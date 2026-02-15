@@ -1,0 +1,921 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>MIGA Data Archive</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.1/font/bootstrap-icons.css">
+    <style>
+        body {
+            background-color: #f4f6f9;
+            padding: 20px;
+            font-family: 'Segoe UI', Roboto, sans-serif;
+        }
+
+        .card {
+            border: none;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
+            border-radius: 8px;
+        }
+
+        .card-header {
+            background-color: #fff;
+            border-bottom: 1px solid #eee;
+            font-weight: 700;
+            padding: 12px 15px;
+            color: #495057;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .nav-tabs .nav-link {
+            color: #6c757d;
+            cursor: pointer;
+            font-weight: 500;
+        }
+
+        .nav-tabs .nav-link.active {
+            font-weight: bold;
+            color: #0d6efd;
+            border-bottom-color: white;
+        }
+
+        .plot-split-container {
+            border-bottom: 1px solid #eee;
+        }
+
+        .btn-back {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 600;
+        }
+
+        .js-plotly-plot .plotly .modebar {
+            left: 50%;
+            transform: translateX(-50%);
+        }
+
+        .loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.85);
+            z-index: 10;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: #0d6efd;
+            backdrop-filter: blur(1px);
+        }
+
+        .form-label-small {
+            font-size: 0.75rem;
+            color: #adb5bd;
+            font-weight: 600;
+            margin-bottom: 2px;
+            display: block;
+        }
+
+        .form-select-sm,
+        .form-control-sm {
+            font-size: 0.85rem;
+            border-color: #dee2e6;
+        }
+
+        .form-select-sm:focus,
+        .form-control-sm:focus {
+            border-color: #86b7fe;
+            box-shadow: none;
+        }
+
+        .card.maximized {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 2000;
+            margin: 0;
+            border-radius: 0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .card.maximized .card-body {
+            flex-grow: 1;
+            overflow-y: auto;
+        }
+
+        .btn-max {
+            color: #adb5bd;
+            transition: color 0.2s;
+        }
+
+        .btn-max:hover {
+            color: #495057;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="app" class="container-fluid">
+
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <div>
+                <h4 class="fw-bold text-dark mb-0 d-flex align-items-center">
+                    <i class="bi bi-folder2-open me-3 text-primary"></i>Data Archive
+                </h4>
+                <div class="text-muted small ms-1">Historical Data Browser & Re-Analysis Tool</div>
+            </div>
+            <a href="/" class="btn btn-white border btn-back shadow-sm text-decoration-none text-dark bg-white px-3">
+                <i class="bi bi-arrow-left"></i> Back to Lab
+            </a>
+        </div>
+
+        <div class="row g-4">
+            <div class="col-md-3 col-xxl-2 d-flex flex-column gap-3">
+
+                <div class="card">
+                    <div class="card-header"><i class="bi bi-hdd-stack me-2"></i>Run Selection</div>
+                    <div class="card-body p-3">
+                        <button class="btn btn-success w-100 mb-3 btn-sm fw-bold shadow-sm" @click="loadLatestRun">
+                            <i class="bi bi-lightning-charge-fill me-1"></i> Load Latest Run
+                        </button>
+
+                        <hr class="text-muted opacity-25 my-3">
+
+                        <div class="row g-1 mb-2">
+                            <div class="col-4">
+                                <label class="form-label-small">YEAR</label>
+                                <select class="form-select form-select-sm" v-model="selectedYear" @change="resetMonth">
+                                    <option v-for="y in Object.keys(archiveTree).reverse()" :key="y" :value="y">{{ y }}
+                                    </option>
+                                </select>
+                            </div>
+                            <div class="col-4">
+                                <label class="form-label-small">MONTH</label>
+                                <select class="form-select form-select-sm" v-model="selectedMonth" @change="resetDay"
+                                    :disabled="!selectedYear">
+                                    <option v-for="m in getMonths().reverse()" :key="m" :value="m">{{ m }}</option>
+                                </select>
+                            </div>
+                            <div class="col-4">
+                                <label class="form-label-small">DAY</label>
+                                <select class="form-select form-select-sm" v-model="selectedDay" @change="resetRun"
+                                    :disabled="!selectedMonth">
+                                    <option v-for="d in getDays().reverse()" :key="d" :value="d">{{ d }}</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label-small">RUN ID</label>
+                            <select class="form-select form-select-sm" v-model="selectedRun" :disabled="!selectedDay">
+                                <option value="" disabled>Select Run...</option>
+                                <option v-for="r in getRuns().reverse()" :key="r" :value="r">{{ r }}</option>
+                            </select>
+                        </div>
+
+                        <button class="btn btn-primary w-100 btn-sm fw-bold shadow-sm" @click="loadRun"
+                            :disabled="!selectedRun || isLoading">
+                            <span v-if="isLoading" class="spinner-border spinner-border-sm me-1"></span>
+                            {{ isLoading ? 'Loading...' : 'Load Data' }}
+                        </button>
+
+                        <div v-if="loadedRunId" class="mt-3 p-2 bg-light rounded border text-center">
+                            <div class="text-success fw-bold small mb-1"><i
+                                    class="bi bi-check-circle-fill me-1"></i>Loaded</div>
+                            <div class="small text-muted font-monospace">{{ loadedRunId }}</div>
+                            <div class="small text-muted" style="font-size: 0.75em;">{{ dataCount }} Points</div>
+                        </div>
+
+                        <div v-if="errorMsg" class="mt-3 alert alert-danger small p-2 mb-0 text-center">
+                            <i class="bi bi-exclamation-triangle me-1"></i> {{ errorMsg }}
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card border-primary shadow-sm" v-if="loadedPoints.length > 0">
+                    <div
+                        class="card-header bg-primary text-white border-0 d-flex justify-content-between align-items-center">
+                        <span><i class="bi bi-sliders me-2"></i>Re-Analysis</span>
+                    </div>
+                    <div class="card-body p-3 bg-light">
+                        <div class="row g-2 mb-2">
+                            <div class="col-6"><label class="form-label-small">GAIN UP</label><input type="number"
+                                    class="form-control form-control-sm fw-bold text-danger"
+                                    v-model.number="analysis.gain_up"></div>
+                            <div class="col-6"><label class="form-label-small">GAIN DW</label><input type="number"
+                                    class="form-control form-control-sm fw-bold text-primary"
+                                    v-model.number="analysis.gain_dw"></div>
+                        </div>
+                        <div class="row g-2 mb-2">
+                            <div class="col-6"><label class="form-label-small">ALPHA</label><input type="number"
+                                    class="form-control form-control-sm" v-model.number="analysis.alpha" step="0.0001">
+                            </div>
+                            <div class="col-6"><label class="form-label-small">BETA</label><input type="number"
+                                    class="form-control form-control-sm" v-model.number="analysis.beta" step="0.0001">
+                            </div>
+                        </div>
+                        <div class="row g-2 mb-2">
+                            <div class="col-6"><label class="form-label-small">RATIO (R)</label><input type="number"
+                                    class="form-control form-control-sm" v-model.number="analysis.R" step="0.01"></div>
+                            <div class="col-6"><label class="form-label-small">COEFF (K)</label><input type="number"
+                                    class="form-control form-control-sm" v-model.number="analysis.K"></div>
+                        </div>
+                        <div class="row g-2 mb-3">
+                            <div class="col-4"><label class="form-label-small">Z_UP</label><input type="number"
+                                    class="form-control form-control-sm" v-model.number="analysis.z_up" step="0.001">
+                            </div>
+                            <div class="col-4"><label class="form-label-small">Z_DW</label><input type="number"
+                                    class="form-control form-control-sm" v-model.number="analysis.z_dw" step="0.001">
+                            </div>
+                            <div class="col-4"><label class="form-label-small">V_LAUNCH</label><input type="number"
+                                    class="form-control form-control-sm" v-model.number="analysis.launch_velocity"
+                                    step="0.01"></div>
+                            <div class="row g-2 mb-3 border-top pt-2 mt-2">
+                                <div class="col-12"><label class="form-label-small text-muted fw-bold">SIGNAL FILTERS</label></div>
+                            
+                                <div class="col-6">
+                                    <label class="form-label-small text-danger">Max Limit (V)</label>
+                                    <input type="number" class="form-control form-control-sm" v-model.number="analysis.voltage_limit" step="0.001"
+                                        placeholder="0.02">
+                                </div>
+                            
+                                <div class="col-6">
+                                    <label class="form-label-small text-primary">Min Thresh (V)</label>
+                                    <input type="number" class="form-control form-control-sm" v-model.number="analysis.max_low" step="0.0001"
+                                        placeholder="0.0001">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="d-grid gap-2">
+                            <button class="btn btn-warning btn-sm fw-bold text-dark shadow-sm" @click="recalculate"><i
+                                    class="bi bi-arrow-repeat me-1"></i> Recalculate</button>
+                            <button class="btn btn-danger btn-sm fw-bold shadow-sm" @click="saveOverwrite"
+                                :disabled="isSaving"><span v-if="isSaving"
+                                    class="spinner-border spinner-border-sm me-1"></span> {{ isSaving ? 'Saving...' :
+                                'Save to Disk' }}</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-9 col-xxl-10">
+                <div class="card mb-4 border-0 shadow-sm" :class="{'maximized': maximizedView === 'analysis'}">
+                    <div class="card-header bg-white d-flex justify-content-between align-items-center py-2">
+                        <div class="d-flex align-items-center text-primary"><i
+                                class="bi bi-graph-up-arrow fs-5 me-2"></i><span class="fw-bold">Analysis Results</span>
+                        </div>
+                        <div class="d-flex align-items-center gap-2">
+                            <button class="btn btn-sm btn-link btn-max p-0 text-decoration-none me-2"
+                                @click="toggleMaximize('analysis')" title="Maximize/Restore"><i class="bi"
+                                    :class="maximizedView === 'analysis' ? 'bi-fullscreen-exit' : 'bi-fullscreen'"></i></button>
+                            <div class="btn-group btn-group-sm me-2">
+                                <button class="btn btn-outline-primary fw-bold" @click="exportCSV"
+                                    :disabled="!loadedRunId"><i class="bi bi-file-earmark-spreadsheet-fill"></i>
+                                    CSV</button>
+                                <button class="btn btn-outline-success fw-bold" @click="exportAllPlots"
+                                    :disabled="!loadedRunId"><i class="bi bi-camera-fill"></i> Plots</button>
+                            </div>
+                            <div class="form-check form-switch ms-2">
+                                <input class="form-check-input m-0" type="checkbox" id="showRaw" v-model="showRawData"
+                                    style="cursor: pointer;">
+                                <label class="form-check-label small fw-bold text-muted" for="showRaw"
+                                    style="cursor: pointer;">NoFit</label>
+                            </div>
+                            <ul class="nav nav-pills card-header-pills ms-3">
+                                <li class="nav-item" v-for="tab in tabs" :key="tab.id">
+                                    <a :class="['nav-link', 'btn-sm', 'py-1', currentTab === tab.id ? 'active' : 'text-muted']"
+                                        href="#" @click.prevent="currentTab = tab.id">{{ tab.label }}</a>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                    <div class="card-body p-0 position-relative">
+                        <div v-if="isLoading" class="loading-overlay">
+                            <div class="text-center">
+                                <div class="spinner-border text-primary mb-2" role="status"></div>
+                                <div>Loading Data...</div>
+                            </div>
+                        </div>
+
+                        <div id="resultsPlotUp" class="plot-split-container"
+                            :style="{height: maximizedView === 'analysis' ? (currentTab==='atoms' ? 'calc(33vh - 20px)' : 'calc(50vh - 30px)') : '350px'}">
+                        </div>
+                        <div id="resultsPlotDw" :class="{'plot-split-container': currentTab==='atoms'}"
+                            :style="{height: maximizedView === 'analysis' ? (currentTab==='atoms' ? 'calc(33vh - 20px)' : 'calc(50vh - 30px)') : '350px'}">
+                        </div>
+                        <div id="resultsPlotTotal"
+                            :style="{display: currentTab==='atoms'?'block':'none', height: maximizedView === 'analysis' ? 'calc(33vh - 20px)' : '350px'}">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card border-0 shadow-sm" :class="{'maximized': maximizedView === 'scope'}">
+                    <div class="card-header bg-light py-2 d-flex justify-content-between align-items-center">
+                        <div class="d-flex align-items-center"><i class="bi bi-activity me-2 text-danger"></i><span
+                                class="fw-bold">Selected Waveform</span></div>
+                        <div class="d-flex align-items-center gap-3">
+                            <button class="btn btn-sm btn-link btn-max p-0 text-decoration-none"
+                                @click="toggleMaximize('scope')" title="Maximize/Restore"><i class="bi"
+                                    :class="maximizedView === 'scope' ? 'bi-fullscreen-exit' : 'bi-fullscreen'"></i></button>
+                            <span v-if="selectedPointParam" class="badge bg-warning text-dark border shadow-sm">P0 = {{
+                                selectedPointParam }}</span>
+                            <span v-else class="small text-muted fst-italic"><i class="bi bi-cursor me-1"></i>Click a
+                                data point above</span>
+                        </div>
+                    </div>
+                    <div class="card-body p-0 position-relative">
+                        <div v-if="isLoadingWaveforms" class="loading-overlay">
+                            <div class="spinner-border spinner-border-sm text-danger" role="status"></div>
+                        </div>
+                        <div id="waveformPlotUp" class="plot-split-container"
+                            :style="{height: maximizedView === 'scope' ? 'calc(50vh - 40px)' : '250px'}"></div>
+                        <div id="waveformPlotDw"
+                            :style="{height: maximizedView === 'scope' ? 'calc(50vh - 40px)' : '250px'}"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/vue@3.2.31/dist/vue.global.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <script src="https://cdn.plot.ly/plotly-2.12.1.min.js"></script>
+
+    <script>
+        const { createApp } = Vue;
+
+        createApp({
+            data() {
+                return {
+                    archiveTree: {}, selectedYear: '', selectedMonth: '', selectedDay: '', selectedRun: '',
+                    isLoading: false, isLoadingWaveforms: false, isSaving: false,
+                    loadedRunId: '', errorMsg: '', dataCount: 0, selectedPointParam: '', selectedCount: 0,
+                    loadedPoints: [], currentCalculatedPoints: [], originalSettings: {},
+                    analysis: { alpha: 0.0151, beta: 0.0188, R: 1.1, K: 7000, gain_up: -35, gain_dw: -35, z_up: 0.275, z_dw: 0.255, launch_velocity: 4.05, chan_launch: '60', chan_trigger: '68' , max_low: 0.0001, voltage_limit: 0.015 },
+                    showRawData: true, maximizedView: null, currentTab: 'atoms', plotRevision: 0,
+                    tabs: [{ id: 'atoms', label: 'Atom Number' }, { id: 'amp', label: 'Max Voltage' }, { id: 'sigma', label: 'Width (ms)' }, { id: 'temp', label: 'Temperature' }, { id: 'arrival', label: 'Arrival Time' }, { id: 'prob', label: 'Transition Prob.' }],
+                    historyMap: {}, layoutResUp: {}, layoutResDw: {}, layoutResTot: {}, layoutOscUp: {}, layoutOscDw: {}
+                }
+            },
+            watch: {
+                currentTab() { this.plotRevision++; this.renderMainPlot(); },
+                showRawData() { this.plotRevision++; this.renderMainPlot(); }
+            },
+            mounted() { this.fetchArchiveTree(); this.initPlots(); },
+            methods: {
+                getTabTitle() { return this.tabs.find(t => t.id === this.currentTab)?.label || 'Results'; },
+                async fetchArchiveTree() { try { const res = await axios.get('/archive/tree'); this.archiveTree = res.data; } catch (e) { } },
+                getMonths() { return this.selectedYear ? Object.keys(this.archiveTree[this.selectedYear] || {}).sort() : []; },
+                getDays() { return (this.selectedYear && this.selectedMonth) ? Object.keys(this.archiveTree[this.selectedYear][this.selectedMonth] || {}).sort() : []; },
+                getRuns() { return (this.selectedDay) ? (this.archiveTree[this.selectedYear][this.selectedMonth][this.selectedDay] || []).sort() : []; },
+                resetMonth() { this.selectedMonth = ''; this.selectedDay = ''; this.selectedRun = ''; },
+                resetDay() { this.selectedDay = ''; this.selectedRun = ''; }, resetRun() { },
+
+                async loadLatestRun() {
+                    await this.fetchArchiveTree();
+                    const years = Object.keys(this.archiveTree).sort(); if (!years.length) return;
+                    this.selectedYear = years[years.length - 1];
+                    const months = this.getMonths(); if (!months.length) return;
+                    this.selectedMonth = months[months.length - 1];
+                    const days = this.getDays(); if (!days.length) return;
+                    this.selectedDay = days[days.length - 1];
+                    const runs = this.getRuns(); if (!runs.length) return;
+                    this.selectedRun = runs[runs.length - 1];
+                    this.loadRun();
+                },
+
+                async loadRun() {
+                    if (!this.selectedRun) return;
+                    this.isLoading = true; 
+                    this.historyMap = {}; 
+                    this.currentCalculatedPoints = []; 
+                    this.selectedPointParam = ''; 
+                    this.errorMsg = '';
+                    
+                    // 重置波形图
+                    Plotly.react('waveformPlotUp', [], this.layoutOscUp); 
+                    Plotly.react('waveformPlotDw', [], this.layoutOscDw);
+                    
+                    try {
+                        const url = `/archive/load/${this.selectedYear}/${this.selectedMonth}/${this.selectedDay}/${this.selectedRun}?t=${Date.now()}`;
+                        const res = await axios.get(url);
+                        
+                        // [修复] 安全检查：确保返回的数据是合法的数组
+                        if (!res.data || !Array.isArray(res.data.data)) {
+                            throw new Error("Invalid data format received from server");
+                        }
+
+                        if (res.data.config && res.data.config._system_settings_snapshot) {
+                            const snap = res.data.config._system_settings_snapshot;
+                            this.originalSettings = { ...snap }; 
+                            this.analysis = { ...this.analysis, ...snap };
+                        }
+                        
+                        this.loadedPoints = res.data.data;
+                        this.dataCount = this.loadedPoints.length;
+                        this.loadedRunId = `${this.selectedDay}/${this.selectedRun}`;
+                        
+                        // 开始计算 (现在用的是安全的 recalculate)
+                        this.recalculate();
+                        
+                    } catch (e) { 
+                        console.error(e); 
+                        if (e.response && e.response.status === 500) {
+                            this.errorMsg = "Server Error (500): Data might contain NaN/Infinity.";
+                        } else {
+                            this.errorMsg = "Load Failed: " + (e.message || "Unknown error"); 
+                        }
+                    } finally { 
+                        this.isLoading = false; 
+                    }
+                },
+
+                // static/archive.html -> methods:
+
+                recalculate() {
+                    const newHistoryMap = {}; const newCalculatedPoints = [];
+                    const S = this.analysis; const origS = this.originalSettings;
+
+                    const oldGUp = (origS.gain_up === 0 || origS.gain_up == null) ? 1.0 : origS.gain_up;
+                    const oldGDw = (origS.gain_dw === 0 || origS.gain_dw == null) ? 1.0 : origS.gain_dw;
+                    const newGUp = (S.gain_up === 0 || S.gain_up == null) ? 1.0 : S.gain_up;
+                    const newGDw = (S.gain_dw === 0 || S.gain_dw == null) ? 1.0 : S.gain_dw;
+
+                    // [获取设置的阈值]
+                    // 1. 上限 (Max): 默认 0.02V (包含您的 0.015V)
+                    const vLimit = (S.voltage_limit !== undefined && S.voltage_limit !== null) ? S.voltage_limit : 0.02;
+
+                    // 2. 下限 (Min): 默认 0.0001V
+                    const minLimit = (S.max_low !== undefined) ? S.max_low : 0.0001;
+
+                    const G = 9.81, KB = 1.38e-23, M = 1.443e-25;
+                    const safe = (v) => (Number.isNaN(v) || !Number.isFinite(v) || v == null) ? 0.0 : v;
+
+                    // ... (recoverAreas, calcTemp 保持不变) ...
+                    const recoverAreas = (n1, n2, alpha, beta, R, K) => {
+                        if (n1 == null || n2 == null) return { a1: 0, a2: 0 };
+                        const C2 = n2 / K; const C1 = n1 / (R * K);
+                        const det = 1 - beta * alpha;
+                        if (Math.abs(det) < 1e-9) return { a1: 0, a2: 0 };
+                        const a2 = (C1 + beta * C2) / det; const a1 = C2 + alpha * a2;
+                        return { a1: safe(a1), a2: safe(a2) };
+                    };
+                    const calcTemp = (sig, t_flight) => {
+                        if (!t_flight || t_flight < 1e-6) return 0;
+                        const res = (M / KB) * Math.pow((S.launch_velocity / t_flight - G), 2) * Math.pow(sig, 2) * 1e6;
+                        return safe(res);
+                    };
+
+                    this.loadedPoints.forEach(pt => {
+                        // [关键步骤 1] 还原原始物理电压 (Raw Voltage)
+                        // 使用 NoFit 峰值来判断最为准确
+                        const rawAmpUpRaw = safe((pt.amplitude_up_nofit || 0) * oldGUp);
+                        const rawAmpDwRaw = safe((pt.amplitude_dw_nofit || 0) * oldGDw);
+
+                        // [关键步骤 2] 执行双重过滤 (Double Filter)
+
+                        // A. 剔除“过大”的数据 (Saturation Filter)
+                        // 如果电压超过 0.015V (vLimit)，说明是坏数据
+                        if (Math.abs(rawAmpUpRaw) > vLimit || Math.abs(rawAmpDwRaw) > vLimit) {
+                            return; // SKIP
+                        }
+
+                        // B. 剔除“过小”的数据 (Noise Filter)
+                        // 如果电压小于 0.0001V (minLimit)，说明是噪声
+                        if (Math.abs(rawAmpUpRaw) < minLimit && Math.abs(rawAmpDwRaw) < minLimit) {
+                            return; // SKIP
+                        }
+
+                        // --- 验证通过，继续计算 ---
+
+                        const rawAmpUp = safe(pt.amplitude_up * oldGUp); const rawAmpDw = safe(pt.amplitude_dw * oldGDw);
+                        const newAmpUp = safe(rawAmpUp / newGUp); const newAmpDw = safe(rawAmpDw / newGDw);
+
+                        const sigUpS = safe(pt.sigma_up * 1e-3); const sigDwS = safe(pt.sigma_dw * 1e-3);
+                        const areaUp = safe(newAmpUp * Math.abs(sigUpS) * Math.sqrt(2 * Math.PI));
+                        const areaDw = safe(newAmpDw * Math.abs(sigDwS) * Math.sqrt(2 * Math.PI));
+
+                        const nF2 = safe((areaUp - areaDw * S.alpha) * S.K);
+                        const nF1 = safe((areaDw - areaUp * S.beta) * S.R * S.K);
+
+                        let probUp = 0, probDw = 0;
+                        if ((nF1 + nF2) !== 0) {
+                            probUp = safe((nF2 / (nF1 + nF2)) * 100);
+                            probDw = safe((nF1 / (nF1 + nF2)) * 100);
+                        }
+
+                        const tempUp = calcTemp(sigUpS, pt.arrival_time_up);
+                        const tempDw = calcTemp(sigDwS, pt.arrival_time_dw);
+
+                        // --- No Fit (Raw) calculations ---
+                        const rawAmpUpNF = safe((pt.amplitude_up_nofit || 0) * oldGUp);
+                        const rawAmpDwNF = safe((pt.amplitude_dw_nofit || 0) * oldGDw);
+                        const newAmpUpNF = safe(rawAmpUpNF / newGUp);
+                        const newAmpDwNF = safe(rawAmpDwNF / newGDw);
+
+                        const oldAreasNF = recoverAreas(pt.atom_number_dw_nofit, pt.atom_number_up_nofit, origS.alpha, origS.beta, origS.R, origS.K);
+                        const rawAreaUpNF = safe(oldAreasNF.a1 * oldGUp);
+                        const rawAreaDwNF = safe(oldAreasNF.a2 * oldGDw);
+                        const newAreaUpNF = safe(rawAreaUpNF / newGUp);
+                        const newAreaDwNF = safe(rawAreaDwNF / newGDw);
+
+                        const nF2_nf = safe((newAreaUpNF - newAreaDwNF * S.alpha) * S.K);
+                        const nF1_nf = safe((newAreaDwNF - newAreaUpNF * S.beta) * S.R * S.K);
+
+                        let probUpNF = 0, probDwNF = 0;
+                        if ((nF1_nf + nF2_nf) !== 0) {
+                            probUpNF = safe((nF2_nf / (nF1_nf + nF2_nf)) * 100);
+                            probDwNF = safe((nF1_nf / (nF1_nf + nF2_nf)) * 100);
+                        }
+
+                        const tempUpNF = calcTemp(safe(pt.sigma_up_nofit * 1e-3), pt.arrival_time_up_nofit);
+                        const tempDwNF = calcTemp(safe(pt.sigma_dw_nofit * 1e-3), pt.arrival_time_dw_nofit);
+
+                        const newPt = {
+                            ...pt,
+                            atom_number_up: nF2, atom_number_dw: nF1,
+                            amplitude_up: newAmpUp, amplitude_dw: newAmpDw,
+                            temperature_up: tempUp, temperature_dw: tempDw,
+                            transition_probability_up: probUp, transition_probability_dw: probDw,
+                            atom_number_up_nofit: nF2_nf, atom_number_dw_nofit: nF1_nf,
+                            amplitude_up_nofit: newAmpUpNF, amplitude_dw_nofit: newAmpDwNF,
+                            temperature_up_nofit: tempUpNF, temperature_dw_nofit: tempDwNF,
+                            transition_probability_up_nofit: probUpNF, transition_probability_dw_nofit: probDwNF
+                        };
+                        newCalculatedPoints.push(newPt);
+                        this.ingestPoint(newPt, newHistoryMap);
+                    });
+                    this.currentCalculatedPoints = newCalculatedPoints;
+                    this.historyMap = newHistoryMap;
+                    this.plotRevision++;
+                    this.renderMainPlot();
+                },
+
+                ingestPoint(data, targetMap) {
+                    const key = data.parameter.toFixed(6);
+                    if (!targetMap[key]) {
+                        targetMap[key] = { count: 0, stepIndices: [], vals_atoms_up: [], vals_atoms_dw: [], vals_temp_up: [], vals_temp_dw: [], vals_sigma_up: [], vals_sigma_dw: [], vals_amp_up: [], vals_amp_dw: [], vals_arrival_up: [], vals_arrival_dw: [], vals_prob_up: [], vals_prob_dw: [], vals_nf_atoms_up: [], vals_nf_atoms_dw: [], vals_nf_temp_up: [], vals_nf_temp_dw: [], vals_nf_sigma_up: [], vals_nf_sigma_dw: [], vals_nf_amp_up: [], vals_nf_amp_dw: [], vals_nf_arrival_up: [], vals_nf_arrival_dw: [], vals_nf_prob_up: [], vals_nf_prob_dw: [] };
+                    }
+                    const item = targetMap[key]; item.count += 1; item.stepIndices.push(data.step);
+                    ['atoms', 'temp', 'sigma', 'amp', 'arrival', 'prob'].forEach(m => {
+                        const k = m === 'arrival' ? 'arrival_time' : (m === 'prob' ? 'transition_probability' : (m === 'amp' ? 'amplitude' : (m === 'atoms' ? 'atom_number' : m === 'temp' ? 'temperature' : m)));
+                        if (data[`${k}_up`] != null) item[`vals_${m}_up`].push(data[`${k}_up`]);
+                        if (data[`${k}_dw`] != null) item[`vals_${m}_dw`].push(data[`${k}_dw`]);
+                        if (data[`${k}_up_nofit`] != null) item[`vals_nf_${m}_up`].push(data[`${k}_up_nofit`]);
+                        if (data[`${k}_dw_nofit`] != null) item[`vals_nf_${m}_dw`].push(data[`${k}_dw_nofit`]);
+                    });
+                },
+
+                toggleMaximize(view) {
+                    if (this.maximizedView === view) this.maximizedView = null; else this.maximizedView = view;
+                    this.$nextTick(() => {
+                        window.dispatchEvent(new Event('resize'));
+                        Plotly.Plots.resize('resultsPlotUp'); Plotly.Plots.resize('resultsPlotDw'); Plotly.Plots.resize('resultsPlotTotal');
+                        Plotly.Plots.resize('waveformPlotUp'); Plotly.Plots.resize('waveformPlotDw');
+                    });
+                },
+
+                initPlots() {
+                    const commonLayout = { font: { family: 'Arial', size: 11 }, margin: { l: 60, r: 20 }, showlegend: true, legend: { x: 1, y: 1, bgcolor: 'rgba(255,255,255,0.7)' }, paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', xaxis: { showline: true, mirror: true, linecolor: '#333' }, yaxis: { showline: true, mirror: true, linecolor: '#333' } };
+                    this.layoutResUp = { ...commonLayout, margin: { t: 30, b: 5, l: 60, r: 20 }, yaxis: { ...commonLayout.yaxis, title: 'Value' }, xaxis: { ...commonLayout.xaxis, showticklabels: false }, title: { text: 'UP Channel', font: { size: 12 }, x: 0.05, y: 0.9 } };
+                    this.layoutResDw = { ...commonLayout, margin: { t: 5, b: 40, l: 60, r: 20 }, yaxis: { ...commonLayout.yaxis, title: 'Value' }, xaxis: { ...commonLayout.xaxis, title: 'Parameter P0' }, title: { text: 'DOWN Channel', font: { size: 12 }, x: 0.05, y: 0.9 } };
+                    this.layoutResTot = { ...commonLayout, margin: { t: 5, b: 40, l: 60, r: 20 }, yaxis: { ...commonLayout.yaxis, title: 'Total' }, xaxis: { ...commonLayout.xaxis, title: 'Parameter P0' }, title: { text: 'TOTAL (UP+DW)', font: { size: 12 }, x: 0.05, y: 0.9 } };
+
+                    Plotly.newPlot('resultsPlotUp', [], this.layoutResUp); Plotly.newPlot('resultsPlotDw', [], this.layoutResDw); Plotly.newPlot('resultsPlotTotal', [], this.layoutResTot);
+                    this.layoutOscUp = { ...commonLayout, margin: { t: 25, b: 5, l: 50, r: 10 }, yaxis: { ...commonLayout.yaxis, title: 'UP (V)' }, xaxis: { ...commonLayout.xaxis, visible: false }, title: { text: 'UP Signal', font: { size: 10 }, x: 0.05, y: 0.85 }, paper_bgcolor: 'white', plot_bgcolor: 'white' };
+                    this.layoutOscDw = { ...commonLayout, margin: { t: 5, b: 30, l: 50, r: 10 }, yaxis: { ...commonLayout.yaxis, title: 'DW (V)' }, xaxis: { ...commonLayout.xaxis, title: 'Time (ms)' }, title: { text: 'DOWN Signal', font: { size: 10 }, x: 0.05, y: 0.85 }, paper_bgcolor: 'white', plot_bgcolor: 'white' };
+                    Plotly.newPlot('waveformPlotUp', [], this.layoutOscUp); Plotly.newPlot('waveformPlotDw', [], this.layoutOscDw);
+
+                    const upDiv = document.getElementById('resultsPlotUp'); const dwDiv = document.getElementById('resultsPlotDw'); const totDiv = document.getElementById('resultsPlotTotal');
+                    const clickHandler = (data) => this.onPlotClick(data);
+                    upDiv.on('plotly_click', clickHandler); dwDiv.on('plotly_click', clickHandler); totDiv.on('plotly_click', clickHandler);
+                },
+
+                async onPlotClick(data) {
+                    if (!data || !data.points) return;
+                    const point = data.points[0]; const key = point.x.toFixed(6);
+                    if (this.historyMap[key]) { const indices = this.historyMap[key].stepIndices; this.selectedPointParam = key; this.selectedCount = indices.length; this.loadWaveforms(indices); }
+                },
+
+                async loadWaveforms(indices) {
+                    this.isLoadingWaveforms = true;
+                    try {
+                        const promises = indices.map(idx => axios.get(`/archive/waveform/${this.selectedYear}/${this.selectedMonth}/${this.selectedDay}/${this.selectedRun}/${idx}`));
+                        const responses = await Promise.all(promises);
+                        const tracesUp = []; const tracesDw = [];
+
+                        // 用于记录所有波形的整体时间范围
+                        let globalMin = null;
+                        let globalMax = null;
+
+                        responses.forEach((res, i) => {
+                            const data = res.data;
+                            // 将秒转换为毫秒
+                            const timeMs = data.time_axis.map(t => t * 1000);
+                            const idx = indices[i];
+
+                            // 1. 更新全局时间范围 (用于后续自动缩放)
+                            if (timeMs.length > 0) {
+                                const tFirst = timeMs[0];
+                                const tLast = timeMs[timeMs.length - 1];
+                                if (globalMin === null || tFirst < globalMin) globalMin = tFirst;
+                                if (globalMax === null || tLast > globalMax) globalMax = tLast;
+                            }
+
+                            // 2. 添加波形数据 Traces
+                            tracesUp.push({ x: timeMs, y: data.raw_up, type: 'scatter', mode: 'lines', line: { color: '#ffc107', width: 1 }, opacity: 0.5, name: `Raw #${idx}`, showlegend: false });
+                            tracesUp.push({ x: timeMs, y: data.fit_up, type: 'scatter', mode: 'lines', line: { color: '#dc3545', width: 1.5 }, opacity: 0.6, name: `Fit #${idx}`, showlegend: false });
+                            tracesDw.push({ x: timeMs, y: data.raw_dw, type: 'scatter', mode: 'lines', line: { color: '#20c997', width: 1 }, opacity: 0.5, name: `Raw #${idx}`, showlegend: false });
+                            tracesDw.push({ x: timeMs, y: data.fit_dw, type: 'scatter', mode: 'lines', line: { color: '#0d6efd', width: 1.5 }, opacity: 0.6, name: `Fit #${idx}`, showlegend: false });
+
+                            // 3. 绘制拟合窗口 (只画第一个点的窗口，避免重叠混乱)
+                            if (i === 0) {
+                                if (data.window_up && data.window_up[0] !== -1) {
+                                    const wStart = data.window_up[0] * 1000;
+                                    const wEnd = data.window_up[1] * 1000;
+                                    this.layoutOscUp.shapes = [{ type: 'rect', xref: 'x', yref: 'paper', x0: wStart, x1: wEnd, y0: 0, y1: 1, fillcolor: '#dc3545', opacity: 0.1, line: { width: 0 } }];
+                                }
+                                if (data.window_dw && data.window_dw[0] !== -1) {
+                                    const wStart = data.window_dw[0] * 1000;
+                                    const wEnd = data.window_dw[1] * 1000;
+                                    this.layoutOscDw.shapes = [{ type: 'rect', xref: 'x', yref: 'paper', x0: wStart, x1: wEnd, y0: 0, y1: 1, fillcolor: '#0d6efd', opacity: 0.1, line: { width: 0 } }];
+                                }
+                            }
+                        });
+
+                        // 4. 智能缩放：强制 X 轴显示数据所在的实际范围
+                        // 这一步非常关键，它解决了波形被挤到一边的问题
+                        const layoutUpdate = {};
+                        if (globalMin !== null && globalMax !== null) {
+                            // 加 5% 的边距，让波形不顶格
+                            const range = globalMax - globalMin;
+                            const padding = range * 0.05;
+                            layoutUpdate['xaxis.range'] = [globalMin - padding, globalMax + padding];
+                            layoutUpdate['xaxis.autorange'] = false; // 关闭 Plotly 的自动范围 (它默认可能会从0开始)
+                        } else {
+                            layoutUpdate['xaxis.autorange'] = true;
+                        }
+
+                        // 应用缩放设置到两个图表
+                        Plotly.relayout('waveformPlotUp', layoutUpdate);
+                        Plotly.relayout('waveformPlotDw', layoutUpdate);
+
+                        // 最后绘制数据
+                        Plotly.react('waveformPlotUp', tracesUp, this.layoutOscUp);
+                        Plotly.react('waveformPlotDw', tracesDw, this.layoutOscDw);
+
+                    } catch (e) { console.error(e); } finally { this.isLoadingWaveforms = false; }
+                },
+
+                calcStats(arr) {
+                    if (!arr || arr.length === 0) return { mean: 0, std: 0 };
+                    const n = arr.length; const sum = arr.reduce((a, b) => a + b, 0); const mean = sum / n;
+                    if (n < 2) return { mean, std: 0 };
+                    const sumSq = arr.reduce((a, b) => a + Math.pow(b - mean, 2), 0);
+                    const std = Math.sqrt(sumSq / (n - 1));
+                    return { mean, std };
+                },
+
+                getStatsArray() {
+                    const dataArray = Object.keys(this.historyMap).map(key => {
+                        const item = this.historyMap[key]; const x = parseFloat(key); const stats = { x };
+                        ['atoms', 'temp', 'sigma', 'amp', 'arrival', 'prob', 'nf_atoms', 'nf_temp', 'nf_sigma', 'nf_amp', 'nf_arrival', 'nf_prob'].forEach(m => {
+                            const sUp = this.calcStats(item[`vals_${m}_up`]); const sDw = this.calcStats(item[`vals_${m}_dw`]);
+                            stats[`${m}_up`] = sUp.mean; stats[`${m}_up_std`] = sUp.std; stats[`${m}_dw`] = sDw.mean; stats[`${m}_dw_std`] = sDw.std;
+                        });
+                        return stats;
+                    });
+                    dataArray.sort((a, b) => a.x - b.x);
+                    return dataArray;
+                },
+
+                async exportCSV(event) {
+                    if (!this.loadedRunId) return;
+
+                    // 1. 标记正在处理 (给按钮加个转圈圈，防止重复点击)
+                    let btn = event ? event.target.closest('button') : null;
+                    let originalText = '';
+                    if (btn) {
+                        originalText = btn.innerHTML;
+                        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Exporting Full Data...';
+                        btn.disabled = true;
+                    }
+
+                    try {
+                        // 2. 向后台请求完整数据 (加上 full=true 参数)
+                        // 这会绕过后端的跳采样逻辑
+                        const url = `/archive/load/${this.selectedYear}/${this.selectedMonth}/${this.selectedDay}/${this.selectedRun}`;
+                        const res = await axios.get(url, { params: { full: true } });
+
+                        if (!res.data || !Array.isArray(res.data.data)) throw new Error("Invalid data");
+
+                        // 3. [核心技巧] 临时替换数据进行计算
+                        // a. 备份当前用于显示的“略缩数据”
+                        const uiPoints = this.loadedPoints;
+
+                        // b. 换上刚下载的“完整数据”
+                        this.loadedPoints = res.data.data;
+
+                        // c. 执行 recalculate()。因为 this.loadedPoints 变了，
+                        //    这会根据当前的 Settings 重新计算所有点，并生成完整的 historyMap
+                        //    此时 this.historyMap 里包含的是全部数据！
+                        this.recalculate();
+
+                        // 4. 生成 CSV (使用您原有的逻辑，但现在的 historyMap 是全量的)
+                        const stats = this.getStatsArray();
+                        const metrics = ['atoms', 'amp', 'sigma', 'temp', 'arrival', 'prob'];
+                        let header = "Parameter";
+                        metrics.forEach(m => { header += `,${m}_UP_Fit,${m}_UP_Fit_Std,${m}_DW_Fit,${m}_DW_Fit_Std,${m}_UP_Raw,${m}_UP_Raw_Std,${m}_DW_Raw,${m}_DW_Raw_Std`; });
+                        header += "\n";
+                        let csvContent = header;
+                        stats.forEach(row => {
+                            let line = `${row.x}`;
+                            metrics.forEach(m => {
+                                line += `,${(row[`${m}_up`] || 0).toFixed(4)},${(row[`${m}_up_std`] || 0).toFixed(4)}`;
+                                line += `,${(row[`${m}_dw`] || 0).toFixed(4)},${(row[`${m}_dw_std`] || 0).toFixed(4)}`;
+                                line += `,${(row[`nf_${m}_up`] || 0).toFixed(4)},${(row[`nf_${m}_up_std`] || 0).toFixed(4)}`;
+                                line += `,${(row[`nf_${m}_dw`] || 0).toFixed(4)},${(row[`nf_${m}_dw_std`] || 0).toFixed(4)}`;
+                            });
+                            csvContent += line + "\n";
+                        });
+
+                        // 5. 触发下载
+                        if (window.showSaveFilePicker) {
+                            try {
+                                const handle = await window.showSaveFilePicker({ suggestedName: `analysis_${this.selectedDay}_${this.selectedRun}_FULL.csv`, types: [{ description: 'CSV File', accept: { 'text/csv': ['.csv'] } }] });
+                                const writable = await handle.createWritable(); await writable.write(csvContent); await writable.close();
+                            } catch (err) { } // 用户取消不报错
+                        } else {
+                            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                            const url = URL.createObjectURL(blob);
+                            const link = document.createElement("a");
+                            link.href = url;
+                            link.download = `analysis_${this.selectedDay}_${this.selectedRun}_FULL.csv`;
+                            document.body.appendChild(link); link.click(); document.body.removeChild(link);
+                        }
+
+                        // 6. [恢复] 还原用于显示的“略缩数据”
+                        // 这样页面不会因为数据点太多而变卡
+                        this.loadedPoints = uiPoints;
+                        this.recalculate();
+
+                    } catch (e) {
+                        console.error(e);
+                        alert("Export Failed: " + e.message);
+                    } finally {
+                        // 恢复按钮状态
+                        if (btn) {
+                            btn.innerHTML = originalText;
+                            btn.disabled = false;
+                        }
+                    }
+                },
+
+                async exportAllPlots() {
+                    if (!this.loadedRunId || Object.keys(this.historyMap).length === 0) return;
+                    const gd = document.createElement('div');
+                    for (const tab of this.tabs) {
+                        const dArray = this.getStatsArray(); const x = dArray.map(d => d.x);
+                        let m = '', mnf = '', labelY = '', nameUp = 'UP', nameDw = 'DOWN';
+                        if (tab.id === 'atoms') { m = 'atoms'; mnf = 'nf_atoms'; labelY = "Atom Number"; }
+                        else if (tab.id === 'amp') { m = 'amp'; mnf = 'nf_amp'; labelY = "Max Voltage (V)"; }
+                        else if (tab.id === 'sigma') { m = 'sigma'; mnf = 'nf_sigma'; labelY = "Width (ms)"; }
+                        else if (tab.id === 'temp') { m = 'temp'; mnf = 'nf_temp'; labelY = "Temperature (uK)"; }
+                        else if (tab.id === 'arrival') { m = 'arrival'; mnf = 'nf_arrival'; labelY = "Arrival Time (s)"; }
+                        else if (tab.id === 'prob') { m = 'prob'; mnf = 'nf_prob'; labelY = "Transition Prob. (%)"; nameUp = "Prob F2"; nameDw = "Prob F1"; }
+
+                        const yUp = dArray.map(d => d[`${m}_up`]); const yUpStd = dArray.map(d => d[`${m}_up_std`]);
+                        const yDw = dArray.map(d => d[`${m}_dw`]); const yDwStd = dArray.map(d => d[`${m}_dw_std`]);
+
+                        const traces = [
+                            { x: x, y: yUp, xaxis: 'x', yaxis: 'y', mode: 'lines+markers', name: nameUp + ' (Fit)', line: { color: '#dc3545', width: 2 }, error_y: { type: 'data', array: yUpStd, visible: true, color: '#dc3545' } },
+                            { x: x, y: yDw, xaxis: 'x', yaxis: 'y2', mode: 'lines+markers', name: nameDw + ' (Fit)', line: { color: '#0d6efd', width: 2 }, error_y: { type: 'data', array: yDwStd, visible: true, color: '#0d6efd' } }
+                        ];
+                        if (this.showRawData) {
+                            const yUpNF = dArray.map(d => d[`${mnf}_up`]); const yUpNFStd = dArray.map(d => d[`${mnf}_up_std`]);
+                            const yDwNF = dArray.map(d => d[`${mnf}_dw`]); const yDwNFStd = dArray.map(d => d[`${mnf}_dw_std`]);
+                            traces.push({ x: x, y: yUpNF, xaxis: 'x', yaxis: 'y', mode: 'lines+markers', name: nameUp + ' (Raw)', line: { color: '#dc3545', width: 1, dash: 'dot' }, error_y: { type: 'data', array: yUpNFStd, visible: true, color: '#dc3545', width: 0 } });
+                            traces.push({ x: x, y: yDwNF, xaxis: 'x', yaxis: 'y2', mode: 'lines+markers', name: nameDw + ' (Raw)', line: { color: '#0d6efd', width: 1, dash: 'dot' }, error_y: { type: 'data', array: yDwNFStd, visible: true, color: '#0d6efd', width: 0 } });
+                        }
+
+                        if (tab.id === 'atoms') {
+                            const yTot = yUp.map((v, i) => (v != null && yDw[i] != null) ? v + yDw[i] : null);
+                            const yTotStd = yUpStd.map((v, i) => (v != null && yDwStd[i] != null) ? Math.sqrt(v * v + yDwStd[i] * yDwStd[i]) : 0);
+                            traces.push({ x: x, y: yTot, xaxis: 'x', yaxis: 'y3', mode: 'lines+markers', name: 'Total (Fit)', line: { color: '#198754', width: 2 }, error_y: { type: 'data', array: yTotStd, visible: true, color: '#198754' } });
+                            if (this.showRawData) {
+                                const yUpNF = dArray.map(d => d[`${mnf}_up`]); const yDwNF = dArray.map(d => d[`${mnf}_dw`]);
+                                const yTotNF = yUpNF.map((v, i) => (v != null && yDwNF[i] != null) ? v + yDwNF[i] : null);
+                                const yTotNFStd = dArray.map(d => {
+                                    const s1 = d[`${mnf}_up_std`] || 0; const s2 = d[`${mnf}_dw_std`] || 0;
+                                    return Math.sqrt(s1 * s1 + s2 * s2);
+                                });
+                                traces.push({ x: x, y: yTotNF, xaxis: 'x', yaxis: 'y3', mode: 'lines+markers', name: 'Total (Raw)', line: { color: '#198754', width: 1, dash: 'dot' }, error_y: { type: 'data', array: yTotNFStd, visible: true, color: '#198754', width: 0 } });
+                            }
+                        }
+
+                        const layout = {
+                            title: `${tab.label} - Run ${this.loadedRunId}`, font: { family: 'Arial', size: 14 },
+                            height: 800, width: 1000, grid: { rows: tab.id === 'atoms' ? 3 : 2, columns: 1, pattern: 'independent' },
+                            yaxis: { title: labelY + ' (UP)' }, xaxis: { visible: false },
+                            yaxis2: { title: labelY + ' (DW)' }, xaxis2: { visible: tab.id !== 'atoms', title: 'Parameter P0' }
+                        };
+                        if (tab.id === 'atoms') {
+                            layout.yaxis3 = { title: 'Total Atoms' };
+                            layout.xaxis3 = { title: 'Parameter P0' };
+                        }
+
+                        await Plotly.newPlot(gd, traces, layout);
+                        await Plotly.downloadImage(gd, { format: 'png', width: 1000, height: 800, filename: `plot_${this.selectedDay}_${this.selectedRun}_${tab.id}` });
+                        await new Promise(r => setTimeout(r, 300));
+                    }
+                },
+
+                async saveOverwrite() {
+                    if (!this.selectedRun || this.currentCalculatedPoints.length === 0) return;
+                    if (!confirm("OVERWRITE results?")) return;
+                    this.isSaving = true;
+                    try {
+                        await axios.post('/archive/overwrite', { year: this.selectedYear, month: this.selectedMonth, day: this.selectedDay, run_id: this.selectedRun, new_settings: this.analysis, updated_data: this.currentCalculatedPoints });
+                        alert("Saved!"); this.originalSettings = JSON.parse(JSON.stringify(this.analysis));
+                    } catch (e) { alert("Error: " + e.message); } finally { this.isSaving = false; }
+                },
+
+                toggleMaximize(view) {
+                    if (this.maximizedView === view) this.maximizedView = null; else this.maximizedView = view;
+                    this.$nextTick(() => {
+                        window.dispatchEvent(new Event('resize'));
+                        Plotly.Plots.resize('resultsPlotUp'); Plotly.Plots.resize('resultsPlotDw'); Plotly.Plots.resize('resultsPlotTotal');
+                        Plotly.Plots.resize('waveformPlotUp'); Plotly.Plots.resize('waveformPlotDw');
+                    });
+                },
+
+                renderMainPlot() {
+                    const dArray = this.getStatsArray();
+                    const x = dArray.map(d => d.x);
+                    let m = '', mnf = '', labelY = "", nameUp = "UP", nameDw = "DOWN";
+                    switch (this.currentTab) {
+                        case 'atoms': m = 'atoms'; mnf = 'nf_atoms'; labelY = "Atom Number"; break;
+                        case 'amp': m = 'amp'; mnf = 'nf_amp'; labelY = "Max Voltage (V)"; break;
+                        case 'sigma': m = 'sigma'; mnf = 'nf_sigma'; labelY = "Width (ms)"; break;
+                        case 'temp': m = 'temp'; mnf = 'nf_temp'; labelY = "Temperature (uK)"; break;
+                        case 'arrival': m = 'arrival'; mnf = 'nf_arrival'; labelY = "Arrival Time (s)"; break;
+                        case 'prob': m = 'prob'; mnf = 'nf_prob'; labelY = "Transition Prob. (%)"; nameUp = "Prob F2"; nameDw = "Prob F1"; break;
+                    }
+
+                    const yUp = dArray.map(d => d[`${m}_up`]); const yUpStd = dArray.map(d => d[`${m}_up_std`]);
+                    const yDw = dArray.map(d => d[`${m}_dw`]); const yDwStd = dArray.map(d => d[`${m}_dw_std`]);
+                    const yUpNF = dArray.map(d => d[`${mnf}_up`]); const yUpNFStd = dArray.map(d => d[`${mnf}_up_std`]);
+                    const yDwNF = dArray.map(d => d[`${mnf}_dw`]); const yDwNFStd = dArray.map(d => d[`${mnf}_dw_std`]);
+
+                    const tracesUp = [{ x: x, y: yUp, mode: 'lines+markers', name: nameUp + ' (Fit)', line: { color: '#dc3545', width: 2 }, marker: { size: 8 }, error_y: { type: 'data', array: yUpStd, visible: true, color: '#dc3545' } }];
+                    const tracesDw = [{ x: x, y: yDw, mode: 'lines+markers', name: nameDw + ' (Fit)', line: { color: '#0d6efd', width: 2 }, marker: { size: 8 }, error_y: { type: 'data', array: yDwStd, visible: true, color: '#0d6efd' } }];
+
+                    if (this.showRawData) {
+                        tracesUp.push({ x: x, y: yUpNF, mode: 'lines+markers', name: nameUp + ' (Raw)', line: { color: '#dc3545', width: 1, dash: 'dot' }, marker: { size: 6, symbol: 'circle-open', opacity: 0.6 }, error_y: { type: 'data', array: yUpNFStd, visible: true, color: '#dc3545', width: 0 } });
+                        tracesDw.push({ x: x, y: yDwNF, mode: 'lines+markers', name: nameDw + ' (Raw)', line: { color: '#0d6efd', width: 1, dash: 'dot' }, marker: { size: 6, symbol: 'circle-open', opacity: 0.6 }, error_y: { type: 'data', array: yDwNFStd, visible: true, color: '#0d6efd', width: 0 } });
+                    }
+
+                    // Total Plot Logic
+                    if (this.currentTab === 'atoms') {
+                        document.getElementById('resultsPlotTotal').style.display = 'block';
+                        const yTot = yUp.map((v, i) => (v != null && yDw[i] != null) ? v + yDw[i] : null);
+                        const yTotStd = yUpStd.map((v, i) => (v != null && yDwStd[i] != null) ? Math.sqrt(v * v + yDwStd[i] * yDwStd[i]) : 0);
+                        const tracesTot = [{ x: x, y: yTot, mode: 'lines+markers', name: 'Total (Fit)', line: { color: '#198754', width: 2 }, marker: { size: 8 }, error_y: { type: 'data', array: yTotStd, visible: true, color: '#198754' } }];
+
+                        if (this.showRawData) {
+                            const yTotNF = yUpNF.map((v, i) => (v != null && yDwNF[i] != null) ? v + yDwNF[i] : null);
+                            const yTotNFStd = yUpNFStd.map((v, i) => (v != null && yDwNFStd[i] != null) ? Math.sqrt(v * v + yDwNFStd[i] * yDwNFStd[i]) : 0);
+                            tracesTot.push({ x: x, y: yTotNF, mode: 'lines+markers', name: 'Total (Raw)', line: { color: '#198754', width: 1, dash: 'dot' }, marker: { size: 6, symbol: 'circle-open', opacity: 0.6 }, error_y: { type: 'data', array: yTotNFStd, visible: true, color: '#198754', width: 0 } });
+                        }
+
+                        this.layoutResTot.datarevision = this.plotRevision;
+                        Plotly.react('resultsPlotTotal', tracesTot, this.layoutResTot);
+                        this.layoutResDw.xaxis.showticklabels = false;
+                        this.layoutResDw.xaxis.title = '';
+                    } else {
+                        document.getElementById('resultsPlotTotal').style.display = 'none';
+                        this.layoutResDw.xaxis.showticklabels = true;
+                        this.layoutResDw.xaxis.title = 'Parameter P0';
+                    }
+
+                    this.layoutResUp.yaxis.title = labelY + ' (UP)'; this.layoutResUp.datarevision = this.plotRevision;
+                    Plotly.react('resultsPlotUp', tracesUp, this.layoutResUp);
+                    this.layoutResDw.yaxis.title = labelY + ' (DW)'; this.layoutResDw.datarevision = this.plotRevision;
+                    Plotly.react('resultsPlotDw', tracesDw, this.layoutResDw);
+                }
+            }
+        }).mount('#app');
+    </script>
+</body>
+
+</html>

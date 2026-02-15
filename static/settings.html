@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Analysis Settings</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.1/font/bootstrap-icons.css">
+    <style>
+        body {
+            background-color: #f4f6f9;
+            padding: 20px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="app" class="container" style="max-width: 900px;">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h3><i class="bi bi-sliders me-2"></i>Analysis Configuration</h3>
+            <a href="/" class="btn btn-outline-secondary">&larr; Back to Lab</a>
+        </div>
+
+        <div class="card shadow-sm">
+            <div class="card-header bg-white border-bottom-0 pt-3">
+                <ul class="nav nav-tabs card-header-tabs">
+                    <li class="nav-item"><a class="nav-link" :class="{active: tab==='phys'}" @click="tab='phys'"
+                            href="#">Physics & Gains</a></li>
+                    <li class="nav-item"><a class="nav-link" :class="{active: tab==='net'}" @click="tab='net'"
+                            href="#">Network</a></li>
+                    <li class="nav-item"><a class="nav-link" :class="{active: tab==='logic'}" @click="tab='logic'"
+                            href="#">Logic & Channels</a></li>
+                    <li class="nav-item"><a class="nav-link" :class="{active: tab==='paths'}" @click="tab='paths'"
+                            href="#">System Paths</a></li>
+                </ul>
+            </div>
+            <div class="card-body p-4">
+
+                
+
+                <div v-if="tab==='net'">
+                    <div class="row g-3">
+                        <div class="col-12 mb-3 bg-light p-3 border rounded">
+                            <label class="form-label fw-bold">Hardware Platform</label>
+                            <select class="form-select" v-model="s.hardware_platform" @change="onHardwareChange">
+                                <option value="redpitaya">Standard Red Pitaya (STEMlab 125-14)</option>
+                                <option value="daq">DAQ Server / Local Interface</option>
+                            </select>
+                            <div class="form-text text-muted" v-if="s.hardware_platform === 'daq'">
+                                Mode: Using local acquisition server (daq_server.py).
+                            </div>
+                        </div>
+
+                        <div class="col-md-6"><label class="form-label">IP (Red)</label><input type="text"
+                                class="form-control font-monospace" v-model="s.rp_ip_red"></div>
+                        <div class="col-md-6"><label class="form-label">IP (Green)</label><input type="text"
+                                class="form-control font-monospace" v-model="s.rp_ip_green"></div>
+                        <div class="col-md-4"><label class="form-label">Timeout (s)</label><input type="number"
+                                class="form-control" v-model.number="s.network_timeout"></div>
+                        <div class="col-md-4">
+            <label class="form-label text-danger fw-bold">Voltage Limit (V)</label>
+            <div class="input-group">
+                <span class="input-group-text"><i class="bi bi-shield-exclamation"></i></span>
+                <input type="number" class="form-control" v-model.number="s.voltage_limit" step="0.1" placeholder="9.5">
+            </div>
+        </div>
+                        
+                    </div>
+                </div>
+
+                <div v-if="tab==='phys'">
+                    <div class="row g-3">
+                        <div class="col-12">
+                            <h6 class="text-muted fw-bold text-uppercase mb-2">Detector Gain Correction</h6>
+                        </div>
+                        <div class="col-md-6"><label class="form-label text-danger">Gain UP (Ch1)</label><input
+                                type="number" class="form-control fw-bold" v-model.number="s.gain_up" step="1"></div>
+                        <div class="col-md-6"><label class="form-label text-primary">Gain DOWN (Ch2)</label><input
+                                type="number" class="form-control fw-bold" v-model.number="s.gain_dw" step="1"></div>
+                        <div class="col-12 mt-3">
+                            <h6 class="text-muted fw-bold text-uppercase mb-2">Signal Validation Filters</h6>
+                        </div>
+                        
+                        <div class="col-md-6">
+                            <label class="form-label text-danger fw-bold small">Max Limit (e.g. 0.015V)</label>
+                            <div class="input-group input-group-sm">
+                                <span class="input-group-text"><i class="bi bi-arrow-bar-up"></i></span>
+                                <input type="number" class="form-control" v-model.number="s.voltage_limit" step="0.001" placeholder="0.015">
+                            </div>
+                            <div class="form-text" style="font-size: 0.7rem;">Discard if Raw > Limit (Saturation/Error).</div>
+                        </div>
+                        
+                        <div class="col-md-6">
+                            <label class="form-label text-primary fw-bold small">Min Threshold (e.g. 0.0001V)</label>
+                            <div class="input-group input-group-sm">
+                                <span class="input-group-text"><i class="bi bi-arrow-bar-down"></i></span>
+                                <input type="number" class="form-control" v-model.number="s.max_low" step="0.0001" placeholder="0.0001">
+                            </div>
+                            <div class="form-text" style="font-size: 0.7rem;">Discard if Raw < Threshold (Noise/Empty).</div>
+                            </div>
+                        
+                            <div class="col-12">
+                                <hr class="my-3 text-muted opacity-25">
+                            </div>
+
+                        <div class="col-12"><hr class="my-1 text-muted opacity-25"></div>
+                        
+                        <div class="col-12">
+                            <h6 class="text-muted fw-bold text-uppercase mb-2">Calibration & Constants</h6>
+                        </div>
+                        <div class="col-md-3"><label class="form-label">Alpha</label><input type="number"
+                                class="form-control" v-model.number="s.alpha" step="0.0001"></div>
+                        <div class="col-md-3"><label class="form-label">Beta</label><input type="number"
+                                class="form-control" v-model.number="s.beta" step="0.0001"></div>
+                        <div class="col-md-3"><label class="form-label">Ratio (R)</label><input type="number"
+                                class="form-control" v-model.number="s.R" step="0.01"></div>
+                        <div class="col-md-3"><label class="form-label">Coeff (K)</label><input type="number"
+                                class="form-control" v-model.number="s.K"></div>
+
+                        <div class="col-md-4"><label class="form-label">Z_UP (m)</label><input type="number"
+                                class="form-control" v-model.number="s.z_up" step="0.001"></div>
+                        <div class="col-md-4"><label class="form-label">Z_DW (m)</label><input type="number"
+                                class="form-control" v-model.number="s.z_dw" step="0.001"></div>
+
+                        <div class="col-md-4" v-if="s.hardware_platform !== 'daq'">
+                            <label class="form-label text-danger fw-bold">Decimation (RP)</label>
+                            <input type="number" class="form-control fw-bold" v-model.number="s.daq_rate" @input="syncDecimation" placeholder="e.g. 3990">
+<small class="text-muted" style="font-size:0.75rem">Virtual Decimation: {{ s.decimation }}</small>
+                            <small class="text-muted" style="font-size:0.75rem">Rate = 125MHz / Decimation</small>
+                        </div>
+                        
+                        <div class="col-md-4" v-if="s.hardware_platform === 'daq'">
+                            <label class="form-label text-success fw-bold">Sample Rate (Hz)</label>
+                            <input type="number" class="form-control fw-bold" v-model.number="s.daq_rate" placeholder="e.g. 3990">
+                            <small class="text-muted" style="font-size:0.75rem">Direct DAQ Sampling Frequency</small>
+                        </div>
+
+                        <div class="col-12"><label class="form-label">Launch Velocity (m/s)</label><input type="number"
+                                class="form-control" v-model.number="s.launch_velocity" step="0.01"></div>
+
+                        <div class="col-12"><hr class="my-3 text-muted opacity-25"></div>
+                        <div class="col-12 bg-light p-3 rounded border">
+                             <h6 class="text-dark fw-bold mb-3"><i class="bi bi-folder2-open me-2"></i>File Management</h6>
+                             <div class="d-flex gap-2">
+                                <button class="btn btn-outline-dark btn-sm" @click="exportSettings"><i
+                                        class="bi bi-save2 me-1"></i> Save As...</button>
+                                <button class="btn btn-outline-dark btn-sm" @click="$refs.fileInput.click()"><i
+                                        class="bi bi-upload me-1"></i> Load from File</button>
+                                <input type="file" ref="fileInput" style="display: none" accept=".json"
+                                    @change="importSettings">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div v-if="tab==='logic'">
+                    <div class="row g-3">
+                        <div class="col-md-6"><label class="form-label">Launch Channel ID</label><input type="text"
+                                class="form-control" v-model="s.chan_launch"></div>
+                        <div class="col-md-6"><label class="form-label">Trigger Channel ID</label><input type="text"
+                                class="form-control" v-model="s.chan_trigger"></div>
+                        <div class="col-md-6"><label class="form-label">Link Mode Total Time</label><input type="number"
+                                class="form-control" v-model.number="s.link_total_time" step="0.1"></div>
+                    </div>
+                </div>
+
+                <div v-if="tab==='paths'">
+                    <div class="bg-light p-3 mb-4 rounded border">
+                        <h6 class="fw-bold text-primary"><i class="bi bi-magic me-2"></i>Quick Configuration</h6>
+                        <div class="input-group mb-2">
+                            <span class="input-group-text">mot4ztex Folder</span>
+                            <input type="text" class="form-control font-monospace" v-model="basePath"
+                                placeholder="e.g. ../mot4ztex">
+                            <button class="btn btn-primary" @click="autoFillPaths">Auto-Fill Paths</button>
+                        </div>
+                        <div class="form-text">Enter the path to 'mot4ztex' folder. Paths below will be updated
+                            automatically.</div>
+                    </div>
+
+                    <h6 class="text-muted fw-bold text-uppercase mb-3">Binary Executables</h6>
+                    <div class="mb-3"><label class="form-label">TMOT Binary</label><input type="text"
+                            class="form-control font-monospace small" v-model="s.tmot_path"></div>
+                    <div class="mb-3"><label class="form-label">CMOT Binary</label><input type="text"
+                            class="form-control font-monospace small" v-model="s.cmot_path"></div>
+                    <div class="mb-3"><label class="form-label">Default Template Path</label><input type="text"
+                            class="form-control font-monospace small" v-model="s.template_path"></div>
+                </div>
+
+                <div class="mt-4 d-flex justify-content-end gap-2 pt-3 border-top">
+                    <button class="btn btn-secondary" @click="fetchSettings">Discard</button>
+                    <button class="btn btn-success px-4 fw-bold" @click="saveSettings" :disabled="saving">
+                        <span v-if="saving" class="spinner-border spinner-border-sm me-2"></span>
+                        {{ saving ? 'Saving...' : 'Apply & Save' }}
+                    </button>
+                </div>
+
+                <div v-if="msg" :class="['alert mt-3 text-center', isError ? 'alert-danger' : 'alert-success']">{{ msg
+                    }}</div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/vue@3.2.31/dist/vue.global.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <script>
+        const { createApp } = Vue;
+        createApp({
+            data() {
+                return {
+                    tab: 'phys', s: {}, msg: '', isError: false, saving: false,
+                    basePath: ''
+                }
+            },
+            mounted() { this.fetchSettings(); },
+            methods: {
+                async fetchSettings() {
+                    try { const res = await axios.get('/settings/all'); this.s = res.data; } catch (e) { console.error(e); }
+                },
+
+                async saveSettings() {
+                    this.saving = true;
+                    if(this.s.hardware_platform === 'daq') this.syncDecimation();
+                    try {
+                        await axios.post('/settings/all', this.s);
+                        this.isError = false; this.msg = "Configuration updated successfully.";
+                        setTimeout(() => this.msg = '', 3000);
+                    } catch (e) {
+                        this.isError = true; this.msg = "Error: " + (e.response?.data?.detail || e.message);
+                    } finally { this.saving = false; }
+                },
+                onHardwareChange() {
+                    if (this.s.hardware_platform === 'daq') {
+                        this.s.rp_ip_red = '127.0.0.1:8001';
+                        //daq
+                        if (!this.s.daq_rate) this.s.daq_rate = 3990;
+                        this.syncDecimation();
+                    } else {
+                        //  Red Pitaya
+                        this.s.rp_ip_red = '192.168.2.5';
+                    }
+                },
+                // [新增] 自动计算 Decimation 以匹配网页画图逻辑
+                syncDecimation() {
+                    if (this.s.daq_rate && this.s.daq_rate > 0) {
+                        // 公式: Decimation = 125MHz / Hz
+                        // 这样网页就会认为采样率是正确的 Hz
+                        this.s.decimation = Math.round(125000000 / this.s.daq_rate);
+                    }
+                },
+                autoFillPaths() {
+                    if (!this.basePath) return;
+                    let base = this.basePath.trim();
+                    if (base.endsWith('/') || base.endsWith('\\')) base = base.slice(0, -1);
+
+                    const isWin = base.includes('\\') || base.includes(':');
+                    const sep = isWin ? '\\' : '/';
+                    const ext = isWin ? '.exe' : '';
+
+                    this.s.tmot_path = `${base}${sep}tmot4${ext}`;
+                    this.s.cmot_path = `${base}${sep}cmot4${ext}`;
+
+                    this.msg = "Paths updated. Please verify and click 'Apply & Save'.";
+                    this.isError = false;
+                },
+
+                async exportSettings() {
+                    const dataStr = JSON.stringify(this.s, null, 4);
+                    const fileName = "miga_config.json";
+                    if (window.showSaveFilePicker) {
+                        try {
+                            const handle = await window.showSaveFilePicker({ suggestedName: fileName, types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }] });
+                            const writable = await handle.createWritable(); await writable.write(dataStr); await writable.close();
+                            this.msg = "File saved!"; return;
+                        } catch (err) { if (err.name !== 'AbortError') console.error(err); return; }
+                    }
+                    const blob = new Blob([dataStr], { type: "application/json" });
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a'); link.href = url; link.download = fileName;
+                    document.body.appendChild(link); link.click(); document.body.removeChild(link);
+                },
+
+                importSettings(event) {
+                    const file = event.target.files[0]; if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        try {
+                            const loaded = JSON.parse(e.target.result);
+                            this.s = { ...this.s, ...loaded };
+                            this.saveSettings();
+                        } catch (err) { this.isError = true; this.msg = "Parse Error: " + err.message; }
+                    };
+                    reader.readAsText(file); event.target.value = '';
+                }
+            }
+        }).mount('#app');
+    </script>
+</body>
+
+</html>

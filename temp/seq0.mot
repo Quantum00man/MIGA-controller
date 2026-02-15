@@ -1,0 +1,338 @@
+LOOP
+
+COMMENT
+
+Launching sequence for tmot5
+in progress testing version
+
+ENDCOMMENT
+
+INIT
+
+
+
+	DDS1 [0]				(2)
+	
+	DDS5 [0]				(14)
+
+ENDINIT
+
+INNER
+
+## Sequence to ckeck the signal of AOM 3D UP and AOM 3D DOWN ##
+
+##################################
+#            3D MOT              #<PARAMETER0>
+##################################
+
+#TURN ON SHIM FIELDS AND 3D MOT MAGNETS#
++2us Bais_coils_X=5.12			(31)#7.128 7.1 5.10 5.12
++2us Bais_coils_Y=4.93 			(33)#6.102 6.05 6.06 4.90 4.90  5.08
++2us Bais_coils_Z=4.93			(35)#3.75 3.75 7.5 4.921 4.94
+######################## Bragg thermalization #########################
++0.2us Gaussian_pulse = 7				(32) # thermalization
+######################## Bragg thermalization #########################
++1us daq DAC = 0					(37)
++1us redpitaya = OFF					(68)
++1ms 3DMOT_Coils = ON					(67) #MOT coils on
++2us Bais_coils = OFF					(65) #Bais coils on
++20us DDS1 [0]					(2) # scan from -1.9---3.0 13 11 13   2.8Gamma 9 (optimal)
++20us DDS4 [0]						(8)
++20us DDS5 [0]						(14) # -2.6 GAMMA   #5  -3.0 gamma(optimal) 7
++10us DDS4 trigger = OFF				(12)
+#TURN ON 3D MOT LIGHT#
++10us TTL 2DMOT_Shutter = ON 				(48) #2D MOT shutter up. 2D MOT on
++10us 3DMOT_Up_Shutter = ON 				(46) #shutter up. up AOM
++10us 3DMOT_Down_Shutter = ON 				(47) #shutter up. down AOM
++10us Detection_Shutter=OFF				(45) #shutter up
++2us Raman_Dw_Shutter=OFF				(40) #shutter up
++2us Raman_Up_Shutter=OFF				(41) #shutter up
++10us Repump_MOT_Shutter = ON				(42) #shutter up. repump
++10us Repump_push_Shutter = OFF			(43) #shutter up. repump
++1us Gaussian_pulse = ON				(63)
+
+#+10us AOM_3DMOT_Up= OFF					(51) #AOM 3D_Up enabled
+
+#+10us AOM_3DMOT_Down= ON				(53) #AOM 3D_Dw enabled
++10us AOM_Raman1= OFF 					(49) #AOM repump enabled
++10us AOM_Raman2= ON 					(50) #AOM Raman2 enabled
+
+#WARNING. OUTPUT LIGHT POSSIBLE#
+
+#3D MOT LIGHT INTENSITY and frequency#
++100us AOM_3DMOT_Up =0.950	(21) #up beams. power set 950 650 550  #24.5 mW 740 660 690 760 600
+###################################################################################### Detuning between UP and DOWN for launching
++30us AOM_3DMOT_Down =0.950		(20) #down beams. power set 950 500 #26 mW 380 0.5 0.550 590 635 650 580 510 600
+########################################################################################
+
++20us AOM_Detection =0.2				(22) #thermalization
++10us AOM_Det= OFF					(52)
++30us AOM_Raman1 =0.950					(23) #repump. power set 30
++20us AOM_Raman2 =0.950					(24) #thermalization
+
+
+
+#WARNING. OUTPUT LIGHT GUARANTEED#
+
+
+
+################################
+#       3D MOT release		#
+################################
+
+
+# ********** molasses ************************************
+#+2us Exp_trig = ON      	   			(60)
++300ms DDS1 [4]					(1) #cooling for molasses 2.8gamma-->3.2gamma 300 50 600
++50ms TTL 2DMOT_Shutter = OFF			(48) #loading time 800 350 600 100
+
++55us TTL 3DMOT_Coils = OFF				(67) #MOT coils off, delay 3.23 10 3
++1us DDS1 trigger					(6)
+#********** launching *********************************** 
+#+1us Exp_trig = ON      	   			(60)
++1us DDS4 [6]						(7)  #changes freq for launch 6200 6500 2, same amplitude for 3D DOWN and UP
++2ms DDS1 [3]						(1)  #-2.8gamma for launching
++10ms DDS4 trigger 					(12) #Change the state from here 18 28 32 36 10 5
++1us DDS1 trigger					(6)
+
++2us Exp_trig = ON      	   			(60)
+
+# ********** frequency ramp ***************************************
+
++700us DDS1 [1]					(2) # Freq ramp 710 -1.9----15GAMMA ##Launchingtime## best parameter:450, optimal gamma end value: -32 GAMMA 12.35 microKelvin 490 3.8uK 600 800 300 700
+
+
++20us DDS1 ramp = ON 					(5)  
+# ********** power ramp ***************************************
+
++2000us AOM_3DMOT_Up =0.939562 			(21) #750 800
++5us AOM_3DMOT_Down =0.939562 			(20)
++5us AOM_Raman1 =0.939562 			(23)
++5us AOM_3DMOT_Up =0.933349 			(21)
++5us AOM_3DMOT_Down =0.933349 			(20)
++5us AOM_Raman1 =0.933349 			(23)
++5us AOM_3DMOT_Up =0.923541 			(21)
++5us AOM_3DMOT_Down =0.923541 			(20)
++5us AOM_Raman1 =0.939562 			(23)
++5us AOM_3DMOT_Up =0.908215 			(21)
++5us AOM_3DMOT_Down =0.908215 			(20)
++5us AOM_Raman1 =0.939562 			(23)
++5us AOM_3DMOT_Up =0.884640 			(21)
++5us AOM_3DMOT_Down =0.884640 			(20)
++5us AOM_Raman1 =0.939562 			(23)
++5us AOM_3DMOT_Up =0.849238 			(21)
++5us AOM_3DMOT_Down =0.849238 			(20)
++5us AOM_Raman1 =0.939562 			(23)
++5us AOM_3DMOT_Up =0.797957 			(21)
++5us AOM_3DMOT_Down =0.797957 			(20)
++5us AOM_Raman1 =0.939562 			(23)
++5us AOM_3DMOT_Up =0.727419 			(21)
++5us AOM_3DMOT_Down =0.727419 			(20)
++5us AOM_Raman1 =0.939562 			(23)
++5us AOM_3DMOT_Up =0.636992 			(21)
++5us AOM_3DMOT_Down =0.636992 			(20)
++5us AOM_Raman1 =0.939562 			(23)
++5us AOM_3DMOT_Up =0.530989 			(21)
++5us AOM_3DMOT_Down =0.530989 			(20)
++5us AOM_Raman1 =0.939562 			(23)
++5us AOM_3DMOT_Up =0.419011 			(21)
++5us AOM_3DMOT_Down =0.419011 			(20)
++5us AOM_Raman1 =0.939562 			(23)
++5us AOM_3DMOT_Up =0.313008 			(21)
++5us AOM_3DMOT_Down =0.313008 			(20)
++5us AOM_Raman1 =0.939562 			(23)
++5us AOM_3DMOT_Up =0.222581 			(21)
++5us AOM_3DMOT_Down =0.222581 			(20)
++5us AOM_Raman1 =0.939562 			(23)
++5us AOM_3DMOT_Up =0.152043 			(21)
++5us AOM_3DMOT_Down =0.152043 			(20)
++5us AOM_Raman1 =0.939562 			(23)
++5us AOM_3DMOT_Up =0.100762 			(21)
++5us AOM_3DMOT_Down =0.100762 			(20)
++5us AOM_Raman1 =0.939562 			(23)
++5us AOM_3DMOT_Up =0.065360 			(21)
++5us AOM_3DMOT_Down =0.065360 			(20)
++5us AOM_Raman1 =0.939562 			(23)
++5us AOM_3DMOT_Up =0.041785 			(21)
++5us AOM_3DMOT_Down =0.041785 			(20)
++5us AOM_Raman1 =0.939562 			(23)
++5us AOM_3DMOT_Up =0.026459 			(21)
++5us AOM_3DMOT_Down =0.026459 			(20)
++5us AOM_Raman1 =0.939562 			(23)
++5us AOM_3DMOT_Up =0.016651 			(21)
++5us AOM_3DMOT_Down =0.016651 			(20)
++5us AOM_Raman1 =0.939562 			(23)
++5us AOM_3DMOT_Up =0.010000 			(21)
++5us AOM_3DMOT_Down =0.010000 			(20)
++5us AOM_Raman1 =0.939562 			(23)
+
+
+
+
+# ********** close  ***************************************
+     	   			
++2ms AOM_3DMOT_Up= ON				(51) #2.56 2.86 2.96 2.36 5.1 7 8 12 15.1 2.56 0.36
++1us Bais_coils = ON					(65) #Bais coils off
++2us Bais_coils_X=5 				(31) #5
++2us Bais_coils_Y=5 				(33)#5
++2us Bais_coils_Z=5 				(35)#5
++0.2us TTL_AOM_Raman1 = ON				(49)#0.6 0.3 BUG: with 368 microsecond the detection switch off directly 367
+
++1us AOM_3DMOT_Down= ON				(53) #1.8 5.8 0.1
+
++1us TTL Repump_MOT_Shutter = OFF			(42)
++14us TTL 3DMOT_Up_Shutter = OFF 			(46) #shutter up. up AOM
++10us TTL 3DMOT_Down_Shutter = OFF 			(47) #shutter up. down AOM 5
++2us TTL_bias_bar = ON				(66)#2
+
++5ms AOM_3DMOT_Down= OFF				(53) # thermalization
++2us AOM_3DMOT_Up= OFF					(51) # thermalization
++5us AOM_3DMOT_Up =0.950 				(21)
++5us AOM_3DMOT_Down =0.950 				(20)
+
++1us AOM_Raman1 =0.245				(23) #repump. power set 30 0.293  45mw; 0.2435 15mw 0.223 4.285mw 0.223 0.215 0.252
++2us AOM_Raman2 =0.345			(24) #thermalization       406 0.383 25mw; 0.3165 8.3mw 0.31 7.77mw 0.332 0.351
+
+######################################
+#   Raman_down_velocity_selection    #<PARAMETER0>
+######################################
++18us DDS1 [87]					(2) #Set raman delt -771.7 mF0 129; 93 120 69 118 146-hk 145 144 [116 -hk fine] [20-140] [peak 85] [79 +hk] 82
++31.7ms TTL_AOM_Raman1 = ON				(49)#42.4 33.4 31.7
+
++2us Raman_Dw_Shutter=ON				(40) #turn on shutter
++13833us TTL_AOM_Raman1 = OFF				(49)#Raman down pulse #5000 10 15 15.1 15.366 15366 13833
+
+
++110us TTL_AOM_Raman1 = ON				(49) #150 pulse duration 270 136 131 90 131 115
++2us Raman_Dw_Shutter= OFF				(40) #turn on shutter
++5ms TTL_AOM_Raman1 = OFF				(49)
+ #
+
+######################################
+#   Detection_push    #
+######################################<PARAMETER0>
++2us AOM_Detection =0.9				(22)#0.69
++2us DDS1 [15]						(2) #15
++2us AOM_Det= ON					(52)
+#+1us redpitaya = ON					(68)
++2us Det_Shutter = ON					(45)
++9380us AOM_Det= OFF					(52) #11000 10609 total 10879 10673 total8206 8070 9770 9775 9500 9541 7708 9435  10296 9400 9359 9375
++920us AOM_Det= ON					(52)#350 920
++2us Det_shutter = OFF					(45)
++5ms AOM_Det= OFF					(52)
++2us AOM_Raman1 =0.365					(23) #repump. power set 30 0.293  45mw; 0.2435 15mw0.560 0.365 0.950 0.365
++2us AOM_Raman2 =0.950					(24) #thermalization       406 0.383 25mw; 0.3165 8.3mw 0.950
++2us AOM_Detection =1			(22)
+######################################<PARAMETER0>
+#   Raman_UP_State_selection  -hk  #
+######################################
++20us DDS1 [212]					(2) #--wdw 798.2 30 --wdwDw 803 30 [141--261] [202 -HK]
++8555us TTL_AOM_Raman1 = ON				(49)#42.4 6670 total 7020 6100 total 16773 7773 6770 6789 8897 8520 7659
++2us Raman_Up_Shutter=OFF				(41)
++6256us TTL_AOM_Raman1 = OFF				(49)#RAMAN PULSE MOMENT 10000#10333 9504 TOTAL  9193
++35us TTL_AOM_Raman1 = ON				(49) #Raman up pulse time 62 59 50 40 35 38 51 60 56
++2us Raman_Up_Shutter=OFF				(41)
++7223us TTL_AOM_Raman1 = OFF				(49)#5000 total 5059 ;5009 5019 5024 total5059 6021 7219
++2us AOM_Raman1 =0.250					(23)#0.25
+
+################################
+#       F1 Push			#<PARAMETER0>
+################################
++2us DDS1 [6]						(2)
++2us  TTL_AOM_Raman1 = ON				(49)#F1push 9333
++2us Repump_push_Shutter = OFF				(43)
++9526us TTL_AOM_Raman1 = OFF				(49)#F1push 9331 10334 7611 9505
++100us TTL_AOM_Raman1 = ON				(49)#900 400 200 
++1us Gaussian_pulse = OFF				(63)
+######################## Bragg thermalization #########################
++0.2us Gaussian_pulse = 7				(32) # thermalization
+######################## Bragg thermalization #########################
++1.8us Repump_push_Shutter = OFF				(43)
++5520us TTL_AOM_Raman1 = OFF				(49)#5000 total14333 total5720
++2us AOM_Raman1 =0.365					(23) #repump. power set 30 0.293  45mw; 0.2435 15mw 0.560
++2us AOM_Raman2 =0.950					(24) #thermalization       406 0.383 25mw; 0.3165 8.3mw
+
+
+
+######################################
+#   Bragg pulse 25microseconds  35 127microseconds     25 91microseconds         <PARAMETER0>
+######################################
++310000us Gaussian_pulse = 7				(32) # thermalization 310000
++8000us Gaussian_pulse = ON		(63) #313034 315757 249207  +hk 256103 322117 319056 320000 320000 238160 315000
++<PARAMETER0>us Gaussian_pulse = OFF		(63) #50 37
+###bragg###
+
+###bragg###
+
+
+
+######################################<PARAMETER0>
+#   Raman_UP_state_labelling_spec    #
+######################################
++<PARAMETER1>us DDS1 [337]				(2) #--wdw 798.2 30 --wdwDw 805 15Fine:[383--483]state:[315 +hk][426 -hk,464 +hk] 328963.4 410803.4 333963.4 331076 331089
++1100us TTL_AOM_Raman1 = ON				(49)#42.4 6670 total 7020
++2us Raman_Up_Shutter=ON				(41)
++2us AOM_Det= ON					(52)
++2us Det_shutter = ON					(45)
++12000us TTL_AOM_Raman1 = OFF				(49)#RAMAN PULSE MOMENT 10000#10333 9504 4997 14997 15000 15234 
++45us TTL_AOM_Raman1 = ON				(49) #Raman up pulse time 62 59 50 36 48 42 200 50 59  56 68 55
+######################## Bragg thermalization #########################
++1us Gaussian_pulse = ON				(63)
++0.2us Gaussian_pulse = 7				(32) # thermalization
+######################## Bragg thermalization #########################
+
++1.8us Raman_Up_Shutter=OFF				(41)
+#+2us Det_shutter = ON					(45)
+#+4983us TTL_AOM_Raman1 =OFF				(49)#5000 total 5059
++2us DDS1 [14]						(2)  #Detection frequency, -0.3 GAMMA optimal value #400mV 720 664 659 629.9 15 RAMAN UP ; 10 RAMAN DOWN 14
++2us AOM_Raman1 =0.2					(23)
+
+
+
+################################
+#       Det			#
+################################
+
+
++2us TTL_AOM_Raman1 = ON				(49) #600 total 620819 611484
+
++2us TTL_Repump_det = ON				(44)
+
+
++6245us AOM_Det= OFF					(52) #11 Detection on 2000 2050 2010 TOTAL 2047 4000 3786 3778 3787 *3790 3500 3350 3000 2988 6235
++2us TTL_AOM_Raman1 = OFF				(49) # repumper on
++2ms redpitaya = ON					(68)
++1us daq DAC = 7					(37)
+
++99ms TTL_AOM_Raman1 = ON				(49) #20
++2us AOM_Det= ON					(52)#2MICROS
++2us Det_shutter = OFF					(45)
++5ms AOM_Det= OFF					(52)
++2us TTL_Repump_det = OFF				(44)
++5ms TTL_AOM_Raman1 = OFF				(49)
++1ms redpitaya = OFF					(68)
++1us daq DAC = 0					(37)
+
+################################
+#       	close		#
+################################
++2us AOM_Raman1 =0.950					(23)
+#+1us redpitaya = OFF					(68)
++2us TTL_bias_bar = OFF				(66)
++3us Exp_trig= OFF 					(60)
+#+1us TTL_AOM_Raman1 = ON				(49)
+#+1us TTL_AOM_Raman2 = ON				(50)
+
+
+
++5us DDS1 [0]						(2)
++5us DDS4 [0]						(8)
++5us DDS5 [0]						(14)
+
+
+
+ENDINNER
+
+ITERATIONS 1
+
+ENDLOOP

@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>MIGA Control Console</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.1/font/bootstrap-icons.css">
+    <style>
+        :root {
+            --sidebar-width: 360px;
+            --header-height: 60px;
+        }
+
+        body {
+            background-color: #f4f6f9;
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            overflow-x: hidden;
+        }
+
+        .sidebar {
+            position: fixed;
+            top: var(--header-height);
+            bottom: 0;
+            left: 0;
+            width: var(--sidebar-width);
+            overflow-y: auto;
+            padding: 20px;
+            background: #ffffff;
+            border-right: 1px solid #dee2e6;
+            z-index: 100;
+        }
+
+        .main-content {
+            margin-left: var(--sidebar-width);
+            padding: 25px;
+            margin-top: var(--header-height);
+        }
+
+        .navbar-fixed {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: var(--header-height);
+            z-index: 1030;
+            background: #2c3e50;
+            color: white;
+            padding: 0 25px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .card {
+            border: none;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
+            margin-bottom: 20px;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+        }
+
+        .card.maximized {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 2000;
+            margin: 0;
+            border-radius: 0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .card.maximized .card-body {
+            flex-grow: 1;
+            overflow: auto;
+        }
+
+        .card-header {
+            background-color: #fff;
+            border-bottom: 1px solid #f0f0f0;
+            font-weight: 600;
+            padding: 12px 20px;
+            color: #495057;
+        }
+
+        .section-label {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 1.2px;
+            color: #adb5bd;
+            font-weight: 800;
+            margin: 20px 0 10px;
+            display: block;
+        }
+
+        .status-badge {
+            padding: 6px 15px;
+            border-radius: 30px;
+            font-size: 0.85rem;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+        }
+
+        .status-badge.idle {
+            background-color: #e9ecef;
+            color: #6c757d;
+            border: 1px solid #ced4da;
+        }
+
+        .status-badge.running {
+            background-color: #d1e7dd;
+            color: #0f5132;
+            border: 1px solid #a3cfbb;
+            animation: pulse 2s infinite;
+        }
+
+        #log-area {
+            height: 320px;
+            overflow-y: auto;
+            background: #1e1e1e;
+            color: #00ff9d;
+            font-family: 'Consolas', monospace;
+            font-size: 0.8rem;
+            padding: 15px;
+            border-radius: 0 0 8px 8px;
+        }
+
+        .form-control-sm,
+        .form-select-sm {
+            border-radius: 4px;
+            border: 1px solid #ced4da;
+            padding: 6px 10px;
+        }
+
+        .form-control:focus {
+            box-shadow: none;
+            border-color: #3498db;
+        }
+
+        .mode-switch-card {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+        }
+
+        .nav-tabs .nav-link {
+            cursor: pointer;
+            color: #495057;
+        }
+
+        .nav-tabs .nav-link.active {
+            font-weight: bold;
+            color: #0d6efd;
+            background-color: #fff;
+            border-bottom-color: transparent;
+        }
+
+        .plot-split-container {
+            border-bottom: 1px solid #eee;
+        }
+
+        .js-plotly-plot .plotly .modebar {
+            left: 50%;
+            transform: translateX(-50%);
+        }
+
+        .btn-max {
+            color: #adb5bd;
+            transition: color 0.2s;
+        }
+
+        .btn-max:hover {
+            color: #495057;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="app">
+        <header class="navbar-fixed">
+            <div class="d-flex align-items-center">
+                <i class="bi bi-radioactive fs-4 me-3 text-warning"></i>
+                <span class="fs-5 fw-bold tracking-tight">MIGA Controller</span>
+            </div>
+            <div class="d-flex align-items-center flex-grow-1 mx-4" style="max-width: 400px;">
+                <div class="d-flex flex-column w-100">
+                    <div class="d-flex justify-content-between small mb-1">
+                        <span class="fw-bold text-white-50" style="font-size: 0.75em;">{{ isRunning ? 'CURRENT RUN' :
+                            'NEXT RUN' }}</span>
+                        <span class="fw-bold text-warning font-monospace" style="font-size: 0.8em;">{{ currentRunId
+                            }}</span>
+                    </div>
+                    <div class="progress w-100" style="height: 8px; background-color: #445566; border-radius: 4px;">
+                        <div class="progress-bar bg-warning" role="progressbar" :style="{width: progressPercent + '%'}"
+                            :aria-valuenow="progressPercent" aria-valuemin="0" aria-valuemax="100"></div>
+                    </div>
+                </div>
+                <span class="ms-2 small fw-bold text-warning" style="min-width: 40px;">{{ isNaN(progressPercent) ? 0 :
+                    progressPercent }}%</span>
+            </div>
+            <div class="d-flex align-items-center gap-4">
+                <div :class="['status-badge', isRunning ? 'running' : 'idle']">
+                    <i class="bi" :class="isRunning ? 'bi-activity' : 'bi-pause-fill'"></i>
+                    {{ statusMessage }}
+                </div>
+                <a href="/archive.html" class="btn btn-outline-light btn-sm d-flex align-items-center gap-2 px-3"><i
+                        class="bi bi-archive-fill"></i> Data Archive</a>
+                <a href="/settings.html" target="_blank"
+                    class="btn btn-outline-light btn-sm d-flex align-items-center gap-2 px-3"><i
+                        class="bi bi-sliders"></i> Settings</a>
+            </div>
+        </header>
+
+        <aside class="sidebar">
+            <div class="card mode-switch-card mb-3">
+                <div class="card-body p-3 d-flex justify-content-between align-items-center">
+                    <div>
+                        <div class="small text-muted fw-bold" style="font-size: 0.7em;">SYSTEM MODE</div>
+                        <div class="fw-bold" :class="isSimulation ? 'text-primary' : 'text-danger'">{{ isSimulation ?
+                            'SIMULATION' : 'REAL HW' }}</div>
+                    </div>
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" v-model="isSimulation" @change="toggleMode"
+                            :disabled="isRunning" style="width: 45px; height: 24px; cursor: pointer;">
+                    </div>
+                </div>
+            </div>
+            <span class="section-label">Sequence Selection</span>
+            <div class="card p-3 mb-3">
+                <div class="input-group input-group-sm">
+                    <span class="input-group-text bg-white text-muted"><i class="bi bi-file-code"></i></span>
+                    <input type="text" class="form-control bg-white" readonly :value="currentSequenceName">
+                    <button class="btn btn-primary" @click="$refs.seqInput.click()" :disabled="isRunning"
+                        title="Load .mot file"><i class="bi bi-folder2-open"></i></button>
+                </div>
+                <input type="file" ref="seqInput" style="display:none" accept=".mot" @change="selectSequence">
+                
+                <div class="form-text mt-1" style="font-size: 0.7rem;">Selected file will overwrite current template.
+                </div>
+            </div>
+
+            <form @submit.prevent>
+                <span class="section-label">Dimension 1</span>
+                <div class="card p-3">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div class="btn-group btn-group-sm" role="group">
+                            <input type="radio" class="btn-check" name="ptype" id="pfloat" value="float"
+                                v-model="config.param_type">
+                            <label class="btn btn-outline-secondary px-2" for="pfloat">Float</label>
+                            <input type="radio" class="btn-check" name="ptype" id="pint" value="int"
+                                v-model="config.param_type">
+                            <label class="btn btn-outline-secondary px-2" for="pint">Int</label>
+                        </div>
+                        <div class="form-check form-switch ms-2">
+                            <input class="form-check-input" type="checkbox" id="d1list" v-model="useList1">
+                            <label class="form-check-label small text-muted" for="d1list">List</label>
+                        </div>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center mb-3" v-if="!useList1">
+                        <span class="small text-muted fw-bold">Method:</span>
+                        <div class="btn-group btn-group-sm w-50">
+                            <input type="radio" class="btn-check" name="pmethod" id="mstep" value="step_size"
+                                v-model="config.dim1_method">
+                            <label class="btn btn-outline-secondary py-0" for="mstep">Step</label>
+                            <input type="radio" class="btn-check" name="pmethod" id="mpoint" value="n_points"
+                                v-model="config.dim1_method">
+                            <label class="btn btn-outline-secondary py-0" for="mpoint">Count</label>
+                        </div>
+                    </div>
+                    <div v-if="!useList1" class="row g-2">
+                        <div class="col-4"><label class="form-label small text-muted mb-1">Start</label><input
+                                type="text" class="form-control form-control-sm" v-model="config.start"></div>
+                        <div class="col-4"><label class="form-label small text-muted mb-1">Stop</label><input
+                                type="text" class="form-control form-control-sm" v-model="config.stop"></div>
+                        <div class="col-4"><label class="form-label small text-muted mb-1">{{ config.dim1_method ===
+                                'step_size' ? 'Step' : 'Points' }}</label><input type="text"
+                                class="form-control form-control-sm" v-model="config.step"></div>
+                    </div>
+                    <div v-else><textarea class="form-control form-control-sm" v-model="config.custom_list"
+                            placeholder="e.g. 1, 5, 10" rows="2"></textarea></div>
+                </div>
+
+                <span class="section-label">Scan Logic</span>
+                <div class="card p-3">
+                    <div class="mb-3">
+                        <label class="form-label small text-muted mb-1">Relation Mode</label>
+                        <select class="form-select form-select-sm fw-bold text-dark" v-model="config.mode">
+                            <option value="standard">Standard (P0)</option>
+                            <option value="timing">Timing (Tot-P0)</option>
+                            <option value="rabi">Rabi (Tot-P0/2)</option>
+                            <option value="half">Half (P0/2)</option>
+                            <option value="link">Link (Custom Formula)</option>
+                        </select>
+                    </div>
+                    <div v-if="['timing', 'rabi'].includes(config.mode)">
+                        <label class="form-label small text-muted mb-1">Total Parameter</label>
+                        <div class="input-group input-group-sm"><span class="input-group-text bg-white"><i
+                                    class="bi bi-calculator"></i></span><input type="text" class="form-control"
+                                v-model="config.mode_param"></div>
+                    </div>
+                    <div v-if="config.mode === 'link'" class="mt-1">
+                        <label class="form-label small text-muted mb-2">Python Formulas</label>
+                        <div v-for="(formula, index) in config.link_formulas" :key="index"
+                            class="input-group input-group-sm mb-2">
+                            <span class="input-group-text bg-light border-end-0">P{{ index + 1 }}</span>
+                            <input type="text" class="form-control font-monospace border-start-0"
+                                v-model="config.link_formulas[index]">
+                            <button class="btn btn-outline-danger border-start-0" @click="removeFormula(index)"><i
+                                    class="bi bi-x-lg"></i></button>
+                        </div>
+                        <button class="btn btn-sm btn-light w-100 text-muted border border-dashed" @click="addFormula">+
+                            Add Parameter</button>
+                    </div>
+                </div>
+
+                <span class="section-label">Fitting Config (ms)</span>
+                <div class="card p-3">
+                    <div class="row g-2 mb-2">
+                        <div class="col-12 small fw-bold text-danger">UP Detector</div>
+                        <div class="col-6"><input type="number" class="form-control form-control-sm"
+                                v-model.number="config.fit_center_up" placeholder="Center" step="any"></div>
+                        <div class="col-6"><input type="number" class="form-control form-control-sm"
+                                v-model.number="config.fit_width_up" placeholder="Width" step="any"></div>
+                    </div>
+                    <div class="row g-2">
+                        <div class="col-12 small fw-bold text-primary">DOWN Detector</div>
+                        <div class="col-6"><input type="number" class="form-control form-control-sm"
+                                v-model.number="config.fit_center_dw" placeholder="Center" step="any"></div>
+                        <div class="col-6"><input type="number" class="form-control form-control-sm"
+                                v-model.number="config.fit_width_dw" placeholder="Width" step="any"></div>
+                    </div>
+                </div>
+
+                <span class="section-label">Dimension 2</span>
+                <div class="card p-3">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <div class="form-check"><input class="form-check-input" type="checkbox" id="d2enable"
+                                v-model="config.dim2_enabled"><label class="form-check-label small fw-bold"
+                                for="d2enable">Enable Dim 2</label></div>
+                        <div class="form-check form-switch" v-if="config.dim2_enabled"><input class="form-check-input"
+                                type="checkbox" id="d2list" v-model="useList2"><label
+                                class="form-check-label small text-muted" for="d2list">List</label></div>
+                    </div>
+                    <div v-if="config.dim2_enabled">
+                        <div v-if="!useList2" class="row g-2">
+                            <div class="col-4"><input type="text" class="form-control form-control-sm"
+                                    v-model="config.dim2_start" placeholder="Start"></div>
+                            <div class="col-4"><input type="text" class="form-control form-control-sm"
+                                    v-model="config.dim2_stop" placeholder="Stop"></div>
+                            <div class="col-4"><input type="text" class="form-control form-control-sm"
+                                    v-model.number="config.dim2_step" placeholder="Step"></div>
+                        </div>
+                        <div v-else><input type="text" class="form-control form-control-sm" v-model="config.dim2_list"
+                                placeholder="0.1, 0.2..."></div>
+                    </div>
+                </div>
+
+                <span class="section-label">Execution Control</span>
+                <div class="card p-3 mb-5 border-0 bg-transparent shadow-none ps-0 pe-0">
+                    <div class="row g-2 align-items-center mb-3 px-1">
+                        <div class="col-6"><label class="form-label small text-muted mb-1">Averages</label><input
+                                type="number" class="form-control form-control-sm" v-model.number="config.averages"
+                                min="1"></div>
+                        <div class="col-6">
+                            <div class="form-check mt-4"><input class="form-check-input" type="checkbox"
+                                    v-model="config.randomize" id="randCheck"><label class="form-check-label small"
+                                    for="randCheck">Randomize</label></div>
+                        </div>
+                    </div>
+                    <div class="d-grid gap-2">
+                        <button class="btn btn-success py-2 fs-6 fw-bold shadow-sm" @click="startScan"
+                            :disabled="isRunning"><i class="bi bi-play-fill me-1 fs-5"></i> START EXPERIMENT</button>
+                        <button class="btn btn-danger py-2 fs-6 fw-bold shadow-sm" @click="stopScan"
+                            :disabled="!isRunning"><i class="bi bi-stop-fill me-1 fs-5"></i> STOP</button>
+                    </div>
+                </div>
+            </form>
+        </aside>
+
+        <main class="main-content">
+            <div class="card mb-4 border-0 shadow-sm" :class="{'maximized': maximizedView === 'analysis'}">
+                <div class="card-header bg-white d-flex justify-content-between align-items-center py-3">
+                    <div class="d-flex align-items-center text-primary">
+                        <i class="bi bi-graph-up-arrow fs-5 me-2"></i>
+                        <span class="fw-bold">Analysis Results</span>
+                    </div>
+
+                    <div class="d-flex align-items-center gap-3">
+                        <button class="btn btn-sm btn-link btn-max p-0 text-decoration-none"
+                            @click="toggleMaximize('analysis')" title="Maximize/Restore">
+                            <i class="bi"
+                                :class="maximizedView === 'analysis' ? 'bi-fullscreen-exit' : 'bi-fullscreen'"></i>
+                        </button>
+
+                        <div class="form-check form-switch ms-2">
+                            <input class="form-check-input" type="checkbox" id="showRaw" v-model="showRawData"
+                                style="cursor: pointer;">
+                            <label class="form-check-label small fw-bold text-muted" for="showRaw"
+                                style="cursor: pointer;">Show NoFit</label>
+                        </div>
+
+                        <ul class="nav nav-pills card-header-pills">
+                            <li class="nav-item" v-for="tab in tabs" :key="tab.id">
+                                <a :class="['nav-link', 'btn-sm', 'px-3', currentTab === tab.id ? 'active' : 'text-muted']"
+                                    href="#" @click.prevent="currentTab = tab.id">{{ tab.label }}</a>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="card-body p-0">
+                    <div id="resultsPlotUp" class="plot-split-container"
+                        :style="{height: maximizedView === 'analysis' ? 'calc(50vh - 40px)' : '350px'}"></div>
+                    <div id="resultsPlotDw"
+                        :style="{height: maximizedView === 'analysis' ? 'calc(50vh - 40px)' : '350px'}"></div>
+                </div>
+            </div>
+
+            <div class="row g-4">
+                <div class="col-lg-7">
+                    <div class="card h-100 border-0 shadow-sm" :class="{'maximized': maximizedView === 'scope'}">
+                        <div class="card-header bg-white py-2 d-flex justify-content-between align-items-center">
+                            <div><i class="bi bi-activity me-2 text-danger"></i><span class="fw-bold">Real-time
+                                    Oscilloscope</span></div>
+                            <div class="d-flex align-items-center gap-3">
+                                <button class="btn btn-sm btn-link btn-max p-0 text-decoration-none"
+                                    @click="toggleMaximize('scope')" title="Maximize/Restore">
+                                    <i class="bi"
+                                        :class="maximizedView === 'scope' ? 'bi-fullscreen-exit' : 'bi-fullscreen'"></i>
+                                </button>
+                                <span class="badge bg-light text-dark border"
+                                    v-if="config.fit_width_up > 0 || config.fit_width_dw > 0">Fitting Window
+                                    Active</span>
+                            </div>
+                        </div>
+                        <div class="card-body p-0">
+                            <div id="waveformPlotUp" class="plot-split-container"
+                                :style="{height: maximizedView === 'scope' ? 'calc(50vh - 40px)' : '300px'}"></div>
+                            <div id="waveformPlotDw"
+                                :style="{height: maximizedView === 'scope' ? 'calc(50vh - 40px)' : '300px'}"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-lg-5">
+                    <div class="card h-100 border-0 shadow-sm">
+                        <div class="card-header bg-dark text-white py-2 border-0"><i
+                                class="bi bi-terminal-fill me-2"></i>System Terminal</div>
+                        <div id="log-area">
+                            <div v-for="(log, index) in logs" :key="index"><span
+                                    class="text-secondary opacity-50 me-2">></span>{{ log }}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/vue@3.2.31/dist/vue.global.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <script src="https://cdn.plot.ly/plotly-2.12.1.min.js"></script>
+
+    <script>
+        const { createApp } = Vue;
+
+        createApp({
+            data() {
+                return {
+                    useList1: false, useList2: false,
+                    config: {
+                        dim1_type: 'range', start: 0, stop: 10, step: 1, custom_list: '',
+                        param_type: 'float', dim1_method: 'step_size',
+                        dim2_enabled: false, dim2_type: 'range', dim2_start: 0, dim2_stop: 5, dim2_step: 1, dim2_list: '',
+                        averages: 1, randomize: false, mode: 'standard', mode_param: 100,
+                        link_formulas: ["(P0-151)/2+26", "100-P1"],
+                        fit_center_up: 0, fit_width_up: 0, fit_center_dw: 0, fit_width_dw: 0
+                    },
+                    isRunning: false, isSimulation: true, statusMessage: "IDLE", currentStep: 0, plotRevision: 0, logs: [], ws: null,
+                    progressPercent: 0,
+                    currentSequenceName: "Default (seq0.mot)",
+                    currentRunId: "...",
+                    seqFile: null,
+                    showRawData: true, // Toggle State
+                    maximizedView: null,
+                    currentTab: 'atoms',
+                    tabs: [{ id: 'atoms', label: 'Atom Number' }, { id: 'amp', label: 'Max Voltage' }, { id: 'sigma', label: 'Width (ms)' }, { id: 'temp', label: 'Temperature' }, { id: 'arrival', label: 'Arrival Time' }, { id: 'prob', label: 'Transition Prob.' }],
+                    historyMap: {},
+                    layoutResUp: {}, layoutResDw: {}, layoutOscUp: {}, layoutOscDw: {},
+                    isPlotting: false
+                }
+            },
+            watch: {
+                currentTab() { this.plotRevision++; this.renderMainPlot(); },
+                showRawData() { this.plotRevision++; this.renderMainPlot(); },
+                useList1(val) { this.config.dim1_type = val ? 'list' : 'range'; this.saveState(); },
+                useList2(val) { this.config.dim2_type = val ? 'list' : 'range'; this.saveState(); },
+                config: { handler() { this.saveState(); }, deep: true }
+            },
+            mounted() {
+                this.loadState();
+                this.initPlots();
+                this.connectWebSocket();
+                this.fetchSystemMode();
+                this.fetchStatus();
+                setInterval(this.fetchStatus, 2000);
+                this.addLog("System initialized ready.");
+            },
+            methods: {
+                async fetchStatus() { try { const res = await axios.get('/experiment/status'); const d = res.data.data; this.currentRunId = d.run_id || "Loading..."; if (!this.isRunning) { this.isRunning = d.is_running; } } catch (e) { } },
+                isNaN(val) { return Number.isNaN(val); },
+                toggleMaximize(view) {
+                    if (this.maximizedView === view) { this.maximizedView = null; } else { this.maximizedView = view; }
+                    this.$nextTick(() => {
+                        window.dispatchEvent(new Event('resize'));
+                        if (view === 'analysis' || !view) { Plotly.Plots.resize('resultsPlotUp'); Plotly.Plots.resize('resultsPlotDw'); }
+                        if (view === 'scope' || !view) { Plotly.Plots.resize('waveformPlotUp'); Plotly.Plots.resize('waveformPlotDw'); }
+                    });
+                },
+
+                selectSequence(event) {
+                    const file = event.target.files[0];
+                    if (!file) return;
+
+                    // 保存文件对象到 data 中，以便 Start 时再次使用
+                    this.seqFile = file;
+
+                    // 立即上传一次，让用户确认文件已加载
+                    this.uploadSequenceFile();
+
+                    // 清空 input value 以便允许重新选择同名文件
+                    event.target.value = '';
+                },
+                async uploadSequenceFile() {
+                    if (!this.seqFile) return true; // 如果没选文件，视为使用默认，返回成功
+
+                    const formData = new FormData();
+                    formData.append("file", this.seqFile);
+
+                    try {
+                        this.addLog(`Uploading ${this.seqFile.name}...`);
+                        const res = await axios.post('/experiment/sequence', formData, {
+                            headers: { 'Content-Type': 'multipart/form-data' }
+                        });
+                        this.currentSequenceName = res.data.filename;
+                        this.addLog("Sequence uploaded successfully.");
+                        return true; // 上传成功
+                    } catch (e) {
+                        this.addLog("Upload failed: " + (e.response?.data?.detail || e.message));
+                        return false; // 上传失败
+                    }
+                },
+                saveState() {
+                    const state = { useList1: this.useList1, useList2: this.useList2, config: this.config, showRawData: this.showRawData };
+                    localStorage.setItem('miga_scan_state', JSON.stringify(state));
+                },
+                loadState() {
+                    const stored = localStorage.getItem('miga_scan_state');
+                    if (stored) {
+                        try {
+                            const state = JSON.parse(stored);
+                            this.useList1 = state.useList1;
+                            this.useList2 = state.useList2;
+                            this.config = { ...this.config, ...state.config };
+                            if (state.showRawData !== undefined) this.showRawData = state.showRawData;
+                        } catch (e) { console.error("Load state failed", e); }
+                    }
+                },
+                addLog(msg) {
+                    const time = new Date().toLocaleTimeString('en-GB', { hour12: false });
+                    this.logs.unshift(`[${time}] ${msg}`);
+                    if (this.logs.length > 50) this.logs.pop();
+                },
+                addFormula() { this.config.link_formulas.push(""); },
+                removeFormula(index) { this.config.link_formulas.splice(index, 1); },
+                
+                initPlots() {
+                    const commonLayout = { font: { family: 'Arial, sans-serif', size: 11 }, margin: { l: 60, r: 20 }, showlegend: true, legend: { x: 1, y: 1, xanchor: 'right', bgcolor: 'rgba(255,255,255,0.7)', bordercolor: '#ccc', borderwidth: 1 }, paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', xaxis: { showline: true, mirror: true, ticks: 'inside', linecolor: '#333' }, yaxis: { showline: true, mirror: true, ticks: 'inside', linecolor: '#333', zeroline: false } };
+                    this.layoutResUp = { ...commonLayout, margin: { t: 30, b: 5, l: 60, r: 20 }, yaxis: { ...commonLayout.yaxis, title: 'Value' }, xaxis: { ...commonLayout.xaxis, title: '', showticklabels: false }, title: { text: 'UP Channel', font: { size: 12 }, x: 0.05, y: 0.9 } };
+                    this.layoutResDw = { ...commonLayout, margin: { t: 5, b: 40, l: 60, r: 20 }, yaxis: { ...commonLayout.yaxis, title: 'Value' }, xaxis: { ...commonLayout.xaxis, title: 'Parameter P0' }, title: { text: 'DOWN Channel', font: { size: 12 }, x: 0.05, y: 0.9 } };
+                    Plotly.newPlot('resultsPlotUp', [], this.layoutResUp); Plotly.newPlot('resultsPlotDw', [], this.layoutResDw);
+                    this.layoutOscUp = { ...commonLayout, margin: { t: 25, b: 5, l: 50, r: 10 }, yaxis: { ...commonLayout.yaxis, title: 'UP (V)' }, xaxis: { ...commonLayout.xaxis, visible: false }, title: { text: 'UP Signal', font: { size: 10 }, x: 0.05, y: 0.85 }, paper_bgcolor: 'white', plot_bgcolor: 'white' };
+                    this.layoutOscDw = { ...commonLayout, margin: { t: 5, b: 30, l: 50, r: 10 }, yaxis: { ...commonLayout.yaxis, title: 'DW (V)' }, xaxis: { ...commonLayout.xaxis, title: 'Time (ms)' }, title: { text: 'DOWN Signal', font: { size: 10 }, x: 0.05, y: 0.85 }, paper_bgcolor: 'white', plot_bgcolor: 'white' };
+                    Plotly.newPlot('waveformPlotUp', [], this.layoutOscUp); Plotly.newPlot('waveformPlotDw', [], this.layoutOscDw);
+                    this.renderMainPlot();
+                },
+                getProcessedHistory() {
+                    const dataArray = Object.keys(this.historyMap).map(key => {
+                        const item = this.historyMap[key]; const n = item.count; const avg = (sum) => sum / n;
+                        return {
+                            x: parseFloat(key),
+                            atoms_up: avg(item.sum_atoms_up), atoms_dw: avg(item.sum_atoms_dw),
+                            temp_up: avg(item.sum_temp_up), temp_dw: avg(item.sum_temp_dw),
+                            sigma_up: avg(item.sum_sigma_up), sigma_dw: avg(item.sum_sigma_dw),
+                            amp_up: avg(item.sum_amp_up), amp_dw: avg(item.sum_amp_dw),
+                            arrival_up: avg(item.sum_arrival_up), arrival_dw: avg(item.sum_arrival_dw),
+                            prob_up: avg(item.sum_prob_up), prob_dw: avg(item.sum_prob_dw),
+                            nf_atoms_up: avg(item.sum_nf_atoms_up), nf_atoms_dw: avg(item.sum_nf_atoms_dw),
+                            nf_temp_up: avg(item.sum_nf_temp_up), nf_temp_dw: avg(item.sum_nf_temp_dw),
+                            nf_sigma_up: avg(item.sum_nf_sigma_up), nf_sigma_dw: avg(item.sum_nf_sigma_dw),
+                            nf_amp_up: avg(item.sum_nf_amp_up), nf_amp_dw: avg(item.sum_nf_amp_dw),
+                            nf_arrival_up: avg(item.sum_nf_arrival_up), nf_arrival_dw: avg(item.sum_nf_arrival_dw),
+                            nf_prob_up: avg(item.sum_nf_prob_up), nf_prob_dw: avg(item.sum_nf_prob_dw)
+                        };
+                    });
+                    dataArray.sort((a, b) => a.x - b.x);
+                    const res = { x: [] };
+                    ['atoms', 'temp', 'sigma', 'amp', 'arrival', 'prob'].forEach(k => {
+                        res[k + '_up'] = []; res['nf_' + k + '_up'] = []; res[k + '_dw'] = []; res['nf_' + k + '_dw'] = [];
+                    });
+                    dataArray.forEach(d => {
+                        res.x.push(d.x);
+                        ['atoms', 'temp', 'sigma', 'amp', 'arrival', 'prob'].forEach(k => {
+                            res[k + '_up'].push(d[k + '_up']); res['nf_' + k + '_up'].push(d['nf_' + k + '_up']);
+                            res[k + '_dw'].push(d[k + '_dw']); res['nf_' + k + '_dw'].push(d['nf_' + k + '_dw']);
+                        });
+                    });
+                    return res;
+                },
+                renderMainPlot() {
+                    const d = this.getProcessedHistory();
+                    let yUp = [], yUpNF = [], yDw = [], yDwNF = [], labelY = "", nameUp = "UP", nameDw = "DOWN";
+                    switch (this.currentTab) {
+                        case 'atoms': yUp = d.atoms_up; yUpNF = d.nf_atoms_up; yDw = d.atoms_dw; yDwNF = d.nf_atoms_dw; labelY = "Atom Number"; break;
+                        case 'amp': yUp = d.amp_up; yUpNF = d.nf_amp_up; yDw = d.amp_dw; yDwNF = d.nf_amp_dw; labelY = "Max Voltage (V)"; break;
+                        case 'sigma': yUp = d.sigma_up; yUpNF = d.nf_sigma_up; yDw = d.sigma_dw; yDwNF = d.nf_sigma_dw; labelY = "Width (ms)"; break;
+                        case 'temp': yUp = d.temp_up; yUpNF = d.nf_temp_up; yDw = d.temp_dw; yDwNF = d.nf_temp_dw; labelY = "Temperature (uK)"; break;
+                        case 'arrival': yUp = d.arrival_up; yUpNF = d.nf_arrival_up; yDw = d.arrival_dw; yDwNF = d.nf_arrival_dw; labelY = "Arrival Time (s)"; break;
+                        case 'prob': yUp = d.prob_up; yUpNF = d.nf_prob_up; yDw = d.prob_dw; yDwNF = d.nf_prob_dw; labelY = "Transition Prob. (%)"; nameUp = "Prob F2 (UP)"; nameDw = "Prob F1 (DW)"; break;
+                    }
+
+                    const tracesUp = [{ x: d.x, y: yUp, mode: 'lines+markers', name: nameUp + ' (Fit)', line: { color: '#dc3545', width: 2 }, marker: { size: 8 } }];
+                    const tracesDw = [{ x: d.x, y: yDw, mode: 'lines+markers', name: nameDw + ' (Fit)', line: { color: '#0d6efd', width: 2 }, marker: { size: 8 } }];
+
+                    if (this.showRawData) {
+                        tracesUp.push({ x: d.x, y: yUpNF, mode: 'lines+markers', name: nameUp + ' (Raw)', line: { color: '#dc3545', width: 1, dash: 'dot' }, marker: { size: 6, symbol: 'circle-open', opacity: 0.6 } });
+                        tracesDw.push({ x: d.x, y: yDwNF, mode: 'lines+markers', name: nameDw + ' (Raw)', line: { color: '#0d6efd', width: 1, dash: 'dot' }, marker: { size: 6, symbol: 'circle-open', opacity: 0.6 } });
+                    }
+
+                    this.layoutResUp.yaxis.title = labelY + ' (UP)'; this.layoutResUp.datarevision = this.plotRevision;
+                    Plotly.react('resultsPlotUp', tracesUp, this.layoutResUp);
+                    this.layoutResDw.yaxis.title = labelY + ' (DW)'; this.layoutResDw.datarevision = this.plotRevision;
+                    Plotly.react('resultsPlotDw', tracesDw, this.layoutResDw);
+                },
+                connectWebSocket() {
+                    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                    const wsUrl = `${protocol}//${window.location.host}/ws`;
+                    this.ws = new WebSocket(wsUrl);
+                    this.ws.onopen = () => this.addLog("WebSocket connected.");
+                    this.ws.onclose = () => setTimeout(this.connectWebSocket, 3000);
+                    this.ws.onmessage = (event) => this.handleData(JSON.parse(event.data));
+                },
+                handleData(data) {
+                    this.currentStep = data.current_step;
+                    const total = data.total_steps || 1;
+                    this.progressPercent = total > 0 ? Math.round((this.currentStep / total) * 100) : 0;
+                    this.statusMessage = `Scanning: ${data.parameter}`;
+
+                    if (this.isPlotting) return;
+                    this.isPlotting = true;
+                    requestAnimationFrame(() => {
+                        try {
+                            const timeMs = data.time_axis.map(t => t * 1000);
+                            const traceUpRaw = { x: timeMs, y: data.raw_data_up, type: 'scatter', mode: 'markers', marker: { color: 'black', size: 2, opacity: 0.3 }, name: 'Raw', showlegend: false };
+                            const traceUpFit = { x: timeMs, y: data.fit_data_up, type: 'scatter', mode: 'lines', line: { color: '#d62728', width: 2 }, name: 'Fit' };
+                            const traceDwRaw = { x: timeMs, y: data.raw_data_dw, type: 'scatter', mode: 'markers', marker: { color: 'black', size: 2, opacity: 0.3 }, name: 'Raw', showlegend: false };
+                            const traceDwFit = { x: timeMs, y: data.fit_data_dw, type: 'scatter', mode: 'lines', line: { color: '#1f77b4', width: 2 }, name: 'Fit' };
+                            const shapesUp = []; const shapesDw = [];
+                            if (data.window_up) shapesUp.push({ type: 'rect', xref: 'x', yref: 'paper', x0: data.window_up[0] * 1000, x1: data.window_up[1] * 1000, y0: 0, y1: 1, fillcolor: '#dc3545', opacity: 0.1, line: { width: 0 } });
+                            if (data.window_dw) shapesDw.push({ type: 'rect', xref: 'x', yref: 'paper', x0: data.window_dw[0] * 1000, x1: data.window_dw[1] * 1000, y0: 0, y1: 1, fillcolor: '#0d6efd', opacity: 0.1, line: { width: 0 } });
+                            this.layoutOscUp.datarevision = this.currentStep; this.layoutOscUp.shapes = shapesUp;
+                            Plotly.react('waveformPlotUp', [traceUpRaw, traceUpFit], this.layoutOscUp);
+                            this.layoutOscDw.datarevision = this.currentStep; this.layoutOscDw.shapes = shapesDw;
+                            Plotly.react('waveformPlotDw', [traceDwRaw, traceDwFit], this.layoutOscDw);
+
+                            // ... (History Update Code Omitted for Brevity, keep as is) ...
+                            const key = data.parameter.toFixed(6);
+                            if (!this.historyMap[key]) {
+                                this.historyMap[key] = {
+                                    count: 0,
+                                    sum_atoms_up: 0, sum_atoms_dw: 0, sum_temp_up: 0, sum_temp_dw: 0, sum_sigma_up: 0, sum_sigma_dw: 0, sum_amp_up: 0, sum_amp_dw: 0, sum_arrival_up: 0, sum_arrival_dw: 0, sum_prob_up: 0, sum_prob_dw: 0,
+                                    sum_nf_atoms_up: 0, sum_nf_atoms_dw: 0, sum_nf_temp_up: 0, sum_nf_temp_dw: 0, sum_nf_sigma_up: 0, sum_nf_sigma_dw: 0, sum_nf_amp_up: 0, sum_nf_amp_dw: 0, sum_nf_arrival_up: 0, sum_nf_arrival_dw: 0, sum_nf_prob_up: 0, sum_nf_prob_dw: 0
+                                };
+                            }
+                            const item = this.historyMap[key];
+                            item.count += 1;
+                            ['atoms', 'temp', 'sigma', 'amp', 'arrival', 'prob'].forEach(metric => {
+                                const k = metric === 'arrival' ? 'arrival_time' : (metric === 'prob' ? 'transition_probability' : (metric === 'amp' ? 'amplitude' : (metric === 'atoms' ? 'atom_number' : metric === 'temp' ? 'temperature' : metric)));
+                                item[`sum_${metric}_up`] += (data[`${k}_up`] || 0);
+                                item[`sum_${metric}_dw`] += (data[`${k}_dw`] || 0);
+                                item[`sum_nf_${metric}_up`] += (data[`${k}_up_nofit`] || 0);
+                                item[`sum_nf_${metric}_dw`] += (data[`${k}_dw_nofit`] || 0);
+                            });
+
+                            this.renderMainPlot();
+                            this.plotRevision++;
+
+                            // [NEW] Log display with Delta T
+                            let paramLog = `P0=${data.parameter.toFixed(6)}`;
+                            if (data.all_parameters && data.all_parameters.length > 1) {
+                                paramLog = data.all_parameters.map((p, i) => `P${i}=${p.toFixed(6)}`).join(", ");
+                            }
+                            if (data.detected_delay !== undefined && data.detected_delay !== null) {
+                                paramLog += ` | Δt=${(data.detected_delay * 1000).toFixed(2)}ms`;
+                            }
+                            this.addLog(paramLog);
+
+                            if (this.isRunning) this.fetchStatus();
+                        } finally {
+                            this.isPlotting = false;
+                        }
+                    });
+                },
+                async fetchSystemMode() { try { const res = await axios.get('/system/mode'); this.isSimulation = res.data.simulation; } catch (e) { } },
+                async toggleMode() { try { await axios.post('/system/mode', { simulation: this.isSimulation }); this.resetHistory(); } catch (e) { this.isSimulation = !this.isSimulation; } },
+                async startScan() {
+                    if (this.isRunning) return;
+
+                    // 第一步：尝试重新上传最新的 .mot 文件
+                    // 这样即使文件名没变，只要内容变了，也会应用新内容
+                    const uploadSuccess = await this.uploadSequenceFile();
+                    if (!uploadSuccess) {
+                        this.addLog("Aborting start due to sequence upload failure.");
+                        return;
+                    }
+
+                    // 第二步：执行原来的启动逻辑
+                    this.resetHistory();
+                    this.currentStep = 0;
+                    this.progressPercent = 0;
+                    this.plotRevision = 0;
+                    try {
+                        const res = await axios.post('/experiment/start', this.config);
+                        if (res.data.status === 'success') {
+                            this.isRunning = true;
+                            this.statusMessage = "RUNNING";
+                        }
+                    } catch (error) {
+                        this.addLog("Start failed: " + (error.response?.data?.detail || error.message));
+                    }
+                },
+                async stopScan() { await axios.post('/experiment/stop'); this.isRunning = false; this.statusMessage = "STOPPED"; },
+                resetHistory() { this.historyMap = {}; this.initPlots(); }
+            }
+        }).mount('#app');
+    </script>
+</body>
+
+</html>
