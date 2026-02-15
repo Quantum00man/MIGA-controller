@@ -21,7 +21,7 @@ Built with **Python (FastAPI)** on the backend and **Vue.js 3 + Plotly.js** on t
 To securely clone this repository using SSH, open your terminal and run:
 
 ```bash
-git clone git@github.com:YourUsername/MIGA-controller.git
+git clone https://github.com/Quantum00man/MIGA-controller.git
 cd MIGA-controller
 ```
 *(Remember to replace `YourUsername` with your actual GitHub username).*
