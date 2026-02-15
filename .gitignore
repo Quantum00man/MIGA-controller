@@ -1,0 +1,11 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# User config
+*.json
+
+# Experiment data
+Data_log/
