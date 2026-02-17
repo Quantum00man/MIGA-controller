@@ -78,31 +78,6 @@
                                 type="number" class="form-control fw-bold" v-model.number="s.gain_up" step="1"></div>
                         <div class="col-md-6"><label class="form-label text-primary">Gain DOWN (Ch2)</label><input
                                 type="number" class="form-control fw-bold" v-model.number="s.gain_dw" step="1"></div>
-                        <div class="col-12 mt-3">
-                            <h6 class="text-muted fw-bold text-uppercase mb-2">Signal Validation Filters</h6>
-                        </div>
-                        
-                        <div class="col-md-6">
-                            <label class="form-label text-danger fw-bold small">Max Limit (e.g. 0.015V)</label>
-                            <div class="input-group input-group-sm">
-                                <span class="input-group-text"><i class="bi bi-arrow-bar-up"></i></span>
-                                <input type="number" class="form-control" v-model.number="s.voltage_limit" step="0.001" placeholder="0.015">
-                            </div>
-                            <div class="form-text" style="font-size: 0.7rem;">Discard if Raw > Limit (Saturation/Error).</div>
-                        </div>
-                        
-                        <div class="col-md-6">
-                            <label class="form-label text-primary fw-bold small">Min Threshold (e.g. 0.0001V)</label>
-                            <div class="input-group input-group-sm">
-                                <span class="input-group-text"><i class="bi bi-arrow-bar-down"></i></span>
-                                <input type="number" class="form-control" v-model.number="s.max_low" step="0.0001" placeholder="0.0001">
-                            </div>
-                            <div class="form-text" style="font-size: 0.7rem;">Discard if Raw < Threshold (Noise/Empty).</div>
-                            </div>
-                        
-                            <div class="col-12">
-                                <hr class="my-3 text-muted opacity-25">
-                            </div>
 
                         <div class="col-12"><hr class="my-1 text-muted opacity-25"></div>
                         

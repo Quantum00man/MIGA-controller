@@ -120,8 +120,9 @@ class RedPitayaDriver:
             base_url = f"http://{self.real_ip}:{config.RP_PORT_REAL}"
 
         target_url = f"{base_url}/{channel_name}.dat"
+        time.sleep(0.05)
         trigger_time = time.time() 
-
+	
         try:
             # ... (Rest of the code remains exactly the same) ...
             response = requests.get(target_url, timeout=self.timeout)

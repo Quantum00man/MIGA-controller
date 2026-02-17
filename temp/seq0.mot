@@ -95,7 +95,7 @@ INNER
 +10ms DDS4 trigger 					(12) #Change the state from here 18 28 32 36 10 5
 +1us DDS1 trigger					(6)
 
-+2us Exp_trig = ON      	   			(60)
+#+2us Exp_trig = ON      	   			(60)
 
 # ********** frequency ramp ***************************************
 
@@ -196,7 +196,7 @@ INNER
 ######################################
 #   Raman_down_velocity_selection    #<PARAMETER0>
 ######################################
-+18us DDS1 [87]					(2) #Set raman delt -771.7 mF0 129; 93 120 69 118 146-hk 145 144 [116 -hk fine] [20-140] [peak 85] [79 +hk] 82
++18us DDS1 [86]					(2) #Set raman delt -771.7 mF0 129; 93 120 69 118 146-hk 145 144 [116 -hk fine] [20-140] [peak 85] [79 +hk] 82 87
 +31.7ms TTL_AOM_Raman1 = ON				(49)#42.4 33.4 31.7
 
 +2us Raman_Dw_Shutter=ON				(40) #turn on shutter
@@ -249,17 +249,19 @@ INNER
 ######################## Bragg thermalization #########################
 +1.8us Repump_push_Shutter = OFF				(43)
 +5520us TTL_AOM_Raman1 = OFF				(49)#5000 total14333 total5720
-+2us AOM_Raman1 =0.365					(23) #repump. power set 30 0.293  45mw; 0.2435 15mw 0.560
-+2us AOM_Raman2 =0.950					(24) #thermalization       406 0.383 25mw; 0.3165 8.3mw
++2us AOM_Raman1 =0.345					(23) #repump. power set 30 0.293  45mw; 0.2435 15mw 0.560 0.365
++2us AOM_Raman2 =0.590					(24) #thermalization       406 0.383 25mw; 0.3165 8.3mw 950
 
 
 
 ######################################
 #   Bragg pulse 25microseconds  35 127microseconds     25 91microseconds         <PARAMETER0>
 ######################################
-+310000us Gaussian_pulse = 7				(32) # thermalization 310000
-+8000us Gaussian_pulse = ON		(63) #313034 315757 249207  +hk 256103 322117 319056 320000 320000 238160 315000
-+<PARAMETER0>us Gaussian_pulse = OFF		(63) #50 37
++300000us Gaussian_pulse = 7				(32) # thermalization 310000
++1us daq DAC = 7					(37)
+#+2us Exp_trig = ON      	   			(60)
++500us Gaussian_pulse = ON		(63) #313034 315757 249207  +hk 256103 322117 319056 320000 320000 238160 315000
++100us Gaussian_pulse = OFF		(63) #50 37 35 44
 ###bragg###
 
 ###bragg###
@@ -269,13 +271,13 @@ INNER
 ######################################<PARAMETER0>
 #   Raman_UP_state_labelling_spec    #
 ######################################
-+<PARAMETER1>us DDS1 [337]				(2) #--wdw 798.2 30 --wdwDw 805 15Fine:[383--483]state:[315 +hk][426 -hk,464 +hk] 328963.4 410803.4 333963.4 331076 331089
++300000us DDS1 [340]				(2) #--wdw 798.2 30 --wdwDw 805 15Fine:[383--483]state:[315 +hk][426 -hk,464 +hk] 328963.4 410803.4 333963.4 331076 331089 331075
 +1100us TTL_AOM_Raman1 = ON				(49)#42.4 6670 total 7020
 +2us Raman_Up_Shutter=ON				(41)
 +2us AOM_Det= ON					(52)
 +2us Det_shutter = ON					(45)
 +12000us TTL_AOM_Raman1 = OFF				(49)#RAMAN PULSE MOMENT 10000#10333 9504 4997 14997 15000 15234 
-+45us TTL_AOM_Raman1 = ON				(49) #Raman up pulse time 62 59 50 36 48 42 200 50 59  56 68 55
++100us TTL_AOM_Raman1 = ON				(49) #Raman up pulse time 62 59 50 36 48 42 200 50 59  56 68 55 45
 ######################## Bragg thermalization #########################
 +1us Gaussian_pulse = ON				(63)
 +0.2us Gaussian_pulse = 7				(32) # thermalization
@@ -299,7 +301,7 @@ INNER
 +2us TTL_Repump_det = ON				(44)
 
 
-+6245us AOM_Det= OFF					(52) #11 Detection on 2000 2050 2010 TOTAL 2047 4000 3786 3778 3787 *3790 3500 3350 3000 2988 6235
++6206us AOM_Det= OFF					(52) #11 Detection on 2000 2050 2010 TOTAL 2047 4000 3786 3778 3787 *3790 3500 3350 3000 2988 6235 6245
 +2us TTL_AOM_Raman1 = OFF				(49) # repumper on
 +2ms redpitaya = ON					(68)
 +1us daq DAC = 7					(37)
@@ -317,6 +319,7 @@ INNER
 #       	close		#
 ################################
 +2us AOM_Raman1 =0.950					(23)
++2us AOM_Raman2 =0.950					(24)
 #+1us redpitaya = OFF					(68)
 +2us TTL_bias_bar = OFF				(66)
 +3us Exp_trig= OFF 					(60)

@@ -92,10 +92,8 @@ async def update_analysis_settings(settings: AnalysisSettings):
 async def get_archive_tree(): return data_loader.get_archive_tree()
 
 @router.get("/archive/load/{year}/{month}/{day}/{run_id}")
-async def load_archived_run(year: str, month: str, day: str, run_id: str, full: bool = False):
-    try: 
-        # 
-        return data_loader.load_run(year, month, day, run_id, full_data=full)
+async def load_archived_run(year: str, month: str, day: str, run_id: str):
+    try: return data_loader.load_run(year, month, day, run_id)
     except FileNotFoundError: raise HTTPException(404, "Run not found")
     except Exception as e: raise HTTPException(500, str(e))
 

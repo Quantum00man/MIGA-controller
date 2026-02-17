@@ -240,21 +240,6 @@
                             <div class="col-4"><label class="form-label-small">V_LAUNCH</label><input type="number"
                                     class="form-control form-control-sm" v-model.number="analysis.launch_velocity"
                                     step="0.01"></div>
-                            <div class="row g-2 mb-3 border-top pt-2 mt-2">
-                                <div class="col-12"><label class="form-label-small text-muted fw-bold">SIGNAL FILTERS</label></div>
-                            
-                                <div class="col-6">
-                                    <label class="form-label-small text-danger">Max Limit (V)</label>
-                                    <input type="number" class="form-control form-control-sm" v-model.number="analysis.voltage_limit" step="0.001"
-                                        placeholder="0.02">
-                                </div>
-                            
-                                <div class="col-6">
-                                    <label class="form-label-small text-primary">Min Thresh (V)</label>
-                                    <input type="number" class="form-control form-control-sm" v-model.number="analysis.max_low" step="0.0001"
-                                        placeholder="0.0001">
-                                </div>
-                            </div>
                         </div>
                         <div class="d-grid gap-2">
                             <button class="btn btn-warning btn-sm fw-bold text-dark shadow-sm" @click="recalculate"><i
@@ -361,7 +346,7 @@
                     isLoading: false, isLoadingWaveforms: false, isSaving: false,
                     loadedRunId: '', errorMsg: '', dataCount: 0, selectedPointParam: '', selectedCount: 0,
                     loadedPoints: [], currentCalculatedPoints: [], originalSettings: {},
-                    analysis: { alpha: 0.0151, beta: 0.0188, R: 1.1, K: 7000, gain_up: -35, gain_dw: -35, z_up: 0.275, z_dw: 0.255, launch_velocity: 4.05, chan_launch: '60', chan_trigger: '68' , max_low: 0.0001, voltage_limit: 0.015 },
+                    analysis: { alpha: 0.0151, beta: 0.0188, R: 1.1, K: 7000, gain_up: -35, gain_dw: -35, z_up: 0.275, z_dw: 0.255, launch_velocity: 4.05, chan_launch: '60', chan_trigger: '68' },
                     showRawData: true, maximizedView: null, currentTab: 'atoms', plotRevision: 0,
                     tabs: [{ id: 'atoms', label: 'Atom Number' }, { id: 'amp', label: 'Max Voltage' }, { id: 'sigma', label: 'Width (ms)' }, { id: 'temp', label: 'Temperature' }, { id: 'arrival', label: 'Arrival Time' }, { id: 'prob', label: 'Transition Prob.' }],
                     historyMap: {}, layoutResUp: {}, layoutResDw: {}, layoutResTot: {}, layoutOscUp: {}, layoutOscDw: {}
@@ -440,28 +425,21 @@
                     }
                 },
 
-                // static/archive.html -> methods:
-
                 recalculate() {
                     const newHistoryMap = {}; const newCalculatedPoints = [];
                     const S = this.analysis; const origS = this.originalSettings;
-
+                    
+                    // [修复1] 防止增益为 0 导致除以零 (Infinity)
                     const oldGUp = (origS.gain_up === 0 || origS.gain_up == null) ? 1.0 : origS.gain_up;
                     const oldGDw = (origS.gain_dw === 0 || origS.gain_dw == null) ? 1.0 : origS.gain_dw;
-                    const newGUp = (S.gain_up === 0 || S.gain_up == null) ? 1.0 : S.gain_up;
+                    const newGUp = (S.gain_up === 0 || S.gain_up == null) ? 1.0 : S.gain_up; 
                     const newGDw = (S.gain_dw === 0 || S.gain_dw == null) ? 1.0 : S.gain_dw;
-
-                    // [获取设置的阈值]
-                    // 1. 上限 (Max): 默认 0.02V (包含您的 0.015V)
-                    const vLimit = (S.voltage_limit !== undefined && S.voltage_limit !== null) ? S.voltage_limit : 0.02;
-
-                    // 2. 下限 (Min): 默认 0.0001V
-                    const minLimit = (S.max_low !== undefined) ? S.max_low : 0.0001;
-
+                    
                     const G = 9.81, KB = 1.38e-23, M = 1.443e-25;
+
+                    // [修复2] 定义安全函数：如果是 NaN/Inf，强制返回 0
                     const safe = (v) => (Number.isNaN(v) || !Number.isFinite(v) || v == null) ? 0.0 : v;
 
-                    // ... (recoverAreas, calcTemp 保持不变) ...
                     const recoverAreas = (n1, n2, alpha, beta, R, K) => {
                         if (n1 == null || n2 == null) return { a1: 0, a2: 0 };
                         const C2 = n2 / K; const C1 = n1 / (R * K);
@@ -470,74 +448,55 @@
                         const a2 = (C1 + beta * C2) / det; const a1 = C2 + alpha * a2;
                         return { a1: safe(a1), a2: safe(a2) };
                     };
-                    const calcTemp = (sig, t_flight) => {
-                        if (!t_flight || t_flight < 1e-6) return 0;
-                        const res = (M / KB) * Math.pow((S.launch_velocity / t_flight - G), 2) * Math.pow(sig, 2) * 1e6;
+                    
+                    const calcTemp = (sig, t_flight) => { 
+                        if (!t_flight || t_flight < 1e-6) return 0; 
+                        const res = (M / KB) * Math.pow((S.launch_velocity / t_flight - G), 2) * Math.pow(sig, 2) * 1e6; 
                         return safe(res);
                     };
 
                     this.loadedPoints.forEach(pt => {
-                        // [关键步骤 1] 还原原始物理电压 (Raw Voltage)
-                        // 使用 NoFit 峰值来判断最为准确
-                        const rawAmpUpRaw = safe((pt.amplitude_up_nofit || 0) * oldGUp);
-                        const rawAmpDwRaw = safe((pt.amplitude_dw_nofit || 0) * oldGDw);
-
-                        // [关键步骤 2] 执行双重过滤 (Double Filter)
-
-                        // A. 剔除“过大”的数据 (Saturation Filter)
-                        // 如果电压超过 0.015V (vLimit)，说明是坏数据
-                        if (Math.abs(rawAmpUpRaw) > vLimit || Math.abs(rawAmpDwRaw) > vLimit) {
-                            return; // SKIP
-                        }
-
-                        // B. 剔除“过小”的数据 (Noise Filter)
-                        // 如果电压小于 0.0001V (minLimit)，说明是噪声
-                        if (Math.abs(rawAmpUpRaw) < minLimit && Math.abs(rawAmpDwRaw) < minLimit) {
-                            return; // SKIP
-                        }
-
-                        // --- 验证通过，继续计算 ---
-
+                        // [修复3] 在每一步计算外层包裹 safe()
                         const rawAmpUp = safe(pt.amplitude_up * oldGUp); const rawAmpDw = safe(pt.amplitude_dw * oldGDw);
                         const newAmpUp = safe(rawAmpUp / newGUp); const newAmpDw = safe(rawAmpDw / newGDw);
-
+                        
                         const sigUpS = safe(pt.sigma_up * 1e-3); const sigDwS = safe(pt.sigma_dw * 1e-3);
                         const areaUp = safe(newAmpUp * Math.abs(sigUpS) * Math.sqrt(2 * Math.PI));
                         const areaDw = safe(newAmpDw * Math.abs(sigDwS) * Math.sqrt(2 * Math.PI));
-
+                        
                         const nF2 = safe((areaUp - areaDw * S.alpha) * S.K);
                         const nF1 = safe((areaDw - areaUp * S.beta) * S.R * S.K);
-
-                        let probUp = 0, probDw = 0;
-                        if ((nF1 + nF2) !== 0) {
-                            probUp = safe((nF2 / (nF1 + nF2)) * 100);
-                            probDw = safe((nF1 / (nF1 + nF2)) * 100);
+                        
+                        let probUp = 0, probDw = 0; 
+                        if ((nF1 + nF2) !== 0) { 
+                            probUp = safe((nF2 / (nF1 + nF2)) * 100); 
+                            probDw = safe((nF1 / (nF1 + nF2)) * 100); 
                         }
-
-                        const tempUp = calcTemp(sigUpS, pt.arrival_time_up);
+                        
+                        const tempUp = calcTemp(sigUpS, pt.arrival_time_up); 
                         const tempDw = calcTemp(sigDwS, pt.arrival_time_dw);
 
                         // --- No Fit (Raw) calculations ---
-                        const rawAmpUpNF = safe((pt.amplitude_up_nofit || 0) * oldGUp);
+                        const rawAmpUpNF = safe((pt.amplitude_up_nofit || 0) * oldGUp); 
                         const rawAmpDwNF = safe((pt.amplitude_dw_nofit || 0) * oldGDw);
-                        const newAmpUpNF = safe(rawAmpUpNF / newGUp);
+                        const newAmpUpNF = safe(rawAmpUpNF / newGUp); 
                         const newAmpDwNF = safe(rawAmpDwNF / newGDw);
-
+                        
                         const oldAreasNF = recoverAreas(pt.atom_number_dw_nofit, pt.atom_number_up_nofit, origS.alpha, origS.beta, origS.R, origS.K);
-                        const rawAreaUpNF = safe(oldAreasNF.a1 * oldGUp);
+                        const rawAreaUpNF = safe(oldAreasNF.a1 * oldGUp); 
                         const rawAreaDwNF = safe(oldAreasNF.a2 * oldGDw);
-                        const newAreaUpNF = safe(rawAreaUpNF / newGUp);
+                        const newAreaUpNF = safe(rawAreaUpNF / newGUp); 
                         const newAreaDwNF = safe(rawAreaDwNF / newGDw);
-
+                        
                         const nF2_nf = safe((newAreaUpNF - newAreaDwNF * S.alpha) * S.K);
                         const nF1_nf = safe((newAreaDwNF - newAreaUpNF * S.beta) * S.R * S.K);
-
-                        let probUpNF = 0, probDwNF = 0;
-                        if ((nF1_nf + nF2_nf) !== 0) {
-                            probUpNF = safe((nF2_nf / (nF1_nf + nF2_nf)) * 100);
-                            probDwNF = safe((nF1_nf / (nF1_nf + nF2_nf)) * 100);
+                        
+                        let probUpNF = 0, probDwNF = 0; 
+                        if ((nF1_nf + nF2_nf) !== 0) { 
+                            probUpNF = safe((nF2_nf / (nF1_nf + nF2_nf)) * 100); 
+                            probDwNF = safe((nF1_nf / (nF1_nf + nF2_nf)) * 100); 
                         }
-
+                        
                         const tempUpNF = calcTemp(safe(pt.sigma_up_nofit * 1e-3), pt.arrival_time_up_nofit);
                         const tempDwNF = calcTemp(safe(pt.sigma_dw_nofit * 1e-3), pt.arrival_time_dw_nofit);
 

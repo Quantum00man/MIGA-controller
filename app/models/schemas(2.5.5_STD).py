@@ -40,7 +40,6 @@ class AnalysisSettings(BaseModel):
     gain_up: float
     gain_dw: float
     max_low: float = 0.01
-    voltage_limit: float = 0.015
     # [NEW]
     decimation: int = 64
 
@@ -68,7 +67,7 @@ class SystemSettings(BaseModel):
     tmot_path: str
     cmot_path: str
     template_path: str
-    voltage_limit: float = 0.015
+    voltage_limit: Optional[float] = 0.015
 
 class ExperimentResponse(BaseModel):
     status: str
