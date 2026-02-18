@@ -75,6 +75,9 @@ class SystemSettings(BaseModel):
     cmot_path: str
     template_path: str
     voltage_limit: float = 0.015
+    intf_alpha: float = 0.35
+    intf_beta: float = 0.07636
+    intf_gamma: float = 0.25
 
 class ExperimentResponse(BaseModel):
     status: str
