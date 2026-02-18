@@ -670,6 +670,8 @@ class ExperimentManager:
                     S.get('intf_beta', 0.076), 
                     S.get('intf_gamma', 0.25)
                 )
+                # [DEBUG] 添加这行打印
+                print(f"[DEBUG] Raw Atoms: F2={n_f2}, F1={n_f1} | Intf Result: P1={i_p1}, P2={i_p2}")
                 
                 # NoFit Data
                 i_n1_nf, i_n2_nf, i_p1_nf, i_p2_nf = physics.calculate_interferometer_output(
