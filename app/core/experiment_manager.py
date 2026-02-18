@@ -57,7 +57,11 @@ class ExperimentManager:
             "link_total_time": config.LINK_TOTAL_TIME,
             "tmot_path": config.TMOT_BINARY_PATH_WIN if config.IS_WINDOWS else config.TMOT_BINARY_PATH_LINUX,
             "cmot_path": config.CMOT_BINARY_PATH_WIN if config.IS_WINDOWS else config.CMOT_BINARY_PATH_LINUX,
-            "template_path": config.SEQUENCE_TEMPLATE_PATH_WIN if config.IS_WINDOWS else config.SEQUENCE_TEMPLATE_PATH_LINUX
+            "template_path": config.SEQUENCE_TEMPLATE_PATH_WIN if config.IS_WINDOWS else config.SEQUENCE_TEMPLATE_PATH_LINUX,
+            "intf_alpha": 0.35,
+            "intf_beta": 0.07636,
+            "intf_gamma": 0.25
+            
         }
         
         settings_path = Path(config.SETTINGS_FILE_PATH)
@@ -655,6 +659,25 @@ class ExperimentManager:
 
                 prob_up, prob_dw = physics.calculate_probabilities(n_f2, n_f1)
                 prob_up_nf, prob_dw_nf = physics.calculate_probabilities(n_f2_nf, n_f1_nf)
+                # ============================================================
+                # [New] Calculate Interferometer Output (Using Dynamic Settings)
+                # ============================================================
+                
+                # Fit Data
+                i_n1, i_n2, i_p1, i_p2 = physics.calculate_interferometer_output(
+                    n_f1, n_f2, 
+                    S.get('intf_alpha', 0.35), 
+                    S.get('intf_beta', 0.076), 
+                    S.get('intf_gamma', 0.25)
+                )
+                
+                # NoFit Data
+                i_n1_nf, i_n2_nf, i_p1_nf, i_p2_nf = physics.calculate_interferometer_output(
+                    n_f1_nf, n_f2_nf, 
+                    S.get('intf_alpha', 0.35), 
+                    S.get('intf_beta', 0.076), 
+                    S.get('intf_gamma', 0.25)
+                )
 
                 volt_up_store = volt_up[::STORAGE_STEP]; volt_dw_store = volt_dw[::STORAGE_STEP]
                 fit_up_store = fit_curve_up[::STORAGE_STEP]; fit_dw_store = fit_curve_dw[::STORAGE_STEP]
@@ -677,7 +700,9 @@ class ExperimentManager:
                     sigma_up_nofit=sig_up_nf * 1000.0, sigma_dw_nofit=sig_dw_nf * 1000.0,
                     temperature_up_nofit=temp_up_nf, temperature_dw_nofit=temp_dw_nf,
                     arrival_time_up_nofit=t_flight_up_nf, arrival_time_dw_nofit=t_flight_dw_nf,
-                    transition_probability_up_nofit=prob_up_nf, transition_probability_dw_nofit=prob_dw_nf
+                    transition_probability_up_nofit=prob_up_nf, transition_probability_dw_nofit=prob_dw_nf,
+                    intf_n1=i_n1, intf_n2=i_n2, intf_p1=i_p1, intf_p2=i_p2,
+                    intf_n1_nofit=i_n1_nf, intf_n2_nofit=i_n2_nf, intf_p1_nofit=i_p1_nf, intf_p2_nofit=i_p2_nf
                 )
                 self.data_manager.save_point(result, idx + 1)
                 if self.on_data_ready:

@@ -91,8 +91,8 @@ class DataManager:
         # Expanded Header
         header = [
             "Step", "Timestamp", "Parameter_P0", "All_Parameters",
-            "Atom_UP", "Atom_DW", "Temp_UP", "Temp_DW", "Sigma_UP", "Sigma_DW", "Center_UP", "Center_DW", "Amp_UP", "Amp_DW", "Prob_UP_F2", "Prob_DW_F1",
-            "NF_Atom_UP", "NF_Atom_DW", "NF_Temp_UP", "NF_Temp_DW", "NF_Sigma_UP", "NF_Sigma_DW", "NF_Center_UP", "NF_Center_DW", "NF_Amp_UP", "NF_Amp_DW", "NF_Prob_UP", "NF_Prob_DW"
+            "Atom_UP", "Atom_DW", "Temp_UP", "Temp_DW", "Sigma_UP", "Sigma_DW", "Center_UP", "Center_DW", "Amp_UP", "Amp_DW", "Prob_UP_F2", "Prob_DW_F1","Intf_N1", "Intf_N2", "Intf_P1", "Intf_P2",
+            "NF_Atom_UP", "NF_Atom_DW", "NF_Temp_UP", "NF_Temp_DW", "NF_Sigma_UP", "NF_Sigma_DW", "NF_Center_UP", "NF_Center_DW", "NF_Amp_UP", "NF_Amp_DW", "NF_Prob_UP", "NF_Prob_DW","NF_Intf_N1", "NF_Intf_N2", "NF_Intf_P1", "NF_Intf_P2"
         ]
         self.csv_writer.writerow(header)
         self.csv_handle.flush()
@@ -126,6 +126,8 @@ class DataManager:
             f(result.temperature_up), f(result.temperature_dw),
             f(result.sigma_up,6), f(result.sigma_dw,6), f(result.arrival_time_up,6), f(result.arrival_time_dw,6),
             f(result.amplitude_up), f(result.amplitude_dw), f(result.transition_probability_up,2), f(result.transition_probability_dw,2),
+            # [New] 
+            f(result.intf_n1), f(result.intf_n2), f(result.intf_p1, 2), f(result.intf_p2, 2),
             # No Fit
             f(result.atom_number_up_nofit), f(result.atom_number_dw_nofit),
             f(result.temperature_up_nofit), f(result.temperature_dw_nofit),
@@ -133,6 +135,7 @@ class DataManager:
             f(result.arrival_time_up_nofit,6), f(result.arrival_time_dw_nofit,6),
             f(result.amplitude_up_nofit), f(result.amplitude_dw_nofit),
             f(result.transition_probability_up_nofit,2), f(result.transition_probability_dw_nofit,2),
+            f(result.intf_n1_nofit), f(result.intf_n2_nofit), f(result.intf_p1_nofit, 2), f(result.intf_p2_nofit, 2),
         ]
         self.csv_writer.writerow(row)
         self.csv_handle.flush()
@@ -162,7 +165,9 @@ class DataManager:
             header = [
                 "Step", "Timestamp", "Parameter_P0", "All_Parameters",
                 "Atom_UP", "Atom_DW", "Temp_UP", "Temp_DW", "Sigma_UP", "Sigma_DW", "Center_UP", "Center_DW", "Amp_UP", "Amp_DW", "Prob_UP_F2", "Prob_DW_F1",
-                "NF_Atom_UP", "NF_Atom_DW", "NF_Temp_UP", "NF_Temp_DW", "NF_Sigma_UP", "NF_Sigma_DW", "NF_Center_UP", "NF_Center_DW", "NF_Amp_UP", "NF_Amp_DW", "NF_Prob_UP", "NF_Prob_DW"
+                "Intf_N1", "Intf_N2", "Intf_P1", "Intf_P2", 
+                "NF_Atom_UP", "NF_Atom_DW", "NF_Temp_UP", "NF_Temp_DW", "NF_Sigma_UP", "NF_Sigma_DW", "NF_Center_UP", "NF_Center_DW", "NF_Amp_UP", "NF_Amp_DW", "NF_Prob_UP", "NF_Prob_DW",
+                "NF_Intf_N1", "NF_Intf_N2", "NF_Intf_P1", "NF_Intf_P2"
             ]
             writer.writerow(header)
             
@@ -175,9 +180,11 @@ class DataManager:
                     f('atom_number_up'), f('atom_number_dw'), f('temperature_up'), f('temperature_dw'),
                     f('sigma_up',6), f('sigma_dw',6), f('arrival_time_up',6), f('arrival_time_dw',6),
                     f('amplitude_up'), f('amplitude_dw'), f('transition_probability_up',2), f('transition_probability_dw',2),
+                    f('intf_n1'), f('intf_n2'), f('intf_p1', 2), f('intf_p2', 2),
                     f('atom_number_up_nofit'), f('atom_number_dw_nofit'), f('temperature_up_nofit'), f('temperature_dw_nofit'),
                     f('sigma_up_nofit',6), f('sigma_dw_nofit',6), f('arrival_time_up_nofit',6), f('arrival_time_dw_nofit',6),
                     f('amplitude_up_nofit'), f('amplitude_dw_nofit'), f('transition_probability_up_nofit',2), f('transition_probability_dw_nofit',2),
+                    f('intf_n1_nofit'), f('intf_n2_nofit'), f('intf_p1_nofit', 2), f('intf_p2_nofit', 2),
                 ]
                 writer.writerow(row)
         

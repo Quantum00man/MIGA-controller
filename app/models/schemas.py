@@ -26,6 +26,9 @@ class ScanConfig(BaseModel):
     fit_width_up: float = Field(0)
     fit_center_dw: float = Field(0)
     fit_width_dw: float = Field(0)
+    intf_alpha: float = 0.35
+    intf_beta: float = 0.07636
+    intf_gamma: float = 0.25
 
 class AnalysisSettings(BaseModel):
     alpha: float
@@ -43,6 +46,9 @@ class AnalysisSettings(BaseModel):
     voltage_limit: float = 0.015
     # [NEW]
     decimation: int = 64
+    intf_alpha: float = 0.35
+    intf_beta: float = 0.07636
+    intf_gamma: float = 0.25
 
 class SystemSettings(BaseModel):
     """Comprehensive System Settings."""

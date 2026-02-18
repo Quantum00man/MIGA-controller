@@ -58,6 +58,52 @@ def calculate_probabilities(n_f2: Optional[float], n_f1: Optional[float]) -> Tup
     
     return prob_f2, prob_f1
 
+
+def calculate_interferometer_output(
+    n_f1: Optional[float],  # Down atoms (Corrected)
+    n_f2: Optional[float],  # Up atoms (Corrected)
+    alpha: float,           # intf_alpha
+    beta: float,            # intf_beta
+    gamma: float            # intf_gamma
+) -> Tuple[Optional[float], Optional[float], Optional[float], Optional[float]]:
+    """
+    Calculates Interferometer N1, N2, P1, P2 based on user's Excel formula.
+    Inputs n_f1, n_f2 are already corrected for imaging crosstalk.
+    """
+    if n_f1 is None or n_f2 is None:
+        return None, None, None, None
+    
+    
+    if abs(beta) < 1e-9: 
+        return None, None, None, None
+
+    # Excel Logic:
+    # N1 = (n_f1 - (1 + gamma - beta) * n_f2 / beta) / 
+    #      ((1 + gamma - alpha) - alpha * (1 + gamma - beta) / beta)
+    
+    term_common = (1 + gamma - beta) / beta
+    numerator = n_f1 - term_common * n_f2
+    denominator = (1 + gamma - alpha) - alpha * term_common
+    
+    if abs(denominator) < 1e-9:
+        return None, None, None, None
+        
+    N1 = numerator / denominator
+    
+    # N2 = (n_f2 - alpha * N1) / beta
+    N2 = (n_f2 - alpha * N1) / beta
+    
+    # Calculate Probabilities
+    total = N1 + N2
+    if abs(total) < 1e-9:
+        P1 = 0.0
+        P2 = 0.0
+    else:
+        P1 = 100.0 * N1 / total
+        P2 = 100.0 * N2 / total
+        
+    return N1, N2, P1, P2
+
 def calculate_temperature(sigma_t: float, t_flight: float, v_launch: float, is_sigma_in_ms: bool = False) -> Optional[float]:
     if t_flight <= 1e-6: return None
     sigma_seconds = sigma_t * 1e-3 if is_sigma_in_ms else sigma_t

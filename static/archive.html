@@ -240,6 +240,23 @@
                             <div class="col-4"><label class="form-label-small">V_LAUNCH</label><input type="number"
                                     class="form-control form-control-sm" v-model.number="analysis.launch_velocity"
                                     step="0.01"></div>
+                            
+                                    <div class="row g-2 mb-3 border-top pt-2 mt-2">
+                                <div class="col-12"><label class="form-label-small text-primary fw-bold">INTERFEROMETER</label></div>
+                                <div class="col-4">
+                                    <label class="form-label-small">I_Alpha</label>
+                                    <input type="number" class="form-control form-control-sm" v-model.number="analysis.intf_alpha" step="0.001">
+                                </div>
+                                <div class="col-4">
+                                    <label class="form-label-small">I_Beta</label>
+                                    <input type="number" class="form-control form-control-sm" v-model.number="analysis.intf_beta" step="0.001">
+                                </div>
+                                <div class="col-4">
+                                    <label class="form-label-small">I_Gamma</label>
+                                    <input type="number" class="form-control form-control-sm" v-model.number="analysis.intf_gamma" step="0.001">
+                                </div>
+                            </div>
+
                             <div class="row g-2 mb-3 border-top pt-2 mt-2">
                                 <div class="col-12"><label class="form-label-small text-muted fw-bold">SIGNAL FILTERS</label></div>
                             
@@ -361,9 +378,9 @@
                     isLoading: false, isLoadingWaveforms: false, isSaving: false,
                     loadedRunId: '', errorMsg: '', dataCount: 0, selectedPointParam: '', selectedCount: 0,
                     loadedPoints: [], currentCalculatedPoints: [], originalSettings: {},
-                    analysis: { alpha: 0.0151, beta: 0.0188, R: 1.1, K: 7000, gain_up: -35, gain_dw: -35, z_up: 0.275, z_dw: 0.255, launch_velocity: 4.05, chan_launch: '60', chan_trigger: '68' , max_low: 0.0001, voltage_limit: 0.015 },
+                    analysis: { alpha: 0.0151, beta: 0.0188, R: 1.1, K: 7000, gain_up: -1, gain_dw: -1, z_up: 0.275, z_dw: 0.255, launch_velocity: 4.25, chan_launch: '60', chan_trigger: '68' , max_low: 0.0001, voltage_limit: 0.015, intf_alpha: 0.35, intf_beta: 0.07636, intf_gamma: 0.25 },
                     showRawData: true, maximizedView: null, currentTab: 'atoms', plotRevision: 0,
-                    tabs: [{ id: 'atoms', label: 'Atom Number' }, { id: 'amp', label: 'Max Voltage' }, { id: 'sigma', label: 'Width (ms)' }, { id: 'temp', label: 'Temperature' }, { id: 'arrival', label: 'Arrival Time' }, { id: 'prob', label: 'Transition Prob.' }],
+                    tabs: [{ id: 'atoms', label: 'Atom Number' }, { id: 'amp', label: 'Max Voltage' }, { id: 'sigma', label: 'Width (ms)' }, { id: 'temp', label: 'Temperature' }, { id: 'arrival', label: 'Arrival Time' }, { id: 'prob', label: 'Transition Prob.' }, { id: 'intf', label: 'Interferometer' }],
                     historyMap: {}, layoutResUp: {}, layoutResDw: {}, layoutResTot: {}, layoutOscUp: {}, layoutOscDw: {}
                 }
             },
@@ -514,8 +531,48 @@
                             probDw = safe((nF1 / (nF1 + nF2)) * 100);
                         }
 
+                        // =========================================================
+                        // [New] Interferometer Calculation Logic (JS Implementation)
+                        // =========================================================
+                        const calcIntf = (n_f1_in, n_f2_in) => {
+                            // n_f1_in is DOWN, n_f2_in is UP
+                            if (n_f1_in == null || n_f2_in == null) return { n1: 0, n2: 0, p1: 0, p2: 0 };
+
+                            const ia = (S.intf_alpha !== undefined) ? S.intf_alpha : 0.35;
+                            const ib = (S.intf_beta !== undefined) ? S.intf_beta : 0.07636;
+                            const ig = (S.intf_gamma !== undefined) ? S.intf_gamma : 0.25;
+
+                            if (Math.abs(ib) < 1e-9) return { n1: 0, n2: 0, p1: 0, p2: 0 };
+
+                            // Excel Formula Translation:
+                            // Term = (1 + Gamma - Beta) / Beta
+                            const term = (1 + ig - ib) / ib;
+
+                            // Numerator = n_f1 - Term * n_f2
+                            const num = n_f1_in - term * n_f2_in;
+
+                            // Denominator = (1 + Gamma - Alpha) - Alpha * Term
+                            const den = (1 + ig - ia) - ia * term;
+
+                            if (Math.abs(den) < 1e-9) return { n1: 0, n2: 0, p1: 0, p2: 0 };
+
+                            const N1 = num / den;
+                            const N2 = (n_f2_in - ia * N1) / ib;
+
+                            let P1 = 0, P2 = 0;
+                            const tot = N1 + N2;
+                            if (Math.abs(tot) > 1e-9) {
+                                P1 = 100.0 * N1 / tot;
+                                P2 = 100.0 * N2 / tot;
+                            }
+                            return { n1: safe(N1), n2: safe(N2), p1: safe(P1), p2: safe(P2) };
+                        };
+                        // Fit Data Calculation
+                        const resFit = calcIntf(nF1, nF2);
+
                         const tempUp = calcTemp(sigUpS, pt.arrival_time_up);
                         const tempDw = calcTemp(sigDwS, pt.arrival_time_dw);
+
 
                         // --- No Fit (Raw) calculations ---
                         const rawAmpUpNF = safe((pt.amplitude_up_nofit || 0) * oldGUp);
@@ -531,6 +588,9 @@
 
                         const nF2_nf = safe((newAreaUpNF - newAreaDwNF * S.alpha) * S.K);
                         const nF1_nf = safe((newAreaDwNF - newAreaUpNF * S.beta) * S.R * S.K);
+                        // NoFit Data Calculation
+                        // ... (计算 nF2_nf, nF1_nf 之后) ...
+                        const resNF = calcIntf(nF1_nf, nF2_nf);
 
                         let probUpNF = 0, probDwNF = 0;
                         if ((nF1_nf + nF2_nf) !== 0) {
@@ -550,7 +610,9 @@
                             atom_number_up_nofit: nF2_nf, atom_number_dw_nofit: nF1_nf,
                             amplitude_up_nofit: newAmpUpNF, amplitude_dw_nofit: newAmpDwNF,
                             temperature_up_nofit: tempUpNF, temperature_dw_nofit: tempDwNF,
-                            transition_probability_up_nofit: probUpNF, transition_probability_dw_nofit: probDwNF
+                            transition_probability_up_nofit: probUpNF, transition_probability_dw_nofit: probDwNF,
+                            intf_n1: resFit.n1, intf_n2: resFit.n2, intf_p1: resFit.p1, intf_p2: resFit.p2,
+                            intf_n1_nofit: resNF.n1, intf_n2_nofit: resNF.n2, intf_p1_nofit: resNF.p1, intf_p2_nofit: resNF.p2
                         };
                         newCalculatedPoints.push(newPt);
                         this.ingestPoint(newPt, newHistoryMap);
@@ -564,7 +626,7 @@
                 ingestPoint(data, targetMap) {
                     const key = data.parameter.toFixed(6);
                     if (!targetMap[key]) {
-                        targetMap[key] = { count: 0, stepIndices: [], vals_atoms_up: [], vals_atoms_dw: [], vals_temp_up: [], vals_temp_dw: [], vals_sigma_up: [], vals_sigma_dw: [], vals_amp_up: [], vals_amp_dw: [], vals_arrival_up: [], vals_arrival_dw: [], vals_prob_up: [], vals_prob_dw: [], vals_nf_atoms_up: [], vals_nf_atoms_dw: [], vals_nf_temp_up: [], vals_nf_temp_dw: [], vals_nf_sigma_up: [], vals_nf_sigma_dw: [], vals_nf_amp_up: [], vals_nf_amp_dw: [], vals_nf_arrival_up: [], vals_nf_arrival_dw: [], vals_nf_prob_up: [], vals_nf_prob_dw: [] };
+                        targetMap[key] = { count: 0, stepIndices: [], vals_atoms_up: [], vals_atoms_dw: [], vals_temp_up: [], vals_temp_dw: [], vals_sigma_up: [], vals_sigma_dw: [], vals_amp_up: [], vals_amp_dw: [], vals_arrival_up: [], vals_arrival_dw: [], vals_prob_up: [], vals_prob_dw: [], vals_intf_p_up: [], vals_intf_p_dw: [], vals_nf_atoms_up: [], vals_nf_atoms_dw: [], vals_nf_temp_up: [], vals_nf_temp_dw: [], vals_nf_sigma_up: [], vals_nf_sigma_dw: [], vals_nf_amp_up: [], vals_nf_amp_dw: [], vals_nf_arrival_up: [], vals_nf_arrival_dw: [], vals_nf_prob_up: [], vals_nf_prob_dw: [] , vals_nf_intf_p_up: [], vals_nf_intf_p_dw: [] };
                     }
                     const item = targetMap[key]; item.count += 1; item.stepIndices.push(data.step);
                     ['atoms', 'temp', 'sigma', 'amp', 'arrival', 'prob'].forEach(m => {
@@ -573,6 +635,10 @@
                         if (data[`${k}_dw`] != null) item[`vals_${m}_dw`].push(data[`${k}_dw`]);
                         if (data[`${k}_up_nofit`] != null) item[`vals_nf_${m}_up`].push(data[`${k}_up_nofit`]);
                         if (data[`${k}_dw_nofit`] != null) item[`vals_nf_${m}_dw`].push(data[`${k}_dw_nofit`]);
+                        if (data.intf_p1 != null) item.vals_intf_p_up.push(data.intf_p1);
+                        if (data.intf_p2 != null) item.vals_intf_p_dw.push(data.intf_p2);
+                        if (data.intf_p1_nofit != null) item.vals_nf_intf_p_up.push(data.intf_p1_nofit);
+                        if (data.intf_p2_nofit != null) item.vals_nf_intf_p_dw.push(data.intf_p2_nofit);
                     });
                 },
 
@@ -702,21 +768,50 @@
                 async exportCSV() {
                     if (Object.keys(this.historyMap).length === 0) return;
                     const stats = this.getStatsArray();
+
+                    // 1. Define standard physical metrics
                     const metrics = ['atoms', 'amp', 'sigma', 'temp', 'arrival', 'prob'];
+
+                    // 2. Build CSV Header
                     let header = "Parameter";
-                    metrics.forEach(m => { header += `,${m}_UP_Fit,${m}_UP_Fit_Std,${m}_DW_Fit,${m}_DW_Fit_Std,${m}_UP_Raw,${m}_UP_Raw_Std,${m}_DW_Raw,${m}_DW_Raw_Std`; });
+                    // Add standard headers
+                    metrics.forEach(m => {
+                        header += `,${m}_UP_Fit,${m}_UP_Fit_Std,${m}_DW_Fit,${m}_DW_Fit_Std,${m}_UP_Raw,${m}_UP_Raw_Std,${m}_DW_Raw,${m}_DW_Raw_Std`;
+                    });
+
+                    // [NEW] Add Interferometer headers (P1, P2)
+                    header += ",Intf_P1_Fit,Intf_P1_Fit_Std,Intf_P2_Fit,Intf_P2_Fit_Std,Intf_P1_Raw,Intf_P1_Raw_Std,Intf_P2_Raw,Intf_P2_Raw_Std";
                     header += "\n";
+
                     let csvContent = header;
+
+                    // 3. Build data rows
                     stats.forEach(row => {
                         let line = `${row.x}`;
+
+                        // Fill standard data
                         metrics.forEach(m => {
                             line += `,${(row[`${m}_up`] || 0).toFixed(4)},${(row[`${m}_up_std`] || 0).toFixed(4)}`;
                             line += `,${(row[`${m}_dw`] || 0).toFixed(4)},${(row[`${m}_dw_std`] || 0).toFixed(4)}`;
                             line += `,${(row[`nf_${m}_up`] || 0).toFixed(4)},${(row[`nf_${m}_up_std`] || 0).toFixed(4)}`;
                             line += `,${(row[`nf_${m}_dw`] || 0).toFixed(4)},${(row[`nf_${m}_dw_std`] || 0).toFixed(4)}`;
                         });
+
+                        // [NEW] Fill Interferometer data
+                        // Note: In ingestPoint, we mapped P1 to _up and P2 to _dw
+
+                        // Fit Data (P1, P2)
+                        line += `,${(row[`intf_p_up`] || 0).toFixed(4)},${(row[`intf_p_up_std`] || 0).toFixed(4)}`; // P1 Fit
+                        line += `,${(row[`intf_p_dw`] || 0).toFixed(4)},${(row[`intf_p_dw_std`] || 0).toFixed(4)}`; // P2 Fit
+
+                        // Raw Data (P1, P2) - NoFit
+                        line += `,${(row[`nf_intf_p_up`] || 0).toFixed(4)},${(row[`nf_intf_p_up_std`] || 0).toFixed(4)}`; // P1 Raw
+                        line += `,${(row[`nf_intf_p_dw`] || 0).toFixed(4)},${(row[`nf_intf_p_dw_std`] || 0).toFixed(4)}`; // P2 Raw
+
                         csvContent += line + "\n";
                     });
+
+                    // 4. Trigger download
                     if (window.showSaveFilePicker) {
                         window.showSaveFilePicker({ suggestedName: `analysis_${this.selectedDay}_${this.selectedRun}.csv`, types: [{ description: 'CSV File', accept: { 'text/csv': ['.csv'] } }] }).then(async handle => {
                             const writable = await handle.createWritable(); await writable.write(csvContent); await writable.close();
@@ -732,15 +827,20 @@
                 async exportAllPlots() {
                     if (!this.loadedRunId || Object.keys(this.historyMap).length === 0) return;
                     const gd = document.createElement('div');
+
                     for (const tab of this.tabs) {
                         const dArray = this.getStatsArray(); const x = dArray.map(d => d.x);
                         let m = '', mnf = '', labelY = '', nameUp = 'UP', nameDw = 'DOWN';
+
                         if (tab.id === 'atoms') { m = 'atoms'; mnf = 'nf_atoms'; labelY = "Atom Number"; }
                         else if (tab.id === 'amp') { m = 'amp'; mnf = 'nf_amp'; labelY = "Max Voltage (V)"; }
                         else if (tab.id === 'sigma') { m = 'sigma'; mnf = 'nf_sigma'; labelY = "Width (ms)"; }
                         else if (tab.id === 'temp') { m = 'temp'; mnf = 'nf_temp'; labelY = "Temperature (uK)"; }
                         else if (tab.id === 'arrival') { m = 'arrival'; mnf = 'nf_arrival'; labelY = "Arrival Time (s)"; }
                         else if (tab.id === 'prob') { m = 'prob'; mnf = 'nf_prob'; labelY = "Transition Prob. (%)"; nameUp = "Prob F2"; nameDw = "Prob F1"; }
+                        else if (tab.id === 'intf') {
+                            m = 'intf_p'; mnf = 'nf_intf_p'; labelY = "Interferometer Prob. (%)"; nameUp = "P_N1"; nameDw = "P_N2";
+                        }
 
                         const yUp = dArray.map(d => d[`${m}_up`]); const yUpStd = dArray.map(d => d[`${m}_up_std`]);
                         const yDw = dArray.map(d => d[`${m}_dw`]); const yDwStd = dArray.map(d => d[`${m}_dw_std`]);
@@ -771,12 +871,24 @@
                             }
                         }
 
+                        // [修改] 定义后缀逻辑
+                        let suffixUp = ' (UP)';
+                        let suffixDw = ' (DW)';
+                        if (tab.id === 'intf') {
+                            suffixUp = ' (N1)';
+                            suffixDw = ' (N2)';
+                        }
+
                         const layout = {
                             title: `${tab.label} - Run ${this.loadedRunId}`, font: { family: 'Arial', size: 14 },
                             height: 800, width: 1000, grid: { rows: tab.id === 'atoms' ? 3 : 2, columns: 1, pattern: 'independent' },
-                            yaxis: { title: labelY + ' (UP)' }, xaxis: { visible: false },
-                            yaxis2: { title: labelY + ' (DW)' }, xaxis2: { visible: tab.id !== 'atoms', title: 'Parameter P0' }
+                            // [修改] 应用后缀变量
+                            yaxis: { title: labelY + suffixUp },
+                            xaxis: { visible: false },
+                            yaxis2: { title: labelY + suffixDw },
+                            xaxis2: { visible: tab.id !== 'atoms', title: 'Parameter P0' }
                         };
+
                         if (tab.id === 'atoms') {
                             layout.yaxis3 = { title: 'Total Atoms' };
                             layout.xaxis3 = { title: 'Parameter P0' };
@@ -811,6 +923,11 @@
                     const dArray = this.getStatsArray();
                     const x = dArray.map(d => d.x);
                     let m = '', mnf = '', labelY = "", nameUp = "UP", nameDw = "DOWN";
+
+                    // [修改 1] 定义后缀变量，默认为 (UP)/(DW)
+                    let suffixUp = ' (UP)';
+                    let suffixDw = ' (DW)';
+
                     switch (this.currentTab) {
                         case 'atoms': m = 'atoms'; mnf = 'nf_atoms'; labelY = "Atom Number"; break;
                         case 'amp': m = 'amp'; mnf = 'nf_amp'; labelY = "Max Voltage (V)"; break;
@@ -818,6 +935,15 @@
                         case 'temp': m = 'temp'; mnf = 'nf_temp'; labelY = "Temperature (uK)"; break;
                         case 'arrival': m = 'arrival'; mnf = 'nf_arrival'; labelY = "Arrival Time (s)"; break;
                         case 'prob': m = 'prob'; mnf = 'nf_prob'; labelY = "Transition Prob. (%)"; nameUp = "Prob F2"; nameDw = "Prob F1"; break;
+
+                        // [修改 2] 添加 Interferometer 逻辑
+                        case 'intf':
+                            m = 'intf_p'; mnf = 'nf_intf_p';
+                            labelY = "Interferometer P (%)";
+                            nameUp = "P_N1"; nameDw = "P_N2";
+                            // 修改后缀为 (N1)/(N2)
+                            suffixUp = ' (N1)'; suffixDw = ' (N2)';
+                            break;
                     }
 
                     const yUp = dArray.map(d => d[`${m}_up`]); const yUpStd = dArray.map(d => d[`${m}_up_std`]);
@@ -856,11 +982,15 @@
                         this.layoutResDw.xaxis.title = 'Parameter P0';
                     }
 
-                    this.layoutResUp.yaxis.title = labelY + ' (UP)'; this.layoutResUp.datarevision = this.plotRevision;
+                    // [修改 3] 应用后缀变量 (UP/DW 或 N1/N2)
+                    this.layoutResUp.yaxis.title = labelY + suffixUp;
+                    this.layoutResUp.datarevision = this.plotRevision;
                     Plotly.react('resultsPlotUp', tracesUp, this.layoutResUp);
-                    this.layoutResDw.yaxis.title = labelY + ' (DW)'; this.layoutResDw.datarevision = this.plotRevision;
+
+                    this.layoutResDw.yaxis.title = labelY + suffixDw;
+                    this.layoutResDw.datarevision = this.plotRevision;
                     Plotly.react('resultsPlotDw', tracesDw, this.layoutResDw);
-                }
+                },
             }
         }).mount('#app');
     </script>

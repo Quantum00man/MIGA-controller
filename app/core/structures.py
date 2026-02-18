@@ -59,3 +59,15 @@ class ScanResult:
     arrival_time_dw_nofit: Optional[float] = None
     transition_probability_up_nofit: Optional[float] = None
     transition_probability_dw_nofit: Optional[float] = None
+
+    # [New] Interferometer Output (Fit)
+    intf_n1: Optional[float] = None
+    intf_n2: Optional[float] = None
+    intf_p1: Optional[float] = None  # P_N1
+    intf_p2: Optional[float] = None  # P_N2
+
+    # [New] Interferometer Output (NoFit)
+    intf_n1_nofit: Optional[float] = None
+    intf_n2_nofit: Optional[float] = None
+    intf_p1_nofit: Optional[float] = None
+    intf_p2_nofit: Optional[float] = None

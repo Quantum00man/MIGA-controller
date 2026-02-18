@@ -486,7 +486,7 @@
                     showRawData: true, // Toggle State
                     maximizedView: null,
                     currentTab: 'atoms',
-                    tabs: [{ id: 'atoms', label: 'Atom Number' }, { id: 'amp', label: 'Max Voltage' }, { id: 'sigma', label: 'Width (ms)' }, { id: 'temp', label: 'Temperature' }, { id: 'arrival', label: 'Arrival Time' }, { id: 'prob', label: 'Transition Prob.' }],
+                    tabs: [{ id: 'atoms', label: 'Atom Number' }, { id: 'amp', label: 'Max Voltage' }, { id: 'sigma', label: 'Width (ms)' }, { id: 'temp', label: 'Temperature' }, { id: 'arrival', label: 'Arrival Time' }, { id: 'prob', label: 'Transition Prob.' }, { id: 'intf', label: 'Interferometer' }],
                     historyMap: {},
                     layoutResUp: {}, layoutResDw: {}, layoutOscUp: {}, layoutOscDw: {},
                     isPlotting: false
@@ -597,17 +597,19 @@
                             amp_up: avg(item.sum_amp_up), amp_dw: avg(item.sum_amp_dw),
                             arrival_up: avg(item.sum_arrival_up), arrival_dw: avg(item.sum_arrival_dw),
                             prob_up: avg(item.sum_prob_up), prob_dw: avg(item.sum_prob_dw),
+                            intf_p_up: avg(item.sum_intf_p_up), intf_p_dw: avg(item.sum_intf_p_dw),
                             nf_atoms_up: avg(item.sum_nf_atoms_up), nf_atoms_dw: avg(item.sum_nf_atoms_dw),
                             nf_temp_up: avg(item.sum_nf_temp_up), nf_temp_dw: avg(item.sum_nf_temp_dw),
                             nf_sigma_up: avg(item.sum_nf_sigma_up), nf_sigma_dw: avg(item.sum_nf_sigma_dw),
                             nf_amp_up: avg(item.sum_nf_amp_up), nf_amp_dw: avg(item.sum_nf_amp_dw),
                             nf_arrival_up: avg(item.sum_nf_arrival_up), nf_arrival_dw: avg(item.sum_nf_arrival_dw),
-                            nf_prob_up: avg(item.sum_nf_prob_up), nf_prob_dw: avg(item.sum_nf_prob_dw)
+                            nf_prob_up: avg(item.sum_nf_prob_up), nf_prob_dw: avg(item.sum_nf_prob_dw),
+                            nf_intf_p_up: avg(item.sum_nf_intf_p_up), nf_intf_p_dw: avg(item.sum_nf_intf_p_dw)
                         };
                     });
                     dataArray.sort((a, b) => a.x - b.x);
                     const res = { x: [] };
-                    ['atoms', 'temp', 'sigma', 'amp', 'arrival', 'prob'].forEach(k => {
+                    ['atoms', 'temp', 'sigma', 'amp', 'arrival', 'prob', 'intf_p'].forEach(k => {
                         res[k + '_up'] = []; res['nf_' + k + '_up'] = []; res[k + '_dw'] = []; res['nf_' + k + '_dw'] = [];
                     });
                     dataArray.forEach(d => {
@@ -622,6 +624,11 @@
                 renderMainPlot() {
                     const d = this.getProcessedHistory();
                     let yUp = [], yUpNF = [], yDw = [], yDwNF = [], labelY = "", nameUp = "UP", nameDw = "DOWN";
+
+                    // [修改 1] 定义默认的坐标轴后缀
+                    let suffixUp = ' (UP)';
+                    let suffixDw = ' (DW)';
+
                     switch (this.currentTab) {
                         case 'atoms': yUp = d.atoms_up; yUpNF = d.nf_atoms_up; yDw = d.atoms_dw; yDwNF = d.nf_atoms_dw; labelY = "Atom Number"; break;
                         case 'amp': yUp = d.amp_up; yUpNF = d.nf_amp_up; yDw = d.amp_dw; yDwNF = d.nf_amp_dw; labelY = "Max Voltage (V)"; break;
@@ -629,6 +636,16 @@
                         case 'temp': yUp = d.temp_up; yUpNF = d.nf_temp_up; yDw = d.temp_dw; yDwNF = d.nf_temp_dw; labelY = "Temperature (uK)"; break;
                         case 'arrival': yUp = d.arrival_up; yUpNF = d.nf_arrival_up; yDw = d.arrival_dw; yDwNF = d.nf_arrival_dw; labelY = "Arrival Time (s)"; break;
                         case 'prob': yUp = d.prob_up; yUpNF = d.nf_prob_up; yDw = d.prob_dw; yDwNF = d.nf_prob_dw; labelY = "Transition Prob. (%)"; nameUp = "Prob F2 (UP)"; nameDw = "Prob F1 (DW)"; break;
+                        case 'intf':
+                            yUp = d.intf_p_up; yUpNF = d.nf_intf_p_up;
+                            yDw = d.intf_p_dw; yDwNF = d.nf_intf_p_dw;
+                            labelY = "Interferometer P (%)";
+                            nameUp = "P_N1"; nameDw = "P_N2";
+
+                            //  Interferometer 
+                            suffixUp = ' (N1)';
+                            suffixDw = ' (N2)';
+                            break;
                     }
 
                     const tracesUp = [{ x: d.x, y: yUp, mode: 'lines+markers', name: nameUp + ' (Fit)', line: { color: '#dc3545', width: 2 }, marker: { size: 8 } }];
@@ -639,9 +656,13 @@
                         tracesDw.push({ x: d.x, y: yDwNF, mode: 'lines+markers', name: nameDw + ' (Raw)', line: { color: '#0d6efd', width: 1, dash: 'dot' }, marker: { size: 6, symbol: 'circle-open', opacity: 0.6 } });
                     }
 
-                    this.layoutResUp.yaxis.title = labelY + ' (UP)'; this.layoutResUp.datarevision = this.plotRevision;
+                    
+                    this.layoutResUp.yaxis.title = labelY + suffixUp;
+                    this.layoutResUp.datarevision = this.plotRevision;
                     Plotly.react('resultsPlotUp', tracesUp, this.layoutResUp);
-                    this.layoutResDw.yaxis.title = labelY + ' (DW)'; this.layoutResDw.datarevision = this.plotRevision;
+
+                    this.layoutResDw.yaxis.title = labelY + suffixDw;
+                    this.layoutResDw.datarevision = this.plotRevision;
                     Plotly.react('resultsPlotDw', tracesDw, this.layoutResDw);
                 },
                 connectWebSocket() {
@@ -680,8 +701,8 @@
                             if (!this.historyMap[key]) {
                                 this.historyMap[key] = {
                                     count: 0,
-                                    sum_atoms_up: 0, sum_atoms_dw: 0, sum_temp_up: 0, sum_temp_dw: 0, sum_sigma_up: 0, sum_sigma_dw: 0, sum_amp_up: 0, sum_amp_dw: 0, sum_arrival_up: 0, sum_arrival_dw: 0, sum_prob_up: 0, sum_prob_dw: 0,
-                                    sum_nf_atoms_up: 0, sum_nf_atoms_dw: 0, sum_nf_temp_up: 0, sum_nf_temp_dw: 0, sum_nf_sigma_up: 0, sum_nf_sigma_dw: 0, sum_nf_amp_up: 0, sum_nf_amp_dw: 0, sum_nf_arrival_up: 0, sum_nf_arrival_dw: 0, sum_nf_prob_up: 0, sum_nf_prob_dw: 0
+                                    sum_atoms_up: 0, sum_atoms_dw: 0, sum_temp_up: 0, sum_temp_dw: 0, sum_sigma_up: 0, sum_sigma_dw: 0, sum_amp_up: 0, sum_amp_dw: 0, sum_arrival_up: 0, sum_arrival_dw: 0, sum_prob_up: 0, sum_prob_dw: 0, sum_intf_p_up: 0, sum_intf_p_dw: 0,
+                                    sum_nf_atoms_up: 0, sum_nf_atoms_dw: 0, sum_nf_temp_up: 0, sum_nf_temp_dw: 0, sum_nf_sigma_up: 0, sum_nf_sigma_dw: 0, sum_nf_amp_up: 0, sum_nf_amp_dw: 0, sum_nf_arrival_up: 0, sum_nf_arrival_dw: 0, sum_nf_prob_up: 0, sum_nf_prob_dw: 0, sum_nf_intf_p_up: 0, sum_nf_intf_p_dw: 0
                                 };
                             }
                             const item = this.historyMap[key];
@@ -693,7 +714,11 @@
                                 item[`sum_nf_${metric}_up`] += (data[`${k}_up_nofit`] || 0);
                                 item[`sum_nf_${metric}_dw`] += (data[`${k}_dw_nofit`] || 0);
                             });
+                            item.sum_intf_p_up += (data.intf_p1 || 0);
+                            item.sum_intf_p_dw += (data.intf_p2 || 0);
 
+                            item.sum_nf_intf_p_up += (data.intf_p1_nofit || 0);
+                            item.sum_nf_intf_p_dw += (data.intf_p2_nofit || 0);
                             this.renderMainPlot();
                             this.plotRevision++;
 

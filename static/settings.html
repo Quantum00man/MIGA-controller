@@ -138,6 +138,36 @@
 
                         <div class="col-12"><label class="form-label">Launch Velocity (m/s)</label><input type="number"
                                 class="form-control" v-model.number="s.launch_velocity" step="0.01"></div>
+                        <div class="col-12 mt-2">
+                            <div class="bg-white p-3 border rounded shadow-sm">
+                                <h6 class="text-primary fw-bold text-uppercase mb-2" style="font-size: 0.8rem;">
+                                    <i class="bi bi-bezier2 me-2"></i>Interferometer Parameters
+                                </h6>
+                                <div class="row g-2">
+                                    <div class="col-md-4">
+                                        <label class="form-label small fw-bold text-muted">Intf Alpha (Eff)</label>
+                                        <input type="number" class="form-control form-control-sm font-monospace" v-model.number="s.intf_alpha"
+                                            step="0.0001">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label small fw-bold text-muted">Intf Beta (X-Talk)</label>
+                                        <input type="number" class="form-control form-control-sm font-monospace" v-model.number="s.intf_beta"
+                                            step="0.0001">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label small fw-bold text-muted">Intf Gamma (Spont)</label>
+                                        <input type="number" class="form-control form-control-sm font-monospace" v-model.number="s.intf_gamma"
+                                            step="0.0001">
+                                    </div>
+                                    <div class="col-12">
+                                        <div class="form-text small text-muted fst-italic">
+                                            Used for calculating N1, N2, and P_N1. Formula: N1 = (n_f1 - (1+γ-β)*n_f2/β) / ...
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
 
                         <div class="col-12"><hr class="my-3 text-muted opacity-25"></div>
                         <div class="col-12 bg-light p-3 rounded border">
