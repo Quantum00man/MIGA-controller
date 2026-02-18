@@ -662,13 +662,22 @@ class ExperimentManager:
                 # ============================================================
                 # [New] Calculate Interferometer Output (Using Dynamic Settings)
                 # ============================================================
-                
+                '''
                 # Fit Data
                 i_n1, i_n2, i_p1, i_p2 = physics.calculate_interferometer_output(
                     n_f1, n_f2, 
                     S.get('intf_alpha', 0.35), 
                     S.get('intf_beta', 0.076), 
                     S.get('intf_gamma', 0.25)
+                )'''
+
+                # 修改为：(强制使用默认值)
+                force_alpha = 0.35
+                force_beta = 0.07636  # 确保这个不是 0
+                force_gamma = 0.25
+                
+                i_n1, i_n2, i_p1, i_p2 = physics.calculate_interferometer_output(
+                    n_f1, n_f2, force_alpha, force_beta, force_gamma
                 )
                 # [DEBUG] 添加这行打印
                 print(f"[DEBUG] Raw Atoms: F2={n_f2}, F1={n_f1} | Intf Result: P1={i_p1}, P2={i_p2}")
