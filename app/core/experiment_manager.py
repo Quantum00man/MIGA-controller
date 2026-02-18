@@ -47,30 +47,37 @@ class ExperimentManager:
         self.on_data_ready: Optional[Callable[[Dict[str, Any]], None]] = None
 
     def _load_initial_settings(self) -> Dict[str, Any]:
+        # 1. 定义所有参数的默认值
         base_settings = {
-            "voltage_limit": .015,
+            "voltage_limit": 0.015,
             "rp_ip_red": config.RP_IP_RED_REAL,
             "rp_ip_green": config.RP_IP_GREEN_REAL,
             "network_timeout": config.NETWORK_TIMEOUT,
-            **config.DEFAULT_ANALYSIS_SETTINGS,
             "g_const": config.G_CONST,
             "link_total_time": config.LINK_TOTAL_TIME,
             "tmot_path": config.TMOT_BINARY_PATH_WIN if config.IS_WINDOWS else config.TMOT_BINARY_PATH_LINUX,
             "cmot_path": config.CMOT_BINARY_PATH_WIN if config.IS_WINDOWS else config.CMOT_BINARY_PATH_LINUX,
             "template_path": config.SEQUENCE_TEMPLATE_PATH_WIN if config.IS_WINDOWS else config.SEQUENCE_TEMPLATE_PATH_LINUX,
+            
+            # --- [关键修复] 显式添加这三个参数的默认值 ---
             "intf_alpha": 0.35,
             "intf_beta": 0.07636,
-            "intf_gamma": 0.25
+            "intf_gamma": 0.25,
+            # ----------------------------------------
             
+            # 合并 config.py 中的默认分析参数
+            **config.DEFAULT_ANALYSIS_SETTINGS
         }
         
+        # 2. 从文件加载用户保存的设置，覆盖默认值
         settings_path = Path(config.SETTINGS_FILE_PATH)
         if settings_path.exists():
             try:
                 with open(settings_path, 'r') as f:
                     saved_settings = json.load(f)
+                # 遍历保存的设置，覆盖 base_settings
                 for k, v in saved_settings.items():
-                    if k in base_settings: base_settings[k] = v
+                    base_settings[k] = v 
                 print(f"[Settings] Loaded user settings from {settings_path}")
             except Exception as e:
                 print(f"[Settings] Failed to load user settings: {e}")
@@ -662,23 +669,16 @@ class ExperimentManager:
                 # ============================================================
                 # [New] Calculate Interferometer Output (Using Dynamic Settings)
                 # ============================================================
-                '''
+                
                 # Fit Data
                 i_n1, i_n2, i_p1, i_p2 = physics.calculate_interferometer_output(
                     n_f1, n_f2, 
                     S.get('intf_alpha', 0.35), 
                     S.get('intf_beta', 0.076), 
                     S.get('intf_gamma', 0.25)
-                )'''
-
-                # 修改为：(强制使用默认值)
-                force_alpha = 0.35
-                force_beta = 0.07636  # 确保这个不是 0
-                force_gamma = 0.25
-                
-                i_n1, i_n2, i_p1, i_p2 = physics.calculate_interferometer_output(
-                    n_f1, n_f2, force_alpha, force_beta, force_gamma
                 )
+
+                
                 # [DEBUG] 添加这行打印
                 print(f"[DEBUG] Raw Atoms: F2={n_f2}, F1={n_f1} | Intf Result: P1={i_p1}, P2={i_p2}")
                 
