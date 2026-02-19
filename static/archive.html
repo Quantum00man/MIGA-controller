@@ -755,7 +755,7 @@
                 getStatsArray() {
                     const dataArray = Object.keys(this.historyMap).map(key => {
                         const item = this.historyMap[key]; const x = parseFloat(key); const stats = { x };
-                        ['atoms', 'temp', 'sigma', 'amp', 'arrival', 'prob', 'nf_atoms', 'nf_temp', 'nf_sigma', 'nf_amp', 'nf_arrival', 'nf_prob'].forEach(m => {
+                        ['atoms', 'temp', 'sigma', 'amp', 'arrival', 'prob', 'intf_p','nf_atoms', 'nf_temp', 'nf_sigma', 'nf_amp', 'nf_arrival', 'nf_prob', 'nf_intf_p'].forEach(m => {
                             const sUp = this.calcStats(item[`vals_${m}_up`]); const sDw = this.calcStats(item[`vals_${m}_dw`]);
                             stats[`${m}_up`] = sUp.mean; stats[`${m}_up_std`] = sUp.std; stats[`${m}_dw`] = sDw.mean; stats[`${m}_dw_std`] = sDw.std;
                         });

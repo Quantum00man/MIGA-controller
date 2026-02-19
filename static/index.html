@@ -614,7 +614,7 @@
                     });
                     dataArray.forEach(d => {
                         res.x.push(d.x);
-                        ['atoms', 'temp', 'sigma', 'amp', 'arrival', 'prob'].forEach(k => {
+                        ['atoms', 'temp', 'sigma', 'amp', 'arrival', 'prob', 'intf_p'].forEach(k => {
                             res[k + '_up'].push(d[k + '_up']); res['nf_' + k + '_up'].push(d['nf_' + k + '_up']);
                             res[k + '_dw'].push(d[k + '_dw']); res['nf_' + k + '_dw'].push(d['nf_' + k + '_dw']);
                         });
