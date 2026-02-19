@@ -66,32 +66,24 @@ def calculate_interferometer_output(
     beta: float,            # intf_beta
     gamma: float            # intf_gamma
 ) -> Tuple[Optional[float], Optional[float], Optional[float], Optional[float]]:
-    """
-    Calculates Interferometer N1, N2, P1, P2 based on user's Excel formula.
-    Inputs n_f1, n_f2 are already corrected for imaging crosstalk.
-    """
+    
     if n_f1 is None or n_f2 is None:
         return None, None, None, None
     
-    
-    if abs(beta) < 1e-9: 
-        return None, None, None, None
 
-    # Excel Logic:
-    # N1 = (n_f1 - (1 + gamma - beta) * n_f2 / beta) / 
-    #      ((1 + gamma - alpha) - alpha * (1 + gamma - beta) / beta)
+    denominator = (beta - alpha) * (1.0 + gamma)
     
-    term_common = (1 + gamma - beta) / beta
-    numerator = n_f1 - term_common * n_f2
-    denominator = (1 + gamma - alpha) - alpha * term_common
-    
+
     if abs(denominator) < 1e-9:
         return None, None, None, None
         
-    N1 = numerator / denominator
+    # N1
+    numerator_n1 = beta * n_f1 - (1.0 - beta + gamma) * n_f2
+    N1 = numerator_n1 / denominator
     
-    # N2 = (n_f2 - alpha * N1) / beta
-    N2 = (n_f2 - alpha * N1) / beta
+    # N2
+    numerator_n2 = (1.0 - alpha + gamma) * n_f2 - alpha * n_f1
+    N2 = numerator_n2 / denominator
     
     # Calculate Probabilities
     total = N1 + N2

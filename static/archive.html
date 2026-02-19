@@ -542,29 +542,31 @@
                             const ib = (S.intf_beta !== undefined) ? S.intf_beta : 0.07636;
                             const ig = (S.intf_gamma !== undefined) ? S.intf_gamma : 0.25;
 
-                            if (Math.abs(ib) < 1e-9) return { n1: 0, n2: 0, p1: 0, p2: 0 };
+                            // New stabilized formula common denominator: (beta - alpha) * (1 + gamma)
+                            const den = (ib - ia) * (1.0 + ig);
 
-                            // Excel Formula Translation:
-                            // Term = (1 + Gamma - Beta) / Beta
-                            const term = (1 + ig - ib) / ib;
-
-                            // Numerator = n_f1 - Term * n_f2
-                            const num = n_f1_in - term * n_f2_in;
-
-                            // Denominator = (1 + Gamma - Alpha) - Alpha * Term
-                            const den = (1 + ig - ia) - ia * term;
-
+                            // Prevent division by zero if alpha equals beta
                             if (Math.abs(den) < 1e-9) return { n1: 0, n2: 0, p1: 0, p2: 0 };
 
-                            const N1 = num / den;
-                            const N2 = (n_f2_in - ia * N1) / ib;
+                            // Calculate N1
+                            // Numerator N1 = beta * n_f1 - (1 - beta + gamma) * n_f2
+                            const num_n1 = ib * n_f1_in - (1.0 - ib + ig) * n_f2_in;
+                            const N1 = num_n1 / den;
 
+                            // Calculate N2
+                            // Numerator N2 = (1 - alpha + gamma) * n_f2 - alpha * n_f1
+                            const num_n2 = (1.0 - ia + ig) * n_f2_in - ia * n_f1_in;
+                            const N2 = num_n2 / den;
+
+                            // Calculate Transition Probabilities
                             let P1 = 0, P2 = 0;
                             const tot = N1 + N2;
+
                             if (Math.abs(tot) > 1e-9) {
                                 P1 = 100.0 * N1 / tot;
                                 P2 = 100.0 * N2 / tot;
                             }
+
                             return { n1: safe(N1), n2: safe(N2), p1: safe(P1), p2: safe(P2) };
                         };
                         // Fit Data Calculation
