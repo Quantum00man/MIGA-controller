@@ -253,3 +253,10 @@ data/
                     ├── step_0000.npz   # Compressed raw array (Trace + Fit)
                     └── step_0001.npz   
 ```
+---
+
+## 👥 Author & Acknowledgments
+
+* **[Yiming MENG]** - *Lead Developer / Physicist* - [GitHub](https://github.com/Quantum00man)
+
+Developed and maintained for the **MIGA Experiment** at **[MIGA/Cold atom in Bordeaux/Université de Bordeaux]**(https://www.coldatomsbordeaux.org/miga). 
