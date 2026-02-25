@@ -24,7 +24,7 @@ To securely clone this repository using SSH, open your terminal and run:
 git clone [https://github.com/Quantum00man/MIGA-controller.git](https://github.com/Quantum00man/MIGA-controller.git)
 cd MIGA-controller
 ```
-*(Remember to replace `YourUsername` with your actual GitHub username).*
+
 
 Install the required Python dependencies:
 ```bash
