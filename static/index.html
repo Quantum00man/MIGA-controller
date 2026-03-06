@@ -190,9 +190,9 @@
             <div class="d-flex align-items-center flex-grow-1 mx-4" style="max-width: 400px;">
                 <div class="d-flex flex-column w-100">
                     <div class="d-flex justify-content-between small mb-1">
-                        <span class="fw-bold text-white-50" style="font-size: 0.75em;">{{ isRunning ? 'CURRENT RUN' :
+                        <span class="fw-bold text-white-50" style="font-size: 1em;">{{ isRunning ? 'CURRENT RUN' :
                             'NEXT RUN' }}</span>
-                        <span class="fw-bold text-warning font-monospace" style="font-size: 0.8em;">{{ currentRunId
+                        <span class="fw-bold text-warning font-monospace" style="font-size: 1.5em;">{{ currentRunId
                             }}</span>
                     </div>
                     <div class="progress w-100" style="height: 8px; background-color: #445566; border-radius: 4px;">
@@ -239,7 +239,7 @@
                         title="Load .mot file"><i class="bi bi-folder2-open"></i></button>
                 </div>
                 <input type="file" ref="seqInput" style="display:none" accept=".mot" @change="selectSequence">
-                
+
                 <div class="form-text mt-1" style="font-size: 0.7rem;">Selected file will overwrite current template.
                 </div>
             </div>
@@ -575,7 +575,7 @@
                 },
                 addFormula() { this.config.link_formulas.push(""); },
                 removeFormula(index) { this.config.link_formulas.splice(index, 1); },
-                
+
                 initPlots() {
                     const commonLayout = { font: { family: 'Arial, sans-serif', size: 11 }, margin: { l: 60, r: 20 }, showlegend: true, legend: { x: 1, y: 1, xanchor: 'right', bgcolor: 'rgba(255,255,255,0.7)', bordercolor: '#ccc', borderwidth: 1 }, paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', xaxis: { showline: true, mirror: true, ticks: 'inside', linecolor: '#333' }, yaxis: { showline: true, mirror: true, ticks: 'inside', linecolor: '#333', zeroline: false } };
                     this.layoutResUp = { ...commonLayout, margin: { t: 30, b: 5, l: 60, r: 20 }, yaxis: { ...commonLayout.yaxis, title: 'Value' }, xaxis: { ...commonLayout.xaxis, title: '', showticklabels: false }, title: { text: 'UP Channel', font: { size: 12 }, x: 0.05, y: 0.9 } };
@@ -656,7 +656,7 @@
                         tracesDw.push({ x: d.x, y: yDwNF, mode: 'lines+markers', name: nameDw + ' (Raw)', line: { color: '#0d6efd', width: 1, dash: 'dot' }, marker: { size: 6, symbol: 'circle-open', opacity: 0.6 } });
                     }
 
-                    
+
                     this.layoutResUp.yaxis.title = labelY + suffixUp;
                     this.layoutResUp.datarevision = this.plotRevision;
                     Plotly.react('resultsPlotUp', tracesUp, this.layoutResUp);
