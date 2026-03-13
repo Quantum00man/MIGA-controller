@@ -1,21 +1,44 @@
 import os
+from pathlib import Path
 import numpy as np
 import pandas as pd
 from scipy.interpolate import interp1d
 
-# Retrieve the absolute directory path where this pulse_generator.py is located
-CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-# Construct the absolute path to the calibration file
-DEFAULT_CALIB_PATH = os.path.join(CURRENT_DIR, "calibration.csv")
+# Define robust path resolution
+CURRENT_DIR = Path(__file__).resolve().parent      # Expected: app/core/
+PROJECT_ROOT = CURRENT_DIR.parent.parent             # Expected: project root
 
-def get_inverse_calibration_func(csv_path=DEFAULT_CALIB_PATH):
+# List of possible locations for the calibration file
+POSSIBLE_PATHS = [
+    CURRENT_DIR / "calibration.csv",       # 1. app/core/calibration.csv
+    PROJECT_ROOT / "calibration.csv",      # 2. Project Root/calibration.csv
+    Path.cwd() / "calibration.csv"         # 3. Current Working Directory
+]
+
+def get_inverse_calibration_func():
     """
     Reads the calibration data and returns an inverse interpolation function:
     DAC_value = f(Target_Optical_Power)
     """
-    if not os.path.exists(csv_path):
-        print(f"Warning: Calibration file '{csv_path}' not found. Using ideal linear output.")
-        return lambda x: x 
+    csv_path = None
+    # Smart search for the calibration file
+    for path in POSSIBLE_PATHS:
+        if path.exists():
+            csv_path = path
+            print(f"[Pulse Generator] Successfully loaded calibration from: {csv_path}")
+            break
+            
+    # If the file is strictly required, raise a hard error instead of failing silently
+    if not csv_path:
+        error_msg = (
+            "\n[CRITICAL ERROR] Calibration file 'calibration.csv' NOT FOUND!\n"
+            "The system looked in the following locations:\n"
+            f"  1. {POSSIBLE_PATHS[0]}\n"
+            f"  2. {POSSIBLE_PATHS[1]}\n"
+            f"  3. {POSSIBLE_PATHS[2]}\n"
+            "Please place the file in one of these directories."
+        )
+        raise FileNotFoundError(error_msg)
         
     # Read the monotonic, offset-removed calibration data
     data = pd.read_csv(csv_path, header=None)
@@ -45,7 +68,7 @@ def generate_bragg_pulse(fwhm: float, shape: str = 'blackman', base_timing: int 
     # 1. Calculate pulse array based on chosen shape
     if shape == 'gaussian':
         std_dev = fwhm / (2 * np.sqrt(2 * np.log(2)))
-        # Extend to 4 sigma (ideal optical power drops to ~0.03% of peak, smoothly reaching 0)
+        # Extend to 4 sigma 
         mean = 4.0 * std_dev
         x_end = 2.0 * mean
         num_points = int(x_end / clock_res)
