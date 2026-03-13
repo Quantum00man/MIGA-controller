@@ -276,16 +276,36 @@
                         </div>
                     </div>
                     <div v-if="!useList1" class="row g-2">
-                        <div class="col-4"><label class="form-label small text-muted mb-1">Start</label><input
-                                type="text" class="form-control form-control-sm" v-model="config.start"></div>
-                        <div class="col-4"><label class="form-label small text-muted mb-1">Stop</label><input
-                                type="text" class="form-control form-control-sm" v-model="config.stop"></div>
-                        <div class="col-4"><label class="form-label small text-muted mb-1">{{ config.dim1_method ===
-                                'step_size' ? 'Step' : 'Points' }}</label><input type="text"
-                                class="form-control form-control-sm" v-model="config.step"></div>
+                        <div class="col-4"><label class="form-label small mb-1"
+                                :class="config.mode === 'bragg_rabi' ? 'text-primary fw-bold' : 'text-muted'">{{ config.mode ===
+                                'bragg_rabi' ? 'FWHM Start' : 'Start' }}</label><input type="text" class="form-control form-control-sm"
+                                v-model="config.start"></div>
+                        <div class="col-4"><label class="form-label small mb-1"
+                                :class="config.mode === 'bragg_rabi' ? 'text-primary fw-bold' : 'text-muted'">{{ config.mode ===
+                                'bragg_rabi' ? 'FWHM Stop' : 'Stop' }}</label><input type="text" class="form-control form-control-sm"
+                                v-model="config.stop"></div>
+                        <div class="col-4"><label class="form-label small mb-1"
+                                :class="config.mode === 'bragg_rabi' ? 'text-primary fw-bold' : 'text-muted'">{{ config.mode ===
+                                'bragg_rabi' ? 'FWHM Step' : (config.dim1_method === 'step_size' ? 'Step' : 'Points') }}</label><input
+                                type="text" class="form-control form-control-sm" v-model="config.step"></div>
                     </div>
-                    <div v-else><textarea class="form-control form-control-sm" v-model="config.custom_list"
-                            placeholder="e.g. 1, 5, 10" rows="2"></textarea></div>
+                    <div v-else><textarea class="form-control form-control-sm" v-model="config.custom_list" placeholder="e.g. 1, 5, 10"
+                            rows="2"></textarea></div>
+                    
+                    <div v-if="config.mode === 'bragg_rabi'" class="row g-2 mt-2 p-2 rounded"
+                        style="background-color: #eef2f5; border: 1px dashed #ced4da;">
+                        <div class="col-6">
+                            <label class="form-label small mb-1 fw-bold text-primary">Pulse Shape</label>
+                            <select class="form-select form-select-sm" v-model="config.bragg_shape">
+                                <option value="blackman">Blackman</option>
+                                <option value="gaussian">Gaussian</option>
+                            </select>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small mb-1 fw-bold text-primary">Base Timing</label>
+                            <input type="number" class="form-control form-control-sm" v-model.number="config.bragg_base_timing">
+                        </div>
+                    </div>
                 </div>
 
                 <span class="section-label">Scan Logic</span>
@@ -298,6 +318,7 @@
                             <option value="rabi">Rabi (Tot-P0/2)</option>
                             <option value="half">Half (P0/2)</option>
                             <option value="link">Link (Custom Formula)</option>
+                            <option value="bragg_rabi">Bragg Rabi</option>
                         </select>
                     </div>
                     <div v-if="['timing', 'rabi'].includes(config.mode)">
@@ -479,7 +500,9 @@
                         dim2_enabled: false, dim2_type: 'range', dim2_start: 0, dim2_stop: 5, dim2_step: 1, dim2_list: '',
                         averages: 1, randomize: false, mode: 'standard', mode_param: 100,
                         link_formulas: ["(P0-151)/2+26", "100-P1"],
-                        fit_center_up: 0, fit_width_up: 0, fit_center_dw: 0, fit_width_dw: 0
+                        fit_center_up: 0, fit_width_up: 0, fit_center_dw: 0, fit_width_dw: 0,
+                        bragg_shape: 'blackman',
+                        bragg_base_timing: 331119
                     },
                     isRunning: false, isSimulation: true, statusMessage: "IDLE", currentStep: 0, plotRevision: 0, logs: [], ws: null,
                     progressPercent: 0,

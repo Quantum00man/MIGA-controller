@@ -29,6 +29,9 @@ class ScanConfig(BaseModel):
     intf_alpha: float = 0.35
     intf_beta: float = 0.07636
     intf_gamma: float = 0.25
+    # Bragg Rabi Scan Parameters
+    bragg_shape: str = Field("blackman")
+    bragg_base_timing: int = Field(331119)
 
 class AnalysisSettings(BaseModel):
     alpha: float

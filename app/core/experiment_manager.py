@@ -16,6 +16,7 @@ from app.drivers.vcd_parser import VCDParser
 from app.analysis import fitting, physics
 from app.core.data_manager import DataManager
 from app.core.structures import ExperimentStatus, ScanResult
+from app.core.pulse_generator import generate_bragg_pulse
 
 class ExperimentManager:
     _instance = None
@@ -162,7 +163,8 @@ class ExperimentManager:
         self.proc_thread.daemon = True
         self.proc_thread.start()
 
-        self.acq_thread = threading.Thread(target=self._acquisition_loop, args=(parameters,))
+        #self.acq_thread = threading.Thread(target=self._acquisition_loop, args=(parameters,))
+        self.acq_thread = threading.Thread(target=self._acquisition_loop, args=(parameters, scan_config))
         self.acq_thread.daemon = True
         self.acq_thread.start()
 
@@ -491,10 +493,11 @@ class ExperimentManager:
             return 0.0
 
     # --- THREAD 1: ACQUISITION (PRODUCER) ---
-    def _acquisition_loop(self, parameter_list: List[Any]):
+    def _acquisition_loop(self, parameter_list: List[Any], scan_config: Dict[str, Any]): # [修改] 增加 scan_config
         print(f"--- Acquisition Started: {len(parameter_list)} points ---")
         S = self.settings 
         total_steps = len(parameter_list)
+        mode = scan_config.get('mode', 'standard') # [新增] 获取当前扫描模式
 
         for idx, param_set in enumerate(parameter_list):
             if self.stop_flag: break
@@ -502,8 +505,23 @@ class ExperimentManager:
             if not isinstance(param_set, list): params_to_write = [param_set]
             else: params_to_write = param_set
             
+            # === [NEW] 拦截 Bragg Rabi 模式，生成脉冲代码 ===
+            if mode == 'bragg_rabi':
+                fwhm_val = params_to_write[0]
+                pulse_code, comp_time = generate_bragg_pulse(
+                    fwhm=fwhm_val,
+                    shape=scan_config.get('bragg_shape', 'blackman'),
+                    base_timing=int(scan_config.get('bragg_base_timing', 331119))
+                )
+                # 这两个值会依次替换模板中的 <PARAMETER0> 和 <PARAMETER1>
+                actual_params_to_write = [pulse_code, comp_time]
+            else:
+                actual_params_to_write = params_to_write
+            # ===============================================
+            
             tpl = config.SEQUENCE_TEMPLATE_PATH_WIN if config.USE_SIMULATION else S['template_path']
-            self.seq_editor.generate_sequence(tpl, config.SEQUENCE_OUTPUT_PATH, params_to_write)
+            # [修改] 使用 actual_params_to_write 写入硬件序列
+            self.seq_editor.generate_sequence(tpl, config.SEQUENCE_OUTPUT_PATH, actual_params_to_write)
             
             cmot_bin = config.CMOT_BINARY_PATH_WIN if config.USE_SIMULATION else S['cmot_path']
             self.driver.compile_vcd(config.SEQUENCE_OUTPUT_PATH, config.VCD_OUTPUT_PATH, binary_path=cmot_bin)
