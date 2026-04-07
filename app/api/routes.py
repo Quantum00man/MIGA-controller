@@ -42,7 +42,9 @@ async def get_status():
         data={
             "is_running": s.is_running, 
             "current_step": s.current_step,
-            "run_id": run_label # <--- This is what index.html needs
+            "total_steps": s.total_steps,
+            "message": s.message,
+            "run_id": run_label
         }
     )
 
@@ -93,7 +95,7 @@ async def get_archive_tree(): return data_loader.get_archive_tree()
 
 @router.get("/archive/load/{year}/{month}/{day}/{run_id}")
 async def load_archived_run(year: str, month: str, day: str, run_id: str):
-    try: return data_loader.load_run(year, month, day, run_id)
+    try: return data_loader.load_run_streaming(year, month, day, run_id)
     except FileNotFoundError: raise HTTPException(404, "Run not found")
     except Exception as e: raise HTTPException(500, str(e))
 

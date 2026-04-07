@@ -56,3 +56,6 @@ DEFAULT_ANALYSIS_SETTINGS = {
     # [CRITICAL FIX] Default Decimation set to 8192 to match 1500pts -> ~100ms
     "decimation": 8192 
 }
+
+DEFAULT_HARDWARE_PLATFORM = "redpitaya"
+DEFAULT_DAQ_RATE = 125_000_000 / DEFAULT_ANALYSIS_SETTINGS["decimation"]

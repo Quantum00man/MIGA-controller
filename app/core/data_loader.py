@@ -103,6 +103,97 @@ class DataLoader:
 
         return { "config": config_data, "data": data_points }
 
+    def load_run_streaming(self, year: str, month: str, day: str, run_id: str) -> Dict[str, Any]:
+        run_dir = self.base_dir / year / month / day / run_id
+        if not run_dir.exists():
+            raise FileNotFoundError(f"Run not found: {run_dir}")
+
+        config_data = {}
+        config_path = run_dir / "config.json"
+        if config_path.exists():
+            try:
+                with open(config_path, 'r') as f:
+                    raw_config = json.load(f)
+                    config_data = self._sanitize_structure(raw_config)
+            except Exception:
+                pass
+
+        def build_point(row: Dict[str, str]) -> Dict[str, Any]:
+            def safe_float(key):
+                val = row.get(key)
+                if not val or val.strip() == "":
+                    return None
+                try:
+                    parsed = float(val)
+                    if math.isnan(parsed) or math.isinf(parsed):
+                        return None
+                    return parsed
+                except ValueError:
+                    return None
+
+            return {
+                "step": int(row["Step"]) if row.get("Step") else 0,
+                "parameter": safe_float("Parameter_P0") if safe_float("Parameter_P0") is not None else 0.0,
+                "all_parameters": [float(x) for x in row["All_Parameters"].split(";")] if row.get("All_Parameters") else [],
+                "atom_number_up": safe_float("Atom_UP"),
+                "atom_number_dw": safe_float("Atom_DW"),
+                "temperature_up": safe_float("Temp_UP"),
+                "temperature_dw": safe_float("Temp_DW"),
+                "sigma_up": safe_float("Sigma_UP"),
+                "sigma_dw": safe_float("Sigma_DW"),
+                "amplitude_up": safe_float("Amp_UP"),
+                "amplitude_dw": safe_float("Amp_DW"),
+                "arrival_time_up": safe_float("Center_UP"),
+                "arrival_time_dw": safe_float("Center_DW"),
+                "transition_probability_up": safe_float("Prob_UP_F2"),
+                "transition_probability_dw": safe_float("Prob_DW_F1"),
+                "atom_number_up_nofit": safe_float("NF_Atom_UP"),
+                "atom_number_dw_nofit": safe_float("NF_Atom_DW"),
+                "temperature_up_nofit": safe_float("NF_Temp_UP"),
+                "temperature_dw_nofit": safe_float("NF_Temp_DW"),
+                "sigma_up_nofit": safe_float("NF_Sigma_UP"),
+                "sigma_dw_nofit": safe_float("NF_Sigma_DW"),
+                "amplitude_up_nofit": safe_float("NF_Amp_UP"),
+                "amplitude_dw_nofit": safe_float("NF_Amp_DW"),
+                "arrival_time_up_nofit": safe_float("NF_Center_UP"),
+                "arrival_time_dw_nofit": safe_float("NF_Center_DW"),
+                "transition_probability_up_nofit": safe_float("NF_Prob_UP"),
+                "transition_probability_dw_nofit": safe_float("NF_Prob_DW"),
+            }
+
+        csv_path = run_dir / "results.csv"
+        data_points = []
+        total_rows = 0
+        max_display_points = 3000
+        sampling_step = 1
+
+        if csv_path.exists():
+            with open(csv_path, 'r', newline='') as f:
+                reader = csv.DictReader(f)
+                for _ in reader:
+                    total_rows += 1
+
+            if total_rows > 0:
+                sampling_step = max(1, math.ceil(total_rows / max_display_points))
+
+            with open(csv_path, 'r', newline='') as f:
+                reader = csv.DictReader(f)
+                for idx, row in enumerate(reader):
+                    keep_row = (idx % sampling_step == 0)
+                    if total_rows and idx == total_rows - 1:
+                        keep_row = True
+                    if keep_row:
+                        data_points.append(build_point(row))
+
+        return {
+            "config": config_data,
+            "data": data_points,
+            "total_points": total_rows,
+            "displayed_points": len(data_points),
+            "is_sampled": total_rows > len(data_points),
+            "sampling_step": sampling_step
+        }
+
     def load_waveform(self, year: str, month: str, day: str, run_id: str, step_index: int) -> Dict[str, Any]:
         npz_path = self.base_dir / year / month / day / run_id / "waveforms" / f"step_{step_index:04d}.npz"
         if not npz_path.exists(): raise FileNotFoundError(f"Waveform not found")

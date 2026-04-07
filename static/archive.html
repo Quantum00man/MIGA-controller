@@ -193,7 +193,11 @@
                             <div class="text-success fw-bold small mb-1"><i
                                     class="bi bi-check-circle-fill me-1"></i>Loaded</div>
                             <div class="small text-muted font-monospace">{{ loadedRunId }}</div>
-                            <div class="small text-muted" style="font-size: 0.75em;">{{ dataCount }} Points</div>
+                            <div class="small text-muted" style="font-size: 0.75em;">
+                                <span v-if="isSampled">{{ displayedCount }} / {{ dataCount }} Points</span>
+                                <span v-else>{{ dataCount }} Points</span>
+                            </div>
+                            <div v-if="isSampled" class="small text-warning" style="font-size: 0.75em;">Large run preview only. Save-to-disk is disabled.</div>
                         </div>
 
                         <div v-if="errorMsg" class="mt-3 alert alert-danger small p-2 mb-0 text-center">
@@ -263,7 +267,7 @@
                                 <div class="col-6">
                                     <label class="form-label-small text-danger">Max Limit (V)</label>
                                     <input type="number" class="form-control form-control-sm" v-model.number="analysis.voltage_limit" step="0.001"
-                                        placeholder="0.02">
+                                        placeholder="0.015">
                                 </div>
                             
                                 <div class="col-6">
@@ -277,7 +281,7 @@
                             <button class="btn btn-warning btn-sm fw-bold text-dark shadow-sm" @click="recalculate"><i
                                     class="bi bi-arrow-repeat me-1"></i> Recalculate</button>
                             <button class="btn btn-danger btn-sm fw-bold shadow-sm" @click="saveOverwrite"
-                                :disabled="isSaving"><span v-if="isSaving"
+                                :disabled="isSaving || isSampled"><span v-if="isSaving"
                                     class="spinner-border spinner-border-sm me-1"></span> {{ isSaving ? 'Saving...' :
                                 'Save to Disk' }}</button>
                         </div>
@@ -376,7 +380,7 @@
                 return {
                     archiveTree: {}, selectedYear: '', selectedMonth: '', selectedDay: '', selectedRun: '',
                     isLoading: false, isLoadingWaveforms: false, isSaving: false,
-                    loadedRunId: '', errorMsg: '', dataCount: 0, selectedPointParam: '', selectedCount: 0,
+                    loadedRunId: '', errorMsg: '', dataCount: 0, displayedCount: 0, isSampled: false, samplingStep: 1, selectedPointParam: '', selectedCount: 0,
                     loadedPoints: [], currentCalculatedPoints: [], originalSettings: {},
                     analysis: { alpha: 0.0151, beta: 0.0188, R: 1.1, K: 7000, gain_up: -1, gain_dw: -1, z_up: 0.275, z_dw: 0.255, launch_velocity: 4.25, chan_launch: '60', chan_trigger: '68' , max_low: 0.0001, voltage_limit: 0.015, intf_alpha: 0.35, intf_beta: 0.07636, intf_gamma: 0.25 },
                     showRawData: true, maximizedView: null, currentTab: 'atoms', plotRevision: 0,
@@ -418,6 +422,10 @@
                     this.currentCalculatedPoints = []; 
                     this.selectedPointParam = ''; 
                     this.errorMsg = '';
+                    this.dataCount = 0;
+                    this.displayedCount = 0;
+                    this.isSampled = false;
+                    this.samplingStep = 1;
                     
                     // 重置波形图
                     Plotly.react('waveformPlotUp', [], this.layoutOscUp); 
@@ -439,7 +447,10 @@
                         }
                         
                         this.loadedPoints = res.data.data;
-                        this.dataCount = this.loadedPoints.length;
+                        this.dataCount = res.data.total_points || this.loadedPoints.length;
+                        this.displayedCount = res.data.displayed_points || this.loadedPoints.length;
+                        this.isSampled = !!res.data.is_sampled;
+                        this.samplingStep = res.data.sampling_step || 1;
                         this.loadedRunId = `${this.selectedDay}/${this.selectedRun}`;
                         
                         // 开始计算 (现在用的是安全的 recalculate)
@@ -904,6 +915,10 @@
 
                 async saveOverwrite() {
                     if (!this.selectedRun || this.currentCalculatedPoints.length === 0) return;
+                    if (this.isSampled) {
+                        alert(`This run is loaded in sampled preview mode (${this.displayedCount}/${this.dataCount} points shown). Please use the full run data before overwriting disk results.`);
+                        return;
+                    }
                     if (!confirm("OVERWRITE results?")) return;
                     this.isSaving = true;
                     try {

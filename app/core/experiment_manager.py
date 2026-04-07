@@ -47,12 +47,56 @@ class ExperimentManager:
         self.proc_thread: Optional[threading.Thread] = None
         self.on_data_ready: Optional[Callable[[Dict[str, Any]], None]] = None
 
+    def _normalize_settings(self, settings: Dict[str, Any]) -> Dict[str, Any]:
+        normalized = dict(settings)
+
+        hardware_platform = str(
+            normalized.get("hardware_platform", config.DEFAULT_HARDWARE_PLATFORM)
+        ).strip().lower()
+        if hardware_platform not in {"redpitaya", "daq"}:
+            hardware_platform = config.DEFAULT_HARDWARE_PLATFORM
+        normalized["hardware_platform"] = hardware_platform
+
+        try:
+            decimation = int(normalized.get("decimation", config.DEFAULT_ANALYSIS_SETTINGS["decimation"]))
+        except (TypeError, ValueError):
+            decimation = config.DEFAULT_ANALYSIS_SETTINGS["decimation"]
+        normalized["decimation"] = max(1, decimation)
+
+        daq_rate = normalized.get("daq_rate")
+        try:
+            daq_rate = float(daq_rate) if daq_rate not in (None, "") else None
+        except (TypeError, ValueError):
+            daq_rate = None
+
+        if hardware_platform == "daq":
+            if daq_rate is None or daq_rate <= 0:
+                daq_rate = config.DEFAULT_DAQ_RATE
+            normalized["daq_rate"] = daq_rate
+            normalized["decimation"] = max(1, int(round(125_000_000 / daq_rate)))
+        else:
+            normalized["daq_rate"] = 125_000_000 / normalized["decimation"]
+
+        return normalized
+
+    def _apply_driver_settings(self):
+        self.rp_driver_red.update_settings(
+            self.settings["rp_ip_red"],
+            int(self.settings["network_timeout"])
+        )
+        self.rp_driver_green.update_settings(
+            self.settings["rp_ip_green"],
+            int(self.settings["network_timeout"])
+        )
+
     def _load_initial_settings(self) -> Dict[str, Any]:
         # 1. 定义所有参数的默认值
         base_settings = {
             "voltage_limit": 0.015,
             "rp_ip_red": config.RP_IP_RED_REAL,
             "rp_ip_green": config.RP_IP_GREEN_REAL,
+            "hardware_platform": config.DEFAULT_HARDWARE_PLATFORM,
+            "daq_rate": config.DEFAULT_DAQ_RATE,
             "network_timeout": config.NETWORK_TIMEOUT,
             "g_const": config.G_CONST,
             "link_total_time": config.LINK_TOTAL_TIME,
@@ -83,7 +127,7 @@ class ExperimentManager:
             except Exception as e:
                 print(f"[Settings] Failed to load user settings: {e}")
         
-        return base_settings
+        return self._normalize_settings(base_settings)
 
     def _save_settings_to_disk(self):
         try:
@@ -96,11 +140,10 @@ class ExperimentManager:
     def get_settings(self) -> Dict[str, Any]: return self.settings
 
     def update_settings(self, new_settings: Dict[str, Any]):
-        self.settings.update(new_settings)
-        self.rp_driver_red.real_ip = self.settings['rp_ip_red']
-        self.rp_driver_red.timeout = int(self.settings['network_timeout'])
-        self.rp_driver_green.real_ip = self.settings['rp_ip_green']
-        self.rp_driver_green.timeout = int(self.settings['network_timeout'])
+        merged_settings = dict(self.settings)
+        merged_settings.update(new_settings)
+        self.settings = self._normalize_settings(merged_settings)
+        self._apply_driver_settings()
         self._save_settings_to_disk()
         print(f">>> System Settings Updated: {self.settings}")
     
@@ -122,20 +165,20 @@ class ExperimentManager:
             
             # 1. 重新从硬盘加载最新配置
             # 这一步确保即使重启程序没有点Save，也能读到上次保存的配置
-            current_settings = self._load_initial_settings()
+            self.settings = self._load_initial_settings()
             
             # 2. 更新内存中的 settings
-            self.settings.update(current_settings)
+            self._apply_driver_settings()
             
             # 3. 强制配置 RP 驱动 (RedPitayaDriver)
             # 这会触发 IP 切换 (RP <-> DAQ) 和 采样率下发给 Server
             # 注意：我们主要用 rp_driver_red 来控制 DAQ Server
             if hasattr(self, 'rp_driver_red'):
-                self.rp_driver_red.configure(self.settings)
                 print("[Manager] Driver configured successfully.")
                 
         except Exception as e:
             print(f"[Manager Error] Failed to auto-configure driver: {e}")
+            return {"status": "error", "message": f"Failed to apply runtime settings: {str(e)}"}
             # 不阻断流程，万一配置失败也尝试继续跑
         # ========================================================
 
@@ -172,6 +215,8 @@ class ExperimentManager:
 
     def stop_scan(self) -> Dict[str, str]:
         if self.status.is_running:
+            if self.stop_flag:
+                return {"status": "warning", "message": "Stop already requested"}
             self.stop_flag = True
             self.status.message = "Stopping..."
             return {"status": "success", "message": "Stop signal sent"}
@@ -576,7 +621,10 @@ class ExperimentManager:
             
             self.status.current_step = idx + 1
             self.status.total_steps = total
-            self.status.message = f"Processing: {params} (Queue: {self.data_queue.qsize()})"
+            if self.stop_flag:
+                self.status.message = f"Stopping... finishing step {idx+1}/{total} (Queue: {self.data_queue.qsize()})"
+            else:
+                self.status.message = f"Processing: {params} (Queue: {self.data_queue.qsize()})"
 
             if not volt_up_raw or not volt_dw_raw:
                  if self.on_data_ready: self.on_data_ready({'parameter': primary_param, 'error': 'No Data', 'current_step': idx+1, 'total_steps': total})
@@ -746,5 +794,7 @@ class ExperimentManager:
                 print(f"Processing Error step {idx+1}: {traceback.format_exc()}")
 
         self.data_manager.close_run()
-        self.status.is_running = False; self.status.message = "Done"
+        self.status.is_running = False
+        self.status.message = "Stopped" if self.stop_flag else "Done"
+        self.stop_flag = False
         print("--- Processing Finished ---")

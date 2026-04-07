@@ -509,13 +509,16 @@
                     currentSequenceName: "Default (seq0.mot)",
                     currentRunId: "...",
                     seqFile: null,
+                    sequenceUploaded: false,
                     showRawData: true, // Toggle State
                     maximizedView: null,
                     currentTab: 'atoms',
                     tabs: [{ id: 'atoms', label: 'Atom Number' }, { id: 'amp', label: 'Max Voltage' }, { id: 'sigma', label: 'Width (ms)' }, { id: 'temp', label: 'Temperature' }, { id: 'arrival', label: 'Arrival Time' }, { id: 'prob', label: 'Transition Prob.' }, { id: 'intf', label: 'Interferometer' }],
                     historyMap: {},
                     layoutResUp: {}, layoutResDw: {}, layoutOscUp: {}, layoutOscDw: {},
-                    isPlotting: false
+                    latestRealtimeFrame: null,
+                    renderScheduled: false,
+                    statusTimer: null
                 }
             },
             watch: {
@@ -531,11 +534,26 @@
                 this.connectWebSocket();
                 this.fetchSystemMode();
                 this.fetchStatus();
-                setInterval(this.fetchStatus, 2000);
+                this.statusTimer = setInterval(this.fetchStatus, 2000);
                 this.addLog("System initialized ready.");
             },
+            beforeUnmount() {
+                if (this.statusTimer) clearInterval(this.statusTimer);
+                if (this.ws) this.ws.close();
+            },
             methods: {
-                async fetchStatus() { try { const res = await axios.get('/experiment/status'); const d = res.data.data; this.currentRunId = d.run_id || "Loading..."; if (!this.isRunning) { this.isRunning = d.is_running; } } catch (e) { } },
+                async fetchStatus() {
+                    try {
+                        const res = await axios.get('/experiment/status');
+                        const d = res.data.data || {};
+                        this.currentRunId = d.run_id || "Loading...";
+                        this.isRunning = !!d.is_running;
+                        if (typeof d.current_step === 'number') this.currentStep = d.current_step;
+                        const total = d.total_steps || 0;
+                        this.progressPercent = total > 0 ? Math.round((this.currentStep / total) * 100) : 0;
+                        this.statusMessage = d.message || (this.isRunning ? "RUNNING" : "IDLE");
+                    } catch (e) { }
+                },
                 isNaN(val) { return Number.isNaN(val); },
                 toggleMaximize(view) {
                     if (this.maximizedView === view) { this.maximizedView = null; } else { this.maximizedView = view; }
@@ -552,6 +570,7 @@
 
                     // 保存文件对象到 data 中，以便 Start 时再次使用
                     this.seqFile = file;
+                    this.sequenceUploaded = false;
 
                     // 立即上传一次，让用户确认文件已加载
                     this.uploadSequenceFile();
@@ -562,6 +581,8 @@
                 async uploadSequenceFile() {
                     if (!this.seqFile) return true; // 如果没选文件，视为使用默认，返回成功
 
+                    if (this.sequenceUploaded) return true;
+
                     const formData = new FormData();
                     formData.append("file", this.seqFile);
 
@@ -571,9 +592,11 @@
                             headers: { 'Content-Type': 'multipart/form-data' }
                         });
                         this.currentSequenceName = res.data.filename;
+                        this.sequenceUploaded = true;
                         this.addLog("Sequence uploaded successfully.");
                         return true; // 上传成功
                     } catch (e) {
+                        this.sequenceUploaded = false;
                         this.addLog("Upload failed: " + (e.response?.data?.detail || e.message));
                         return false; // 上传失败
                     }
@@ -696,31 +719,122 @@
                     const wsUrl = `${protocol}//${window.location.host}/ws`;
                     this.ws = new WebSocket(wsUrl);
                     this.ws.onopen = () => this.addLog("WebSocket connected.");
-                    this.ws.onclose = () => setTimeout(this.connectWebSocket, 3000);
+                    this.ws.onclose = () => setTimeout(() => this.connectWebSocket(), 3000);
                     this.ws.onmessage = (event) => this.handleData(JSON.parse(event.data));
                 },
+                recordRealtimePoint(data) {
+                    if (data._recorded) return;
+                    data._recorded = true;
+
+                    const parameterValue = Number(data.parameter ?? 0);
+                    const key = parameterValue.toFixed(6);
+
+                    if (!this.historyMap[key]) {
+                        this.historyMap[key] = {
+                            count: 0,
+                            sum_atoms_up: 0, sum_atoms_dw: 0, sum_temp_up: 0, sum_temp_dw: 0, sum_sigma_up: 0, sum_sigma_dw: 0, sum_amp_up: 0, sum_amp_dw: 0, sum_arrival_up: 0, sum_arrival_dw: 0, sum_prob_up: 0, sum_prob_dw: 0, sum_intf_p_up: 0, sum_intf_p_dw: 0,
+                            sum_nf_atoms_up: 0, sum_nf_atoms_dw: 0, sum_nf_temp_up: 0, sum_nf_temp_dw: 0, sum_nf_sigma_up: 0, sum_nf_sigma_dw: 0, sum_nf_amp_up: 0, sum_nf_amp_dw: 0, sum_nf_arrival_up: 0, sum_nf_arrival_dw: 0, sum_nf_prob_up: 0, sum_nf_prob_dw: 0, sum_nf_intf_p_up: 0, sum_nf_intf_p_dw: 0
+                        };
+                    }
+
+                    const item = this.historyMap[key];
+                    item.count += 1;
+
+                    const metricMap = {
+                        atoms: 'atom_number',
+                        temp: 'temperature',
+                        sigma: 'sigma',
+                        amp: 'amplitude',
+                        arrival: 'arrival_time',
+                        prob: 'transition_probability'
+                    };
+
+                    Object.entries(metricMap).forEach(([metric, sourceKey]) => {
+                        item[`sum_${metric}_up`] += (data[`${sourceKey}_up`] || 0);
+                        item[`sum_${metric}_dw`] += (data[`${sourceKey}_dw`] || 0);
+                        item[`sum_nf_${metric}_up`] += (data[`${sourceKey}_up_nofit`] || 0);
+                        item[`sum_nf_${metric}_dw`] += (data[`${sourceKey}_dw_nofit`] || 0);
+                    });
+
+                    item.sum_intf_p_up += (data.intf_p1 || 0);
+                    item.sum_intf_p_dw += (data.intf_p2 || 0);
+                    item.sum_nf_intf_p_up += (data.intf_p1_nofit || 0);
+                    item.sum_nf_intf_p_dw += (data.intf_p2_nofit || 0);
+
+                    let paramLog = `P0=${parameterValue.toFixed(6)}`;
+                    if (Array.isArray(data.all_parameters) && data.all_parameters.length > 1) {
+                        paramLog = data.all_parameters.map((p, i) => `P${i}=${Number(p).toFixed(6)}`).join(", ");
+                    }
+                    if (data.detected_delay !== undefined && data.detected_delay !== null) {
+                        paramLog += ` | Δt=${(Number(data.detected_delay) * 1000).toFixed(2)}ms`;
+                    }
+                    this.addLog(paramLog);
+                },
+                renderRealtimeFrame(data) {
+                    const timeMs = (data.time_axis || []).map(t => t * 1000);
+                    const traceUpRaw = { x: timeMs, y: data.raw_data_up, type: 'scatter', mode: 'markers', marker: { color: 'black', size: 2, opacity: 0.3 }, name: 'Raw', showlegend: false };
+                    const traceUpFit = { x: timeMs, y: data.fit_data_up, type: 'scatter', mode: 'lines', line: { color: '#d62728', width: 2 }, name: 'Fit' };
+                    const traceDwRaw = { x: timeMs, y: data.raw_data_dw, type: 'scatter', mode: 'markers', marker: { color: 'black', size: 2, opacity: 0.3 }, name: 'Raw', showlegend: false };
+                    const traceDwFit = { x: timeMs, y: data.fit_data_dw, type: 'scatter', mode: 'lines', line: { color: '#1f77b4', width: 2 }, name: 'Fit' };
+                    const shapesUp = [];
+                    const shapesDw = [];
+
+                    if (data.window_up) {
+                        shapesUp.push({ type: 'rect', xref: 'x', yref: 'paper', x0: data.window_up[0] * 1000, x1: data.window_up[1] * 1000, y0: 0, y1: 1, fillcolor: '#dc3545', opacity: 0.1, line: { width: 0 } });
+                    }
+                    if (data.window_dw) {
+                        shapesDw.push({ type: 'rect', xref: 'x', yref: 'paper', x0: data.window_dw[0] * 1000, x1: data.window_dw[1] * 1000, y0: 0, y1: 1, fillcolor: '#0d6efd', opacity: 0.1, line: { width: 0 } });
+                    }
+
+                    this.layoutOscUp.datarevision = this.currentStep;
+                    this.layoutOscUp.shapes = shapesUp;
+                    Plotly.react('waveformPlotUp', [traceUpRaw, traceUpFit], this.layoutOscUp);
+
+                    this.layoutOscDw.datarevision = this.currentStep;
+                    this.layoutOscDw.shapes = shapesDw;
+                    Plotly.react('waveformPlotDw', [traceDwRaw, traceDwFit], this.layoutOscDw);
+
+                    this.plotRevision++;
+                    this.renderMainPlot();
+                },
+                scheduleRealtimeRender() {
+                    if (this.renderScheduled) return;
+                    this.renderScheduled = true;
+
+                    requestAnimationFrame(() => {
+                        const frame = this.latestRealtimeFrame;
+                        this.latestRealtimeFrame = null;
+
+                        if (frame) {
+                            this.renderRealtimeFrame(frame);
+                        }
+
+                        this.renderScheduled = false;
+                        if (this.latestRealtimeFrame) {
+                            this.scheduleRealtimeRender();
+                        }
+                    });
+                },
                 handleData(data) {
-                    this.currentStep = data.current_step;
+                    if (typeof data.current_step === 'number') {
+                        this.currentStep = data.current_step;
+                    }
                     const total = data.total_steps || 1;
                     this.progressPercent = total > 0 ? Math.round((this.currentStep / total) * 100) : 0;
-                    this.statusMessage = `Scanning: ${data.parameter}`;
+                    this.currentRunId = data.run_id || this.currentRunId;
+                    this.isRunning = true;
+                    this.statusMessage = `Scanning: ${Number(data.parameter ?? 0).toFixed(6)}`;
 
-                    if (this.isPlotting) return;
-                    this.isPlotting = true;
-                    requestAnimationFrame(() => {
-                        try {
-                            const timeMs = data.time_axis.map(t => t * 1000);
-                            const traceUpRaw = { x: timeMs, y: data.raw_data_up, type: 'scatter', mode: 'markers', marker: { color: 'black', size: 2, opacity: 0.3 }, name: 'Raw', showlegend: false };
-                            const traceUpFit = { x: timeMs, y: data.fit_data_up, type: 'scatter', mode: 'lines', line: { color: '#d62728', width: 2 }, name: 'Fit' };
-                            const traceDwRaw = { x: timeMs, y: data.raw_data_dw, type: 'scatter', mode: 'markers', marker: { color: 'black', size: 2, opacity: 0.3 }, name: 'Raw', showlegend: false };
-                            const traceDwFit = { x: timeMs, y: data.fit_data_dw, type: 'scatter', mode: 'lines', line: { color: '#1f77b4', width: 2 }, name: 'Fit' };
-                            const shapesUp = []; const shapesDw = [];
-                            if (data.window_up) shapesUp.push({ type: 'rect', xref: 'x', yref: 'paper', x0: data.window_up[0] * 1000, x1: data.window_up[1] * 1000, y0: 0, y1: 1, fillcolor: '#dc3545', opacity: 0.1, line: { width: 0 } });
-                            if (data.window_dw) shapesDw.push({ type: 'rect', xref: 'x', yref: 'paper', x0: data.window_dw[0] * 1000, x1: data.window_dw[1] * 1000, y0: 0, y1: 1, fillcolor: '#0d6efd', opacity: 0.1, line: { width: 0 } });
-                            this.layoutOscUp.datarevision = this.currentStep; this.layoutOscUp.shapes = shapesUp;
-                            Plotly.react('waveformPlotUp', [traceUpRaw, traceUpFit], this.layoutOscUp);
-                            this.layoutOscDw.datarevision = this.currentStep; this.layoutOscDw.shapes = shapesDw;
-                            Plotly.react('waveformPlotDw', [traceDwRaw, traceDwFit], this.layoutOscDw);
+                    if (data.error) {
+                        this.addLog(`Step ${this.currentStep}: ${data.error}`);
+                        this.statusMessage = "FILTERED";
+                        return;
+                    }
+
+                    this.recordRealtimePoint(data);
+                    this.latestRealtimeFrame = data;
+                    this.scheduleRealtimeRender();
+                    /*
 
                             // ... (History Update Code Omitted for Brevity, keep as is) ...
                             const key = data.parameter.toFixed(6);
@@ -762,7 +876,7 @@
                         } finally {
                             this.isPlotting = false;
                         }
-                    });
+                    */
                 },
                 async fetchSystemMode() { try { const res = await axios.get('/system/mode'); this.isSimulation = res.data.simulation; } catch (e) { } },
                 async toggleMode() { try { await axios.post('/system/mode', { simulation: this.isSimulation }); this.resetHistory(); } catch (e) { this.isSimulation = !this.isSimulation; } },
@@ -782,17 +896,32 @@
                     this.currentStep = 0;
                     this.progressPercent = 0;
                     this.plotRevision = 0;
+                    this.latestRealtimeFrame = null;
+                    this.renderScheduled = false;
                     try {
                         const res = await axios.post('/experiment/start', this.config);
                         if (res.data.status === 'success') {
                             this.isRunning = true;
-                            this.statusMessage = "RUNNING";
+                            this.statusMessage = "Starting...";
+                            this.addLog(res.data.message || "Scan started.");
+                            await this.fetchStatus();
                         }
                     } catch (error) {
                         this.addLog("Start failed: " + (error.response?.data?.detail || error.message));
                     }
                 },
-                async stopScan() { await axios.post('/experiment/stop'); this.isRunning = false; this.statusMessage = "STOPPED"; },
+                async stopScan() {
+                    try {
+                        const res = await axios.post('/experiment/stop');
+                        this.addLog(res.data.message || "Stop requested.");
+                        if (res.data.status === 'success') {
+                            this.statusMessage = "Stopping...";
+                        }
+                        await this.fetchStatus();
+                    } catch (error) {
+                        this.addLog("Stop failed: " + (error.response?.data?.detail || error.message));
+                    }
+                },
                 resetHistory() { this.historyMap = {}; this.initPlots(); }
             }
         }).mount('#app');

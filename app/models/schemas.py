@@ -57,6 +57,8 @@ class SystemSettings(BaseModel):
     """Comprehensive System Settings."""
     rp_ip_red: str
     rp_ip_green: str
+    hardware_platform: str = "redpitaya"
+    daq_rate: Optional[float] = None
     network_timeout: int
     alpha: float
     beta: float

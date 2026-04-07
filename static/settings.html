@@ -58,14 +58,10 @@
                                 class="form-control font-monospace" v-model="s.rp_ip_green"></div>
                         <div class="col-md-4"><label class="form-label">Timeout (s)</label><input type="number"
                                 class="form-control" v-model.number="s.network_timeout"></div>
-                        <div class="col-md-4">
-            <label class="form-label text-danger fw-bold">Voltage Limit (V)</label>
-            <div class="input-group">
-                <span class="input-group-text"><i class="bi bi-shield-exclamation"></i></span>
-                <input type="number" class="form-control" v-model.number="s.voltage_limit" step="0.1" placeholder="9.5">
-            </div>
-        </div>
-                        
+                        <div class="col-12">
+                            <div class="form-text text-muted">Signal thresholds are configured in the Physics & Gains tab.</div>
+                        </div>
+
                     </div>
                 </div>
 
@@ -83,7 +79,7 @@
                         </div>
                         
                         <div class="col-md-6">
-                            <label class="form-label text-danger fw-bold small">Max Limit (e.g. 0.015V)</label>
+                            <label class="form-label text-danger fw-bold small">Max Limit (e.g. 0.015 V)</label>
                             <div class="input-group input-group-sm">
                                 <span class="input-group-text"><i class="bi bi-arrow-bar-up"></i></span>
                                 <input type="number" class="form-control" v-model.number="s.voltage_limit" step="0.001" placeholder="0.015">
@@ -125,14 +121,14 @@
 
                         <div class="col-md-4" v-if="s.hardware_platform !== 'daq'">
                             <label class="form-label text-danger fw-bold">Decimation (RP)</label>
-                            <input type="number" class="form-control fw-bold" v-model.number="s.daq_rate" @input="syncDecimation" placeholder="e.g. 3990">
-<small class="text-muted" style="font-size:0.75rem">Virtual Decimation: {{ s.decimation }}</small>
-                            <small class="text-muted" style="font-size:0.75rem">Rate = 125MHz / Decimation</small>
+                            <input type="number" class="form-control fw-bold" v-model.number="s.decimation" @input="syncRateFromDecimation" placeholder="e.g. 8192">
+                            <small class="text-muted d-block" style="font-size:0.75rem">Sample Rate: {{ formatSampleRate(s.daq_rate) }}</small>
+                            <small class="text-muted" style="font-size:0.75rem">Rate = 125 MHz / Decimation</small>
                         </div>
                         
                         <div class="col-md-4" v-if="s.hardware_platform === 'daq'">
                             <label class="form-label text-success fw-bold">Sample Rate (Hz)</label>
-                            <input type="number" class="form-control fw-bold" v-model.number="s.daq_rate" placeholder="e.g. 3990">
+                            <input type="number" class="form-control fw-bold" v-model.number="s.daq_rate" @input="syncDecimationFromRate" placeholder="e.g. 15258.79">
                             <small class="text-muted" style="font-size:0.75rem">Direct DAQ Sampling Frequency</small>
                         </div>
 
@@ -245,12 +241,23 @@
             mounted() { this.fetchSettings(); },
             methods: {
                 async fetchSettings() {
-                    try { const res = await axios.get('/settings/all'); this.s = res.data; } catch (e) { console.error(e); }
+                    try {
+                        const res = await axios.get('/settings/all');
+                        this.s = {
+                            hardware_platform: 'redpitaya',
+                            decimation: 8192,
+                            daq_rate: null,
+                            voltage_limit: 0.015,
+                            max_low: 0.0001,
+                            ...res.data
+                        };
+                        this.normalizeSamplingSettings();
+                    } catch (e) { console.error(e); }
                 },
 
                 async saveSettings() {
                     this.saving = true;
-                    if(this.s.hardware_platform === 'daq') this.syncDecimation();
+                    this.normalizeSamplingSettings();
                     try {
                         await axios.post('/settings/all', this.s);
                         this.isError = false; this.msg = "Configuration updated successfully.";
@@ -262,12 +269,12 @@
                 onHardwareChange() {
                     if (this.s.hardware_platform === 'daq') {
                         this.s.rp_ip_red = '127.0.0.1:8001';
-                        //daq
-                        if (!this.s.daq_rate) this.s.daq_rate = 3990;
-                        this.syncDecimation();
+                        if (!this.s.daq_rate || this.s.daq_rate <= 0) this.s.daq_rate = 125000000 / 8192;
+                        this.syncDecimationFromRate();
                     } else {
-                        //  Red Pitaya
                         this.s.rp_ip_red = '192.168.2.5';
+                        if (!this.s.decimation || this.s.decimation <= 0) this.s.decimation = 8192;
+                        this.syncRateFromDecimation();
                     }
                 },
                 // [新增] 自动计算 Decimation 以匹配网页画图逻辑
@@ -277,6 +284,34 @@
                         // 这样网页就会认为采样率是正确的 Hz
                         this.s.decimation = Math.round(125000000 / this.s.daq_rate);
                     }
+                },
+                normalizeSamplingSettings() {
+                    if (this.s.hardware_platform === 'daq') {
+                        this.syncDecimationFromRate();
+                    } else {
+                        this.syncRateFromDecimation();
+                    }
+                },
+                syncDecimationFromRate() {
+                    const rate = Number(this.s.daq_rate);
+                    if (Number.isFinite(rate) && rate > 0) {
+                        this.s.daq_rate = rate;
+                        this.s.decimation = Math.max(1, Math.round(125000000 / rate));
+                    }
+                },
+                syncRateFromDecimation() {
+                    const decimation = Number(this.s.decimation);
+                    if (Number.isFinite(decimation) && decimation > 0) {
+                        this.s.decimation = Math.max(1, Math.round(decimation));
+                        this.s.daq_rate = 125000000 / this.s.decimation;
+                    }
+                },
+                formatSampleRate(rate) {
+                    const numericRate = Number(rate);
+                    if (!Number.isFinite(numericRate) || numericRate <= 0) return '--';
+                    if (numericRate >= 1000000) return `${(numericRate / 1000000).toFixed(3)} MHz`;
+                    if (numericRate >= 1000) return `${(numericRate / 1000).toFixed(3)} kHz`;
+                    return `${numericRate.toFixed(2)} Hz`;
                 },
                 autoFillPaths() {
                     if (!this.basePath) return;
