@@ -20,6 +20,8 @@ CMOT_BINARY_PATH_WIN = str(BASE_DIR / "mock_bin" / "cmot4_mock.exe")
 # Real Hardware Default
 MOT_BASE_DIR = BASE_DIR.parent / "mot4ztex"
 TMOT_BINARY_PATH_LINUX = str(MOT_BASE_DIR / "tmot4")
+#Ext.trigger
+#TMOT_BINARY_PATH_LINUX = str(MOT_BASE_DIR / "tmot4 -e") 
 CMOT_BINARY_PATH_LINUX = str(MOT_BASE_DIR / "cmot4")
 
 SEQUENCE_TEMPLATE_PATH_WIN = str(BASE_DIR / "temp" / "seq0.mot")

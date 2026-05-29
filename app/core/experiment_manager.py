@@ -655,7 +655,13 @@ class ExperimentManager:
 
                 fit_t_up, fit_v_up, win_up = get_fit_data(tof_axis, volt_up, fit_config.get('center_up', 0), fit_config.get('width_up', 0))
                 fit_t_dw, fit_v_dw, win_dw = get_fit_data(tof_axis, volt_dw, fit_config.get('center_dw', 0), fit_config.get('width_dw', 0))
-
+                ##Fit function
+                # --- Fitting Model Constants ---
+                #MODEL_GAUSSIAN = 1
+                #MODEL_MOD_GAUSSIAN_1 = 2
+                #MODEL_MOD_GAUSSIAN_2 = 3
+                #MODEL_LORENTZIAN = 4
+                #MODEL_SINC_SQ = 5
                 popt_up, _ = fitting.perform_odr_fit(fitting.MODEL_GAUSSIAN, fit_t_up, fit_v_up)
                 popt_dw, _ = fitting.perform_odr_fit(fitting.MODEL_GAUSSIAN, fit_t_dw, fit_v_dw)
                 fit_curve_up = fitting.fit_funcs(popt_up, tof_axis) if popt_up is not None else np.zeros_like(tof_axis)
