@@ -72,6 +72,7 @@ class ExperimentDriver:
             binary = binary_path if binary_path else config.TMOT_BINARY_PATH_LINUX
             try:
                 command = self._build_command(binary, sequence_file_path, extra_args=extra_args)
+                print(f"[TMOT] Running command: {' '.join(shlex.quote(part) for part in command)}")
                 subprocess.run(command, check=True, capture_output=True, text=True)
                 return True
             except subprocess.CalledProcessError as e:
