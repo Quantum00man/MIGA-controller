@@ -5,6 +5,8 @@ import json
 import random
 import math
 import queue
+import os
+import shlex
 import numpy as np
 from pathlib import Path
 from typing import List, Dict, Optional, Callable, Any
@@ -47,6 +49,31 @@ class ExperimentManager:
         self.proc_thread: Optional[threading.Thread] = None
         self.on_data_ready: Optional[Callable[[Dict[str, Any]], None]] = None
 
+    def _default_tmot_args(self) -> str:
+        return config.TMOT_EXTRA_ARGS_WIN if config.IS_WINDOWS else config.TMOT_EXTRA_ARGS_LINUX
+
+    def _normalize_tmot_settings(self, settings: Dict[str, Any]) -> Dict[str, Any]:
+        tmot_path = (settings.get("tmot_path") or "").strip()
+        tmot_args = settings.get("tmot_args")
+
+        if tmot_args is None:
+            tmot_args = self._default_tmot_args()
+
+        # Backward compatibility for legacy values like "/path/to/tmot4 -e".
+        if tmot_path and not os.path.exists(tmot_path):
+            try:
+                parts = shlex.split(tmot_path)
+            except ValueError:
+                parts = []
+
+            if parts:
+                settings["tmot_path"] = parts[0]
+                if len(parts) > 1 and not str(tmot_args).strip():
+                    tmot_args = " ".join(parts[1:])
+
+        settings["tmot_args"] = tmot_args
+        return settings
+
     def _load_initial_settings(self) -> Dict[str, Any]:
         # 1. 定义所有参数的默认值
         base_settings = {
@@ -83,8 +110,8 @@ class ExperimentManager:
                 print(f"[Settings] Loaded user settings from {settings_path}")
             except Exception as e:
                 print(f"[Settings] Failed to load user settings: {e}")
-        
-        return base_settings
+
+        return self._normalize_tmot_settings(base_settings)
 
     def _save_settings_to_disk(self):
         try:
@@ -97,6 +124,9 @@ class ExperimentManager:
     def get_settings(self) -> Dict[str, Any]: return self.settings
 
     def update_settings(self, new_settings: Dict[str, Any]):
+        if new_settings.get('tmot_args') is None:
+            new_settings['tmot_args'] = self.settings.get('tmot_args', self._default_tmot_args())
+        new_settings = self._normalize_tmot_settings(new_settings)
         self.settings.update(new_settings)
         self.rp_driver_red.real_ip = self.settings['rp_ip_red']
         self.rp_driver_red.timeout = int(self.settings['network_timeout'])
@@ -538,7 +568,8 @@ class ExperimentManager:
                 )
 
             tmot_bin = config.TMOT_BINARY_PATH_WIN if config.USE_SIMULATION else S['tmot_path']
-            tmot_args = "" if config.USE_SIMULATION else S.get('tmot_args', '')
+            tmot_args = "" if config.USE_SIMULATION else S.get('tmot_args', self._default_tmot_args())
+            print(f"[TMOT] Effective settings: path={tmot_bin!r}, args={tmot_args!r}")
             success = self.driver.run_sequence(
                 config.SEQUENCE_OUTPUT_PATH,
                 binary_path=tmot_bin,

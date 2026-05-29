@@ -75,7 +75,7 @@ class SystemSettings(BaseModel):
     decimation: int = 64
     link_total_time: float
     tmot_path: str
-    tmot_args: str = ""
+    tmot_args: Optional[str] = None
     cmot_path: str
     template_path: str
     voltage_limit: float = 0.015
