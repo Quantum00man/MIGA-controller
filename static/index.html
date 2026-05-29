@@ -391,9 +391,14 @@
                                 type="number" class="form-control form-control-sm" v-model.number="config.averages"
                                 min="1"></div>
                         <div class="col-6">
-                            <div class="form-check mt-4"><input class="form-check-input" type="checkbox"
-                                    v-model="config.randomize" id="randCheck"><label class="form-check-label small"
-                                    for="randCheck">Randomize</label></div>
+                            <div class="d-flex align-items-center gap-3 mt-4 flex-wrap">
+                                <div class="form-check mb-0"><input class="form-check-input" type="checkbox"
+                                        v-model="config.randomize" id="randCheck"><label
+                                        class="form-check-label small" for="randCheck">Randomize</label></div>
+                                <div class="form-check mb-0"><input class="form-check-input" type="checkbox"
+                                        v-model="config.ext_trigger" id="extTriggerCheck"><label
+                                        class="form-check-label small" for="extTriggerCheck">Ext Trigger</label></div>
+                            </div>
                         </div>
                     </div>
                     <div class="d-grid gap-2">
@@ -498,7 +503,7 @@
                         dim1_type: 'range', start: 0, stop: 10, step: 1, custom_list: '',
                         param_type: 'float', dim1_method: 'step_size',
                         dim2_enabled: false, dim2_type: 'range', dim2_start: 0, dim2_stop: 5, dim2_step: 1, dim2_list: '',
-                        averages: 1, randomize: false, mode: 'standard', mode_param: 100,
+                        averages: 1, randomize: false, ext_trigger: false, mode: 'standard', mode_param: 100,
                         link_formulas: ["(P0-151)/2+26", "100-P1"],
                         fit_center_up: 0, fit_width_up: 0, fit_center_dw: 0, fit_width_dw: 0,
                         bragg_shape: 'blackman',

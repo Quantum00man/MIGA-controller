@@ -568,8 +568,9 @@ class ExperimentManager:
                 )
 
             tmot_bin = config.TMOT_BINARY_PATH_WIN if config.USE_SIMULATION else S['tmot_path']
-            tmot_args = "" if config.USE_SIMULATION else S.get('tmot_args', self._default_tmot_args())
-            print(f"[TMOT] Effective settings: path={tmot_bin!r}, args={tmot_args!r}")
+            ext_trigger_enabled = bool(scan_config.get('ext_trigger', False))
+            tmot_args = "" if config.USE_SIMULATION else ("-e" if ext_trigger_enabled else "")
+            print(f"[TMOT] Effective settings: path={tmot_bin!r}, ext_trigger={ext_trigger_enabled}, args={tmot_args!r}")
             success = self.driver.run_sequence(
                 config.SEQUENCE_OUTPUT_PATH,
                 binary_path=tmot_bin,

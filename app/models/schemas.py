@@ -19,6 +19,7 @@ class ScanConfig(BaseModel):
     dim2_list: str = Field("")
     averages: int = Field(1)
     randomize: bool = Field(False)
+    ext_trigger: bool = Field(False)
     mode: str = Field("standard")
     mode_param: Optional[float] = Field(None)
     link_formulas: List[str] = Field(default_factory=list)
