@@ -1,6 +1,7 @@
 import os
 import time
 import subprocess
+import shlex
 import requests
 import numpy as np
 from typing import List, Tuple
@@ -33,7 +34,28 @@ class SequenceEditor:
 class ExperimentDriver:
     def __init__(self): pass
 
-    def run_sequence(self, sequence_file_path: str, binary_path: str = None) -> bool:
+    @staticmethod
+    def _build_command(binary_path: str, sequence_file_path: str, extra_args: str = "") -> List[str]:
+        binary = (binary_path or "").strip()
+        if not binary:
+            raise ValueError("TMOT binary path is empty")
+
+        # Support both the new split config (`tmot_path` + `tmot_args`)
+        # and legacy values such as "/path/to/tmot4 -e".
+        if os.path.exists(binary):
+            command = [binary]
+        else:
+            command = shlex.split(binary)
+            if not command:
+                raise ValueError("TMOT command is empty")
+
+        if extra_args:
+            command.extend(shlex.split(extra_args))
+
+        command.extend(["-f", sequence_file_path])
+        return command
+
+    def run_sequence(self, sequence_file_path: str, binary_path: str = None, extra_args: str = "") -> bool:
         if config.USE_SIMULATION:
             print(f"[SIMULATION] Executing sequence: {sequence_file_path}")
             try: requests.post(f"http://{config.RP_IP_MOCK}:{config.RP_PORT_MOCK}/trigger", timeout=1)
@@ -49,8 +71,17 @@ class ExperimentDriver:
 
             binary = binary_path if binary_path else config.TMOT_BINARY_PATH_LINUX
             try:
-                subprocess.run([binary, "-f", sequence_file_path], check=True, capture_output=True, text=True)
+                command = self._build_command(binary, sequence_file_path, extra_args=extra_args)
+                subprocess.run(command, check=True, capture_output=True, text=True)
                 return True
+            except subprocess.CalledProcessError as e:
+                cmd_str = " ".join(shlex.quote(part) for part in e.cmd)
+                print(f"Hardware Execution Error: command failed: {cmd_str}")
+                if e.stderr:
+                    print(e.stderr.strip())
+                elif e.stdout:
+                    print(e.stdout.strip())
+                return False
             except Exception as e:
                 print(f"Hardware Execution Error: {e}")
                 return False

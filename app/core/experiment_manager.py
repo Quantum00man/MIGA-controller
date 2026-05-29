@@ -57,6 +57,7 @@ class ExperimentManager:
             "g_const": config.G_CONST,
             "link_total_time": config.LINK_TOTAL_TIME,
             "tmot_path": config.TMOT_BINARY_PATH_WIN if config.IS_WINDOWS else config.TMOT_BINARY_PATH_LINUX,
+            "tmot_args": config.TMOT_EXTRA_ARGS_WIN if config.IS_WINDOWS else config.TMOT_EXTRA_ARGS_LINUX,
             "cmot_path": config.CMOT_BINARY_PATH_WIN if config.IS_WINDOWS else config.CMOT_BINARY_PATH_LINUX,
             "template_path": config.SEQUENCE_TEMPLATE_PATH_WIN if config.IS_WINDOWS else config.SEQUENCE_TEMPLATE_PATH_LINUX,
             
@@ -537,7 +538,12 @@ class ExperimentManager:
                 )
 
             tmot_bin = config.TMOT_BINARY_PATH_WIN if config.USE_SIMULATION else S['tmot_path']
-            success = self.driver.run_sequence(config.SEQUENCE_OUTPUT_PATH, binary_path=tmot_bin)
+            tmot_args = "" if config.USE_SIMULATION else S.get('tmot_args', '')
+            success = self.driver.run_sequence(
+                config.SEQUENCE_OUTPUT_PATH,
+                binary_path=tmot_bin,
+                extra_args=tmot_args
+            )
             
             if not success:
                 print(f"[Acq] Failed at step {idx+1}")

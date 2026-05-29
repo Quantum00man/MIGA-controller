@@ -16,12 +16,13 @@ SETTINGS_FILE_PATH = BASE_DIR / "user_settings.json"
 # --- Hardware Paths ---
 TMOT_BINARY_PATH_WIN = str(BASE_DIR / "mock_bin" / "tmot4_mock.exe")
 CMOT_BINARY_PATH_WIN = str(BASE_DIR / "mock_bin" / "cmot4_mock.exe")
+TMOT_EXTRA_ARGS_WIN = ""
 
 # Real Hardware Default
 MOT_BASE_DIR = BASE_DIR.parent / "mot4ztex"
 TMOT_BINARY_PATH_LINUX = str(MOT_BASE_DIR / "tmot4")
-#Ext.trigger
-#TMOT_BINARY_PATH_LINUX = str(MOT_BASE_DIR / "tmot4 -e") 
+# External trigger mode. Clear this string if your tmot4 should run without `-e`.
+TMOT_EXTRA_ARGS_LINUX = "-e"
 CMOT_BINARY_PATH_LINUX = str(MOT_BASE_DIR / "cmot4")
 
 SEQUENCE_TEMPLATE_PATH_WIN = str(BASE_DIR / "temp" / "seq0.mot")
