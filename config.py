@@ -56,6 +56,8 @@ DEFAULT_ANALYSIS_SETTINGS = {
     "gain_up": -35.0, 
     "gain_dw": -35.0,
     "max_low": 0.0001,
+    "atom_area_method": "legacy",
+    "atom_area_baseline_points": 2,
     # [CRITICAL FIX] Default Decimation set to 8192 to match 1500pts -> ~100ms
     "decimation": 8192 
 }

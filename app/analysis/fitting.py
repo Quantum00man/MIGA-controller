@@ -273,6 +273,32 @@ def calc_std(func: np.ndarray, x: np.ndarray) -> Optional[float]:
     return np.sqrt(var) if var > 0 else 0
 
 
+def calculate_area_with_edge_baseline(x_data: np.ndarray, y_data: np.ndarray, baseline_points: int = 2) -> float:
+    x_data = np.asarray(x_data, dtype=float)
+    y_data = np.asarray(y_data, dtype=float)
+
+    if len(x_data) != len(y_data) or len(x_data) == 0:
+        return 0.0
+    if len(x_data) == 1:
+        return 0.0
+
+    n = max(1, int(baseline_points or 1))
+    n = min(n, len(x_data))
+
+    left_x = float(np.mean(x_data[:n]))
+    right_x = float(np.mean(x_data[-n:]))
+    left_y = float(np.mean(y_data[:n]))
+    right_y = float(np.mean(y_data[-n:]))
+
+    if np.isclose(right_x, left_x):
+        baseline = np.full_like(y_data, 0.5 * (left_y + right_y), dtype=float)
+    else:
+        slope = (right_y - left_y) / (right_x - left_x)
+        baseline = left_y + slope * (x_data - left_x)
+
+    return float(abs(np.trapz(y_data - baseline, x_data)))
+
+
 def get_default_fit_models() -> List[Dict[str, Any]]:
     return copy.deepcopy(DEFAULT_FIT_MODELS)
 

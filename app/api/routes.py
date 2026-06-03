@@ -9,6 +9,7 @@ from app.core.data_loader import DataLoader
 from app.core.data_manager import DataManager
 from app.models.schemas import (
     AnalysisSettings,
+    ArchiveWaveformRequest,
     ExperimentResponse,
     FitModelDefinition,
     ReAnalysisRequest,
@@ -119,15 +120,58 @@ async def load_archived_waveform(year: str, month: str, day: str, run_id: str, s
     except FileNotFoundError: raise HTTPException(404, "Waveform not found")
     except Exception as e: raise HTTPException(500, str(e))
 
+@router.post("/archive/recalculate")
+async def recalculate_archived_run(req: ReAnalysisRequest):
+    try:
+        return data_loader.recalculate_run(
+            req.year,
+            req.month,
+            req.day,
+            req.run_id,
+            req.new_settings.dict(),
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+@router.post("/archive/waveforms/recalculate")
+async def recalculate_archived_waveforms(req: ArchiveWaveformRequest):
+    try:
+        return data_loader.recalculate_waveforms(
+            req.year,
+            req.month,
+            req.day,
+            req.run_id,
+            req.step_indices,
+            req.new_settings.dict(),
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
 @router.post("/archive/overwrite", response_model=ExperimentResponse)
 async def overwrite_archived_run(req: ReAnalysisRequest):
     try:
         # Use a fresh DataManager instance for overwrite ops to avoid state conflict
         dm = DataManager() 
+        recalculated = data_loader.recalculate_run(
+            req.year,
+            req.month,
+            req.day,
+            req.run_id,
+            req.new_settings.dict(),
+            max_points=None,
+        )
         dm.overwrite_run(
             req.year, req.month, req.day, req.run_id,
             req.new_settings.dict(),
-            req.updated_data
+            recalculated["data"],
         )
         return ExperimentResponse(status="success", message="Run overwritten successfully")
     except Exception as e:

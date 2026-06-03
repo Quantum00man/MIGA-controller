@@ -153,8 +153,10 @@ class DataManager:
         config_path = target_dir / "config.json"
         if config_path.exists():
             with open(config_path, 'r') as f: data = json.load(f)
-            data['_system_settings_snapshot'] = new_settings
-            data['_analysis_snapshot'] = new_settings 
+            existing_system = data.get('_system_settings_snapshot') if isinstance(data.get('_system_settings_snapshot'), dict) else {}
+            existing_analysis = data.get('_analysis_snapshot') if isinstance(data.get('_analysis_snapshot'), dict) else {}
+            data['_system_settings_snapshot'] = {**existing_system, **new_settings}
+            data['_analysis_snapshot'] = {**existing_analysis, **new_settings}
             with open(config_path, 'w') as f: json.dump(data, f, indent=4)
 
         csv_path = target_dir / "results.csv"

@@ -1,11 +1,17 @@
-import os
 import csv
 import json
-import math  # <--- [修复1] 必须导入 math 库
-import numpy as np
+import math
 from pathlib import Path
-from typing import Dict, List, Any
+from typing import Any, Dict, List, Optional, Tuple
+
+import numpy as np
+
+from app.analysis import fitting, physics
 import config
+
+
+MAX_DISPLAY_POINTS = 3000
+
 
 class DataLoader:
     def __init__(self):
@@ -13,7 +19,8 @@ class DataLoader:
 
     def get_archive_tree(self) -> Dict[str, Any]:
         tree = {}
-        if not self.base_dir.exists(): return tree
+        if not self.base_dir.exists():
+            return tree
         for year_dir in sorted(self.base_dir.iterdir()):
             if year_dir.is_dir():
                 year = year_dir.name
@@ -29,96 +36,506 @@ class DataLoader:
                                 tree[year][month][day] = runs
         return tree
 
-    # [新增] 递归清洗函数
     def _sanitize_structure(self, data):
-        """递归将 NaN/Infinity 转换为 None 或 0.0"""
         if isinstance(data, dict):
             return {k: self._sanitize_structure(v) for k, v in data.items()}
-        elif isinstance(data, list):
+        if isinstance(data, list):
             return [self._sanitize_structure(v) for v in data]
-        elif isinstance(data, float):
-            if math.isnan(data) or math.isinf(data):
-                return 0.0 # 或者 None
+        if isinstance(data, float) and (math.isnan(data) or math.isinf(data)):
+            return 0.0
         return data
 
-    def load_run(self, year: str, month: str, day: str, run_id: str) -> Dict[str, Any]:
+    def _get_run_dir(self, year: str, month: str, day: str, run_id: str) -> Path:
         run_dir = self.base_dir / year / month / day / run_id
-        if not run_dir.exists(): raise FileNotFoundError(f"Run not found: {run_dir}")
+        if not run_dir.exists():
+            raise FileNotFoundError(f"Run not found: {run_dir}")
+        return run_dir
 
-        config_data = {}
+    def _load_config_data(self, run_dir: Path) -> Dict[str, Any]:
         config_path = run_dir / "config.json"
-        if config_path.exists():
-            try:
-                with open(config_path, 'r') as f: 
-                    raw_config = json.load(f)
-                    # [修复2] 清洗 Config 数据，防止 settings 里有 NaN
-                    config_data = self._sanitize_structure(raw_config)
-            except: pass
+        if not config_path.exists():
+            return {}
+        try:
+            with open(config_path, "r") as handle:
+                return self._sanitize_structure(json.load(handle))
+        except Exception:
+            return {}
 
-        data_points = []
+    def _parse_float(self, value: Any) -> Optional[float]:
+        if value is None:
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        try:
+            parsed = float(text)
+        except ValueError:
+            return None
+        if math.isnan(parsed) or math.isinf(parsed):
+            return None
+        return parsed
+
+    def _parse_int(self, value: Any, default: int = 0) -> int:
+        parsed = self._parse_float(value)
+        return int(parsed) if parsed is not None else default
+
+    def _parse_parameters(self, value: Any) -> List[float]:
+        if value is None:
+            return []
+        raw_parts = str(value).split(";")
+        parsed: List[float] = []
+        for part in raw_parts:
+            number = self._parse_float(part)
+            if number is not None:
+                parsed.append(number)
+        return parsed
+
+    def _row_to_point(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "step": self._parse_int(row.get("Step"), 0),
+            "timestamp": self._parse_float(row.get("Timestamp")) or 0.0,
+            "parameter": self._parse_float(row.get("Parameter_P0")) or 0.0,
+            "all_parameters": self._parse_parameters(row.get("All_Parameters")),
+            "atom_number_up": self._parse_float(row.get("Atom_UP")),
+            "atom_number_dw": self._parse_float(row.get("Atom_DW")),
+            "temperature_up": self._parse_float(row.get("Temp_UP")),
+            "temperature_dw": self._parse_float(row.get("Temp_DW")),
+            "sigma_up": self._parse_float(row.get("Sigma_UP")),
+            "sigma_dw": self._parse_float(row.get("Sigma_DW")),
+            "amplitude_up": self._parse_float(row.get("Amp_UP")),
+            "amplitude_dw": self._parse_float(row.get("Amp_DW")),
+            "arrival_time_up": self._parse_float(row.get("Center_UP")),
+            "arrival_time_dw": self._parse_float(row.get("Center_DW")),
+            "transition_probability_up": self._parse_float(row.get("Prob_UP_F2")),
+            "transition_probability_dw": self._parse_float(row.get("Prob_DW_F1")),
+            "intf_n1": self._parse_float(row.get("Intf_N1")),
+            "intf_n2": self._parse_float(row.get("Intf_N2")),
+            "intf_p1": self._parse_float(row.get("Intf_P1")),
+            "intf_p2": self._parse_float(row.get("Intf_P2")),
+            "atom_number_up_nofit": self._parse_float(row.get("NF_Atom_UP")),
+            "atom_number_dw_nofit": self._parse_float(row.get("NF_Atom_DW")),
+            "temperature_up_nofit": self._parse_float(row.get("NF_Temp_UP")),
+            "temperature_dw_nofit": self._parse_float(row.get("NF_Temp_DW")),
+            "sigma_up_nofit": self._parse_float(row.get("NF_Sigma_UP")),
+            "sigma_dw_nofit": self._parse_float(row.get("NF_Sigma_DW")),
+            "amplitude_up_nofit": self._parse_float(row.get("NF_Amp_UP")),
+            "amplitude_dw_nofit": self._parse_float(row.get("NF_Amp_DW")),
+            "arrival_time_up_nofit": self._parse_float(row.get("NF_Center_UP")),
+            "arrival_time_dw_nofit": self._parse_float(row.get("NF_Center_DW")),
+            "transition_probability_up_nofit": self._parse_float(row.get("NF_Prob_UP")),
+            "transition_probability_dw_nofit": self._parse_float(row.get("NF_Prob_DW")),
+            "intf_n1_nofit": self._parse_float(row.get("NF_Intf_N1")),
+            "intf_n2_nofit": self._parse_float(row.get("NF_Intf_N2")),
+            "intf_p1_nofit": self._parse_float(row.get("NF_Intf_P1")),
+            "intf_p2_nofit": self._parse_float(row.get("NF_Intf_P2")),
+        }
+
+    def _read_results_csv(self, run_dir: Path, max_points: Optional[int] = MAX_DISPLAY_POINTS) -> List[Dict[str, Any]]:
         csv_path = run_dir / "results.csv"
-        
-        MAX_DISPLAY_POINTS = 3000
-        
-        if csv_path.exists():
-            with open(csv_path, 'r') as f:
-                reader = list(csv.DictReader(f)) 
-                total_rows = len(reader)
-                
-                step = 1
-                if total_rows > MAX_DISPLAY_POINTS:
-                    step = total_rows // MAX_DISPLAY_POINTS
-                
-                for row in reader[::step]:
-                    # 这里的 safe_float 之前会因为缺少 math 库而报错
-                    def safe_float(key): 
-                        val = row.get(key)
-                        if not val or val.strip() == "": return None
-                        try:
-                            f = float(val)
-                            if math.isnan(f) or math.isinf(f): return None
-                            return f
-                        except ValueError: return None
-                    
-                    point = {
-                        "step": int(row["Step"]) if row.get("Step") else 0,
-                        "parameter": safe_float("Parameter_P0") if safe_float("Parameter_P0") is not None else 0.0,
-                        "all_parameters": [float(x) for x in row["All_Parameters"].split(";")] if row.get("All_Parameters") else [],
-                        
-                        "atom_number_up": safe_float("Atom_UP"), "atom_number_dw": safe_float("Atom_DW"),
-                        "temperature_up": safe_float("Temp_UP"), "temperature_dw": safe_float("Temp_DW"),
-                        "sigma_up": safe_float("Sigma_UP"), "sigma_dw": safe_float("Sigma_DW"),
-                        "amplitude_up": safe_float("Amp_UP"), "amplitude_dw": safe_float("Amp_DW"),
-                        "arrival_time_up": safe_float("Center_UP"), "arrival_time_dw": safe_float("Center_DW"),
-                        "transition_probability_up": safe_float("Prob_UP_F2"), "transition_probability_dw": safe_float("Prob_DW_F1"),
-                        
-                        "atom_number_up_nofit": safe_float("NF_Atom_UP"), "atom_number_dw_nofit": safe_float("NF_Atom_DW"),
-                        "temperature_up_nofit": safe_float("NF_Temp_UP"), "temperature_dw_nofit": safe_float("NF_Temp_DW"),
-                        "sigma_up_nofit": safe_float("NF_Sigma_UP"), "sigma_dw_nofit": safe_float("NF_Sigma_DW"),
-                        "amplitude_up_nofit": safe_float("NF_Amp_UP"), "amplitude_dw_nofit": safe_float("NF_Amp_DW"),
-                        "arrival_time_up_nofit": safe_float("NF_Center_UP"), "arrival_time_dw_nofit": safe_float("NF_Center_DW"),
-                        "transition_probability_up_nofit": safe_float("NF_Prob_UP"), "transition_probability_dw_nofit": safe_float("NF_Prob_DW"),
-                    }
-                    data_points.append(point)
+        if not csv_path.exists():
+            return []
 
-        return { "config": config_data, "data": data_points }
+        with open(csv_path, "r") as handle:
+            rows = list(csv.DictReader(handle))
 
-    def load_waveform(self, year: str, month: str, day: str, run_id: str, step_index: int) -> Dict[str, Any]:
-        npz_path = self.base_dir / year / month / day / run_id / "waveforms" / f"step_{step_index:04d}.npz"
-        if not npz_path.exists(): raise FileNotFoundError(f"Waveform not found")
+        if max_points is None or max_points <= 0 or len(rows) <= max_points:
+            sampled_rows = rows
+        else:
+            step = max(1, len(rows) // max_points)
+            sampled_rows = rows[::step]
+
+        return [self._row_to_point(row) for row in sampled_rows]
+
+    def load_run(self, year: str, month: str, day: str, run_id: str) -> Dict[str, Any]:
+        run_dir = self._get_run_dir(year, month, day, run_id)
+        return {
+            "config": self._load_config_data(run_dir),
+            "data": self._read_results_csv(run_dir, max_points=MAX_DISPLAY_POINTS),
+        }
+
+    def _load_waveform_arrays(self, run_dir: Path, step_index: int) -> Dict[str, Any]:
+        npz_path = run_dir / "waveforms" / f"step_{step_index:04d}.npz"
+        if not npz_path.exists():
+            raise FileNotFoundError("Waveform not found")
+
         try:
             with np.load(npz_path) as data:
-                def get_arr(k): 
-                    # [修复3] 波形数据也要清洗
-                    arr = data[k].tolist() if k in data else []
-                    return [0.0 if (math.isnan(x) or math.isinf(x)) else x for x in arr]
-                
-                def get_val(k): return data[k].tolist() if k in data else None
-                
+                def get_arr(key: str) -> np.ndarray:
+                    if key not in data:
+                        return np.array([], dtype=float)
+                    arr = np.asarray(data[key], dtype=float)
+                    if arr.size == 0:
+                        return np.array([], dtype=float)
+                    arr = arr.copy()
+                    arr[~np.isfinite(arr)] = 0.0
+                    return arr
+
+                def get_window(key: str) -> Optional[Tuple[float, float]]:
+                    if key not in data:
+                        return None
+                    raw = np.asarray(data[key], dtype=float).tolist()
+                    if len(raw) != 2:
+                        return None
+                    if raw[0] == -1 or raw[1] == -1:
+                        return None
+                    return float(raw[0]), float(raw[1])
+
                 return {
-                    "time_axis": get_arr('time_axis'),
-                    "raw_up": get_arr('raw_up'), "raw_dw": get_arr('raw_dw'),
-                    "fit_up": get_arr('fit_up'), "fit_dw": get_arr('fit_dw'),
-                    "window_up": get_val('window_up'), "window_dw": get_val('window_dw')
+                    "time_axis": get_arr("time_axis"),
+                    "raw_up": get_arr("raw_up"),
+                    "raw_dw": get_arr("raw_dw"),
+                    "fit_up": get_arr("fit_up"),
+                    "fit_dw": get_arr("fit_dw"),
+                    "window_up": get_window("window_up"),
+                    "window_dw": get_window("window_dw"),
                 }
-        except Exception as e: raise RuntimeError(f"Failed to load waveform: {str(e)}")
+        except Exception as exc:
+            raise RuntimeError(f"Failed to load waveform: {str(exc)}")
+
+    def load_waveform(self, year: str, month: str, day: str, run_id: str, step_index: int) -> Dict[str, Any]:
+        run_dir = self._get_run_dir(year, month, day, run_id)
+        waveform = self._load_waveform_arrays(run_dir, step_index)
+        return {
+            "time_axis": waveform["time_axis"].tolist(),
+            "raw_up": waveform["raw_up"].tolist(),
+            "raw_dw": waveform["raw_dw"].tolist(),
+            "fit_up": waveform["fit_up"].tolist(),
+            "fit_dw": waveform["fit_dw"].tolist(),
+            "window_up": list(waveform["window_up"]) if waveform["window_up"] is not None else [-1, -1],
+            "window_dw": list(waveform["window_dw"]) if waveform["window_dw"] is not None else [-1, -1],
+        }
+
+    def _normalize_archive_settings(self, new_settings: Dict[str, Any], fallback: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        settings = dict(config.DEFAULT_ANALYSIS_SETTINGS)
+        settings.update(
+            {
+                "voltage_limit": 0.015,
+                "intf_alpha": 0.35,
+                "intf_beta": 0.07636,
+                "intf_gamma": 0.25,
+                "fit_model_key": "gaussian",
+                "fit_models": fitting.get_default_fit_models(),
+            }
+        )
+
+        if isinstance(fallback, dict):
+            settings.update(self._sanitize_structure(fallback))
+        if isinstance(new_settings, dict):
+            settings.update(self._sanitize_structure(new_settings))
+
+        fit_models = fitting.normalize_fit_model_list(settings.get("fit_models") or fitting.get_default_fit_models())
+        selected_model = fitting.get_fit_model_by_key(fit_models, settings.get("fit_model_key", "gaussian"))
+        settings["fit_models"] = fit_models
+        settings["fit_model_key"] = selected_model["key"]
+
+        method = str(settings.get("atom_area_method") or "legacy").strip().lower()
+        settings["atom_area_method"] = "edge_line" if method == "edge_line" else "legacy"
+        try:
+            baseline_points = int(settings.get("atom_area_baseline_points", 2))
+        except (TypeError, ValueError):
+            baseline_points = 2
+        settings["atom_area_baseline_points"] = max(1, baseline_points)
+
+        return settings
+
+    def _safe_scalar(self, value: Any, default: float = 0.0) -> float:
+        if value is None:
+            return default
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return default
+        if math.isnan(parsed) or math.isinf(parsed):
+            return default
+        return parsed
+
+    def _safe_gain(self, settings: Dict[str, Any], key: str) -> float:
+        gain = self._safe_scalar(settings.get(key), 1.0)
+        return 1.0 if abs(gain) < 1e-12 else gain
+
+    def _safe_window(self, window: Optional[Tuple[float, float]]) -> List[float]:
+        if window is None:
+            return [-1, -1]
+        return [float(window[0]), float(window[1])]
+
+    def _select_fit_data(
+        self,
+        time_axis: np.ndarray,
+        signal: np.ndarray,
+        window: Optional[Tuple[float, float]],
+    ) -> Tuple[np.ndarray, np.ndarray, Optional[Tuple[float, float]]]:
+        if window is None:
+            return time_axis, signal, None
+
+        start, end = float(window[0]), float(window[1])
+        mask = (time_axis >= start) & (time_axis <= end)
+        if np.any(mask):
+            return time_axis[mask], signal[mask], (start, end)
+        return time_axis, signal, None
+
+    def _prepare_waveform_context(
+        self,
+        waveform: Dict[str, Any],
+        settings: Dict[str, Any],
+        original_settings: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        time_axis = np.asarray(waveform.get("time_axis", np.array([], dtype=float)), dtype=float)
+        raw_up_stored = np.asarray(waveform.get("raw_up", np.array([], dtype=float)), dtype=float)
+        raw_dw_stored = np.asarray(waveform.get("raw_dw", np.array([], dtype=float)), dtype=float)
+
+        min_len = min(len(time_axis), len(raw_up_stored), len(raw_dw_stored))
+        if min_len == 0:
+            raise ValueError("Archived waveform is empty")
+
+        time_axis = time_axis[:min_len]
+        raw_up_stored = raw_up_stored[:min_len]
+        raw_dw_stored = raw_dw_stored[:min_len]
+
+        old_gain_up = self._safe_gain(original_settings, "gain_up")
+        old_gain_dw = self._safe_gain(original_settings, "gain_dw")
+        new_gain_up = self._safe_gain(settings, "gain_up")
+        new_gain_dw = self._safe_gain(settings, "gain_dw")
+
+        clean_up = raw_up_stored * old_gain_up
+        clean_dw = raw_dw_stored * old_gain_dw
+        volt_up = clean_up / new_gain_up
+        volt_dw = clean_dw / new_gain_dw
+
+        fit_t_up, fit_v_up, win_up = self._select_fit_data(time_axis, volt_up, waveform.get("window_up"))
+        fit_t_dw, fit_v_dw, win_dw = self._select_fit_data(time_axis, volt_dw, waveform.get("window_dw"))
+
+        fit_models = settings.get("fit_models") or fitting.get_default_fit_models()
+        fit_model = fitting.get_fit_model_by_key(fit_models, settings.get("fit_model_key", "gaussian"))
+        fit_result_up = fitting.perform_configured_fit(fit_model, fit_t_up, fit_v_up, eval_x=time_axis)
+        fit_result_dw = fitting.perform_configured_fit(fit_model, fit_t_dw, fit_v_dw, eval_x=time_axis)
+
+        return {
+            "time_axis": time_axis,
+            "clean_up": clean_up,
+            "clean_dw": clean_dw,
+            "volt_up": volt_up,
+            "volt_dw": volt_dw,
+            "fit_t_up": fit_t_up,
+            "fit_t_dw": fit_t_dw,
+            "fit_v_up": fit_v_up,
+            "fit_v_dw": fit_v_dw,
+            "win_up": win_up,
+            "win_dw": win_dw,
+            "fit_result_up": fit_result_up,
+            "fit_result_dw": fit_result_dw,
+        }
+
+    def _recalculate_point(
+        self,
+        point: Dict[str, Any],
+        waveform: Dict[str, Any],
+        settings: Dict[str, Any],
+        original_settings: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        context = self._prepare_waveform_context(waveform, settings, original_settings)
+        clean_up = context["clean_up"]
+        clean_dw = context["clean_dw"]
+        fit_t_up = context["fit_t_up"]
+        fit_t_dw = context["fit_t_dw"]
+        fit_v_up = context["fit_v_up"]
+        fit_v_dw = context["fit_v_dw"]
+        fit_result_up = context["fit_result_up"]
+        fit_result_dw = context["fit_result_dw"]
+
+        v_limit = self._safe_scalar(settings.get("voltage_limit"), 0.015)
+        min_limit = self._safe_scalar(settings.get("max_low"), 0.0001)
+
+        max_clean_up = float(np.max(np.abs(clean_up))) if clean_up.size else 0.0
+        max_clean_dw = float(np.max(np.abs(clean_dw))) if clean_dw.size else 0.0
+        if max_clean_up > v_limit or max_clean_dw > v_limit:
+            return None
+
+        amp_up_nf = float(np.max(fit_v_up)) if fit_v_up.size else 0.0
+        amp_dw_nf = float(np.max(fit_v_dw)) if fit_v_dw.size else 0.0
+        if abs(amp_up_nf) < min_limit and abs(amp_dw_nf) < min_limit:
+            return None
+
+        amp_up = fit_result_up.amplitude if fit_result_up is not None else 0.0
+        sig_up = fit_result_up.width if fit_result_up is not None else 0.0
+        cen_up = fit_result_up.center if fit_result_up is not None else 0.0
+        amp_dw = fit_result_dw.amplitude if fit_result_dw is not None else 0.0
+        sig_dw = fit_result_dw.width if fit_result_dw is not None else 0.0
+        cen_dw = fit_result_dw.center if fit_result_dw is not None else 0.0
+
+        sig_up_nf = fitting.calc_sigma(fit_v_up, fit_t_up) or 0.0
+        sig_dw_nf = fitting.calc_sigma(fit_v_dw, fit_t_dw) or 0.0
+        cen_up_nf = float(fit_t_up[int(np.argmax(fit_v_up))]) if fit_v_up.size else 0.0
+        cen_dw_nf = float(fit_t_dw[int(np.argmax(fit_v_dw))]) if fit_v_dw.size else 0.0
+
+        if settings["atom_area_method"] == "edge_line":
+            baseline_points = settings["atom_area_baseline_points"]
+            area_up_nf = fitting.calculate_area_with_edge_baseline(fit_t_up, fit_v_up, baseline_points)
+            area_dw_nf = fitting.calculate_area_with_edge_baseline(fit_t_dw, fit_v_dw, baseline_points)
+            area_up = (
+                fitting.calculate_area_with_edge_baseline(fit_t_up, fit_result_up.fit_window_curve, baseline_points)
+                if fit_result_up is not None
+                else 0.0
+            )
+            area_dw = (
+                fitting.calculate_area_with_edge_baseline(fit_t_dw, fit_result_dw.fit_window_curve, baseline_points)
+                if fit_result_dw is not None
+                else 0.0
+            )
+        else:
+            area_up_nf = float(abs(np.trapz(fit_v_up, fit_t_up))) if fit_t_up.size > 1 else 0.0
+            area_dw_nf = float(abs(np.trapz(fit_v_dw, fit_t_dw))) if fit_t_dw.size > 1 else 0.0
+            area_up = fit_result_up.area if fit_result_up is not None else 0.0
+            area_dw = fit_result_dw.area if fit_result_dw is not None else 0.0
+
+        n_f2, n_f1 = physics.calculate_atom_numbers(
+            area_up,
+            area_dw,
+            max_vol_up=amp_up,
+            max_vol_dw=amp_dw,
+            alpha=settings["alpha"],
+            beta=settings["beta"],
+            R=settings["R"],
+            K=settings["K"],
+            max_low=settings["max_low"],
+        )
+        n_f2_nf, n_f1_nf = physics.calculate_atom_numbers(
+            area_up_nf,
+            area_dw_nf,
+            max_vol_up=amp_up_nf,
+            max_vol_dw=amp_dw_nf,
+            alpha=settings["alpha"],
+            beta=settings["beta"],
+            R=settings["R"],
+            K=settings["K"],
+            max_low=settings["max_low"],
+        )
+
+        temp_up = physics.calculate_temperature(sig_up, cen_up, settings["launch_velocity"], is_sigma_in_ms=False)
+        temp_dw = physics.calculate_temperature(sig_dw, cen_dw, settings["launch_velocity"], is_sigma_in_ms=False)
+        temp_up_nf = physics.calculate_temperature(sig_up_nf, cen_up_nf, settings["launch_velocity"], is_sigma_in_ms=False)
+        temp_dw_nf = physics.calculate_temperature(sig_dw_nf, cen_dw_nf, settings["launch_velocity"], is_sigma_in_ms=False)
+
+        prob_up, prob_dw = physics.calculate_probabilities(n_f2, n_f1)
+        prob_up_nf, prob_dw_nf = physics.calculate_probabilities(n_f2_nf, n_f1_nf)
+
+        intf_n1, intf_n2, intf_p1, intf_p2 = physics.calculate_interferometer_output(
+            n_f1,
+            n_f2,
+            settings.get("intf_alpha", 0.35),
+            settings.get("intf_beta", 0.07636),
+            settings.get("intf_gamma", 0.25),
+        )
+        intf_n1_nf, intf_n2_nf, intf_p1_nf, intf_p2_nf = physics.calculate_interferometer_output(
+            n_f1_nf,
+            n_f2_nf,
+            settings.get("intf_alpha", 0.35),
+            settings.get("intf_beta", 0.07636),
+            settings.get("intf_gamma", 0.25),
+        )
+
+        return {
+            **point,
+            "atom_number_up": n_f2,
+            "atom_number_dw": n_f1,
+            "amplitude_up": amp_up,
+            "amplitude_dw": amp_dw,
+            "sigma_up": sig_up * 1000.0,
+            "sigma_dw": sig_dw * 1000.0,
+            "temperature_up": temp_up,
+            "temperature_dw": temp_dw,
+            "arrival_time_up": cen_up,
+            "arrival_time_dw": cen_dw,
+            "transition_probability_up": prob_up,
+            "transition_probability_dw": prob_dw,
+            "intf_n1": intf_n1,
+            "intf_n2": intf_n2,
+            "intf_p1": intf_p1,
+            "intf_p2": intf_p2,
+            "atom_number_up_nofit": n_f2_nf,
+            "atom_number_dw_nofit": n_f1_nf,
+            "amplitude_up_nofit": amp_up_nf,
+            "amplitude_dw_nofit": amp_dw_nf,
+            "sigma_up_nofit": sig_up_nf * 1000.0,
+            "sigma_dw_nofit": sig_dw_nf * 1000.0,
+            "temperature_up_nofit": temp_up_nf,
+            "temperature_dw_nofit": temp_dw_nf,
+            "arrival_time_up_nofit": cen_up_nf,
+            "arrival_time_dw_nofit": cen_dw_nf,
+            "transition_probability_up_nofit": prob_up_nf,
+            "transition_probability_dw_nofit": prob_dw_nf,
+            "intf_n1_nofit": intf_n1_nf,
+            "intf_n2_nofit": intf_n2_nf,
+            "intf_p1_nofit": intf_p1_nf,
+            "intf_p2_nofit": intf_p2_nf,
+        }
+
+    def recalculate_run(
+        self,
+        year: str,
+        month: str,
+        day: str,
+        run_id: str,
+        new_settings: Dict[str, Any],
+        max_points: Optional[int] = MAX_DISPLAY_POINTS,
+    ) -> Dict[str, Any]:
+        run_dir = self._get_run_dir(year, month, day, run_id)
+        config_data = self._load_config_data(run_dir)
+        original_settings = (
+            config_data.get("_system_settings_snapshot")
+            or config_data.get("_analysis_snapshot")
+            or {}
+        )
+        settings = self._normalize_archive_settings(new_settings, fallback=original_settings)
+        points = self._read_results_csv(run_dir, max_points=max_points)
+
+        recalculated_points: List[Dict[str, Any]] = []
+        for point in points:
+            waveform = self._load_waveform_arrays(run_dir, int(point["step"]))
+            result = self._recalculate_point(point, waveform, settings, original_settings)
+            if result is not None:
+                recalculated_points.append(result)
+
+        return {
+            "config": config_data,
+            "settings": settings,
+            "data": recalculated_points,
+        }
+
+    def recalculate_waveforms(
+        self,
+        year: str,
+        month: str,
+        day: str,
+        run_id: str,
+        step_indices: List[int],
+        new_settings: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        run_dir = self._get_run_dir(year, month, day, run_id)
+        config_data = self._load_config_data(run_dir)
+        original_settings = (
+            config_data.get("_system_settings_snapshot")
+            or config_data.get("_analysis_snapshot")
+            or {}
+        )
+        settings = self._normalize_archive_settings(new_settings, fallback=original_settings)
+
+        waveforms: List[Dict[str, Any]] = []
+        for step_index in step_indices:
+            waveform = self._load_waveform_arrays(run_dir, int(step_index))
+            context = self._prepare_waveform_context(waveform, settings, original_settings)
+            fit_curve_up = context["fit_result_up"].fit_curve if context["fit_result_up"] is not None else np.zeros_like(context["time_axis"])
+            fit_curve_dw = context["fit_result_dw"].fit_curve if context["fit_result_dw"] is not None else np.zeros_like(context["time_axis"])
+            waveforms.append(
+                {
+                    "step": int(step_index),
+                    "time_axis": context["time_axis"].tolist(),
+                    "raw_up": context["volt_up"].tolist(),
+                    "raw_dw": context["volt_dw"].tolist(),
+                    "fit_up": fit_curve_up.tolist(),
+                    "fit_dw": fit_curve_dw.tolist(),
+                    "window_up": self._safe_window(context["win_up"]),
+                    "window_dw": self._safe_window(context["win_dw"]),
+                }
+            )
+
+        return {"settings": settings, "data": waveforms}

@@ -189,6 +189,35 @@
                 <div v-if="tab==='fitting'">
                     <div class="row g-3">
                         <div class="col-12">
+                            <div class="bg-white border rounded p-3 shadow-sm">
+                                <h6 class="fw-bold text-uppercase text-muted mb-3">Atom Number Area Calculation</h6>
+                                <div class="row g-3 align-items-end">
+                                    <div class="col-md-7">
+                                        <label class="form-label small text-muted fw-bold">Area Method</label>
+                                        <select class="form-select" v-model="s.atom_area_method">
+                                            <option value="legacy">Legacy</option>
+                                            <option value="edge_line">Edge Line Baseline</option>
+                                        </select>
+                                        <div class="form-text">
+                                            <span v-if="s.atom_area_method === 'legacy'">
+                                                Keep the original area definition. Raw uses direct window integral; fit uses the model's configured area mode.
+                                            </span>
+                                            <span v-else>
+                                                For both raw and fit, connect the averaged values at the two window edges with a straight line, subtract that baseline, then integrate the remaining area.
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-5">
+                                        <label class="form-label small text-muted fw-bold">Edge Points Per Side (N)</label>
+                                        <input type="number" class="form-control" v-model.number="s.atom_area_baseline_points"
+                                            min="1" step="1" :disabled="s.atom_area_method !== 'edge_line'">
+                                        <div class="form-text">Default: 2. Uses the first N and last N points in the fitting window.</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="col-12">
                             <div class="bg-light border rounded p-3">
                                 <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
                                     <div>
@@ -474,6 +503,9 @@
                 },
                 normalizeSettings(settings) {
                     const normalized = { ...(settings || {}) };
+                    normalized.atom_area_method = normalized.atom_area_method === 'edge_line' ? 'edge_line' : 'legacy';
+                    const baselinePoints = Number.parseInt(normalized.atom_area_baseline_points ?? 2, 10);
+                    normalized.atom_area_baseline_points = Number.isFinite(baselinePoints) && baselinePoints > 0 ? baselinePoints : 2;
                     normalized.fit_models = this.normalizeFitModels(normalized.fit_models);
                     if (!normalized.fit_models.find(model => model.key === normalized.fit_model_key)) {
                         normalized.fit_model_key = normalized.fit_models[0].key;

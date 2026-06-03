@@ -70,6 +70,14 @@ class AnalysisSettings(BaseModel):
     intf_alpha: float = 0.35
     intf_beta: float = 0.07636
     intf_gamma: float = 0.25
+    atom_area_method: str = Field("legacy")
+    atom_area_baseline_points: int = Field(2)
+
+
+class ArchiveAnalysisSettings(AnalysisSettings):
+    fit_model_key: str = Field("gaussian")
+    fit_models: List[FitModelDefinition] = Field(default_factory=list)
+
 
 class SystemSettings(BaseModel):
     """Comprehensive System Settings."""
@@ -100,6 +108,8 @@ class SystemSettings(BaseModel):
     intf_alpha: float = 0.35
     intf_beta: float = 0.07636
     intf_gamma: float = 0.25
+    atom_area_method: str = Field("legacy")
+    atom_area_baseline_points: int = Field(2)
     fit_model_key: str = Field("gaussian")
     fit_models: List[FitModelDefinition] = Field(default_factory=list)
 
@@ -113,5 +123,14 @@ class ReAnalysisRequest(BaseModel):
     month: str
     day: str
     run_id: str
-    new_settings: AnalysisSettings
-    updated_data: List[Dict[str, Any]]
+    new_settings: ArchiveAnalysisSettings
+    updated_data: Optional[List[Dict[str, Any]]] = None
+
+
+class ArchiveWaveformRequest(BaseModel):
+    year: str
+    month: str
+    day: str
+    run_id: str
+    step_indices: List[int]
+    new_settings: ArchiveAnalysisSettings

@@ -114,7 +114,9 @@ class ExperimentManager:
         base_settings.setdefault("fit_model_key", "gaussian")
         base_settings.setdefault("fit_models", fitting.get_default_fit_models())
 
-        return self._normalize_fit_settings(self._normalize_tmot_settings(base_settings), strict=False)
+        return self._normalize_atom_area_settings(
+            self._normalize_fit_settings(self._normalize_tmot_settings(base_settings), strict=False)
+        )
 
     def _save_settings_to_disk(self):
         try:
@@ -145,10 +147,26 @@ class ExperimentManager:
         settings["fit_model_key"] = selected_fit_model["key"]
         return settings
 
+    def _normalize_atom_area_settings(self, settings: Dict[str, Any]) -> Dict[str, Any]:
+        method = str(settings.get("atom_area_method") or "legacy").strip().lower()
+        if method not in {"legacy", "edge_line"}:
+            method = "legacy"
+
+        try:
+            baseline_points = int(settings.get("atom_area_baseline_points", 2))
+        except (TypeError, ValueError):
+            baseline_points = 2
+
+        settings["atom_area_method"] = method
+        settings["atom_area_baseline_points"] = max(1, baseline_points)
+        return settings
+
     def update_settings(self, new_settings: Dict[str, Any]):
         if new_settings.get('tmot_args') is None:
             new_settings['tmot_args'] = self.settings.get('tmot_args', self._default_tmot_args())
-        new_settings = self._normalize_fit_settings(self._normalize_tmot_settings(new_settings), strict=True)
+        new_settings = self._normalize_atom_area_settings(
+            self._normalize_fit_settings(self._normalize_tmot_settings(new_settings), strict=True)
+        )
         self.settings.update(new_settings)
         self.rp_driver_red.real_ip = self.settings['rp_ip_red']
         self.rp_driver_red.timeout = int(self.settings['network_timeout'])
@@ -732,6 +750,8 @@ class ExperimentManager:
                 fit_result_dw = fitting.perform_configured_fit(selected_fit_model, fit_t_dw, fit_v_dw, eval_x=tof_axis)
                 fit_curve_up = fit_result_up.fit_curve if fit_result_up is not None else np.zeros_like(tof_axis)
                 fit_curve_dw = fit_result_dw.fit_curve if fit_result_dw is not None else np.zeros_like(tof_axis)
+                area_method = str(S.get('atom_area_method', 'legacy')).strip().lower()
+                baseline_points = int(S.get('atom_area_baseline_points', 2))
 
                 amp_up = fit_result_up.amplitude if fit_result_up is not None else 0
                 sig_up = fit_result_up.width if fit_result_up is not None else 0
@@ -742,9 +762,16 @@ class ExperimentManager:
                 amp_up_nf = np.max(fit_v_up) if len(fit_v_up) > 0 else 0; amp_dw_nf = np.max(fit_v_dw) if len(fit_v_dw) > 0 else 0
                 sig_up_nf = fitting.calc_sigma(fit_v_up, fit_t_up) or 0; sig_dw_nf = fitting.calc_sigma(fit_v_dw, fit_t_dw) or 0
                 cen_up_nf = fit_t_up[np.argmax(fit_v_up)] if len(fit_v_up)>0 else 0; cen_dw_nf = fit_t_dw[np.argmax(fit_v_dw)] if len(fit_v_dw)>0 else 0
-                area_up_nf = abs(np.trapz(fit_v_up, fit_t_up)) if len(fit_v_up)>1 else 0; area_dw_nf = abs(np.trapz(fit_v_dw, fit_t_dw)) if len(fit_v_dw)>1 else 0
-                area_up = fit_result_up.area if fit_result_up is not None else 0
-                area_dw = fit_result_dw.area if fit_result_dw is not None else 0
+                if area_method == 'edge_line':
+                    area_up_nf = fitting.calculate_area_with_edge_baseline(fit_t_up, fit_v_up, baseline_points)
+                    area_dw_nf = fitting.calculate_area_with_edge_baseline(fit_t_dw, fit_v_dw, baseline_points)
+                    area_up = fitting.calculate_area_with_edge_baseline(fit_t_up, fit_result_up.fit_window_curve, baseline_points) if fit_result_up is not None else 0
+                    area_dw = fitting.calculate_area_with_edge_baseline(fit_t_dw, fit_result_dw.fit_window_curve, baseline_points) if fit_result_dw is not None else 0
+                else:
+                    area_up_nf = abs(np.trapz(fit_v_up, fit_t_up)) if len(fit_v_up)>1 else 0
+                    area_dw_nf = abs(np.trapz(fit_v_dw, fit_t_dw)) if len(fit_v_dw)>1 else 0
+                    area_up = fit_result_up.area if fit_result_up is not None else 0
+                    area_dw = fit_result_dw.area if fit_result_dw is not None else 0
 
                 n_f2, n_f1 = physics.calculate_atom_numbers(area_up, area_dw, max_vol_up=amp_up, max_vol_dw=amp_dw, alpha=S['alpha'], beta=S['beta'], R=S['R'], K=S['K'], max_low=S['max_low'])
                 n_f2_nf, n_f1_nf = physics.calculate_atom_numbers(area_up_nf, area_dw_nf, max_vol_up=amp_up_nf, max_vol_dw=amp_dw_nf, alpha=S['alpha'], beta=S['beta'], R=S['R'], K=S['K'], max_low=S['max_low'])

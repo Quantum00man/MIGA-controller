@@ -240,42 +240,68 @@
                             <div class="col-4"><label class="form-label-small">V_LAUNCH</label><input type="number"
                                     class="form-control form-control-sm" v-model.number="analysis.launch_velocity"
                                     step="0.01"></div>
-                            
-                                    <div class="row g-2 mb-3 border-top pt-2 mt-2">
-                                <div class="col-12"><label class="form-label-small text-primary fw-bold">INTERFEROMETER</label></div>
-                                <div class="col-4">
-                                    <label class="form-label-small">I_Alpha</label>
-                                    <input type="number" class="form-control form-control-sm" v-model.number="analysis.intf_alpha" step="0.001">
-                                </div>
-                                <div class="col-4">
-                                    <label class="form-label-small">I_Beta</label>
-                                    <input type="number" class="form-control form-control-sm" v-model.number="analysis.intf_beta" step="0.001">
-                                </div>
-                                <div class="col-4">
-                                    <label class="form-label-small">I_Gamma</label>
-                                    <input type="number" class="form-control form-control-sm" v-model.number="analysis.intf_gamma" step="0.001">
-                                </div>
-                            </div>
+                        </div>
 
-                            <div class="row g-2 mb-3 border-top pt-2 mt-2">
-                                <div class="col-12"><label class="form-label-small text-muted fw-bold">SIGNAL FILTERS</label></div>
-                            
-                                <div class="col-6">
-                                    <label class="form-label-small text-danger">Max Limit (V)</label>
-                                    <input type="number" class="form-control form-control-sm" v-model.number="analysis.voltage_limit" step="0.001"
-                                        placeholder="0.02">
-                                </div>
-                            
-                                <div class="col-6">
-                                    <label class="form-label-small text-primary">Min Thresh (V)</label>
-                                    <input type="number" class="form-control form-control-sm" v-model.number="analysis.max_low" step="0.0001"
-                                        placeholder="0.0001">
-                                </div>
+                        <div class="row g-2 mb-3 border-top pt-2 mt-2">
+                            <div class="col-12"><label class="form-label-small text-primary fw-bold">INTERFEROMETER</label></div>
+                            <div class="col-4">
+                                <label class="form-label-small">I_Alpha</label>
+                                <input type="number" class="form-control form-control-sm" v-model.number="analysis.intf_alpha" step="0.001">
+                            </div>
+                            <div class="col-4">
+                                <label class="form-label-small">I_Beta</label>
+                                <input type="number" class="form-control form-control-sm" v-model.number="analysis.intf_beta" step="0.001">
+                            </div>
+                            <div class="col-4">
+                                <label class="form-label-small">I_Gamma</label>
+                                <input type="number" class="form-control form-control-sm" v-model.number="analysis.intf_gamma" step="0.001">
                             </div>
                         </div>
+
+                        <div class="row g-2 mb-3 border-top pt-2 mt-2">
+                            <div class="col-12"><label class="form-label-small text-muted fw-bold">SIGNAL FILTERS</label></div>
+                            <div class="col-6">
+                                <label class="form-label-small text-danger">Max Limit (V)</label>
+                                <input type="number" class="form-control form-control-sm" v-model.number="analysis.voltage_limit" step="0.001"
+                                    placeholder="0.02">
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label-small text-primary">Min Thresh (V)</label>
+                                <input type="number" class="form-control form-control-sm" v-model.number="analysis.max_low" step="0.0001"
+                                    placeholder="0.0001">
+                            </div>
+                        </div>
+
+                        <div class="row g-2 mb-3 border-top pt-2 mt-2">
+                            <div class="col-12"><label class="form-label-small text-dark fw-bold">FITTING</label></div>
+                            <div class="col-12">
+                                <label class="form-label-small">FIT MODEL</label>
+                                <select class="form-select form-select-sm" v-model="analysis.fit_model_key">
+                                    <option v-for="model in (analysis.fit_models || [])" :key="model.key" :value="model.key">
+                                        {{ model.label }}
+                                    </option>
+                                </select>
+                            </div>
+                            <div class="col-8">
+                                <label class="form-label-small">ATOM AREA</label>
+                                <select class="form-select form-select-sm" v-model="analysis.atom_area_method">
+                                    <option value="legacy">Legacy</option>
+                                    <option value="edge_line">Edge Line Baseline</option>
+                                </select>
+                            </div>
+                            <div class="col-4">
+                                <label class="form-label-small">N PTS</label>
+                                <input type="number" class="form-control form-control-sm"
+                                    v-model.number="analysis.atom_area_baseline_points" min="1" step="1"
+                                    :disabled="analysis.atom_area_method !== 'edge_line'">
+                            </div>
+                        </div>
+
                         <div class="d-grid gap-2">
                             <button class="btn btn-warning btn-sm fw-bold text-dark shadow-sm" @click="recalculate"><i
                                     class="bi bi-arrow-repeat me-1"></i> Recalculate</button>
+                            <button class="btn btn-outline-secondary btn-sm fw-bold shadow-sm" @click="showSavedResults"
+                                :disabled="displayMode === 'saved'"><i class="bi bi-clock-history me-1"></i> Show Saved</button>
                             <button class="btn btn-danger btn-sm fw-bold shadow-sm" @click="saveOverwrite"
                                 :disabled="isSaving"><span v-if="isSaving"
                                     class="spinner-border spinner-border-sm me-1"></span> {{ isSaving ? 'Saving...' :
@@ -295,6 +321,9 @@
                             <button class="btn btn-sm btn-link btn-max p-0 text-decoration-none me-2"
                                 @click="toggleMaximize('analysis')" title="Maximize/Restore"><i class="bi"
                                     :class="maximizedView === 'analysis' ? 'bi-fullscreen-exit' : 'bi-fullscreen'"></i></button>
+                            <span class="badge" :class="displayMode === 'saved' ? 'bg-secondary' : 'bg-warning text-dark'">
+                                {{ displayMode === 'saved' ? 'Saved Results' : 'Recalculated' }}
+                            </span>
                             <div class="btn-group btn-group-sm me-2">
                                 <button class="btn btn-outline-primary fw-bold" @click="exportCSV"
                                     :disabled="!loadedRunId"><i class="bi bi-file-earmark-spreadsheet-fill"></i>
@@ -378,7 +407,19 @@
                     isLoading: false, isLoadingWaveforms: false, isSaving: false,
                     loadedRunId: '', errorMsg: '', dataCount: 0, selectedPointParam: '', selectedCount: 0,
                     loadedPoints: [], currentCalculatedPoints: [], originalSettings: {},
-                    analysis: { alpha: 0.0151, beta: 0.0188, R: 1.1, K: 7000, gain_up: -1, gain_dw: -1, z_up: 0.275, z_dw: 0.255, launch_velocity: 4.25, chan_launch: '60', chan_trigger: '68' , max_low: 0.0001, voltage_limit: 0.015, intf_alpha: 0.35, intf_beta: 0.07636, intf_gamma: 0.25 },
+                    displayMode: 'saved',
+                    defaultFitModels: [],
+                    analysis: {
+                        alpha: 0.0151, beta: 0.0188, R: 1.1, K: 7000,
+                        gain_up: -1, gain_dw: -1,
+                        z_up: 0.275, z_dw: 0.255,
+                        launch_velocity: 4.25,
+                        chan_launch: '60', chan_trigger: '68',
+                        max_low: 0.0001, voltage_limit: 0.015,
+                        intf_alpha: 0.35, intf_beta: 0.07636, intf_gamma: 0.25,
+                        atom_area_method: 'legacy', atom_area_baseline_points: 2,
+                        fit_model_key: 'gaussian', fit_models: []
+                    },
                     showRawData: true, maximizedView: null, currentTab: 'atoms', plotRevision: 0,
                     tabs: [{ id: 'atoms', label: 'Atom Number' }, { id: 'amp', label: 'Max Voltage' }, { id: 'sigma', label: 'Width (ms)' }, { id: 'temp', label: 'Temperature' }, { id: 'arrival', label: 'Arrival Time' }, { id: 'prob', label: 'Transition Prob.' }, { id: 'intf', label: 'Interferometer' }],
                     historyMap: {}, layoutResUp: {}, layoutResDw: {}, layoutResTot: {}, layoutOscUp: {}, layoutOscDw: {}
@@ -388,10 +429,85 @@
                 currentTab() { this.plotRevision++; this.renderMainPlot(); },
                 showRawData() { this.plotRevision++; this.renderMainPlot(); }
             },
-            mounted() { this.fetchArchiveTree(); this.initPlots(); },
+            mounted() { this.fetchArchiveTree(); this.fetchDefaultFitModels(); this.initPlots(); },
             methods: {
+                baseAnalysis() {
+                    return {
+                        alpha: 0.0151, beta: 0.0188, R: 1.1, K: 7000,
+                        gain_up: -1, gain_dw: -1,
+                        z_up: 0.275, z_dw: 0.255,
+                        launch_velocity: 4.25,
+                        chan_launch: '60', chan_trigger: '68',
+                        max_low: 0.0001, voltage_limit: 0.015,
+                        intf_alpha: 0.35, intf_beta: 0.07636, intf_gamma: 0.25,
+                        atom_area_method: 'legacy', atom_area_baseline_points: 2,
+                        fit_model_key: 'gaussian', fit_models: []
+                    };
+                },
+                cloneFitModels(models) {
+                    return JSON.parse(JSON.stringify(Array.isArray(models) ? models : []));
+                },
+                normalizeFitModels(models) {
+                    const source = Array.isArray(models) && models.length
+                        ? models
+                        : this.cloneFitModels(this.defaultFitModels);
+                    return source.map((model, index) => ({
+                        key: String(model?.key || `fit_model_${index + 1}`),
+                        label: String(model?.label || model?.key || `Fit Model ${index + 1}`),
+                        formula: String(model?.formula || ''),
+                        parameters: Array.isArray(model?.parameters) ? model.parameters.map(param => ({
+                            name: String(param?.name || 'param'),
+                            guess: String(param?.guess || ''),
+                            fixed: Boolean(param?.fixed)
+                        })) : [],
+                        roles: model?.roles && typeof model.roles === 'object' ? { ...model.roles } : {},
+                        area_mode: String(model?.area_mode || 'window_integral')
+                    }));
+                },
+                normalizeAnalysis(settings = {}) {
+                    const normalized = { ...this.baseAnalysis(), ...(settings || {}) };
+                    normalized.atom_area_method = normalized.atom_area_method === 'edge_line' ? 'edge_line' : 'legacy';
+                    const baselinePoints = Number.parseInt(normalized.atom_area_baseline_points ?? 2, 10);
+                    normalized.atom_area_baseline_points = Number.isFinite(baselinePoints) && baselinePoints > 0 ? baselinePoints : 2;
+                    normalized.fit_models = this.normalizeFitModels(normalized.fit_models);
+                    if (!normalized.fit_models.length && this.defaultFitModels.length) {
+                        normalized.fit_models = this.cloneFitModels(this.defaultFitModels);
+                    }
+                    if (!normalized.fit_models.some(model => model.key === normalized.fit_model_key)) {
+                        normalized.fit_model_key = normalized.fit_models[0]?.key || 'gaussian';
+                    }
+                    return normalized;
+                },
+                buildArchivePayload(extra = {}) {
+                    return {
+                        year: this.selectedYear,
+                        month: this.selectedMonth,
+                        day: this.selectedDay,
+                        run_id: this.selectedRun,
+                        new_settings: this.normalizeAnalysis(this.analysis),
+                        ...extra
+                    };
+                },
+                applyDisplayedPoints(points) {
+                    const source = Array.isArray(points) ? points : [];
+                    const newHistoryMap = {};
+                    this.currentCalculatedPoints = source;
+                    source.forEach(pt => this.ingestPoint(pt, newHistoryMap));
+                    this.historyMap = newHistoryMap;
+                    this.plotRevision++;
+                    this.renderMainPlot();
+                },
                 getTabTitle() { return this.tabs.find(t => t.id === this.currentTab)?.label || 'Results'; },
                 async fetchArchiveTree() { try { const res = await axios.get('/archive/tree'); this.archiveTree = res.data; } catch (e) { } },
+                async fetchDefaultFitModels() {
+                    try {
+                        const res = await axios.get('/fitting/models/defaults');
+                        this.defaultFitModels = this.normalizeFitModels(res.data);
+                        this.analysis = this.normalizeAnalysis(this.analysis);
+                    } catch (e) {
+                        console.error(e);
+                    }
+                },
                 getMonths() { return this.selectedYear ? Object.keys(this.archiveTree[this.selectedYear] || {}).sort() : []; },
                 getDays() { return (this.selectedYear && this.selectedMonth) ? Object.keys(this.archiveTree[this.selectedYear][this.selectedMonth] || {}).sort() : []; },
                 getRuns() { return (this.selectedDay) ? (this.archiveTree[this.selectedYear][this.selectedMonth][this.selectedDay] || []).sort() : []; },
@@ -408,7 +524,7 @@
                     this.selectedDay = days[days.length - 1];
                     const runs = this.getRuns(); if (!runs.length) return;
                     this.selectedRun = runs[runs.length - 1];
-                    this.loadRun();
+                    await this.loadRun();
                 },
 
                 async loadRun() {
@@ -432,22 +548,21 @@
                             throw new Error("Invalid data format received from server");
                         }
 
-                        if (res.data.config && res.data.config._system_settings_snapshot) {
-                            const snap = res.data.config._system_settings_snapshot;
-                            this.originalSettings = { ...snap }; 
-                            this.analysis = { ...this.analysis, ...snap };
-                        }
+                        const snap = res.data.config?.['_system_settings_snapshot'] || {};
+                        this.originalSettings = this.normalizeAnalysis(snap);
+                        this.analysis = this.normalizeAnalysis({ ...this.analysis, ...snap });
                         
                         this.loadedPoints = res.data.data;
                         this.dataCount = this.loadedPoints.length;
                         this.loadedRunId = `${this.selectedDay}/${this.selectedRun}`;
-                        
-                        // 开始计算 (现在用的是安全的 recalculate)
-                        this.recalculate();
+                        this.displayMode = 'saved';
+                        this.applyDisplayedPoints(this.loadedPoints);
                         
                     } catch (e) { 
                         console.error(e); 
-                        if (e.response && e.response.status === 500) {
+                        if (e.response?.data?.detail) {
+                            this.errorMsg = "Load Failed: " + e.response.data.detail;
+                        } else if (e.response && e.response.status === 500) {
                             this.errorMsg = "Server Error (500): Data might contain NaN/Infinity.";
                         } else {
                             this.errorMsg = "Load Failed: " + (e.message || "Unknown error"); 
@@ -457,172 +572,57 @@
                     }
                 },
 
-                // static/archive.html -> methods:
-
-                recalculate() {
-                    const newHistoryMap = {}; const newCalculatedPoints = [];
-                    const S = this.analysis; const origS = this.originalSettings;
-
-                    const oldGUp = (origS.gain_up === 0 || origS.gain_up == null) ? 1.0 : origS.gain_up;
-                    const oldGDw = (origS.gain_dw === 0 || origS.gain_dw == null) ? 1.0 : origS.gain_dw;
-                    const newGUp = (S.gain_up === 0 || S.gain_up == null) ? 1.0 : S.gain_up;
-                    const newGDw = (S.gain_dw === 0 || S.gain_dw == null) ? 1.0 : S.gain_dw;
-
-                    // [获取设置的阈值]
-                    // 1. 上限 (Max): 默认 0.02V (包含您的 0.015V)
-                    const vLimit = (S.voltage_limit !== undefined && S.voltage_limit !== null) ? S.voltage_limit : 0.02;
-
-                    // 2. 下限 (Min): 默认 0.0001V
-                    const minLimit = (S.max_low !== undefined) ? S.max_low : 0.0001;
-
-                    const G = 9.81, KB = 1.38e-23, M = 1.443e-25;
-                    const safe = (v) => (Number.isNaN(v) || !Number.isFinite(v) || v == null) ? 0.0 : v;
-
-                    // ... (recoverAreas, calcTemp 保持不变) ...
-                    const recoverAreas = (n1, n2, alpha, beta, R, K) => {
-                        if (n1 == null || n2 == null) return { a1: 0, a2: 0 };
-                        const C2 = n2 / K; const C1 = n1 / (R * K);
-                        const det = 1 - beta * alpha;
-                        if (Math.abs(det) < 1e-9) return { a1: 0, a2: 0 };
-                        const a2 = (C1 + beta * C2) / det; const a1 = C2 + alpha * a2;
-                        return { a1: safe(a1), a2: safe(a2) };
-                    };
-                    const calcTemp = (sig, t_flight) => {
-                        if (!t_flight || t_flight < 1e-6) return 0;
-                        const res = (M / KB) * Math.pow((S.launch_velocity / t_flight - G), 2) * Math.pow(sig, 2) * 1e6;
-                        return safe(res);
-                    };
-
-                    this.loadedPoints.forEach(pt => {
-                        // [关键步骤 1] 还原原始物理电压 (Raw Voltage)
-                        // 使用 NoFit 峰值来判断最为准确
-                        const rawAmpUpRaw = safe((pt.amplitude_up_nofit || 0) * oldGUp);
-                        const rawAmpDwRaw = safe((pt.amplitude_dw_nofit || 0) * oldGDw);
-
-                        // [关键步骤 2] 执行双重过滤 (Double Filter)
-
-                        // A. 剔除“过大”的数据 (Saturation Filter)
-                        // 如果电压超过 0.015V (vLimit)，说明是坏数据
-                        if (Math.abs(rawAmpUpRaw) > vLimit || Math.abs(rawAmpDwRaw) > vLimit) {
-                            return; // SKIP
+                async recalculate() {
+                    if (!this.selectedRun) return;
+                    this.isLoading = true;
+                    this.errorMsg = '';
+                    try {
+                        this.analysis = this.normalizeAnalysis(this.analysis);
+                        const res = await axios.post('/archive/recalculate', this.buildArchivePayload());
+                        if (!res.data || !Array.isArray(res.data.data)) {
+                            throw new Error("Invalid recalculation data received from server");
                         }
 
-                        // B. 剔除“过小”的数据 (Noise Filter)
-                        // 如果电压小于 0.0001V (minLimit)，说明是噪声
-                        if (Math.abs(rawAmpUpRaw) < minLimit && Math.abs(rawAmpDwRaw) < minLimit) {
-                            return; // SKIP
+                        if (res.data.settings) {
+                            this.analysis = this.normalizeAnalysis(res.data.settings);
                         }
 
-                        // --- 验证通过，继续计算 ---
-
-                        const rawAmpUp = safe(pt.amplitude_up * oldGUp); const rawAmpDw = safe(pt.amplitude_dw * oldGDw);
-                        const newAmpUp = safe(rawAmpUp / newGUp); const newAmpDw = safe(rawAmpDw / newGDw);
-
-                        const sigUpS = safe(pt.sigma_up * 1e-3); const sigDwS = safe(pt.sigma_dw * 1e-3);
-                        const areaUp = safe(newAmpUp * Math.abs(sigUpS) * Math.sqrt(2 * Math.PI));
-                        const areaDw = safe(newAmpDw * Math.abs(sigDwS) * Math.sqrt(2 * Math.PI));
-
-                        const nF2 = safe((areaUp - areaDw * S.alpha) * S.K);
-                        const nF1 = safe((areaDw - areaUp * S.beta) * S.R * S.K);
-
-                        let probUp = 0, probDw = 0;
-                        if ((nF1 + nF2) !== 0) {
-                            probUp = safe((nF2 / (nF1 + nF2)) * 100);
-                            probDw = safe((nF1 / (nF1 + nF2)) * 100);
+                        this.displayMode = 'recalculated';
+                        this.applyDisplayedPoints(res.data.data);
+                        await this.refreshWaveformPreview();
+                    } catch (e) {
+                        console.error(e);
+                        if (e.response?.data?.detail) {
+                            this.errorMsg = "Recalculate Failed: " + e.response.data.detail;
+                        } else {
+                            this.errorMsg = "Recalculate Failed: " + (e.message || "Unknown error");
                         }
+                    } finally {
+                        this.isLoading = false;
+                    }
+                },
 
-                        // =========================================================
-                        // [New] Interferometer Calculation Logic (JS Implementation)
-                        // =========================================================
-                        const calcIntf = (n_f1_in, n_f2_in) => {
-                            // n_f1_in is DOWN, n_f2_in is UP
-                            if (n_f1_in == null || n_f2_in == null) return { n1: 0, n2: 0, p1: 0, p2: 0 };
+                async showSavedResults() {
+                    this.displayMode = 'saved';
+                    this.errorMsg = '';
+                    this.applyDisplayedPoints(this.loadedPoints);
+                    await this.refreshWaveformPreview();
+                },
 
-                            const ia = (S.intf_alpha !== undefined) ? S.intf_alpha : 0.35;
-                            const ib = (S.intf_beta !== undefined) ? S.intf_beta : 0.07636;
-                            const ig = (S.intf_gamma !== undefined) ? S.intf_gamma : 0.25;
+                async refreshWaveformPreview() {
+                    if (this.selectedPointParam && this.historyMap[this.selectedPointParam]) {
+                        const indices = this.historyMap[this.selectedPointParam].stepIndices;
+                        this.selectedCount = indices.length;
+                        await this.loadWaveforms(indices);
+                        return;
+                    }
 
-                            // New stabilized formula common denominator: (beta - alpha) * (1 + gamma)
-                            const den = (ib - ia) * (1.0 + ig);
-
-                            // Prevent division by zero if alpha equals beta
-                            if (Math.abs(den) < 1e-9) return { n1: 0, n2: 0, p1: 0, p2: 0 };
-
-                            // Calculate N1
-                            // Numerator N1 = beta * n_f1 - (1 - beta + gamma) * n_f2
-                            const num_n1 = ib * n_f1_in - (1.0 - ib + ig) * n_f2_in;
-                            const N1 = num_n1 / den;
-
-                            // Calculate N2
-                            // Numerator N2 = (1 - alpha + gamma) * n_f2 - alpha * n_f1
-                            const num_n2 = (1.0 - ia + ig) * n_f2_in - ia * n_f1_in;
-                            const N2 = num_n2 / den;
-
-                            // Calculate Transition Probabilities
-                            let P1 = 0, P2 = 0;
-                            const tot = N1 + N2;
-
-                            if (Math.abs(tot) > 1e-9) {
-                                P1 = 100.0 * N1 / tot;
-                                P2 = 100.0 * N2 / tot;
-                            }
-
-                            return { n1: safe(N1), n2: safe(N2), p1: safe(P1), p2: safe(P2) };
-                        };
-                        // Fit Data Calculation
-                        const resFit = calcIntf(nF1, nF2);
-
-                        const tempUp = calcTemp(sigUpS, pt.arrival_time_up);
-                        const tempDw = calcTemp(sigDwS, pt.arrival_time_dw);
-
-
-                        // --- No Fit (Raw) calculations ---
-                        const rawAmpUpNF = safe((pt.amplitude_up_nofit || 0) * oldGUp);
-                        const rawAmpDwNF = safe((pt.amplitude_dw_nofit || 0) * oldGDw);
-                        const newAmpUpNF = safe(rawAmpUpNF / newGUp);
-                        const newAmpDwNF = safe(rawAmpDwNF / newGDw);
-
-                        const oldAreasNF = recoverAreas(pt.atom_number_dw_nofit, pt.atom_number_up_nofit, origS.alpha, origS.beta, origS.R, origS.K);
-                        const rawAreaUpNF = safe(oldAreasNF.a1 * oldGUp);
-                        const rawAreaDwNF = safe(oldAreasNF.a2 * oldGDw);
-                        const newAreaUpNF = safe(rawAreaUpNF / newGUp);
-                        const newAreaDwNF = safe(rawAreaDwNF / newGDw);
-
-                        const nF2_nf = safe((newAreaUpNF - newAreaDwNF * S.alpha) * S.K);
-                        const nF1_nf = safe((newAreaDwNF - newAreaUpNF * S.beta) * S.R * S.K);
-                        // NoFit Data Calculation
-                        // ... (计算 nF2_nf, nF1_nf 之后) ...
-                        const resNF = calcIntf(nF1_nf, nF2_nf);
-
-                        let probUpNF = 0, probDwNF = 0;
-                        if ((nF1_nf + nF2_nf) !== 0) {
-                            probUpNF = safe((nF2_nf / (nF1_nf + nF2_nf)) * 100);
-                            probDwNF = safe((nF1_nf / (nF1_nf + nF2_nf)) * 100);
-                        }
-
-                        const tempUpNF = calcTemp(safe(pt.sigma_up_nofit * 1e-3), pt.arrival_time_up_nofit);
-                        const tempDwNF = calcTemp(safe(pt.sigma_dw_nofit * 1e-3), pt.arrival_time_dw_nofit);
-
-                        const newPt = {
-                            ...pt,
-                            atom_number_up: nF2, atom_number_dw: nF1,
-                            amplitude_up: newAmpUp, amplitude_dw: newAmpDw,
-                            temperature_up: tempUp, temperature_dw: tempDw,
-                            transition_probability_up: probUp, transition_probability_dw: probDw,
-                            atom_number_up_nofit: nF2_nf, atom_number_dw_nofit: nF1_nf,
-                            amplitude_up_nofit: newAmpUpNF, amplitude_dw_nofit: newAmpDwNF,
-                            temperature_up_nofit: tempUpNF, temperature_dw_nofit: tempDwNF,
-                            transition_probability_up_nofit: probUpNF, transition_probability_dw_nofit: probDwNF,
-                            intf_n1: resFit.n1, intf_n2: resFit.n2, intf_p1: resFit.p1, intf_p2: resFit.p2,
-                            intf_n1_nofit: resNF.n1, intf_n2_nofit: resNF.n2, intf_p1_nofit: resNF.p1, intf_p2_nofit: resNF.p2
-                        };
-                        newCalculatedPoints.push(newPt);
-                        this.ingestPoint(newPt, newHistoryMap);
-                    });
-                    this.currentCalculatedPoints = newCalculatedPoints;
-                    this.historyMap = newHistoryMap;
-                    this.plotRevision++;
-                    this.renderMainPlot();
+                    this.selectedPointParam = '';
+                    this.selectedCount = 0;
+                    this.layoutOscUp.shapes = [];
+                    this.layoutOscDw.shapes = [];
+                    Plotly.react('waveformPlotUp', [], this.layoutOscUp);
+                    Plotly.react('waveformPlotDw', [], this.layoutOscDw);
                 },
 
                 ingestPoint(data, targetMap) {
@@ -641,15 +641,6 @@
                         if (data.intf_p2 != null) item.vals_intf_p_dw.push(data.intf_p2);
                         if (data.intf_p1_nofit != null) item.vals_nf_intf_p_up.push(data.intf_p1_nofit);
                         if (data.intf_p2_nofit != null) item.vals_nf_intf_p_dw.push(data.intf_p2_nofit);
-                    });
-                },
-
-                toggleMaximize(view) {
-                    if (this.maximizedView === view) this.maximizedView = null; else this.maximizedView = view;
-                    this.$nextTick(() => {
-                        window.dispatchEvent(new Event('resize'));
-                        Plotly.Plots.resize('resultsPlotUp'); Plotly.Plots.resize('resultsPlotDw'); Plotly.Plots.resize('resultsPlotTotal');
-                        Plotly.Plots.resize('waveformPlotUp'); Plotly.Plots.resize('waveformPlotDw');
                     });
                 },
 
@@ -672,25 +663,34 @@
                 async onPlotClick(data) {
                     if (!data || !data.points) return;
                     const point = data.points[0]; const key = point.x.toFixed(6);
-                    if (this.historyMap[key]) { const indices = this.historyMap[key].stepIndices; this.selectedPointParam = key; this.selectedCount = indices.length; this.loadWaveforms(indices); }
+                    if (this.historyMap[key]) { const indices = this.historyMap[key].stepIndices; this.selectedPointParam = key; this.selectedCount = indices.length; await this.loadWaveforms(indices); }
                 },
 
                 async loadWaveforms(indices) {
+                    if (!this.selectedRun || !indices || !indices.length) return;
                     this.isLoadingWaveforms = true;
                     try {
-                        const promises = indices.map(idx => axios.get(`/archive/waveform/${this.selectedYear}/${this.selectedMonth}/${this.selectedDay}/${this.selectedRun}/${idx}`));
-                        const responses = await Promise.all(promises);
+                        let responses = [];
+                        if (this.displayMode === 'recalculated') {
+                            const res = await axios.post('/archive/waveforms/recalculate', this.buildArchivePayload({ step_indices: indices }));
+                            responses = Array.isArray(res.data?.data) ? res.data.data : [];
+                        } else {
+                            const requests = indices.map(idx => axios.get(`/archive/waveform/${this.selectedYear}/${this.selectedMonth}/${this.selectedDay}/${this.selectedRun}/${idx}`));
+                            const fetched = await Promise.all(requests);
+                            responses = fetched.map((res, index) => ({ step: indices[index], ...res.data }));
+                        }
                         const tracesUp = []; const tracesDw = [];
 
                         // 用于记录所有波形的整体时间范围
                         let globalMin = null;
                         let globalMax = null;
+                        this.layoutOscUp.shapes = [];
+                        this.layoutOscDw.shapes = [];
 
-                        responses.forEach((res, i) => {
-                            const data = res.data;
+                        responses.forEach((data, i) => {
                             // 将秒转换为毫秒
-                            const timeMs = data.time_axis.map(t => t * 1000);
-                            const idx = indices[i];
+                            const timeMs = (data.time_axis || []).map(t => t * 1000);
+                            const idx = data.step ?? indices[i];
 
                             // 1. 更新全局时间范围 (用于后续自动缩放)
                             if (timeMs.length > 0) {
@@ -742,7 +742,12 @@
                         Plotly.react('waveformPlotUp', tracesUp, this.layoutOscUp);
                         Plotly.react('waveformPlotDw', tracesDw, this.layoutOscDw);
 
-                    } catch (e) { console.error(e); } finally { this.isLoadingWaveforms = false; }
+                    } catch (e) {
+                        console.error(e);
+                        if (e.response?.data?.detail) {
+                            this.errorMsg = "Waveform Preview Failed: " + e.response.data.detail;
+                        }
+                    } finally { this.isLoadingWaveforms = false; }
                 },
 
                 calcStats(arr) {
@@ -903,13 +908,19 @@
                 },
 
                 async saveOverwrite() {
-                    if (!this.selectedRun || this.currentCalculatedPoints.length === 0) return;
+                    if (!this.selectedRun) return;
                     if (!confirm("OVERWRITE results?")) return;
                     this.isSaving = true;
                     try {
-                        await axios.post('/archive/overwrite', { year: this.selectedYear, month: this.selectedMonth, day: this.selectedDay, run_id: this.selectedRun, new_settings: this.analysis, updated_data: this.currentCalculatedPoints });
-                        alert("Saved!"); this.originalSettings = JSON.parse(JSON.stringify(this.analysis));
-                    } catch (e) { alert("Error: " + e.message); } finally { this.isSaving = false; }
+                        this.analysis = this.normalizeAnalysis(this.analysis);
+                        await axios.post('/archive/overwrite', this.buildArchivePayload());
+                        alert("Saved!");
+                        this.originalSettings = this.normalizeAnalysis(this.analysis);
+                        await this.loadRun();
+                    } catch (e) {
+                        const detail = e.response?.data?.detail || e.message || 'Unknown error';
+                        alert("Error: " + detail);
+                    } finally { this.isSaving = false; }
                 },
 
                 toggleMaximize(view) {
