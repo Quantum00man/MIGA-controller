@@ -584,7 +584,12 @@
                     }
                 },
                 saveState() {
-                    const state = { useList1: this.useList1, useList2: this.useList2, config: this.config, showRawData: this.showRawData };
+                    const state = {
+                        useList1: this.useList1,
+                        useList2: this.useList2,
+                        config: this.config,
+                        showRawData: this.showRawData
+                    };
                     localStorage.setItem('miga_scan_state', JSON.stringify(state));
                 },
                 loadState() {
@@ -594,7 +599,11 @@
                             const state = JSON.parse(stored);
                             this.useList1 = state.useList1;
                             this.useList2 = state.useList2;
-                            this.config = { ...this.config, ...state.config };
+                            const knownConfigKeys = Object.keys(this.config);
+                            const restoredConfig = Object.fromEntries(
+                                Object.entries(state.config || {}).filter(([key]) => knownConfigKeys.includes(key))
+                            );
+                            this.config = { ...this.config, ...restoredConfig };
                             if (state.showRawData !== undefined) this.showRawData = state.showRawData;
                         } catch (e) { console.error("Load state failed", e); }
                     }

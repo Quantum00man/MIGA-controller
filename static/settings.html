@@ -27,6 +27,8 @@
                 <ul class="nav nav-tabs card-header-tabs">
                     <li class="nav-item"><a class="nav-link" :class="{active: tab==='phys'}" @click="tab='phys'"
                             href="#">Physics & Gains</a></li>
+                    <li class="nav-item"><a class="nav-link" :class="{active: tab==='fitting'}" @click="tab='fitting'"
+                            href="#">Fitting Models</a></li>
                     <li class="nav-item"><a class="nav-link" :class="{active: tab==='net'}" @click="tab='net'"
                             href="#">Network</a></li>
                     <li class="nav-item"><a class="nav-link" :class="{active: tab==='logic'}" @click="tab='logic'"
@@ -184,6 +186,118 @@
                     </div>
                 </div>
 
+                <div v-if="tab==='fitting'">
+                    <div class="row g-3">
+                        <div class="col-12">
+                            <div class="bg-light border rounded p-3">
+                                <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+                                    <div>
+                                        <h6 class="fw-bold text-uppercase text-muted mb-1">Default Fitting Model</h6>
+                                        <div class="small text-muted">The model selected here is used by experiment runs. The scan page only controls fitting windows.</div>
+                                    </div>
+                                    <div class="btn-group btn-group-sm">
+                                        <button class="btn btn-outline-secondary" @click="createFitModel">New</button>
+                                        <button class="btn btn-outline-secondary" @click="duplicateFitModel"
+                                            :disabled="!selectedFitModel">Duplicate</button>
+                                        <button class="btn btn-outline-danger" @click="removeFitModel"
+                                            :disabled="(s.fit_models || []).length <= 1">Remove</button>
+                                    </div>
+                                </div>
+                                <div class="mt-3">
+                                    <label class="form-label small text-muted fw-bold mb-1">Selected Model</label>
+                                    <select class="form-select" v-model="s.fit_model_key">
+                                        <option v-for="model in (s.fit_models || [])" :key="model.key" :value="model.key">{{ model.label }}</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="col-12" v-if="selectedFitModel">
+                            <div class="card border-0 shadow-sm">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between align-items-center mb-3">
+                                        <div>
+                                            <div class="small text-muted fw-bold">Editing</div>
+                                            <div class="font-monospace small">{{ selectedFitModel.key }}</div>
+                                        </div>
+                                        <div class="badge bg-light text-dark border">{{ selectedFitModel.area_mode }}</div>
+                                    </div>
+
+                                    <div class="row g-3 mb-3">
+                                        <div class="col-md-7">
+                                            <label class="form-label small text-muted fw-bold">Model Name</label>
+                                            <input type="text" class="form-control" v-model="selectedFitModel.label">
+                                        </div>
+                                        <div class="col-md-5">
+                                            <label class="form-label small text-muted fw-bold">Area Mode</label>
+                                            <select class="form-select" v-model="selectedFitModel.area_mode">
+                                                <option value="gaussian_sigma">Gaussian Sigma</option>
+                                                <option value="window_integral">Integral In Window</option>
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    <div class="mb-3">
+                                        <label class="form-label small text-muted fw-bold">Formula</label>
+                                        <textarea class="form-control font-monospace" v-model="selectedFitModel.formula" rows="4"
+                                            placeholder="amp * exp(-((x - center)**2) / (2 * sigma**2)) + offset"></textarea>
+                                        <div class="form-text">
+                                            Symbols: <code>x</code>. Functions: <code>exp</code>, <code>erf</code>, <code>sin</code>,
+                                            <code>cos</code>, <code>tan</code>, <code>sqrt</code>, <code>abs</code>,
+                                            <code>log</code>, <code>log10</code>, <code>sinh</code>, <code>cosh</code>,
+                                            <code>tanh</code>, <code>sinc_sq</code>. Use <code>**</code> for powers.
+                                        </div>
+                                    </div>
+
+                                    <div class="d-flex justify-content-between align-items-center mb-2">
+                                        <h6 class="text-muted fw-bold text-uppercase mb-0">Fit Parameters</h6>
+                                        <button class="btn btn-sm btn-light border" @click="addFitParameter">+ Add Parameter</button>
+                                    </div>
+                                    <div v-for="(param, pIndex) in selectedFitModel.parameters"
+                                        :key="`${selectedFitModel.key}-${pIndex}`" class="row g-2 align-items-center mb-2">
+                                        <div class="col-md-3">
+                                            <input type="text" class="form-control font-monospace" v-model="param.name" placeholder="name">
+                                        </div>
+                                        <div class="col-md-6">
+                                            <input type="text" class="form-control font-monospace" v-model="param.guess"
+                                                placeholder="guess e.g. x_peak or y_max - y_min">
+                                        </div>
+                                        <div class="col-md-2">
+                                            <div class="form-check mt-2">
+                                                <input class="form-check-input" type="checkbox"
+                                                    :id="`fit-param-fixed-${selectedFitModel.key}-${pIndex}`" v-model="param.fixed">
+                                                <label class="form-check-label small"
+                                                    :for="`fit-param-fixed-${selectedFitModel.key}-${pIndex}`">Fixed</label>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-1">
+                                            <button class="btn btn-outline-danger w-100" @click="removeFitParameter(pIndex)"
+                                                :disabled="selectedFitModel.parameters.length <= 1"><i class="bi bi-x-lg"></i></button>
+                                        </div>
+                                    </div>
+                                    <div class="form-text mb-3">
+                                        Guess variables: <code>x_peak</code>, <code>x_start</code>, <code>x_end</code>, <code>x_span</code>,
+                                        <code>x_mean</code>, <code>y_max</code>, <code>y_min</code>, <code>y_mean</code>,
+                                        <code>y_range</code>, <code>sigma_est</code>.
+                                    </div>
+
+                                    <h6 class="text-muted fw-bold text-uppercase mb-2">Result Mapping</h6>
+                                    <div class="row g-3">
+                                        <div class="col-md-3" v-for="role in fitRoleOptions" :key="role.key">
+                                            <label class="form-label small text-muted fw-bold">{{ role.label }}</label>
+                                            <select class="form-select" v-model="selectedFitModel.roles[role.key]">
+                                                <option value="">Auto</option>
+                                                <option v-for="param in selectedFitModel.parameters" :key="`${role.key}-${param.name}`"
+                                                    :value="param.name">{{ param.name }}</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <div v-if="tab==='logic'">
                     <div class="row g-3">
                         <div class="col-md-6"><label class="form-label">Launch Channel ID</label><input type="text"
@@ -239,17 +353,33 @@
             data() {
                 return {
                     tab: 'phys', s: {}, msg: '', isError: false, saving: false,
+                    fitRoleOptions: [
+                        { key: 'amplitude', label: 'Amplitude' },
+                        { key: 'width', label: 'Width' },
+                        { key: 'center', label: 'Center' },
+                        { key: 'offset', label: 'Offset' }
+                    ],
                     basePath: ''
+                }
+            },
+            computed: {
+                selectedFitModel() {
+                    const models = this.s.fit_models || [];
+                    return models.find(model => model.key === this.s.fit_model_key) || models[0] || null;
                 }
             },
             mounted() { this.fetchSettings(); },
             methods: {
                 async fetchSettings() {
-                    try { const res = await axios.get('/settings/all'); this.s = res.data; } catch (e) { console.error(e); }
+                    try {
+                        const res = await axios.get('/settings/all');
+                        this.s = this.normalizeSettings(res.data);
+                    } catch (e) { console.error(e); }
                 },
 
                 async saveSettings() {
                     this.saving = true;
+                    this.s = this.normalizeSettings(this.s);
                     if(this.s.hardware_platform === 'daq') this.syncDecimation();
                     try {
                         await axios.post('/settings/all', this.s);
@@ -277,6 +407,140 @@
                         // 这样网页就会认为采样率是正确的 Hz
                         this.s.decimation = Math.round(125000000 / this.s.daq_rate);
                     }
+                },
+                normalizeFitModelKey(value, fallback = 'fit_model') {
+                    const normalized = String(value || fallback).trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+                    return normalized || fallback;
+                },
+                cloneDeep(value) {
+                    return JSON.parse(JSON.stringify(value));
+                },
+                defaultFitModelFallback() {
+                    return [{
+                        key: 'gaussian',
+                        label: 'GAUSSIAN',
+                        formula: 'amp * exp(-((x - center)**2) / (2 * sigma**2)) + offset',
+                        parameters: [
+                            { name: 'amp', guess: 'y_max - y_min', fixed: false },
+                            { name: 'sigma', guess: 'max(sigma_est, 1e-4)', fixed: false },
+                            { name: 'center', guess: 'x_peak', fixed: false },
+                            { name: 'offset', guess: '0.0', fixed: true }
+                        ],
+                        roles: { amplitude: 'amp', width: 'sigma', center: 'center', offset: 'offset' },
+                        area_mode: 'gaussian_sigma'
+                    }];
+                },
+                normalizeFitModel(model, index = 0) {
+                    const source = model || {};
+                    const parameters = Array.isArray(source.parameters) && source.parameters.length
+                        ? source.parameters.map((param, pIndex) => ({
+                            name: String(param?.name || `p${pIndex + 1}`).trim() || `p${pIndex + 1}`,
+                            guess: String(param?.guess || ''),
+                            fixed: !!param?.fixed
+                        }))
+                        : this.cloneDeep(this.defaultFitModelFallback()[0].parameters);
+                    const roles = source.roles || {};
+                    return {
+                        key: this.normalizeFitModelKey(source.key || source.label || `fit_model_${index + 1}`, `fit_model_${index + 1}`),
+                        label: String(source.label || `FIT_MODEL_${index + 1}`).trim() || `FIT_MODEL_${index + 1}`,
+                        formula: String(source.formula || ''),
+                        parameters,
+                        roles: {
+                            amplitude: roles.amplitude || '',
+                            width: roles.width || '',
+                            center: roles.center || '',
+                            offset: roles.offset || ''
+                        },
+                        area_mode: source.area_mode === 'gaussian_sigma' ? 'gaussian_sigma' : 'window_integral'
+                    };
+                },
+                normalizeFitModels(models) {
+                    const source = Array.isArray(models) && models.length ? models : this.defaultFitModelFallback();
+                    const normalized = [];
+                    const usedKeys = new Set();
+                    source.forEach((model, index) => {
+                        const item = this.normalizeFitModel(model, index);
+                        let key = item.key;
+                        let suffix = 1;
+                        while (usedKeys.has(key)) {
+                            suffix += 1;
+                            key = `${item.key}_${suffix}`;
+                        }
+                        item.key = key;
+                        usedKeys.add(key);
+                        normalized.push(item);
+                    });
+                    return normalized.length ? normalized : this.defaultFitModelFallback();
+                },
+                normalizeSettings(settings) {
+                    const normalized = { ...(settings || {}) };
+                    normalized.fit_models = this.normalizeFitModels(normalized.fit_models);
+                    if (!normalized.fit_models.find(model => model.key === normalized.fit_model_key)) {
+                        normalized.fit_model_key = normalized.fit_models[0].key;
+                    }
+                    return normalized;
+                },
+                createFitModel() {
+                    this.s = this.normalizeSettings(this.s);
+                    const base = this.cloneDeep(this.defaultFitModelFallback()[0]);
+                    let counter = (this.s.fit_models || []).length + 1;
+                    let key = `custom_fit_model_${counter}`;
+                    while ((this.s.fit_models || []).some(model => model.key === key)) {
+                        counter += 1;
+                        key = `custom_fit_model_${counter}`;
+                    }
+                    base.key = key;
+                    base.label = `CUSTOM_${counter}`;
+                    base.area_mode = 'window_integral';
+                    this.s.fit_models.push(this.normalizeFitModel(base, this.s.fit_models.length));
+                    this.s.fit_model_key = key;
+                },
+                duplicateFitModel() {
+                    if (!this.selectedFitModel) return;
+                    this.s = this.normalizeSettings(this.s);
+                    const clone = this.cloneDeep(this.selectedFitModel);
+                    let counter = 1;
+                    let key = `${clone.key}_copy`;
+                    while ((this.s.fit_models || []).some(model => model.key === key)) {
+                        counter += 1;
+                        key = `${clone.key}_copy_${counter}`;
+                    }
+                    clone.key = key;
+                    clone.label = `${clone.label} Copy`;
+                    this.s.fit_models.push(this.normalizeFitModel(clone, this.s.fit_models.length));
+                    this.s.fit_model_key = key;
+                },
+                removeFitModel() {
+                    this.s = this.normalizeSettings(this.s);
+                    if ((this.s.fit_models || []).length <= 1) {
+                        this.isError = true;
+                        this.msg = "At least one fitting model must remain.";
+                        return;
+                    }
+                    const index = this.s.fit_models.findIndex(model => model.key === this.s.fit_model_key);
+                    if (index < 0) return;
+                    this.s.fit_models.splice(index, 1);
+                    this.s = this.normalizeSettings(this.s);
+                },
+                addFitParameter() {
+                    if (!this.selectedFitModel) return;
+                    const existing = new Set(this.selectedFitModel.parameters.map(param => param.name));
+                    let counter = this.selectedFitModel.parameters.length + 1;
+                    let name = `p${counter}`;
+                    while (existing.has(name)) {
+                        counter += 1;
+                        name = `p${counter}`;
+                    }
+                    this.selectedFitModel.parameters.push({ name, guess: '1.0', fixed: false });
+                },
+                removeFitParameter(index) {
+                    if (!this.selectedFitModel || this.selectedFitModel.parameters.length <= 1) return;
+                    const removed = this.selectedFitModel.parameters[index];
+                    this.selectedFitModel.parameters.splice(index, 1);
+                    if (!removed) return;
+                    Object.keys(this.selectedFitModel.roles || {}).forEach(roleKey => {
+                        if (this.selectedFitModel.roles[roleKey] === removed.name) this.selectedFitModel.roles[roleKey] = '';
+                    });
                 },
                 autoFillPaths() {
                     if (!this.basePath) return;
@@ -316,7 +580,7 @@
                     reader.onload = (e) => {
                         try {
                             const loaded = JSON.parse(e.target.result);
-                            this.s = { ...this.s, ...loaded };
+                            this.s = this.normalizeSettings({ ...this.s, ...loaded });
                             this.saveSettings();
                         } catch (err) { this.isError = true; this.msg = "Parse Error: " + err.message; }
                     };

@@ -111,7 +111,10 @@ class ExperimentManager:
             except Exception as e:
                 print(f"[Settings] Failed to load user settings: {e}")
 
-        return self._normalize_tmot_settings(base_settings)
+        base_settings.setdefault("fit_model_key", "gaussian")
+        base_settings.setdefault("fit_models", fitting.get_default_fit_models())
+
+        return self._normalize_fit_settings(self._normalize_tmot_settings(base_settings), strict=False)
 
     def _save_settings_to_disk(self):
         try:
@@ -123,10 +126,29 @@ class ExperimentManager:
 
     def get_settings(self) -> Dict[str, Any]: return self.settings
 
+    def _normalize_fit_settings(self, settings: Dict[str, Any], strict: bool = False) -> Dict[str, Any]:
+        fit_models = fitting.normalize_fit_model_list(settings.get("fit_models") or fitting.get_default_fit_models())
+        validation_errors = []
+        for model in fit_models:
+            fit_model_error = fitting.validate_fit_model_definition(model)
+            if fit_model_error:
+                validation_errors.append(f"{model.get('label') or model.get('key')}: {fit_model_error}")
+
+        if validation_errors:
+            if strict:
+                raise ValueError(f"Fit model invalid: {validation_errors[0]}")
+            print(f"[Settings] Invalid fit model configuration detected, falling back to defaults: {validation_errors[0]}")
+            fit_models = fitting.get_default_fit_models()
+        selected_fit_model = fitting.get_fit_model_by_key(fit_models, settings.get("fit_model_key", "gaussian"))
+
+        settings["fit_models"] = fit_models
+        settings["fit_model_key"] = selected_fit_model["key"]
+        return settings
+
     def update_settings(self, new_settings: Dict[str, Any]):
         if new_settings.get('tmot_args') is None:
             new_settings['tmot_args'] = self.settings.get('tmot_args', self._default_tmot_args())
-        new_settings = self._normalize_tmot_settings(new_settings)
+        new_settings = self._normalize_fit_settings(self._normalize_tmot_settings(new_settings), strict=True)
         self.settings.update(new_settings)
         self.rp_driver_red.real_ip = self.settings['rp_ip_red']
         self.rp_driver_red.timeout = int(self.settings['network_timeout'])
@@ -173,6 +195,12 @@ class ExperimentManager:
         try: parameters = self._generate_parameters(scan_config)
         except Exception as e: return {"status": "error", "message": f"Param generation failed: {str(e)}"}
 
+        fit_models = self.settings.get('fit_models') or fitting.get_default_fit_models()
+        selected_fit_model = fitting.get_fit_model_by_key(fit_models, self.settings.get('fit_model_key', 'gaussian'))
+        fit_model_error = fitting.validate_fit_model_definition(selected_fit_model)
+        if fit_model_error:
+            return {"status": "error", "message": f"System fit model invalid: {fit_model_error}"}
+
         self.stop_flag = False
         self.status = ExperimentStatus(is_running=True, total_steps=len(parameters), message="Starting...")
         
@@ -185,7 +213,9 @@ class ExperimentManager:
             'center_up': float(scan_config.get('fit_center_up', 0)),
             'width_up': float(scan_config.get('fit_width_up', 0)),
             'center_dw': float(scan_config.get('fit_center_dw', 0)),
-            'width_dw': float(scan_config.get('fit_width_dw', 0))
+            'width_dw': float(scan_config.get('fit_width_dw', 0)),
+            'model_key': self.settings.get('fit_model_key', selected_fit_model['key']),
+            'models': fit_models,
         }
 
         with self.data_queue.mutex: self.data_queue.queue.clear()
@@ -596,10 +626,15 @@ class ExperimentManager:
         print("--- Acquisition Finished ---")
 
     # --- THREAD 2: PROCESSING (CONSUMER) ---
-    def _processing_loop(self, fit_config: Dict[str, float]):
+    def _processing_loop(self, fit_config: Dict[str, Any]):
         print("--- Processing Thread Started ---")
         S = self.settings
         STORAGE_STEP = 1 
+        selected_fit_model = fitting.get_fit_model_by_key(
+            fit_config.get('models'),
+            fit_config.get('model_key'),
+        )
+        print(f"[Fit] Using model: {selected_fit_model['label']} ({selected_fit_model['key']})")
         
         while True:
             try: job = self.data_queue.get(timeout=5)
@@ -693,25 +728,23 @@ class ExperimentManager:
 
                 fit_t_up, fit_v_up, win_up = get_fit_data(tof_axis, volt_up, fit_config.get('center_up', 0), fit_config.get('width_up', 0))
                 fit_t_dw, fit_v_dw, win_dw = get_fit_data(tof_axis, volt_dw, fit_config.get('center_dw', 0), fit_config.get('width_dw', 0))
-                ##Fit function
-                # --- Fitting Model Constants ---
-                #MODEL_GAUSSIAN = 1
-                #MODEL_MOD_GAUSSIAN_1 = 2
-                #MODEL_MOD_GAUSSIAN_2 = 3
-                #MODEL_LORENTZIAN = 4
-                #MODEL_SINC_SQ = 5
-                popt_up, _ = fitting.perform_odr_fit(fitting.MODEL_GAUSSIAN, fit_t_up, fit_v_up)
-                popt_dw, _ = fitting.perform_odr_fit(fitting.MODEL_GAUSSIAN, fit_t_dw, fit_v_dw)
-                fit_curve_up = fitting.fit_funcs(popt_up, tof_axis) if popt_up is not None else np.zeros_like(tof_axis)
-                fit_curve_dw = fitting.fit_funcs(popt_dw, tof_axis) if popt_dw is not None else np.zeros_like(tof_axis)
+                fit_result_up = fitting.perform_configured_fit(selected_fit_model, fit_t_up, fit_v_up, eval_x=tof_axis)
+                fit_result_dw = fitting.perform_configured_fit(selected_fit_model, fit_t_dw, fit_v_dw, eval_x=tof_axis)
+                fit_curve_up = fit_result_up.fit_curve if fit_result_up is not None else np.zeros_like(tof_axis)
+                fit_curve_dw = fit_result_dw.fit_curve if fit_result_dw is not None else np.zeros_like(tof_axis)
 
-                amp_up = popt_up[1] if popt_up is not None else 0; sig_up = popt_up[3] if popt_up is not None else 0; cen_up = popt_up[4] if popt_up is not None else 0
-                amp_dw = popt_dw[1] if popt_dw is not None else 0; sig_dw = popt_dw[3] if popt_dw is not None else 0; cen_dw = popt_dw[4] if popt_dw is not None else 0
+                amp_up = fit_result_up.amplitude if fit_result_up is not None else 0
+                sig_up = fit_result_up.width if fit_result_up is not None else 0
+                cen_up = fit_result_up.center if fit_result_up is not None else 0
+                amp_dw = fit_result_dw.amplitude if fit_result_dw is not None else 0
+                sig_dw = fit_result_dw.width if fit_result_dw is not None else 0
+                cen_dw = fit_result_dw.center if fit_result_dw is not None else 0
                 amp_up_nf = np.max(fit_v_up) if len(fit_v_up) > 0 else 0; amp_dw_nf = np.max(fit_v_dw) if len(fit_v_dw) > 0 else 0
                 sig_up_nf = fitting.calc_sigma(fit_v_up, fit_t_up) or 0; sig_dw_nf = fitting.calc_sigma(fit_v_dw, fit_t_dw) or 0
                 cen_up_nf = fit_t_up[np.argmax(fit_v_up)] if len(fit_v_up)>0 else 0; cen_dw_nf = fit_t_dw[np.argmax(fit_v_dw)] if len(fit_v_dw)>0 else 0
                 area_up_nf = abs(np.trapz(fit_v_up, fit_t_up)) if len(fit_v_up)>1 else 0; area_dw_nf = abs(np.trapz(fit_v_dw, fit_t_dw)) if len(fit_v_dw)>1 else 0
-                area_up = amp_up * abs(sig_up) * np.sqrt(2 * np.pi); area_dw = amp_dw * abs(sig_dw) * np.sqrt(2 * np.pi)
+                area_up = fit_result_up.area if fit_result_up is not None else 0
+                area_dw = fit_result_dw.area if fit_result_dw is not None else 0
 
                 n_f2, n_f1 = physics.calculate_atom_numbers(area_up, area_dw, max_vol_up=amp_up, max_vol_dw=amp_dw, alpha=S['alpha'], beta=S['beta'], R=S['R'], K=S['K'], max_low=S['max_low'])
                 n_f2_nf, n_f1_nf = physics.calculate_atom_numbers(area_up_nf, area_dw_nf, max_vol_up=amp_up_nf, max_vol_dw=amp_dw_nf, alpha=S['alpha'], beta=S['beta'], R=S['R'], K=S['K'], max_low=S['max_low'])

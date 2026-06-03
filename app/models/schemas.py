@@ -1,6 +1,21 @@
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 
+
+class FitParameterConfig(BaseModel):
+    name: str
+    guess: str = Field("")
+    fixed: bool = Field(False)
+
+
+class FitModelDefinition(BaseModel):
+    key: str
+    label: str
+    formula: str
+    parameters: List[FitParameterConfig] = Field(default_factory=list)
+    roles: Dict[str, Optional[str]] = Field(default_factory=dict)
+    area_mode: str = Field("window_integral")
+
 class ScanConfig(BaseModel):
     """Full-Feature Scan Configuration."""
     dim1_type: str = Field("range")
@@ -27,6 +42,8 @@ class ScanConfig(BaseModel):
     fit_width_up: float = Field(0)
     fit_center_dw: float = Field(0)
     fit_width_dw: float = Field(0)
+    fit_model_key: str = Field("gaussian")
+    fit_models: List[FitModelDefinition] = Field(default_factory=list)
     intf_alpha: float = 0.35
     intf_beta: float = 0.07636
     intf_gamma: float = 0.25
@@ -83,6 +100,8 @@ class SystemSettings(BaseModel):
     intf_alpha: float = 0.35
     intf_beta: float = 0.07636
     intf_gamma: float = 0.25
+    fit_model_key: str = Field("gaussian")
+    fit_models: List[FitModelDefinition] = Field(default_factory=list)
 
 class ExperimentResponse(BaseModel):
     status: str

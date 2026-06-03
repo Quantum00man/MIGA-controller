@@ -3,10 +3,18 @@ import shutil
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from pydantic import BaseModel
 from typing import Dict, Any, List
+from app.analysis import fitting
 from app.core.experiment_manager import ExperimentManager
 from app.core.data_loader import DataLoader
 from app.core.data_manager import DataManager
-from app.models.schemas import ScanConfig, ExperimentResponse, SystemSettings, AnalysisSettings, ReAnalysisRequest
+from app.models.schemas import (
+    AnalysisSettings,
+    ExperimentResponse,
+    FitModelDefinition,
+    ReAnalysisRequest,
+    ScanConfig,
+    SystemSettings,
+)
 import config 
 
 router = APIRouter()
@@ -76,7 +84,10 @@ async def get_all_settings(): return manager.get_settings()
 
 @router.post("/settings/all", response_model=ExperimentResponse)
 async def update_all_settings(settings: SystemSettings):
-    manager.update_settings(settings.dict())
+    try:
+        manager.update_settings(settings.dict())
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
     return ExperimentResponse(status="success", message="Updated")
 
 @router.get("/settings/analysis", response_model=AnalysisSettings)
@@ -86,6 +97,11 @@ async def get_analysis_settings(): return manager.get_analysis_config()
 async def update_analysis_settings(settings: AnalysisSettings):
     manager.update_analysis_config(settings.dict())
     return ExperimentResponse(status="success", message="Updated")
+
+
+@router.get("/fitting/models/defaults", response_model=List[FitModelDefinition])
+async def get_default_fitting_models():
+    return fitting.get_default_fit_models()
 
 # --- 4. Archive ---
 @router.get("/archive/tree")
