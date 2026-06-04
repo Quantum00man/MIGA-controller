@@ -159,7 +159,37 @@ class DataLoader:
         variance = sum((value - mean) ** 2 for value in values) / (count - 1)
         return mean, float(math.sqrt(variance))
 
-    def _build_stats_array(self, points: List[Dict[str, Any]]) -> List[Dict[str, float]]:
+    def _resolve_scan_dimensions(
+        self,
+        config_data: Optional[Dict[str, Any]] = None,
+        fallback: int = 1,
+    ) -> int:
+        if isinstance(config_data, dict):
+            try:
+                scan_dimensions = int(config_data.get("scan_dimensions", fallback))
+            except (TypeError, ValueError):
+                scan_dimensions = fallback
+            if config_data.get("dim3_enabled", False):
+                scan_dimensions = max(scan_dimensions, 3)
+            elif config_data.get("dim2_enabled", False):
+                scan_dimensions = max(scan_dimensions, 2)
+            return max(1, min(3, scan_dimensions))
+        return max(1, min(3, int(fallback or 1)))
+
+    def _get_group_params(self, point: Dict[str, Any], scan_dimensions: int) -> List[float]:
+        raw_params = point.get("all_parameters") if isinstance(point, dict) else None
+        if isinstance(raw_params, list) and raw_params:
+            params = [self._safe_scalar(value) for value in raw_params[:scan_dimensions]]
+        else:
+            params = [self._safe_scalar(point.get("parameter"))]
+        if not params:
+            params = [0.0]
+        return params
+
+    def _make_group_key(self, params: List[float]) -> str:
+        return "|".join(f"{float(value):.6f}" for value in params)
+
+    def _build_stats_array(self, points: List[Dict[str, Any]], scan_dimensions: int = 1) -> List[Dict[str, Any]]:
         metric_fields = {
             "atoms": ("atom_number_up", "atom_number_dw"),
             "temp": ("temperature_up", "temperature_dw"),
@@ -179,10 +209,13 @@ class DataLoader:
 
         grouped: Dict[str, Dict[str, Any]] = {}
         for point in points:
-            key = f"{float(point.get('parameter', 0.0)):.6f}"
+            params = self._get_group_params(point, scan_dimensions)
+            key = self._make_group_key(params)
             if key not in grouped:
                 grouped[key] = {
-                    "x": float(key),
+                    "key": key,
+                    "params": params,
+                    "x": float(params[0]),
                     "values": {
                         metric: {"up": [], "dw": []}
                         for metric in metric_fields
@@ -197,10 +230,10 @@ class DataLoader:
                 if value_dw is not None:
                     group[metric]["dw"].append(float(value_dw))
 
-        stats_rows: List[Dict[str, float]] = []
-        for key in sorted(grouped.keys(), key=lambda item: float(item)):
+        stats_rows: List[Dict[str, Any]] = []
+        for key in sorted(grouped.keys(), key=lambda item: grouped[item]["params"]):
             group = grouped[key]
-            row: Dict[str, float] = {"x": group["x"]}
+            row: Dict[str, Any] = {"key": key, "params": list(group["params"]), "x": group["x"]}
             for metric in metric_fields:
                 mean_up, std_up = self._calc_stats(group["values"][metric]["up"])
                 mean_dw, std_dw = self._calc_stats(group["values"][metric]["dw"])
@@ -211,13 +244,14 @@ class DataLoader:
             stats_rows.append(row)
         return stats_rows
 
-    def _build_preview_map(self, points: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    def _build_preview_map(self, points: List[Dict[str, Any]], scan_dimensions: int = 1) -> Dict[str, Dict[str, Any]]:
         preview_map: Dict[str, Dict[str, Any]] = {}
         for point in points:
-            key = f"{float(point.get('parameter', 0.0)):.6f}"
+            params = self._get_group_params(point, scan_dimensions)
+            key = self._make_group_key(params)
             step = int(point.get("step", 0))
             if key not in preview_map:
-                preview_map[key] = {"count": 0, "stepIndices": []}
+                preview_map[key] = {"key": key, "params": params, "x": float(params[0]), "count": 0, "stepIndices": []}
             preview_map[key]["count"] += 1
             preview_map[key]["stepIndices"].append(step)
 
@@ -227,13 +261,16 @@ class DataLoader:
 
     def load_run(self, year: str, month: str, day: str, run_id: str) -> Dict[str, Any]:
         run_dir = self._get_run_dir(year, month, day, run_id)
+        config_data = self._load_config_data(run_dir)
+        scan_dimensions = self._resolve_scan_dimensions(config_data)
         full_points = self._read_results_csv(run_dir, max_points=None)
         sampled_points = self._sample_sequence(full_points, MAX_DISPLAY_POINTS)
         return {
-            "config": self._load_config_data(run_dir),
+            "config": config_data,
+            "scan_dimensions": scan_dimensions,
             "data": sampled_points,
-            "stats": self._build_stats_array(full_points),
-            "preview_map": self._build_preview_map(full_points),
+            "stats": self._build_stats_array(full_points, scan_dimensions=scan_dimensions),
+            "preview_map": self._build_preview_map(full_points, scan_dimensions=scan_dimensions),
             "total_points": len(full_points),
         }
 
@@ -564,6 +601,7 @@ class DataLoader:
     ) -> Dict[str, Any]:
         run_dir = self._get_run_dir(year, month, day, run_id)
         config_data = self._load_config_data(run_dir)
+        scan_dimensions = self._resolve_scan_dimensions(config_data)
         original_settings = (
             config_data.get("_system_settings_snapshot")
             or config_data.get("_analysis_snapshot")
@@ -583,10 +621,11 @@ class DataLoader:
 
         return {
             "config": config_data,
+            "scan_dimensions": scan_dimensions,
             "settings": settings,
             "data": sampled_points,
-            "stats": self._build_stats_array(recalculated_points),
-            "preview_map": self._build_preview_map(recalculated_points),
+            "stats": self._build_stats_array(recalculated_points, scan_dimensions=scan_dimensions),
+            "preview_map": self._build_preview_map(recalculated_points, scan_dimensions=scan_dimensions),
             "total_points": len(recalculated_points),
         }
 
