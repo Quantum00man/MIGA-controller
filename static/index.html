@@ -163,6 +163,20 @@
             border-bottom: 1px solid #eee;
         }
 
+        .analysis-card-body.analysis-3d-layout {
+            display: flex;
+            align-items: stretch;
+        }
+
+        .analysis-card-body.analysis-3d-layout .analysis-plot-panel {
+            flex: 1 1 50%;
+            min-width: 0;
+        }
+
+        .analysis-card-body.analysis-3d-layout .analysis-plot-panel+.analysis-plot-panel {
+            border-left: 1px solid #eee;
+        }
+
         .js-plotly-plot .plotly .modebar {
             left: 50%;
             transform: translateX(-50%);
@@ -175,6 +189,17 @@
 
         .btn-max:hover {
             color: #495057;
+        }
+
+        @media (max-width: 1200px) {
+            .analysis-card-body.analysis-3d-layout {
+                display: block;
+            }
+
+            .analysis-card-body.analysis-3d-layout .analysis-plot-panel+.analysis-plot-panel {
+                border-left: none;
+                border-top: 1px solid #eee;
+            }
         }
     </style>
 </head>
@@ -523,11 +548,13 @@
                         </ul>
                     </div>
                 </div>
-                <div class="card-body p-0">
-                    <div id="resultsPlotUp" class="plot-split-container"
-                        :style="{height: maximizedView === 'analysis' ? 'calc(50vh - 40px)' : '350px'}"></div>
-                    <div id="resultsPlotDw"
-                        :style="{height: maximizedView === 'analysis' ? 'calc(50vh - 40px)' : '350px'}"></div>
+                <div class="card-body p-0 analysis-card-body"
+                    :class="{'analysis-3d-layout': isThreeDimensionalView()}">
+                    <div id="resultsPlotUp" class="analysis-plot-panel"
+                        :class="{'plot-split-container': !isThreeDimensionalView()}"
+                        :style="{height: getAnalysisPlotHeight()}"></div>
+                    <div id="resultsPlotDw" class="analysis-plot-panel"
+                        :style="{height: getAnalysisPlotHeight()}"></div>
                 </div>
             </div>
 
@@ -769,6 +796,15 @@
                     const parsed = Number(this.currentScanDimensions || this.getConfiguredScanDimensions());
                     if (!Number.isFinite(parsed)) return 1;
                     return Math.max(1, Math.min(3, Math.round(parsed)));
+                },
+                isThreeDimensionalView() {
+                    return this.getActiveScanDimensions() === 3;
+                },
+                getAnalysisPlotHeight() {
+                    if (this.maximizedView === 'analysis') {
+                        return this.isThreeDimensionalView() ? 'calc(100vh - 126px)' : 'calc(50vh - 40px)';
+                    }
+                    return this.isThreeDimensionalView() ? '520px' : '350px';
                 },
                 getScannedParameters(data, scanDimensions = this.getActiveScanDimensions()) {
                     const rawParams = Array.isArray(data.all_parameters) && data.all_parameters.length
