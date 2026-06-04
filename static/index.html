@@ -248,7 +248,26 @@
             </div>
 
             <form @submit.prevent>
-                <span class="section-label">Dimension 1</span>
+                <span class="section-label">Scan Dimension</span>
+                <div class="card p-3">
+                    <div class="btn-group btn-group-sm w-100" role="group">
+                        <input type="radio" class="btn-check" name="scanDimension" id="scan1d" :value="1"
+                            v-model.number="config.scan_dimensions">
+                        <label class="btn btn-outline-secondary" for="scan1d">1D</label>
+                        <input type="radio" class="btn-check" name="scanDimension" id="scan2d" :value="2"
+                            v-model.number="config.scan_dimensions">
+                        <label class="btn btn-outline-secondary" for="scan2d">2D</label>
+                        <input type="radio" class="btn-check" name="scanDimension" id="scan3d" :value="3"
+                            v-model.number="config.scan_dimensions">
+                        <label class="btn btn-outline-secondary" for="scan3d">3D</label>
+                    </div>
+                    <div class="form-text mt-2" v-if="config.scan_dimensions > 1">
+                        Multidimensional scans map directly to <span class="fw-bold">P0 / P1 / P2</span> and switch the
+                        analysis plots to heatmap-style views.
+                    </div>
+                </div>
+
+                <span class="section-label">Parameter P0</span>
                 <div class="card p-3">
                     <div class="d-flex justify-content-between align-items-center mb-3">
                         <div class="btn-group btn-group-sm" role="group">
@@ -277,22 +296,22 @@
                     </div>
                     <div v-if="!useList1" class="row g-2">
                         <div class="col-4"><label class="form-label small mb-1"
-                                :class="config.mode === 'bragg_rabi' ? 'text-primary fw-bold' : 'text-muted'">{{ config.mode ===
+                                :class="config.scan_dimensions === 1 && config.mode === 'bragg_rabi' ? 'text-primary fw-bold' : 'text-muted'">{{ config.scan_dimensions === 1 && config.mode ===
                                 'bragg_rabi' ? 'FWHM Start' : 'Start' }}</label><input type="text" class="form-control form-control-sm"
                                 v-model="config.start"></div>
                         <div class="col-4"><label class="form-label small mb-1"
-                                :class="config.mode === 'bragg_rabi' ? 'text-primary fw-bold' : 'text-muted'">{{ config.mode ===
+                                :class="config.scan_dimensions === 1 && config.mode === 'bragg_rabi' ? 'text-primary fw-bold' : 'text-muted'">{{ config.scan_dimensions === 1 && config.mode ===
                                 'bragg_rabi' ? 'FWHM Stop' : 'Stop' }}</label><input type="text" class="form-control form-control-sm"
                                 v-model="config.stop"></div>
                         <div class="col-4"><label class="form-label small mb-1"
-                                :class="config.mode === 'bragg_rabi' ? 'text-primary fw-bold' : 'text-muted'">{{ config.mode ===
+                                :class="config.scan_dimensions === 1 && config.mode === 'bragg_rabi' ? 'text-primary fw-bold' : 'text-muted'">{{ config.scan_dimensions === 1 && config.mode ===
                                 'bragg_rabi' ? 'FWHM Step' : (config.dim1_method === 'step_size' ? 'Step' : 'Points') }}</label><input
                                 type="text" class="form-control form-control-sm" v-model="config.step"></div>
                     </div>
                     <div v-else><textarea class="form-control form-control-sm" v-model="config.custom_list" placeholder="e.g. 1, 5, 10"
                             rows="2"></textarea></div>
-                    
-                    <div v-if="config.mode === 'bragg_rabi'" class="row g-2 mt-2 p-2 rounded"
+
+                    <div v-if="config.scan_dimensions === 1 && config.mode === 'bragg_rabi'" class="row g-2 mt-2 p-2 rounded"
                         style="background-color: #eef2f5; border: 1px dashed #ced4da;">
                         <div class="col-6">
                             <label class="form-label small mb-1 fw-bold text-primary">Pulse Shape</label>
@@ -308,8 +327,8 @@
                     </div>
                 </div>
 
-                <span class="section-label">Scan Logic</span>
-                <div class="card p-3">
+                <span class="section-label" v-if="config.scan_dimensions === 1">Scan Logic</span>
+                <div class="card p-3" v-if="config.scan_dimensions === 1">
                     <div class="mb-3">
                         <label class="form-label small text-muted mb-1">Relation Mode</label>
                         <select class="form-select form-select-sm fw-bold text-dark" v-model="config.mode">
@@ -341,6 +360,13 @@
                             Add Parameter</button>
                     </div>
                 </div>
+                <div class="card p-3" v-else>
+                    <div class="small fw-bold text-primary mb-1">Independent Multi-Axis Scan</div>
+                    <div class="small text-muted">
+                        2D and 3D scans use independent P0/P1/P2 axes so the result plots can render clean heatmaps and
+                        3D color clouds.
+                    </div>
+                </div>
 
                 <span class="section-label">Fitting Config (ms)</span>
                 <div class="card p-3">
@@ -360,28 +386,84 @@
                     </div>
                 </div>
 
-                <span class="section-label">Dimension 2</span>
-                <div class="card p-3">
-                    <div class="d-flex justify-content-between align-items-center mb-2">
-                        <div class="form-check"><input class="form-check-input" type="checkbox" id="d2enable"
-                                v-model="config.dim2_enabled"><label class="form-check-label small fw-bold"
-                                for="d2enable">Enable Dim 2</label></div>
-                        <div class="form-check form-switch" v-if="config.dim2_enabled"><input class="form-check-input"
-                                type="checkbox" id="d2list" v-model="useList2"><label
-                                class="form-check-label small text-muted" for="d2list">List</label></div>
-                    </div>
-                    <div v-if="config.dim2_enabled">
-                        <div v-if="!useList2" class="row g-2">
-                            <div class="col-4"><input type="text" class="form-control form-control-sm"
-                                    v-model="config.dim2_start" placeholder="Start"></div>
-                            <div class="col-4"><input type="text" class="form-control form-control-sm"
-                                    v-model="config.dim2_stop" placeholder="Stop"></div>
-                            <div class="col-4"><input type="text" class="form-control form-control-sm"
-                                    v-model.number="config.dim2_step" placeholder="Step"></div>
+                <span class="section-label" v-if="config.scan_dimensions >= 2">Parameter P1</span>
+                <div class="card p-3" v-if="config.scan_dimensions >= 2">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div class="btn-group btn-group-sm" role="group">
+                            <input type="radio" class="btn-check" name="p1type" id="p1float" value="float"
+                                v-model="config.dim2_param_type">
+                            <label class="btn btn-outline-secondary px-2" for="p1float">Float</label>
+                            <input type="radio" class="btn-check" name="p1type" id="p1int" value="int"
+                                v-model="config.dim2_param_type">
+                            <label class="btn btn-outline-secondary px-2" for="p1int">Int</label>
                         </div>
-                        <div v-else><input type="text" class="form-control form-control-sm" v-model="config.dim2_list"
-                                placeholder="0.1, 0.2..."></div>
+                        <div class="form-check form-switch ms-2">
+                            <input class="form-check-input" type="checkbox" id="d2list" v-model="useList2">
+                            <label class="form-check-label small text-muted" for="d2list">List</label>
+                        </div>
                     </div>
+                    <div class="d-flex justify-content-between align-items-center mb-3" v-if="!useList2">
+                        <span class="small text-muted fw-bold">Method:</span>
+                        <div class="btn-group btn-group-sm w-50">
+                            <input type="radio" class="btn-check" name="p1method" id="p1step" value="step_size"
+                                v-model="config.dim2_method">
+                            <label class="btn btn-outline-secondary py-0" for="p1step">Step</label>
+                            <input type="radio" class="btn-check" name="p1method" id="p1point" value="n_points"
+                                v-model="config.dim2_method">
+                            <label class="btn btn-outline-secondary py-0" for="p1point">Count</label>
+                        </div>
+                    </div>
+                    <div v-if="!useList2" class="row g-2">
+                        <div class="col-4"><label class="form-label small mb-1 text-muted">Start</label><input type="text"
+                                class="form-control form-control-sm" v-model="config.dim2_start"></div>
+                        <div class="col-4"><label class="form-label small mb-1 text-muted">Stop</label><input type="text"
+                                class="form-control form-control-sm" v-model="config.dim2_stop"></div>
+                        <div class="col-4"><label class="form-label small mb-1 text-muted">{{ config.dim2_method ===
+                                'step_size' ? 'Step' : 'Points' }}</label><input type="text"
+                                class="form-control form-control-sm" v-model="config.dim2_step"></div>
+                    </div>
+                    <div v-else><textarea class="form-control form-control-sm" v-model="config.dim2_list"
+                            placeholder="e.g. 0.1, 0.2, 0.3" rows="2"></textarea></div>
+                </div>
+
+                <span class="section-label" v-if="config.scan_dimensions >= 3">Parameter P2</span>
+                <div class="card p-3" v-if="config.scan_dimensions >= 3">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div class="btn-group btn-group-sm" role="group">
+                            <input type="radio" class="btn-check" name="p2type" id="p2float" value="float"
+                                v-model="config.dim3_param_type">
+                            <label class="btn btn-outline-secondary px-2" for="p2float">Float</label>
+                            <input type="radio" class="btn-check" name="p2type" id="p2int" value="int"
+                                v-model="config.dim3_param_type">
+                            <label class="btn btn-outline-secondary px-2" for="p2int">Int</label>
+                        </div>
+                        <div class="form-check form-switch ms-2">
+                            <input class="form-check-input" type="checkbox" id="d3list" v-model="useList3">
+                            <label class="form-check-label small text-muted" for="d3list">List</label>
+                        </div>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center mb-3" v-if="!useList3">
+                        <span class="small text-muted fw-bold">Method:</span>
+                        <div class="btn-group btn-group-sm w-50">
+                            <input type="radio" class="btn-check" name="p2method" id="p2step" value="step_size"
+                                v-model="config.dim3_method">
+                            <label class="btn btn-outline-secondary py-0" for="p2step">Step</label>
+                            <input type="radio" class="btn-check" name="p2method" id="p2point" value="n_points"
+                                v-model="config.dim3_method">
+                            <label class="btn btn-outline-secondary py-0" for="p2point">Count</label>
+                        </div>
+                    </div>
+                    <div v-if="!useList3" class="row g-2">
+                        <div class="col-4"><label class="form-label small mb-1 text-muted">Start</label><input type="text"
+                                class="form-control form-control-sm" v-model="config.dim3_start"></div>
+                        <div class="col-4"><label class="form-label small mb-1 text-muted">Stop</label><input type="text"
+                                class="form-control form-control-sm" v-model="config.dim3_stop"></div>
+                        <div class="col-4"><label class="form-label small mb-1 text-muted">{{ config.dim3_method ===
+                                'step_size' ? 'Step' : 'Points' }}</label><input type="text"
+                                class="form-control form-control-sm" v-model="config.dim3_step"></div>
+                    </div>
+                    <div v-else><textarea class="form-control form-control-sm" v-model="config.dim3_list"
+                            placeholder="e.g. 1, 3, 5" rows="2"></textarea></div>
                 </div>
 
                 <span class="section-label">Execution Control</span>
@@ -430,7 +512,7 @@
                             <input class="form-check-input" type="checkbox" id="showRaw" v-model="showRawData"
                                 style="cursor: pointer;">
                             <label class="form-check-label small fw-bold text-muted" for="showRaw"
-                                style="cursor: pointer;">Show NoFit</label>
+                                style="cursor: pointer;">{{ currentScanDimensions === 1 ? 'Show NoFit' : 'Use NoFit' }}</label>
                         </div>
 
                         <ul class="nav nav-pills card-header-pills">
@@ -498,11 +580,13 @@
         createApp({
             data() {
                 return {
-                    useList1: false, useList2: false,
+                    useList1: false, useList2: false, useList3: false,
                     config: {
+                        scan_dimensions: 1,
                         dim1_type: 'range', start: 0, stop: 10, step: 1, custom_list: '',
                         param_type: 'float', dim1_method: 'step_size',
-                        dim2_enabled: false, dim2_type: 'range', dim2_start: 0, dim2_stop: 5, dim2_step: 1, dim2_list: '',
+                        dim2_enabled: false, dim2_type: 'range', dim2_param_type: 'float', dim2_method: 'step_size', dim2_start: 0, dim2_stop: 5, dim2_step: 1, dim2_list: '',
+                        dim3_enabled: false, dim3_type: 'range', dim3_param_type: 'float', dim3_method: 'step_size', dim3_start: 0, dim3_stop: 5, dim3_step: 1, dim3_list: '',
                         averages: 1, randomize: false, ext_trigger: false, mode: 'standard', mode_param: 100,
                         link_formulas: ["(P0-151)/2+26", "100-P1"],
                         fit_center_up: 0, fit_width_up: 0, fit_center_dw: 0, fit_width_dw: 0,
@@ -517,10 +601,12 @@
                     showRawData: true, // Toggle State
                     maximizedView: null,
                     currentTab: 'atoms',
+                    currentScanDimensions: 1,
                     tabs: [{ id: 'atoms', label: 'Atom Number' }, { id: 'amp', label: 'Max Voltage' }, { id: 'sigma', label: 'Width (ms)' }, { id: 'temp', label: 'Temperature' }, { id: 'arrival', label: 'Arrival Time' }, { id: 'prob', label: 'Transition Prob.' }, { id: 'intf', label: 'Interferometer' }],
                     historyMap: {},
-                    layoutResUp: {}, layoutResDw: {}, layoutOscUp: {}, layoutOscDw: {},
-                    isPlotting: false
+                    layoutResBase: {}, layoutResUp: {}, layoutResDw: {}, layoutOscUp: {}, layoutOscDw: {},
+                    isPlotting: false,
+                    heatmapColorscale: [[0, '#c62828'], [0.5, '#fff3bf'], [1, '#1565c0']]
                 }
             },
             watch: {
@@ -528,10 +614,19 @@
                 showRawData() { this.plotRevision++; this.renderMainPlot(); },
                 useList1(val) { this.config.dim1_type = val ? 'list' : 'range'; this.saveState(); },
                 useList2(val) { this.config.dim2_type = val ? 'list' : 'range'; this.saveState(); },
+                useList3(val) { this.config.dim3_type = val ? 'list' : 'range'; this.saveState(); },
+                'config.scan_dimensions'() {
+                    if (!this.isRunning) {
+                        this.currentScanDimensions = this.getConfiguredScanDimensions();
+                        this.plotRevision++;
+                        this.renderMainPlot();
+                    }
+                },
                 config: { handler() { this.saveState(); }, deep: true }
             },
             mounted() {
                 this.loadState();
+                this.currentScanDimensions = this.getConfiguredScanDimensions();
                 this.initPlots();
                 this.connectWebSocket();
                 this.fetchSystemMode();
@@ -587,6 +682,7 @@
                     const state = {
                         useList1: this.useList1,
                         useList2: this.useList2,
+                        useList3: this.useList3,
                         config: this.config,
                         showRawData: this.showRawData
                     };
@@ -597,13 +693,20 @@
                     if (stored) {
                         try {
                             const state = JSON.parse(stored);
-                            this.useList1 = state.useList1;
-                            this.useList2 = state.useList2;
+                            this.useList1 = state.useList1 ?? this.useList1;
+                            this.useList2 = state.useList2 ?? this.useList2;
+                            this.useList3 = state.useList3 ?? this.useList3;
                             const knownConfigKeys = Object.keys(this.config);
                             const restoredConfig = Object.fromEntries(
                                 Object.entries(state.config || {}).filter(([key]) => knownConfigKeys.includes(key))
                             );
                             this.config = { ...this.config, ...restoredConfig };
+                            if (!restoredConfig.scan_dimensions) {
+                                this.config.scan_dimensions = restoredConfig.dim3_enabled ? 3 : (restoredConfig.dim2_enabled ? 2 : 1);
+                            }
+                            this.useList1 = state.useList1 ?? (this.config.dim1_type === 'list');
+                            this.useList2 = state.useList2 ?? (this.config.dim2_type === 'list');
+                            this.useList3 = state.useList3 ?? (this.config.dim3_type === 'list');
                             if (state.showRawData !== undefined) this.showRawData = state.showRawData;
                         } catch (e) { console.error("Load state failed", e); }
                     }
@@ -617,20 +720,147 @@
                 removeFormula(index) { this.config.link_formulas.splice(index, 1); },
 
                 initPlots() {
-                    const commonLayout = { font: { family: 'Arial, sans-serif', size: 11 }, margin: { l: 60, r: 20 }, showlegend: true, legend: { x: 1, y: 1, xanchor: 'right', bgcolor: 'rgba(255,255,255,0.7)', bordercolor: '#ccc', borderwidth: 1 }, paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', xaxis: { showline: true, mirror: true, ticks: 'inside', linecolor: '#333' }, yaxis: { showline: true, mirror: true, ticks: 'inside', linecolor: '#333', zeroline: false } };
-                    this.layoutResUp = { ...commonLayout, margin: { t: 30, b: 5, l: 60, r: 20 }, yaxis: { ...commonLayout.yaxis, title: 'Value' }, xaxis: { ...commonLayout.xaxis, title: '', showticklabels: false }, title: { text: 'UP Channel', font: { size: 12 }, x: 0.05, y: 0.9 } };
-                    this.layoutResDw = { ...commonLayout, margin: { t: 5, b: 40, l: 60, r: 20 }, yaxis: { ...commonLayout.yaxis, title: 'Value' }, xaxis: { ...commonLayout.xaxis, title: 'Parameter P0' }, title: { text: 'DOWN Channel', font: { size: 12 }, x: 0.05, y: 0.9 } };
+                    const commonLayout = {
+                        font: { family: 'Segoe UI, Arial, sans-serif', size: 12 },
+                        margin: { l: 60, r: 20 },
+                        showlegend: true,
+                        legend: {
+                            x: 1, y: 1, xanchor: 'right',
+                            bgcolor: 'rgba(255,255,255,0.82)',
+                            bordercolor: '#d0d7de',
+                            borderwidth: 1
+                        },
+                        paper_bgcolor: 'rgba(0,0,0,0)',
+                        plot_bgcolor: 'rgba(0,0,0,0)',
+                        xaxis: {
+                            showline: true,
+                            mirror: true,
+                            ticks: 'inside',
+                            linecolor: '#333',
+                            gridcolor: '#dde5ee',
+                            zeroline: false
+                        },
+                        yaxis: {
+                            showline: true,
+                            mirror: true,
+                            ticks: 'inside',
+                            linecolor: '#333',
+                            gridcolor: '#dde5ee',
+                            zeroline: false
+                        },
+                        hoverlabel: { bgcolor: 'white' }
+                    };
+                    this.layoutResBase = commonLayout;
+                    this.layoutResUp = { ...commonLayout };
+                    this.layoutResDw = { ...commonLayout };
                     Plotly.newPlot('resultsPlotUp', [], this.layoutResUp); Plotly.newPlot('resultsPlotDw', [], this.layoutResDw);
                     this.layoutOscUp = { ...commonLayout, margin: { t: 25, b: 5, l: 50, r: 10 }, yaxis: { ...commonLayout.yaxis, title: 'UP (V)' }, xaxis: { ...commonLayout.xaxis, visible: false }, title: { text: 'UP Signal', font: { size: 10 }, x: 0.05, y: 0.85 }, paper_bgcolor: 'white', plot_bgcolor: 'white' };
                     this.layoutOscDw = { ...commonLayout, margin: { t: 5, b: 30, l: 50, r: 10 }, yaxis: { ...commonLayout.yaxis, title: 'DW (V)' }, xaxis: { ...commonLayout.xaxis, title: 'Time (ms)' }, title: { text: 'DOWN Signal', font: { size: 10 }, x: 0.05, y: 0.85 }, paper_bgcolor: 'white', plot_bgcolor: 'white' };
                     Plotly.newPlot('waveformPlotUp', [], this.layoutOscUp); Plotly.newPlot('waveformPlotDw', [], this.layoutOscDw);
                     this.renderMainPlot();
                 },
-                getProcessedHistory() {
-                    const dataArray = Object.keys(this.historyMap).map(key => {
-                        const item = this.historyMap[key]; const n = item.count; const avg = (sum) => sum / n;
+                getConfiguredScanDimensions() {
+                    const fallback = this.config.dim3_enabled ? 3 : (this.config.dim2_enabled ? 2 : 1);
+                    const parsed = Number(this.config.scan_dimensions || fallback);
+                    if (!Number.isFinite(parsed)) return 1;
+                    return Math.max(1, Math.min(3, Math.round(parsed)));
+                },
+                getActiveScanDimensions() {
+                    const parsed = Number(this.currentScanDimensions || this.getConfiguredScanDimensions());
+                    if (!Number.isFinite(parsed)) return 1;
+                    return Math.max(1, Math.min(3, Math.round(parsed)));
+                },
+                getScannedParameters(data, scanDimensions = this.getActiveScanDimensions()) {
+                    const rawParams = Array.isArray(data.all_parameters) && data.all_parameters.length
+                        ? data.all_parameters.slice(0, scanDimensions)
+                        : [data.parameter];
+                    return rawParams.map(value => Number(value));
+                },
+                formatScanParameters(params) {
+                    return params.map((value, index) => `P${index}=${Number(value).toFixed(6)}`).join(", ");
+                },
+                getHistoryKey(params) {
+                    return params.map(value => Number(value).toFixed(6)).join('|');
+                },
+                createHistoryAccumulator(params) {
+                    return {
+                        params: [...params],
+                        count: 0,
+                        sum_atoms_up: 0, sum_atoms_dw: 0,
+                        sum_temp_up: 0, sum_temp_dw: 0,
+                        sum_sigma_up: 0, sum_sigma_dw: 0,
+                        sum_amp_up: 0, sum_amp_dw: 0,
+                        sum_arrival_up: 0, sum_arrival_dw: 0,
+                        sum_prob_up: 0, sum_prob_dw: 0,
+                        sum_intf_p_up: 0, sum_intf_p_dw: 0,
+                        sum_nf_atoms_up: 0, sum_nf_atoms_dw: 0,
+                        sum_nf_temp_up: 0, sum_nf_temp_dw: 0,
+                        sum_nf_sigma_up: 0, sum_nf_sigma_dw: 0,
+                        sum_nf_amp_up: 0, sum_nf_amp_dw: 0,
+                        sum_nf_arrival_up: 0, sum_nf_arrival_dw: 0,
+                        sum_nf_prob_up: 0, sum_nf_prob_dw: 0,
+                        sum_nf_intf_p_up: 0, sum_nf_intf_p_dw: 0
+                    };
+                },
+                getMetricConfig() {
+                    let label = "Atom Number";
+                    let fitUp = 'atoms_up';
+                    let fitDw = 'atoms_dw';
+                    let rawUp = 'nf_atoms_up';
+                    let rawDw = 'nf_atoms_dw';
+                    let nameUp = "UP";
+                    let nameDw = "DOWN";
+                    let suffixUp = ' (UP)';
+                    let suffixDw = ' (DW)';
+
+                    switch (this.currentTab) {
+                        case 'amp':
+                            label = "Max Voltage (V)";
+                            fitUp = 'amp_up'; fitDw = 'amp_dw';
+                            rawUp = 'nf_amp_up'; rawDw = 'nf_amp_dw';
+                            break;
+                        case 'sigma':
+                            label = "Width (ms)";
+                            fitUp = 'sigma_up'; fitDw = 'sigma_dw';
+                            rawUp = 'nf_sigma_up'; rawDw = 'nf_sigma_dw';
+                            break;
+                        case 'temp':
+                            label = "Temperature (uK)";
+                            fitUp = 'temp_up'; fitDw = 'temp_dw';
+                            rawUp = 'nf_temp_up'; rawDw = 'nf_temp_dw';
+                            break;
+                        case 'arrival':
+                            label = "Arrival Time (s)";
+                            fitUp = 'arrival_up'; fitDw = 'arrival_dw';
+                            rawUp = 'nf_arrival_up'; rawDw = 'nf_arrival_dw';
+                            break;
+                        case 'prob':
+                            label = "Transition Prob. (%)";
+                            fitUp = 'prob_up'; fitDw = 'prob_dw';
+                            rawUp = 'nf_prob_up'; rawDw = 'nf_prob_dw';
+                            nameUp = "Prob F2 (UP)";
+                            nameDw = "Prob F1 (DW)";
+                            break;
+                        case 'intf':
+                            label = "Interferometer P (%)";
+                            fitUp = 'intf_p_up'; fitDw = 'intf_p_dw';
+                            rawUp = 'nf_intf_p_up'; rawDw = 'nf_intf_p_dw';
+                            nameUp = "P_N1";
+                            nameDw = "P_N2";
+                            suffixUp = ' (N1)';
+                            suffixDw = ' (N2)';
+                            break;
+                    }
+
+                    return { label, fitUp, fitDw, rawUp, rawDw, nameUp, nameDw, suffixUp, suffixDw };
+                },
+                getAggregatedPoints() {
+                    const points = Object.values(this.historyMap).map(item => {
+                        const n = item.count || 1;
+                        const avg = (sum) => sum / n;
                         return {
-                            x: parseFloat(key),
+                            params: Array.isArray(item.params) ? [...item.params] : [0],
+                            count: n,
                             atoms_up: avg(item.sum_atoms_up), atoms_dw: avg(item.sum_atoms_dw),
                             temp_up: avg(item.sum_temp_up), temp_dw: avg(item.sum_temp_dw),
                             sigma_up: avg(item.sum_sigma_up), sigma_dw: avg(item.sum_sigma_dw),
@@ -647,63 +877,214 @@
                             nf_intf_p_up: avg(item.sum_nf_intf_p_up), nf_intf_p_dw: avg(item.sum_nf_intf_p_dw)
                         };
                     });
-                    dataArray.sort((a, b) => a.x - b.x);
-                    const res = { x: [] };
-                    ['atoms', 'temp', 'sigma', 'amp', 'arrival', 'prob', 'intf_p'].forEach(k => {
-                        res[k + '_up'] = []; res['nf_' + k + '_up'] = []; res[k + '_dw'] = []; res['nf_' + k + '_dw'] = [];
+
+                    points.sort((a, b) => {
+                        const maxLen = Math.max(a.params.length, b.params.length, this.getActiveScanDimensions());
+                        for (let index = 0; index < maxLen; index += 1) {
+                            const diff = (a.params[index] ?? 0) - (b.params[index] ?? 0);
+                            if (Math.abs(diff) > 1e-12) return diff;
+                        }
+                        return 0;
                     });
-                    dataArray.forEach(d => {
-                        res.x.push(d.x);
-                        ['atoms', 'temp', 'sigma', 'amp', 'arrival', 'prob', 'intf_p'].forEach(k => {
-                            res[k + '_up'].push(d[k + '_up']); res['nf_' + k + '_up'].push(d['nf_' + k + '_up']);
-                            res[k + '_dw'].push(d[k + '_dw']); res['nf_' + k + '_dw'].push(d['nf_' + k + '_dw']);
-                        });
-                    });
-                    return res;
+                    return points;
                 },
-                renderMainPlot() {
-                    const d = this.getProcessedHistory();
-                    let yUp = [], yUpNF = [], yDw = [], yDwNF = [], labelY = "", nameUp = "UP", nameDw = "DOWN";
+                build1DSeries(points, metric) {
+                    const series = { x: [], fitUp: [], rawUp: [], fitDw: [], rawDw: [] };
+                    points.forEach(point => {
+                        series.x.push(point.params[0] ?? 0);
+                        series.fitUp.push(point[metric.fitUp]);
+                        series.rawUp.push(point[metric.rawUp]);
+                        series.fitDw.push(point[metric.fitDw]);
+                        series.rawDw.push(point[metric.rawDw]);
+                    });
+                    return series;
+                },
+                buildHeatmapMatrix(points, field) {
+                    const xVals = [...new Set(points.map(point => Number(point.params[0] ?? 0)))].sort((a, b) => a - b);
+                    const yVals = [...new Set(points.map(point => Number(point.params[1] ?? 0)))].sort((a, b) => a - b);
+                    const xIndex = new Map(xVals.map((value, index) => [value.toFixed(6), index]));
+                    const yIndex = new Map(yVals.map((value, index) => [value.toFixed(6), index]));
+                    const z = Array.from({ length: yVals.length }, () => Array(xVals.length).fill(null));
 
-                    // [修改 1] 定义默认的坐标轴后缀
-                    let suffixUp = ' (UP)';
-                    let suffixDw = ' (DW)';
+                    points.forEach(point => {
+                        const xKey = Number(point.params[0] ?? 0).toFixed(6);
+                        const yKey = Number(point.params[1] ?? 0).toFixed(6);
+                        const xi = xIndex.get(xKey);
+                        const yi = yIndex.get(yKey);
+                        if (xi !== undefined && yi !== undefined) {
+                            z[yi][xi] = point[field];
+                        }
+                    });
 
-                    switch (this.currentTab) {
-                        case 'atoms': yUp = d.atoms_up; yUpNF = d.nf_atoms_up; yDw = d.atoms_dw; yDwNF = d.nf_atoms_dw; labelY = "Atom Number"; break;
-                        case 'amp': yUp = d.amp_up; yUpNF = d.nf_amp_up; yDw = d.amp_dw; yDwNF = d.nf_amp_dw; labelY = "Max Voltage (V)"; break;
-                        case 'sigma': yUp = d.sigma_up; yUpNF = d.nf_sigma_up; yDw = d.sigma_dw; yDwNF = d.nf_sigma_dw; labelY = "Width (ms)"; break;
-                        case 'temp': yUp = d.temp_up; yUpNF = d.nf_temp_up; yDw = d.temp_dw; yDwNF = d.nf_temp_dw; labelY = "Temperature (uK)"; break;
-                        case 'arrival': yUp = d.arrival_up; yUpNF = d.nf_arrival_up; yDw = d.arrival_dw; yDwNF = d.nf_arrival_dw; labelY = "Arrival Time (s)"; break;
-                        case 'prob': yUp = d.prob_up; yUpNF = d.nf_prob_up; yDw = d.prob_dw; yDwNF = d.nf_prob_dw; labelY = "Transition Prob. (%)"; nameUp = "Prob F2 (UP)"; nameDw = "Prob F1 (DW)"; break;
-                        case 'intf':
-                            yUp = d.intf_p_up; yUpNF = d.nf_intf_p_up;
-                            yDw = d.intf_p_dw; yDwNF = d.nf_intf_p_dw;
-                            labelY = "Interferometer P (%)";
-                            nameUp = "P_N1"; nameDw = "P_N2";
-
-                            //  Interferometer 
-                            suffixUp = ' (N1)';
-                            suffixDw = ' (N2)';
-                            break;
-                    }
-
-                    const tracesUp = [{ x: d.x, y: yUp, mode: 'lines+markers', name: nameUp + ' (Fit)', line: { color: '#dc3545', width: 2 }, marker: { size: 8 } }];
-                    const tracesDw = [{ x: d.x, y: yDw, mode: 'lines+markers', name: nameDw + ' (Fit)', line: { color: '#0d6efd', width: 2 }, marker: { size: 8 } }];
+                    return { xVals, yVals, z };
+                },
+                buildCommonAnalysisLayout() {
+                    return {
+                        ...this.layoutResBase,
+                        datarevision: this.plotRevision,
+                        uirevision: 'analysis-results'
+                    };
+                },
+                build1DLayout(channel, metric) {
+                    const base = this.buildCommonAnalysisLayout();
+                    const isUp = channel === 'up';
+                    return {
+                        ...base,
+                        margin: isUp ? { t: 34, b: 8, l: 68, r: 20 } : { t: 8, b: 44, l: 68, r: 20 },
+                        yaxis: { ...base.yaxis, title: metric.label + (isUp ? metric.suffixUp : metric.suffixDw) },
+                        xaxis: {
+                            ...base.xaxis,
+                            title: isUp ? '' : 'Parameter P0',
+                            showticklabels: !isUp
+                        },
+                        title: {
+                            text: isUp ? 'UP Channel' : 'DOWN Channel',
+                            font: { size: 13 },
+                            x: 0.05,
+                            y: 0.93
+                        }
+                    };
+                },
+                build2DLayout(channel, metric, sourceLabel) {
+                    const base = this.buildCommonAnalysisLayout();
+                    const title = channel === 'up' ? metric.nameUp : metric.nameDw;
+                    return {
+                        ...base,
+                        showlegend: false,
+                        margin: { t: 42, b: 54, l: 72, r: 28 },
+                        xaxis: { ...base.xaxis, title: 'P0', showticklabels: true },
+                        yaxis: { ...base.yaxis, title: 'P1', showticklabels: true, automargin: true },
+                        title: {
+                            text: `${title} · ${metric.label} · ${sourceLabel}`,
+                            font: { size: 13 },
+                            x: 0.05,
+                            y: 0.95
+                        }
+                    };
+                },
+                build3DLayout(channel, metric, sourceLabel) {
+                    const base = this.buildCommonAnalysisLayout();
+                    const title = channel === 'up' ? metric.nameUp : metric.nameDw;
+                    return {
+                        ...base,
+                        showlegend: false,
+                        margin: { t: 42, b: 10, l: 10, r: 10 },
+                        scene: {
+                            xaxis: { title: 'P0', backgroundcolor: '#f6f8fb', gridcolor: '#dbe5ef', zerolinecolor: '#cfd8e3' },
+                            yaxis: { title: 'P1', backgroundcolor: '#f6f8fb', gridcolor: '#dbe5ef', zerolinecolor: '#cfd8e3' },
+                            zaxis: { title: 'P2', backgroundcolor: '#f6f8fb', gridcolor: '#dbe5ef', zerolinecolor: '#cfd8e3' },
+                            aspectmode: 'cube',
+                            camera: { eye: { x: 1.45, y: 1.35, z: 1.05 } }
+                        },
+                        title: {
+                            text: `${title} · ${metric.label} · ${sourceLabel}`,
+                            font: { size: 13 },
+                            x: 0.05,
+                            y: 0.95
+                        }
+                    };
+                },
+                render1DPlot(points, metric) {
+                    const series = this.build1DSeries(points, metric);
+                    const tracesUp = [{
+                        x: series.x, y: series.fitUp, mode: 'lines+markers', name: metric.nameUp + ' (Fit)',
+                        line: { color: '#dc3545', width: 2.5 }, marker: { size: 8 }
+                    }];
+                    const tracesDw = [{
+                        x: series.x, y: series.fitDw, mode: 'lines+markers', name: metric.nameDw + ' (Fit)',
+                        line: { color: '#0d6efd', width: 2.5 }, marker: { size: 8 }
+                    }];
 
                     if (this.showRawData) {
-                        tracesUp.push({ x: d.x, y: yUpNF, mode: 'lines+markers', name: nameUp + ' (Raw)', line: { color: '#dc3545', width: 1, dash: 'dot' }, marker: { size: 6, symbol: 'circle-open', opacity: 0.6 } });
-                        tracesDw.push({ x: d.x, y: yDwNF, mode: 'lines+markers', name: nameDw + ' (Raw)', line: { color: '#0d6efd', width: 1, dash: 'dot' }, marker: { size: 6, symbol: 'circle-open', opacity: 0.6 } });
+                        tracesUp.push({
+                            x: series.x, y: series.rawUp, mode: 'lines+markers', name: metric.nameUp + ' (Raw)',
+                            line: { color: '#dc3545', width: 1.2, dash: 'dot' },
+                            marker: { size: 6, symbol: 'circle-open', opacity: 0.6 }
+                        });
+                        tracesDw.push({
+                            x: series.x, y: series.rawDw, mode: 'lines+markers', name: metric.nameDw + ' (Raw)',
+                            line: { color: '#0d6efd', width: 1.2, dash: 'dot' },
+                            marker: { size: 6, symbol: 'circle-open', opacity: 0.6 }
+                        });
                     }
 
-
-                    this.layoutResUp.yaxis.title = labelY + suffixUp;
-                    this.layoutResUp.datarevision = this.plotRevision;
+                    this.layoutResUp = this.build1DLayout('up', metric);
+                    this.layoutResDw = this.build1DLayout('dw', metric);
                     Plotly.react('resultsPlotUp', tracesUp, this.layoutResUp);
-
-                    this.layoutResDw.yaxis.title = labelY + suffixDw;
-                    this.layoutResDw.datarevision = this.plotRevision;
                     Plotly.react('resultsPlotDw', tracesDw, this.layoutResDw);
+                },
+                render2DHeatmap(points, metric) {
+                    const fieldUp = this.showRawData ? metric.rawUp : metric.fitUp;
+                    const fieldDw = this.showRawData ? metric.rawDw : metric.fitDw;
+                    const sourceLabel = this.showRawData ? 'NoFit' : 'Fit';
+                    const matrixUp = this.buildHeatmapMatrix(points, fieldUp);
+                    const matrixDw = this.buildHeatmapMatrix(points, fieldDw);
+                    const makeTrace = (matrix, channelName) => ({
+                        type: 'heatmap',
+                        x: matrix.xVals,
+                        y: matrix.yVals,
+                        z: matrix.z,
+                        colorscale: this.heatmapColorscale,
+                        zsmooth: false,
+                        hoverongaps: false,
+                        xgap: 1,
+                        ygap: 1,
+                        colorbar: {
+                            title: metric.label,
+                            thickness: 14,
+                            len: 0.82
+                        },
+                        hovertemplate: `P0=%{x:.6f}<br>P1=%{y:.6f}<br>${metric.label}=%{z:.6g}<extra>${channelName} · ${sourceLabel}</extra>`
+                    });
+
+                    this.layoutResUp = this.build2DLayout('up', metric, sourceLabel);
+                    this.layoutResDw = this.build2DLayout('dw', metric, sourceLabel);
+                    Plotly.react('resultsPlotUp', points.length ? [makeTrace(matrixUp, metric.nameUp)] : [], this.layoutResUp);
+                    Plotly.react('resultsPlotDw', points.length ? [makeTrace(matrixDw, metric.nameDw)] : [], this.layoutResDw);
+                },
+                render3DScatter(points, metric) {
+                    const fieldUp = this.showRawData ? metric.rawUp : metric.fitUp;
+                    const fieldDw = this.showRawData ? metric.rawDw : metric.fitDw;
+                    const sourceLabel = this.showRawData ? 'NoFit' : 'Fit';
+                    const makeTrace = (field, channelName) => ({
+                        type: 'scatter3d',
+                        mode: 'markers',
+                        x: points.map(point => point.params[0] ?? 0),
+                        y: points.map(point => point.params[1] ?? 0),
+                        z: points.map(point => point.params[2] ?? 0),
+                        text: points.map(point => `${channelName}<br>${this.formatScanParameters(point.params)}`),
+                        hovertemplate: '%{text}<br>' + `${metric.label}=%{marker.color:.6g}<extra>${sourceLabel}</extra>`,
+                        marker: {
+                            size: 6.5,
+                            color: points.map(point => point[field]),
+                            colorscale: this.heatmapColorscale,
+                            opacity: 0.92,
+                            colorbar: {
+                                title: metric.label,
+                                thickness: 14,
+                                len: 0.78
+                            },
+                            line: { color: 'rgba(0,0,0,0.28)', width: 0.4 }
+                        }
+                    });
+
+                    this.layoutResUp = this.build3DLayout('up', metric, sourceLabel);
+                    this.layoutResDw = this.build3DLayout('dw', metric, sourceLabel);
+                    Plotly.react('resultsPlotUp', points.length ? [makeTrace(fieldUp, metric.nameUp)] : [], this.layoutResUp);
+                    Plotly.react('resultsPlotDw', points.length ? [makeTrace(fieldDw, metric.nameDw)] : [], this.layoutResDw);
+                },
+                renderMainPlot() {
+                    const points = this.getAggregatedPoints();
+                    const metric = this.getMetricConfig();
+                    const scanDimensions = this.getActiveScanDimensions();
+
+                    if (scanDimensions === 1) {
+                        this.render1DPlot(points, metric);
+                    } else if (scanDimensions === 2) {
+                        this.render2DHeatmap(points, metric);
+                    } else {
+                        this.render3DScatter(points, metric);
+                    }
                 },
                 connectWebSocket() {
                     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -714,10 +1095,21 @@
                     this.ws.onmessage = (event) => this.handleData(JSON.parse(event.data));
                 },
                 handleData(data) {
-                    this.currentStep = data.current_step;
+                    this.currentStep = data.current_step || 0;
                     const total = data.total_steps || 1;
                     this.progressPercent = total > 0 ? Math.round((this.currentStep / total) * 100) : 0;
-                    this.statusMessage = `Scanning: ${data.parameter}`;
+                    const scanDimensions = Math.max(1, Math.min(3, Number(data.scan_dimensions || this.currentScanDimensions || this.getConfiguredScanDimensions()) || 1));
+                    const scannedParams = this.getScannedParameters(data, scanDimensions);
+                    this.currentScanDimensions = scanDimensions;
+                    this.statusMessage = `Scanning: ${this.formatScanParameters(scannedParams)}`;
+
+                    if (!data.time_axis || !data.raw_data_up || !data.raw_data_dw || !data.fit_data_up || !data.fit_data_dw) {
+                        if (data.error) {
+                            this.addLog(`${this.formatScanParameters(scannedParams)} | ${data.error}`);
+                        }
+                        if (this.isRunning) this.fetchStatus();
+                        return;
+                    }
 
                     if (this.isPlotting) return;
                     this.isPlotting = true;
@@ -736,16 +1128,12 @@
                             this.layoutOscDw.datarevision = this.currentStep; this.layoutOscDw.shapes = shapesDw;
                             Plotly.react('waveformPlotDw', [traceDwRaw, traceDwFit], this.layoutOscDw);
 
-                            // ... (History Update Code Omitted for Brevity, keep as is) ...
-                            const key = data.parameter.toFixed(6);
+                            const key = this.getHistoryKey(scannedParams);
                             if (!this.historyMap[key]) {
-                                this.historyMap[key] = {
-                                    count: 0,
-                                    sum_atoms_up: 0, sum_atoms_dw: 0, sum_temp_up: 0, sum_temp_dw: 0, sum_sigma_up: 0, sum_sigma_dw: 0, sum_amp_up: 0, sum_amp_dw: 0, sum_arrival_up: 0, sum_arrival_dw: 0, sum_prob_up: 0, sum_prob_dw: 0, sum_intf_p_up: 0, sum_intf_p_dw: 0,
-                                    sum_nf_atoms_up: 0, sum_nf_atoms_dw: 0, sum_nf_temp_up: 0, sum_nf_temp_dw: 0, sum_nf_sigma_up: 0, sum_nf_sigma_dw: 0, sum_nf_amp_up: 0, sum_nf_amp_dw: 0, sum_nf_arrival_up: 0, sum_nf_arrival_dw: 0, sum_nf_prob_up: 0, sum_nf_prob_dw: 0, sum_nf_intf_p_up: 0, sum_nf_intf_p_dw: 0
-                                };
+                                this.historyMap[key] = this.createHistoryAccumulator(scannedParams);
                             }
                             const item = this.historyMap[key];
+                            item.params = [...scannedParams];
                             item.count += 1;
                             ['atoms', 'temp', 'sigma', 'amp', 'arrival', 'prob'].forEach(metric => {
                                 const k = metric === 'arrival' ? 'arrival_time' : (metric === 'prob' ? 'transition_probability' : (metric === 'amp' ? 'amplitude' : (metric === 'atoms' ? 'atom_number' : metric === 'temp' ? 'temperature' : metric)));
@@ -759,14 +1147,13 @@
 
                             item.sum_nf_intf_p_up += (data.intf_p1_nofit || 0);
                             item.sum_nf_intf_p_dw += (data.intf_p2_nofit || 0);
-                            this.renderMainPlot();
                             this.plotRevision++;
+                            this.renderMainPlot();
 
-                            // [NEW] Log display with Delta T
-                            let paramLog = `P0=${data.parameter.toFixed(6)}`;
-                            if (data.all_parameters && data.all_parameters.length > 1) {
-                                paramLog = data.all_parameters.map((p, i) => `P${i}=${p.toFixed(6)}`).join(", ");
-                            }
+                            const allParamsForLog = Array.isArray(data.all_parameters) && data.all_parameters.length
+                                ? data.all_parameters.map(value => Number(value))
+                                : scannedParams;
+                            let paramLog = this.formatScanParameters(allParamsForLog);
                             if (data.detected_delay !== undefined && data.detected_delay !== null) {
                                 paramLog += ` | Δt=${(data.detected_delay * 1000).toFixed(2)}ms`;
                             }
@@ -797,7 +1184,13 @@
                     this.progressPercent = 0;
                     this.plotRevision = 0;
                     try {
-                        const res = await axios.post('/experiment/start', this.config);
+                        const payload = JSON.parse(JSON.stringify(this.config));
+                        payload.scan_dimensions = this.getConfiguredScanDimensions();
+                        payload.dim2_enabled = payload.scan_dimensions >= 2;
+                        payload.dim3_enabled = payload.scan_dimensions >= 3;
+                        if (payload.scan_dimensions > 1) payload.mode = 'standard';
+                        this.currentScanDimensions = payload.scan_dimensions;
+                        const res = await axios.post('/experiment/start', payload);
                         if (res.data.status === 'success') {
                             this.isRunning = true;
                             this.statusMessage = "RUNNING";
@@ -807,7 +1200,7 @@
                     }
                 },
                 async stopScan() { await axios.post('/experiment/stop'); this.isRunning = false; this.statusMessage = "STOPPED"; },
-                resetHistory() { this.historyMap = {}; this.initPlots(); }
+                resetHistory() { this.currentScanDimensions = this.getConfiguredScanDimensions(); this.historyMap = {}; this.initPlots(); }
             }
         }).mount('#app');
     </script>

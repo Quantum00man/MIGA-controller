@@ -9,6 +9,7 @@ import os
 import shlex
 import numpy as np
 from pathlib import Path
+from itertools import product
 from typing import List, Dict, Optional, Callable, Any
 from dataclasses import asdict
 
@@ -256,49 +257,157 @@ class ExperimentManager:
             return {"status": "success", "message": "Stop signal sent"}
         return {"status": "warning", "message": "No experiment running"}
 
-    def _generate_parameters(self, config: Dict[str, Any]) -> List[Any]:
-        def get_values(ptype, start, stop, step, clist, target_type='float'):
-            raw_vals = []
-            if ptype == 'list':
-                try: return [float(x.strip()) for x in clist.split(',') if x.strip()]
-                except ValueError: raise ValueError(f"Invalid list format: {clist}")
-            else:
-                start, stop, step = float(start), float(stop), float(step)
-                if step == 0: raw_vals = [start]
-                else:
-                    num = int(abs((stop - start) / step)) + 1
-                    raw_vals = np.linspace(start, start + (num-1)*step, num).tolist()
-            if target_type == 'int': return [int(x) for x in raw_vals]
-            else: return [round(x, 6) for x in raw_vals]
-
-        param_type = config.get('param_type', 'float')
-        vals_1 = get_values(config.get('dim1_type', 'range'), config.get('start', 0), config.get('stop', 10), config.get('step', 1), config.get('custom_list', ''), target_type=param_type)
-        mode = config.get('mode', 'standard')
-        mode_param = float(config.get('mode_param') or 0.0)
-        link_formulas = config.get('link_formulas', [])
-        sets_1 = []
-        for v in vals_1:
-            s = [v] 
-            if mode == 'timing': s.append(round(mode_param - v, 6))
-            elif mode == 'rabi': s.append(round(mode_param - v/2.0, 6))
-            elif mode == 'half': s.append(round(v/2.0, 6))
-            elif mode == 'link':
-                eval_ctx = {"P0": v, "math": math, "np": np}
-                for i, formula_str in enumerate(link_formulas):
-                    try: val = float(eval(formula_str, {"__builtins__": {}}, eval_ctx)); eval_ctx[f"P{i+1}"] = val; s.append(round(val, 6))
-                    except Exception: raise ValueError(f"Formula Error: {formula_str}")
-            sets_1.append(s)
-        sets_2 = [[]]
+    def _resolve_scan_dimensions(self, config: Dict[str, Any]) -> int:
+        legacy_dims = 1
         if config.get('dim2_enabled', False):
-            vals_2 = get_values(config.get('dim2_type', 'range'), config.get('dim2_start', 0), config.get('dim2_stop', 10), config.get('dim2_step', 1), config.get('dim2_list', ''), target_type='float')
-            sets_2 = [[v] for v in vals_2]
-        final_list = []
-        for s1 in sets_1:
-            for s2 in sets_2:
-                final_list.append(s1 + s2)
+            legacy_dims = 2
+        if config.get('dim3_enabled', False):
+            legacy_dims = 3
+
+        try:
+            scan_dimensions = int(config.get('scan_dimensions', legacy_dims))
+        except (TypeError, ValueError):
+            scan_dimensions = legacy_dims
+
+        return max(1, min(3, scan_dimensions))
+
+    def _generate_parameters(self, config: Dict[str, Any]) -> List[Any]:
+        def normalize_values(values: List[float], target_type: str) -> List[Any]:
+            if target_type == 'int':
+                return [int(round(x)) for x in values]
+            return [round(float(x), 6) for x in values]
+
+        def get_values(scan_type, method, start, stop, step_or_count, clist, target_type='float'):
+            if scan_type == 'list':
+                try:
+                    raw_vals = [float(x.strip()) for x in clist.split(',') if x.strip()]
+                except ValueError:
+                    raise ValueError(f"Invalid list format: {clist}")
+                if not raw_vals:
+                    raise ValueError("Scan list cannot be empty")
+                return normalize_values(raw_vals, target_type)
+
+            start = float(start)
+            stop = float(stop)
+            raw_vals: List[float] = []
+
+            if method == 'n_points':
+                try:
+                    n_points = int(float(step_or_count))
+                except (TypeError, ValueError):
+                    raise ValueError(f"Invalid point count: {step_or_count}")
+                if n_points <= 0:
+                    raise ValueError("Point count must be positive")
+                if n_points == 1:
+                    raw_vals = [start]
+                else:
+                    raw_vals = np.linspace(start, stop, n_points).tolist()
+            else:
+                step = float(step_or_count)
+                if step == 0:
+                    raw_vals = [start]
+                else:
+                    direction = 1.0 if stop >= start else -1.0
+                    effective_step = abs(step) * direction
+                    current = start
+                    tolerance = abs(effective_step) * 1e-9 + 1e-12
+                    compare = (lambda value: value <= stop + tolerance) if direction > 0 else (lambda value: value >= stop - tolerance)
+                    while compare(current):
+                        raw_vals.append(current)
+                        current += effective_step
+                    if not raw_vals:
+                        raw_vals = [start]
+
+            return normalize_values(raw_vals, target_type)
+
+        scan_dimensions = self._resolve_scan_dimensions(config)
+        mode = config.get('mode', 'standard')
+        if scan_dimensions > 1 and mode != 'standard':
+            raise ValueError("2D/3D scans only support Standard mode with independent P0/P1/P2 axes")
+
+        dim_specs = [
+            {
+                'scan_type': config.get('dim1_type', 'range'),
+                'method': config.get('dim1_method', 'step_size'),
+                'start': config.get('start', 0),
+                'stop': config.get('stop', 10),
+                'step': config.get('step', 1),
+                'list': config.get('custom_list', ''),
+                'target_type': config.get('param_type', 'float'),
+            },
+            {
+                'scan_type': config.get('dim2_type', 'range'),
+                'method': config.get('dim2_method', 'step_size'),
+                'start': config.get('dim2_start', 0),
+                'stop': config.get('dim2_stop', 10),
+                'step': config.get('dim2_step', 1),
+                'list': config.get('dim2_list', ''),
+                'target_type': config.get('dim2_param_type', config.get('param_type', 'float')),
+            },
+            {
+                'scan_type': config.get('dim3_type', 'range'),
+                'method': config.get('dim3_method', 'step_size'),
+                'start': config.get('dim3_start', 0),
+                'stop': config.get('dim3_stop', 10),
+                'step': config.get('dim3_step', 1),
+                'list': config.get('dim3_list', ''),
+                'target_type': config.get('dim3_param_type', config.get('param_type', 'float')),
+            },
+        ]
+
+        if scan_dimensions == 1:
+            vals_1 = get_values(
+                dim_specs[0]['scan_type'],
+                dim_specs[0]['method'],
+                dim_specs[0]['start'],
+                dim_specs[0]['stop'],
+                dim_specs[0]['step'],
+                dim_specs[0]['list'],
+                target_type=dim_specs[0]['target_type'],
+            )
+            mode_param = float(config.get('mode_param') or 0.0)
+            link_formulas = config.get('link_formulas', [])
+            final_list = []
+            for v in vals_1:
+                s = [v]
+                if mode == 'timing':
+                    s.append(round(mode_param - v, 6))
+                elif mode == 'rabi':
+                    s.append(round(mode_param - v / 2.0, 6))
+                elif mode == 'half':
+                    s.append(round(v / 2.0, 6))
+                elif mode == 'link':
+                    eval_ctx = {"P0": v, "math": math, "np": np}
+                    for i, formula_str in enumerate(link_formulas):
+                        try:
+                            val = float(eval(formula_str, {"__builtins__": {}}, eval_ctx))
+                            eval_ctx[f"P{i+1}"] = val
+                            s.append(round(val, 6))
+                        except Exception:
+                            raise ValueError(f"Formula Error: {formula_str}")
+                final_list.append(s)
+        else:
+            axis_values = []
+            for dim_idx in range(scan_dimensions):
+                spec = dim_specs[dim_idx]
+                axis_values.append(
+                    get_values(
+                        spec['scan_type'],
+                        spec['method'],
+                        spec['start'],
+                        spec['stop'],
+                        spec['step'],
+                        spec['list'],
+                        target_type=spec['target_type'],
+                    )
+                )
+            final_list = [list(param_set) for param_set in product(*axis_values)]
+
         full_scan = []
-        for _ in range(int(config.get('averages', 1))): full_scan.extend(final_list)
-        if config.get('randomize', False): random.shuffle(full_scan)
+        for _ in range(int(config.get('averages', 1))):
+            full_scan.extend(final_list)
+        if config.get('randomize', False):
+            random.shuffle(full_scan)
         return full_scan
 
     '''# [UPDATED] Robust VCD Parser with Debug Prints
@@ -574,9 +683,10 @@ class ExperimentManager:
     # --- THREAD 1: ACQUISITION (PRODUCER) ---
     def _acquisition_loop(self, parameter_list: List[Any], scan_config: Dict[str, Any]): # [修改] 增加 scan_config
         print(f"--- Acquisition Started: {len(parameter_list)} points ---")
-        S = self.settings 
+        S = self.settings
         total_steps = len(parameter_list)
         mode = scan_config.get('mode', 'standard') # [新增] 获取当前扫描模式
+        scan_dimensions = self._resolve_scan_dimensions(scan_config)
 
         for idx, param_set in enumerate(parameter_list):
             if self.stop_flag: break
@@ -634,6 +744,7 @@ class ExperimentManager:
 
             job = {
                 'idx': idx, 'total': total_steps, 'params': params_to_write,
+                'scan_dimensions': scan_dimensions,
                 'start_delay': start_delay, 'volt_up': volt_up_raw, 'volt_dw': volt_dw_raw,
                 'timestamp': time.time()
             }
@@ -662,6 +773,7 @@ class ExperimentManager:
             if job is None: break 
 
             idx = job['idx']; total = job['total']; params = job['params']
+            scan_dimensions = int(job.get('scan_dimensions', 1))
             primary_param = params[0]; start_delay = job['start_delay']
             volt_up_raw = job['volt_up']; volt_dw_raw = job['volt_dw']
             
@@ -670,7 +782,15 @@ class ExperimentManager:
             self.status.message = f"Processing: {params} (Queue: {self.data_queue.qsize()})"
 
             if not volt_up_raw or not volt_dw_raw:
-                 if self.on_data_ready: self.on_data_ready({'parameter': primary_param, 'error': 'No Data', 'current_step': idx+1, 'total_steps': total})
+                 if self.on_data_ready:
+                     self.on_data_ready({
+                         'parameter': primary_param,
+                         'all_parameters': params,
+                         'scan_dimensions': scan_dimensions,
+                         'error': 'No Data',
+                         'current_step': idx + 1,
+                         'total_steps': total
+                     })
                  continue
 
             try:
@@ -706,9 +826,11 @@ class ExperimentManager:
                     
                     if self.on_data_ready:
                         self.on_data_ready({
-                            'parameter': primary_param, 
-                            'error': msg, 
-                            'current_step': idx+1, 
+                            'parameter': primary_param,
+                            'all_parameters': params,
+                            'scan_dimensions': scan_dimensions,
+                            'error': msg,
+                            'current_step': idx+1,
                             'total_steps': total
                         })
                     continue # 关键：跳过后续处理，丢弃这组数据
@@ -817,7 +939,7 @@ class ExperimentManager:
                 time_axis_store = tof_axis[::STORAGE_STEP]
 
                 result = ScanResult(
-                    parameter=primary_param, timestamp=job['timestamp'],
+                    parameter=primary_param, timestamp=job['timestamp'], scan_dimensions=scan_dimensions,
                     current_step=idx + 1, total_steps=total,
                     detected_delay=start_delay,
                     run_id=self.data_manager.current_run_id_str,

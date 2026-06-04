@@ -18,6 +18,7 @@ class FitModelDefinition(BaseModel):
 
 class ScanConfig(BaseModel):
     """Full-Feature Scan Configuration."""
+    scan_dimensions: int = Field(1)
     dim1_type: str = Field("range")
     param_type: str = Field("float")
     dim1_method: str = Field("step_size")
@@ -27,11 +28,20 @@ class ScanConfig(BaseModel):
     custom_list: str = Field("")
     dim2_enabled: bool = Field(False)
     dim2_type: str = Field("range")
+    dim2_param_type: str = Field("float")
     dim2_method: str = Field("step_size")
     dim2_start: float = Field(0)
     dim2_stop: float = Field(10)
     dim2_step: float = Field(1)
     dim2_list: str = Field("")
+    dim3_enabled: bool = Field(False)
+    dim3_type: str = Field("range")
+    dim3_param_type: str = Field("float")
+    dim3_method: str = Field("step_size")
+    dim3_start: float = Field(0)
+    dim3_stop: float = Field(10)
+    dim3_step: float = Field(1)
+    dim3_list: str = Field("")
     averages: int = Field(1)
     randomize: bool = Field(False)
     ext_trigger: bool = Field(False)

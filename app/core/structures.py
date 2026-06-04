@@ -14,7 +14,8 @@ class ScanResult:
     """Data model representing the result of a single scan point."""
     parameter: float
     timestamp: float
-    
+    scan_dimensions: int = 1
+
     run_id: str = ""
     current_step: int = 0
     total_steps: int = 1
