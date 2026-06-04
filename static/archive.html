@@ -408,6 +408,8 @@
                     loadedRunId: '', errorMsg: '', dataCount: 0, selectedPointParam: '', selectedCount: 0,
                     loadedPoints: [], currentCalculatedPoints: [], originalSettings: {},
                     displayMode: 'saved',
+                    savedDataCount: 0, displayedStats: [], savedStats: [], recalculatedStats: [],
+                    savedPreviewMap: {}, recalculatedPreviewMap: {},
                     defaultFitModels: [],
                     analysis: {
                         alpha: 0.0151, beta: 0.0188, R: 1.1, K: 7000,
@@ -488,12 +490,17 @@
                         ...extra
                     };
                 },
-                applyDisplayedPoints(points) {
+                applyDisplayedPoints(points, stats = [], previewMap = null) {
                     const source = Array.isArray(points) ? points : [];
-                    const newHistoryMap = {};
                     this.currentCalculatedPoints = source;
-                    source.forEach(pt => this.ingestPoint(pt, newHistoryMap));
-                    this.historyMap = newHistoryMap;
+                    this.displayedStats = Array.isArray(stats) ? stats : [];
+                    if (previewMap && typeof previewMap === 'object') {
+                        this.historyMap = previewMap;
+                    } else {
+                        const newHistoryMap = {};
+                        source.forEach(pt => this.ingestPoint(pt, newHistoryMap));
+                        this.historyMap = newHistoryMap;
+                    }
                     this.plotRevision++;
                     this.renderMainPlot();
                 },
@@ -553,10 +560,13 @@
                         this.analysis = this.normalizeAnalysis({ ...this.analysis, ...snap });
                         
                         this.loadedPoints = res.data.data;
-                        this.dataCount = this.loadedPoints.length;
+                        this.savedStats = Array.isArray(res.data.stats) ? res.data.stats : [];
+                        this.savedPreviewMap = res.data.preview_map && typeof res.data.preview_map === 'object' ? res.data.preview_map : {};
+                        this.savedDataCount = Number.isFinite(res.data.total_points) ? res.data.total_points : this.loadedPoints.length;
+                        this.dataCount = this.savedDataCount;
                         this.loadedRunId = `${this.selectedDay}/${this.selectedRun}`;
                         this.displayMode = 'saved';
-                        this.applyDisplayedPoints(this.loadedPoints);
+                        this.applyDisplayedPoints(this.loadedPoints, this.savedStats, this.savedPreviewMap);
                         
                     } catch (e) { 
                         console.error(e); 
@@ -587,8 +597,11 @@
                             this.analysis = this.normalizeAnalysis(res.data.settings);
                         }
 
+                        this.recalculatedStats = Array.isArray(res.data.stats) ? res.data.stats : [];
+                        this.recalculatedPreviewMap = res.data.preview_map && typeof res.data.preview_map === 'object' ? res.data.preview_map : {};
+                        this.dataCount = Number.isFinite(res.data.total_points) ? res.data.total_points : res.data.data.length;
                         this.displayMode = 'recalculated';
-                        this.applyDisplayedPoints(res.data.data);
+                        this.applyDisplayedPoints(res.data.data, this.recalculatedStats, this.recalculatedPreviewMap);
                         await this.refreshWaveformPreview();
                     } catch (e) {
                         console.error(e);
@@ -605,14 +618,16 @@
                 async showSavedResults() {
                     this.displayMode = 'saved';
                     this.errorMsg = '';
-                    this.applyDisplayedPoints(this.loadedPoints);
+                    this.dataCount = this.savedDataCount;
+                    this.applyDisplayedPoints(this.loadedPoints, this.savedStats, this.savedPreviewMap);
                     await this.refreshWaveformPreview();
                 },
 
                 async refreshWaveformPreview() {
                     if (this.selectedPointParam && this.historyMap[this.selectedPointParam]) {
-                        const indices = this.historyMap[this.selectedPointParam].stepIndices;
-                        this.selectedCount = indices.length;
+                        const item = this.historyMap[this.selectedPointParam];
+                        const indices = item.stepIndices || [];
+                        this.selectedCount = item.count || indices.length;
                         await this.loadWaveforms(indices);
                         return;
                     }
@@ -663,7 +678,13 @@
                 async onPlotClick(data) {
                     if (!data || !data.points) return;
                     const point = data.points[0]; const key = point.x.toFixed(6);
-                    if (this.historyMap[key]) { const indices = this.historyMap[key].stepIndices; this.selectedPointParam = key; this.selectedCount = indices.length; await this.loadWaveforms(indices); }
+                    if (this.historyMap[key]) {
+                        const item = this.historyMap[key];
+                        const indices = item.stepIndices || [];
+                        this.selectedPointParam = key;
+                        this.selectedCount = item.count || indices.length;
+                        await this.loadWaveforms(indices);
+                    }
                 },
 
                 async loadWaveforms(indices) {
@@ -760,6 +781,9 @@
                 },
 
                 getStatsArray() {
+                    if (Array.isArray(this.displayedStats) && this.displayedStats.length > 0) {
+                        return this.displayedStats;
+                    }
                     const dataArray = Object.keys(this.historyMap).map(key => {
                         const item = this.historyMap[key]; const x = parseFloat(key); const stats = { x };
                         ['atoms', 'temp', 'sigma', 'amp', 'arrival', 'prob', 'intf_p','nf_atoms', 'nf_temp', 'nf_sigma', 'nf_amp', 'nf_arrival', 'nf_prob', 'nf_intf_p'].forEach(m => {

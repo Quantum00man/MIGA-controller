@@ -117,7 +117,7 @@ class DataManager:
         )
 
     def _write_csv_row(self, result: ScanResult, step_index: int):
-        def f(val, prec=4): return f"{val:.{prec}f}" if val is not None else ""
+        def f(val, prec=8): return f"{val:.{prec}f}" if val is not None else ""
         all_params_str = ";" .join([str(p) for p in result.all_parameters]) if result.all_parameters else ""
         
         row = [
@@ -174,7 +174,7 @@ class DataManager:
             writer.writerow(header)
             
             for pt in new_data:
-                def f(key, prec=4): val = pt.get(key); return f"{val:.{prec}f}" if val is not None else ""
+                def f(key, prec=8): val = pt.get(key); return f"{val:.{prec}f}" if val is not None else ""
                 all_params = pt.get('all_parameters', []); all_params_str = ";" .join([str(p) for p in all_params])
                 
                 row = [

@@ -11,6 +11,7 @@ import config
 
 
 MAX_DISPLAY_POINTS = 3000
+MAX_WAVEFORM_PREVIEW_STEPS = 48
 
 
 class DataLoader:
@@ -138,19 +139,102 @@ class DataLoader:
         with open(csv_path, "r") as handle:
             rows = list(csv.DictReader(handle))
 
-        if max_points is None or max_points <= 0 or len(rows) <= max_points:
-            sampled_rows = rows
-        else:
-            step = max(1, len(rows) // max_points)
-            sampled_rows = rows[::step]
+        sampled_rows = self._sample_sequence(rows, max_points)
 
         return [self._row_to_point(row) for row in sampled_rows]
 
+    def _sample_sequence(self, items: List[Any], max_points: Optional[int]) -> List[Any]:
+        if max_points is None or max_points <= 0 or len(items) <= max_points:
+            return list(items)
+        step = max(1, math.ceil(len(items) / max_points))
+        return list(items[::step])[:max_points]
+
+    def _calc_stats(self, values: List[float]) -> Tuple[float, float]:
+        if not values:
+            return 0.0, 0.0
+        count = len(values)
+        mean = float(sum(values) / count)
+        if count < 2:
+            return mean, 0.0
+        variance = sum((value - mean) ** 2 for value in values) / (count - 1)
+        return mean, float(math.sqrt(variance))
+
+    def _build_stats_array(self, points: List[Dict[str, Any]]) -> List[Dict[str, float]]:
+        metric_fields = {
+            "atoms": ("atom_number_up", "atom_number_dw"),
+            "temp": ("temperature_up", "temperature_dw"),
+            "sigma": ("sigma_up", "sigma_dw"),
+            "amp": ("amplitude_up", "amplitude_dw"),
+            "arrival": ("arrival_time_up", "arrival_time_dw"),
+            "prob": ("transition_probability_up", "transition_probability_dw"),
+            "intf_p": ("intf_p1", "intf_p2"),
+            "nf_atoms": ("atom_number_up_nofit", "atom_number_dw_nofit"),
+            "nf_temp": ("temperature_up_nofit", "temperature_dw_nofit"),
+            "nf_sigma": ("sigma_up_nofit", "sigma_dw_nofit"),
+            "nf_amp": ("amplitude_up_nofit", "amplitude_dw_nofit"),
+            "nf_arrival": ("arrival_time_up_nofit", "arrival_time_dw_nofit"),
+            "nf_prob": ("transition_probability_up_nofit", "transition_probability_dw_nofit"),
+            "nf_intf_p": ("intf_p1_nofit", "intf_p2_nofit"),
+        }
+
+        grouped: Dict[str, Dict[str, Any]] = {}
+        for point in points:
+            key = f"{float(point.get('parameter', 0.0)):.6f}"
+            if key not in grouped:
+                grouped[key] = {
+                    "x": float(key),
+                    "values": {
+                        metric: {"up": [], "dw": []}
+                        for metric in metric_fields
+                    },
+                }
+            group = grouped[key]["values"]
+            for metric, (field_up, field_dw) in metric_fields.items():
+                value_up = point.get(field_up)
+                value_dw = point.get(field_dw)
+                if value_up is not None:
+                    group[metric]["up"].append(float(value_up))
+                if value_dw is not None:
+                    group[metric]["dw"].append(float(value_dw))
+
+        stats_rows: List[Dict[str, float]] = []
+        for key in sorted(grouped.keys(), key=lambda item: float(item)):
+            group = grouped[key]
+            row: Dict[str, float] = {"x": group["x"]}
+            for metric in metric_fields:
+                mean_up, std_up = self._calc_stats(group["values"][metric]["up"])
+                mean_dw, std_dw = self._calc_stats(group["values"][metric]["dw"])
+                row[f"{metric}_up"] = mean_up
+                row[f"{metric}_up_std"] = std_up
+                row[f"{metric}_dw"] = mean_dw
+                row[f"{metric}_dw_std"] = std_dw
+            stats_rows.append(row)
+        return stats_rows
+
+    def _build_preview_map(self, points: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+        preview_map: Dict[str, Dict[str, Any]] = {}
+        for point in points:
+            key = f"{float(point.get('parameter', 0.0)):.6f}"
+            step = int(point.get("step", 0))
+            if key not in preview_map:
+                preview_map[key] = {"count": 0, "stepIndices": []}
+            preview_map[key]["count"] += 1
+            preview_map[key]["stepIndices"].append(step)
+
+        for key, item in preview_map.items():
+            item["stepIndices"] = self._sample_sequence(item["stepIndices"], MAX_WAVEFORM_PREVIEW_STEPS)
+        return preview_map
+
     def load_run(self, year: str, month: str, day: str, run_id: str) -> Dict[str, Any]:
         run_dir = self._get_run_dir(year, month, day, run_id)
+        full_points = self._read_results_csv(run_dir, max_points=None)
+        sampled_points = self._sample_sequence(full_points, MAX_DISPLAY_POINTS)
         return {
             "config": self._load_config_data(run_dir),
-            "data": self._read_results_csv(run_dir, max_points=MAX_DISPLAY_POINTS),
+            "data": sampled_points,
+            "stats": self._build_stats_array(full_points),
+            "preview_map": self._build_preview_map(full_points),
+            "total_points": len(full_points),
         }
 
     def _load_waveform_arrays(self, run_dir: Path, step_index: int) -> Dict[str, Any]:
@@ -486,7 +570,7 @@ class DataLoader:
             or {}
         )
         settings = self._normalize_archive_settings(new_settings, fallback=original_settings)
-        points = self._read_results_csv(run_dir, max_points=max_points)
+        points = self._read_results_csv(run_dir, max_points=None)
 
         recalculated_points: List[Dict[str, Any]] = []
         for point in points:
@@ -495,10 +579,15 @@ class DataLoader:
             if result is not None:
                 recalculated_points.append(result)
 
+        sampled_points = self._sample_sequence(recalculated_points, max_points)
+
         return {
             "config": config_data,
             "settings": settings,
-            "data": recalculated_points,
+            "data": sampled_points,
+            "stats": self._build_stats_array(recalculated_points),
+            "preview_map": self._build_preview_map(recalculated_points),
+            "total_points": len(recalculated_points),
         }
 
     def recalculate_waveforms(
