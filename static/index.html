@@ -177,6 +177,41 @@
             border-left: 1px solid #eee;
         }
 
+        .analysis-tools {
+            padding: 10px 14px 12px;
+            border-bottom: 1px solid #eef2f7;
+            background: linear-gradient(180deg, #fbfcfe 0%, #f4f7fb 100%);
+        }
+
+        .slice-toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .slice-toolbar .btn-group .btn {
+            min-width: 64px;
+        }
+
+        .slice-slider-wrap {
+            flex: 1 1 260px;
+            min-width: 220px;
+        }
+
+        .slice-slider-wrap .form-range {
+            margin: 0;
+        }
+
+        .slice-summary {
+            font-size: 0.78rem;
+            color: #52606d;
+        }
+
+        .slice-summary strong {
+            color: #0d6efd;
+        }
+
         .js-plotly-plot .plotly .modebar {
             left: 50%;
             transform: translateX(-50%);
@@ -388,8 +423,8 @@
                 <div class="card p-3" v-else>
                     <div class="small fw-bold text-primary mb-1">Independent Multi-Axis Scan</div>
                     <div class="small text-muted">
-                        2D and 3D scans use independent P0/P1/P2 axes so the result plots can render clean heatmaps and
-                        3D color clouds.
+                        2D and 3D scans use independent P0/P1/P2 axes so the result plots can render heatmaps,
+                        contour slices, and 3D color clouds.
                     </div>
                 </div>
 
@@ -548,13 +583,45 @@
                         </ul>
                     </div>
                 </div>
-                <div class="card-body p-0 analysis-card-body"
-                    :class="{'analysis-3d-layout': isThreeDimensionalView()}">
-                    <div id="resultsPlotUp" class="analysis-plot-panel"
-                        :class="{'plot-split-container': !isThreeDimensionalView()}"
-                        :style="{height: getAnalysisPlotHeight()}"></div>
-                    <div id="resultsPlotDw" class="analysis-plot-panel"
-                        :style="{height: getAnalysisPlotHeight()}"></div>
+                <div class="card-body p-0">
+                    <div v-if="show3DControls()" class="analysis-tools">
+                        <div class="slice-toolbar">
+                            <div class="btn-group btn-group-sm">
+                                <button class="btn"
+                                    :class="dim3DisplayMode === 'slice' ? 'btn-primary' : 'btn-outline-primary'"
+                                    @click="setDim3DisplayMode('slice')">Slice</button>
+                                <button class="btn"
+                                    :class="dim3DisplayMode === 'cloud' ? 'btn-primary' : 'btn-outline-primary'"
+                                    @click="setDim3DisplayMode('cloud')">Cloud</button>
+                            </div>
+                            <div v-if="is3DSliceMode()" class="btn-group btn-group-sm">
+                                <button v-for="axis in getSliceAxisOptions()" :key="axis.value" class="btn"
+                                    :class="sliceAxis === axis.value ? 'btn-dark' : 'btn-outline-dark'"
+                                    @click="setSliceAxis(axis.value)">{{ axis.label }}</button>
+                            </div>
+                            <div v-if="is3DSliceMode()" class="slice-slider-wrap">
+                                <input class="form-range" type="range" :min="0"
+                                    :max="Math.max(getSliceValues().length - 1, 0)" v-model.number="sliceIndex"
+                                    @input="handleSliceIndexInput" :disabled="getSliceValues().length <= 1">
+                            </div>
+                            <div v-if="is3DSliceMode()" class="slice-summary">
+                                <strong>{{ getCurrentSliceSummary() }}</strong>
+                            </div>
+                        </div>
+                        <div class="slice-summary mt-1" v-if="is3DSliceMode()">
+                            Slice view shows one tomography plane at a time; Cloud keeps the full 3D overview.
+                        </div>
+                        <div class="slice-summary mt-1" v-else>
+                            Rotate the 3D cloud for overview, or switch back to Slice to inspect one plane at a time.
+                        </div>
+                    </div>
+                    <div class="analysis-card-body" :class="{'analysis-3d-layout': isThreeDimensionalView()}">
+                        <div id="resultsPlotUp" class="analysis-plot-panel"
+                            :class="{'plot-split-container': !isThreeDimensionalView()}"
+                            :style="{height: getAnalysisPlotHeight()}"></div>
+                        <div id="resultsPlotDw" class="analysis-plot-panel"
+                            :style="{height: getAnalysisPlotHeight()}"></div>
+                    </div>
                 </div>
             </div>
 
@@ -633,7 +700,8 @@
                     historyMap: {},
                     layoutResBase: {}, layoutResUp: {}, layoutResDw: {}, layoutOscUp: {}, layoutOscDw: {},
                     isPlotting: false,
-                    heatmapColorscale: [[0, '#c62828'], [0.5, '#fff3bf'], [1, '#1565c0']]
+                    heatmapColorscale: [[0, '#c62828'], [0.5, '#fff3bf'], [1, '#1565c0']],
+                    dim3DisplayMode: 'slice', sliceAxis: 2, sliceIndex: 0
                 }
             },
             watch: {
@@ -711,7 +779,8 @@
                         useList2: this.useList2,
                         useList3: this.useList3,
                         config: this.config,
-                        showRawData: this.showRawData
+                        showRawData: this.showRawData,
+                        dim3DisplayMode: this.dim3DisplayMode
                     };
                     localStorage.setItem('miga_scan_state', JSON.stringify(state));
                 },
@@ -735,6 +804,9 @@
                             this.useList2 = state.useList2 ?? (this.config.dim2_type === 'list');
                             this.useList3 = state.useList3 ?? (this.config.dim3_type === 'list');
                             if (state.showRawData !== undefined) this.showRawData = state.showRawData;
+                            if (state.dim3DisplayMode === 'slice' || state.dim3DisplayMode === 'cloud') {
+                                this.dim3DisplayMode = state.dim3DisplayMode;
+                            }
                         } catch (e) { console.error("Load state failed", e); }
                     }
                 },
@@ -797,8 +869,83 @@
                     if (!Number.isFinite(parsed)) return 1;
                     return Math.max(1, Math.min(3, Math.round(parsed)));
                 },
+                show3DControls() {
+                    return this.getActiveScanDimensions() === 3;
+                },
                 isThreeDimensionalView() {
                     return this.getActiveScanDimensions() === 3;
+                },
+                is3DSliceMode() {
+                    return this.show3DControls() && this.dim3DisplayMode === 'slice';
+                },
+                getSliceAxisOptions() {
+                    return [
+                        { value: 0, label: 'Slice P0' },
+                        { value: 1, label: 'Slice P1' },
+                        { value: 2, label: 'Slice P2' }
+                    ];
+                },
+                setDim3DisplayMode(mode) {
+                    if (this.dim3DisplayMode === mode) return;
+                    this.dim3DisplayMode = mode;
+                    this.saveState();
+                    this.plotRevision++;
+                    this.renderMainPlot();
+                },
+                setSliceAxis(axis) {
+                    if (this.sliceAxis === axis) return;
+                    this.sliceAxis = axis;
+                    const points = this.getAggregatedPoints();
+                    const values = this.getSliceValues(points, axis);
+                    this.sliceIndex = values.length ? Math.floor((values.length - 1) / 2) : 0;
+                    this.plotRevision++;
+                    this.renderMainPlot();
+                },
+                handleSliceIndexInput() {
+                    this.syncSliceState(this.getAggregatedPoints());
+                    this.plotRevision++;
+                    this.renderMainPlot();
+                },
+                getSlicePlaneAxes(axis = this.sliceAxis) {
+                    return [0, 1, 2].filter(index => index !== axis);
+                },
+                getSliceValues(points = this.getAggregatedPoints(), axis = this.sliceAxis) {
+                    if (this.getActiveScanDimensions() !== 3) return [];
+                    const normalizedAxis = Math.max(0, Math.min(2, Number(axis) || 0));
+                    return [...new Set((Array.isArray(points) ? points : []).map(point => Number(point.params?.[normalizedAxis] ?? 0)))]
+                        .sort((a, b) => a - b);
+                },
+                syncSliceState(points = this.getAggregatedPoints()) {
+                    if (this.getActiveScanDimensions() !== 3) {
+                        this.sliceIndex = 0;
+                        return;
+                    }
+                    if (![0, 1, 2].includes(this.sliceAxis)) this.sliceAxis = 2;
+                    const values = this.getSliceValues(points, this.sliceAxis);
+                    if (!values.length) {
+                        this.sliceIndex = 0;
+                        return;
+                    }
+                    const maxIndex = values.length - 1;
+                    if (!Number.isFinite(this.sliceIndex) || this.sliceIndex < 0 || this.sliceIndex > maxIndex) {
+                        this.sliceIndex = Math.floor(maxIndex / 2);
+                    } else {
+                        this.sliceIndex = Math.max(0, Math.min(maxIndex, this.sliceIndex));
+                    }
+                },
+                getCurrentSliceValue(points = this.getAggregatedPoints()) {
+                    const values = this.getSliceValues(points, this.sliceAxis);
+                    if (!values.length) return null;
+                    const index = Math.max(0, Math.min(values.length - 1, Number(this.sliceIndex) || 0));
+                    return values[index];
+                },
+                getCurrentSliceSummary() {
+                    if (!this.show3DControls()) return '';
+                    const points = this.getAggregatedPoints();
+                    const sliceValue = this.getCurrentSliceValue(points);
+                    if (sliceValue === null) return 'No slice data yet';
+                    const [xAxis, yAxis] = this.getSlicePlaneAxes();
+                    return `P${this.sliceAxis}=${sliceValue.toFixed(6)} · plane P${xAxis}-P${yAxis} · ${this.getSliceValues(points).length} slices`;
                 },
                 getAnalysisPlotHeight() {
                     if (this.maximizedView === 'analysis') {
@@ -817,6 +964,9 @@
                 },
                 getHistoryKey(params) {
                     return params.map(value => Number(value).toFixed(6)).join('|');
+                },
+                areValuesClose(a, b, epsilon = 1e-6) {
+                    return Math.abs(Number(a ?? 0) - Number(b ?? 0)) <= epsilon;
                 },
                 createHistoryAccumulator(params) {
                     return {
@@ -935,24 +1085,30 @@
                     });
                     return series;
                 },
-                buildHeatmapMatrix(points, field) {
-                    const xVals = [...new Set(points.map(point => Number(point.params[0] ?? 0)))].sort((a, b) => a - b);
-                    const yVals = [...new Set(points.map(point => Number(point.params[1] ?? 0)))].sort((a, b) => a - b);
+                buildPlaneMatrix(points, field, xAxisIndex, yAxisIndex, fixedAxisIndex = null, fixedAxisValue = null) {
+                    const planePoints = (Array.isArray(points) ? points : []).filter((point) => {
+                        if (fixedAxisIndex === null) return true;
+                        return this.areValuesClose(point.params?.[fixedAxisIndex] ?? 0, fixedAxisValue ?? 0);
+                    });
+                    const xVals = [...new Set(planePoints.map(point => Number(point.params?.[xAxisIndex] ?? 0)))].sort((a, b) => a - b);
+                    const yVals = [...new Set(planePoints.map(point => Number(point.params?.[yAxisIndex] ?? 0)))].sort((a, b) => a - b);
                     const xIndex = new Map(xVals.map((value, index) => [value.toFixed(6), index]));
                     const yIndex = new Map(yVals.map((value, index) => [value.toFixed(6), index]));
                     const z = Array.from({ length: yVals.length }, () => Array(xVals.length).fill(null));
+                    const customdata = Array.from({ length: yVals.length }, () => Array(xVals.length).fill(null));
 
-                    points.forEach(point => {
-                        const xKey = Number(point.params[0] ?? 0).toFixed(6);
-                        const yKey = Number(point.params[1] ?? 0).toFixed(6);
+                    planePoints.forEach(point => {
+                        const xKey = Number(point.params?.[xAxisIndex] ?? 0).toFixed(6);
+                        const yKey = Number(point.params?.[yAxisIndex] ?? 0).toFixed(6);
                         const xi = xIndex.get(xKey);
                         const yi = yIndex.get(yKey);
                         if (xi !== undefined && yi !== undefined) {
                             z[yi][xi] = point[field];
+                            customdata[yi][xi] = this.getHistoryKey(point.params || []);
                         }
                     });
 
-                    return { xVals, yVals, z };
+                    return { xAxisIndex, yAxisIndex, fixedAxisIndex, fixedAxisValue, xVals, yVals, z, customdata, planePoints };
                 },
                 buildCommonAnalysisLayout() {
                     return {
@@ -981,17 +1137,19 @@
                         }
                     };
                 },
-                build2DLayout(channel, metric, sourceLabel) {
+                build2DLayout(channel, metric, sourceLabel, xAxisIndex = 0, yAxisIndex = 1, subtitle = '') {
                     const base = this.buildCommonAnalysisLayout();
                     const title = channel === 'up' ? metric.nameUp : metric.nameDw;
                     return {
                         ...base,
                         showlegend: false,
                         margin: { t: 42, b: 54, l: 72, r: 28 },
-                        xaxis: { ...base.xaxis, title: 'P0', showticklabels: true },
-                        yaxis: { ...base.yaxis, title: 'P1', showticklabels: true, automargin: true },
+                        xaxis: { ...base.xaxis, title: `P${xAxisIndex}`, showticklabels: true },
+                        yaxis: { ...base.yaxis, title: `P${yAxisIndex}`, showticklabels: true, automargin: true },
                         title: {
-                            text: `${title} · ${metric.label} · ${sourceLabel}`,
+                            text: subtitle
+                                ? `${title} · ${metric.label} · ${sourceLabel}<br><span style="font-size:11px;color:#5b6472">${subtitle}</span>`
+                                : `${title} · ${metric.label} · ${sourceLabel}`,
                             font: { size: 13 },
                             x: 0.05,
                             y: 0.95
@@ -1019,6 +1177,98 @@
                             y: 0.95
                         }
                     };
+                },
+                buildPlaneHoverTemplate(matrix, metric, channelName, sourceLabel) {
+                    const fixedLine = matrix.fixedAxisIndex === null
+                        ? ''
+                        : `<br>P${matrix.fixedAxisIndex}=${Number(matrix.fixedAxisValue ?? 0).toFixed(6)}`;
+                    return `P${matrix.xAxisIndex}=%{x:.6f}<br>P${matrix.yAxisIndex}=%{y:.6f}${fixedLine}<br>${metric.label}=%{z:.6g}<extra>${channelName} · ${sourceLabel}</extra>`;
+                },
+                buildPlaneHeatmapTrace(matrix, metric, channelName, sourceLabel) {
+                    return {
+                        type: 'heatmap',
+                        x: matrix.xVals,
+                        y: matrix.yVals,
+                        z: matrix.z,
+                        customdata: matrix.customdata,
+                        colorscale: this.heatmapColorscale,
+                        zsmooth: false,
+                        hoverongaps: false,
+                        xgap: 1,
+                        ygap: 1,
+                        colorbar: {
+                            title: metric.label,
+                            thickness: 14,
+                            len: 0.82
+                        },
+                        hovertemplate: this.buildPlaneHoverTemplate(matrix, metric, channelName, sourceLabel)
+                    };
+                },
+                buildPlaneContourTrace(matrix) {
+                    return {
+                        type: 'contour',
+                        x: matrix.xVals,
+                        y: matrix.yVals,
+                        z: matrix.z,
+                        showscale: false,
+                        hoverinfo: 'skip',
+                        connectgaps: false,
+                        ncontours: 8,
+                        contours: { coloring: 'none' },
+                        line: { color: 'rgba(19,33,68,0.55)', width: 1.1 }
+                    };
+                },
+                buildPlaneExtremaTraces(points, field, metricLabel, xAxisIndex, yAxisIndex) {
+                    const validPoints = (Array.isArray(points) ? points : [])
+                        .filter(point => Number.isFinite(Number(point[field])));
+                    if (!validPoints.length) return [];
+
+                    let maxPoint = validPoints[0];
+                    let minPoint = validPoints[0];
+                    validPoints.forEach((point) => {
+                        if (Number(point[field]) > Number(maxPoint[field])) maxPoint = point;
+                        if (Number(point[field]) < Number(minPoint[field])) minPoint = point;
+                    });
+
+                    const makeTrace = (point, label, marker) => ({
+                        type: 'scatter',
+                        mode: 'markers+text',
+                        x: [Number(point.params?.[xAxisIndex] ?? 0)],
+                        y: [Number(point.params?.[yAxisIndex] ?? 0)],
+                        text: [label],
+                        textposition: label === 'MAX' ? 'top center' : 'bottom center',
+                        textfont: { size: 10, color: '#243b53' },
+                        marker,
+                        showlegend: false,
+                        hovertemplate: `${this.formatScanParameters(point.params || [])}<br>${metricLabel}=${Number(point[field]).toFixed(6)}<extra>${label}</extra>`
+                    });
+
+                    const traces = [
+                        makeTrace(maxPoint, 'MAX', {
+                            size: 11,
+                            symbol: 'diamond',
+                            color: '#111827',
+                            line: { color: '#ffffff', width: 1.4 }
+                        })
+                    ];
+
+                    if (this.getHistoryKey(minPoint.params || []) !== this.getHistoryKey(maxPoint.params || [])) {
+                        traces.push(makeTrace(minPoint, 'MIN', {
+                            size: 11,
+                            symbol: 'circle',
+                            color: '#ffffff',
+                            line: { color: '#111827', width: 1.4 }
+                        }));
+                    }
+                    return traces;
+                },
+                buildPlaneTraces(matrix, field, metric, channelName, sourceLabel) {
+                    if (!matrix.xVals.length || !matrix.yVals.length) return [];
+                    return [
+                        this.buildPlaneHeatmapTrace(matrix, metric, channelName, sourceLabel),
+                        this.buildPlaneContourTrace(matrix),
+                        ...this.buildPlaneExtremaTraces(matrix.planePoints, field, metric.label, matrix.xAxisIndex, matrix.yAxisIndex)
+                    ];
                 },
                 render1DPlot(points, metric) {
                     const series = this.build1DSeries(points, metric);
@@ -1053,30 +1303,35 @@
                     const fieldUp = this.showRawData ? metric.rawUp : metric.fitUp;
                     const fieldDw = this.showRawData ? metric.rawDw : metric.fitDw;
                     const sourceLabel = this.showRawData ? 'NoFit' : 'Fit';
-                    const matrixUp = this.buildHeatmapMatrix(points, fieldUp);
-                    const matrixDw = this.buildHeatmapMatrix(points, fieldDw);
-                    const makeTrace = (matrix, channelName) => ({
-                        type: 'heatmap',
-                        x: matrix.xVals,
-                        y: matrix.yVals,
-                        z: matrix.z,
-                        colorscale: this.heatmapColorscale,
-                        zsmooth: false,
-                        hoverongaps: false,
-                        xgap: 1,
-                        ygap: 1,
-                        colorbar: {
-                            title: metric.label,
-                            thickness: 14,
-                            len: 0.82
-                        },
-                        hovertemplate: `P0=%{x:.6f}<br>P1=%{y:.6f}<br>${metric.label}=%{z:.6g}<extra>${channelName} · ${sourceLabel}</extra>`
-                    });
+                    const matrixUp = this.buildPlaneMatrix(points, fieldUp, 0, 1);
+                    const matrixDw = this.buildPlaneMatrix(points, fieldDw, 0, 1);
 
-                    this.layoutResUp = this.build2DLayout('up', metric, sourceLabel);
-                    this.layoutResDw = this.build2DLayout('dw', metric, sourceLabel);
-                    Plotly.react('resultsPlotUp', points.length ? [makeTrace(matrixUp, metric.nameUp)] : [], this.layoutResUp);
-                    Plotly.react('resultsPlotDw', points.length ? [makeTrace(matrixDw, metric.nameDw)] : [], this.layoutResDw);
+                    this.layoutResUp = this.build2DLayout('up', metric, sourceLabel, 0, 1, 'Contours + extrema');
+                    this.layoutResDw = this.build2DLayout('dw', metric, sourceLabel, 0, 1, 'Contours + extrema');
+                    Plotly.react('resultsPlotUp', points.length ? this.buildPlaneTraces(matrixUp, fieldUp, metric, metric.nameUp, sourceLabel) : [], this.layoutResUp);
+                    Plotly.react('resultsPlotDw', points.length ? this.buildPlaneTraces(matrixDw, fieldDw, metric, metric.nameDw, sourceLabel) : [], this.layoutResDw);
+                },
+                render3DSlice(points, metric) {
+                    const fieldUp = this.showRawData ? metric.rawUp : metric.fitUp;
+                    const fieldDw = this.showRawData ? metric.rawDw : metric.fitDw;
+                    const sourceLabel = this.showRawData ? 'NoFit' : 'Fit';
+                    const sliceValue = this.getCurrentSliceValue(points);
+                    const [xAxisIndex, yAxisIndex] = this.getSlicePlaneAxes();
+
+                    if (sliceValue == null) {
+                        Plotly.react('resultsPlotUp', [], this.layoutResUp);
+                        Plotly.react('resultsPlotDw', [], this.layoutResDw);
+                        return;
+                    }
+
+                    const subtitle = `Slice P${this.sliceAxis}=${sliceValue.toFixed(6)} · plane P${xAxisIndex}-P${yAxisIndex}`;
+                    const matrixUp = this.buildPlaneMatrix(points, fieldUp, xAxisIndex, yAxisIndex, this.sliceAxis, sliceValue);
+                    const matrixDw = this.buildPlaneMatrix(points, fieldDw, xAxisIndex, yAxisIndex, this.sliceAxis, sliceValue);
+
+                    this.layoutResUp = this.build2DLayout('up', metric, sourceLabel, xAxisIndex, yAxisIndex, subtitle);
+                    this.layoutResDw = this.build2DLayout('dw', metric, sourceLabel, xAxisIndex, yAxisIndex, subtitle);
+                    Plotly.react('resultsPlotUp', points.length ? this.buildPlaneTraces(matrixUp, fieldUp, metric, metric.nameUp, sourceLabel) : [], this.layoutResUp);
+                    Plotly.react('resultsPlotDw', points.length ? this.buildPlaneTraces(matrixDw, fieldDw, metric, metric.nameDw, sourceLabel) : [], this.layoutResDw);
                 },
                 render3DScatter(points, metric) {
                     const fieldUp = this.showRawData ? metric.rawUp : metric.fitUp;
@@ -1109,6 +1364,13 @@
                     Plotly.react('resultsPlotUp', points.length ? [makeTrace(fieldUp, metric.nameUp)] : [], this.layoutResUp);
                     Plotly.react('resultsPlotDw', points.length ? [makeTrace(fieldDw, metric.nameDw)] : [], this.layoutResDw);
                 },
+                render3DPlot(points, metric) {
+                    if (this.is3DSliceMode()) {
+                        this.render3DSlice(points, metric);
+                        return;
+                    }
+                    this.render3DScatter(points, metric);
+                },
                 renderMainPlot() {
                     const points = this.getAggregatedPoints();
                     const metric = this.getMetricConfig();
@@ -1119,7 +1381,8 @@
                     } else if (scanDimensions === 2) {
                         this.render2DHeatmap(points, metric);
                     } else {
-                        this.render3DScatter(points, metric);
+                        this.syncSliceState(points);
+                        this.render3DPlot(points, metric);
                     }
                 },
                 connectWebSocket() {
