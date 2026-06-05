@@ -430,8 +430,8 @@
                                 </div>
                                 <div v-if="is3DSliceMode()" class="slice-slider-wrap">
                                     <input class="form-range" type="range" :min="0"
-                                        :max="Math.max(getSliceValues().length - 1, 0)" v-model.number="sliceIndex"
-                                        @input="handleSliceIndexInput" :disabled="getSliceValues().length <= 1">
+                                        :max="Math.max(sliceValuesCache.length - 1, 0)" v-model.number="sliceIndex"
+                                        @input="handleSliceIndexInput" :disabled="sliceValuesCache.length <= 1">
                                 </div>
                                 <div v-if="is3DSliceMode()" class="slice-summary">
                                     <strong>{{ getCurrentSliceSummary() }}</strong>
@@ -524,7 +524,7 @@
                     tabs: [{ id: 'atoms', label: 'Atom Number' }, { id: 'amp', label: 'Max Voltage' }, { id: 'sigma', label: 'Width (ms)' }, { id: 'temp', label: 'Temperature' }, { id: 'arrival', label: 'Arrival Time' }, { id: 'prob', label: 'Transition Prob.' }, { id: 'intf', label: 'Interferometer' }],
                     historyMap: {}, layoutResBase: {}, layoutResUp: {}, layoutResDw: {}, layoutResTot: {}, layoutOscUp: {}, layoutOscDw: {},
                     heatmapColorscale: [[0, '#c62828'], [0.5, '#fff3bf'], [1, '#1565c0']],
-                    dim3DisplayMode: 'slice', sliceAxis: 2, sliceIndex: 0
+                    dim3DisplayMode: 'slice', sliceAxis: 2, sliceIndex: 0, sliceValuesCache: []
                 }
             },
             watch: {
@@ -638,19 +638,25 @@
                 getSlicePlaneAxes(axis = this.sliceAxis) {
                     return [0, 1, 2].filter(index => index !== axis);
                 },
-                getSliceValues(rows = this.getStatsArray(), axis = this.sliceAxis) {
+                computeSliceValues(rows = this.getStatsArray(), axis = this.sliceAxis) {
                     if (this.getActiveScanDimensions() !== 3) return [];
                     const normalizedAxis = Math.max(0, Math.min(2, Number(axis) || 0));
                     return [...new Set((Array.isArray(rows) ? rows : []).map(row => Number(row.params?.[normalizedAxis] ?? 0)))]
                         .sort((a, b) => a - b);
                 },
+                getSliceValues(rows = null, axis = this.sliceAxis) {
+                    if (!rows && axis === this.sliceAxis) return this.sliceValuesCache;
+                    return this.computeSliceValues(rows ?? this.getStatsArray(), axis);
+                },
                 syncSliceState(rows = this.getStatsArray()) {
                     if (this.getActiveScanDimensions() !== 3) {
+                        this.sliceValuesCache = [];
                         this.sliceIndex = 0;
                         return;
                     }
                     if (![0, 1, 2].includes(this.sliceAxis)) this.sliceAxis = 2;
-                    const values = this.getSliceValues(rows, this.sliceAxis);
+                    const values = this.computeSliceValues(rows, this.sliceAxis);
+                    this.sliceValuesCache = values;
                     if (!values.length) {
                         this.sliceIndex = 0;
                         return;
@@ -662,7 +668,7 @@
                         this.sliceIndex = Math.max(0, Math.min(maxIndex, this.sliceIndex));
                     }
                 },
-                getCurrentSliceValue(rows = this.getStatsArray()) {
+                getCurrentSliceValue(rows = null) {
                     const values = this.getSliceValues(rows, this.sliceAxis);
                     if (!values.length) return null;
                     const index = Math.max(0, Math.min(values.length - 1, Number(this.sliceIndex) || 0));
@@ -670,11 +676,10 @@
                 },
                 getCurrentSliceSummary() {
                     if (!this.show3DControls()) return '';
-                    const rows = this.getStatsArray();
-                    const sliceValue = this.getCurrentSliceValue(rows);
+                    const sliceValue = this.getCurrentSliceValue();
                     if (sliceValue === null) return 'No slice data';
                     const [xAxis, yAxis] = this.getSlicePlaneAxes();
-                    return `P${this.sliceAxis}=${sliceValue.toFixed(6)} · plane P${xAxis}-P${yAxis} · ${this.getSliceValues(rows).length} slices`;
+                    return `P${this.sliceAxis}=${sliceValue.toFixed(6)} · plane P${xAxis}-P${yAxis} · ${this.sliceValuesCache.length} slices`;
                 },
                 showTotalPlot() {
                     return this.getActiveScanDimensions() === 1 && this.currentTab === 'atoms';
@@ -832,6 +837,7 @@
                         source.forEach(pt => this.ingestPoint(pt, newHistoryMap));
                         this.historyMap = newHistoryMap;
                     }
+                    this.syncSliceState(this.displayedStats);
                     this.plotRevision++;
                     await this.refreshAnalysisView();
                 },
@@ -920,6 +926,8 @@
                         this.dataCount = this.savedDataCount;
                         this.loadedRunId = `${this.selectedDay}/${this.selectedRun}`;
                         this.displayMode = 'saved';
+                        this.isLoading = false;
+                        await this.$nextTick();
                         await this.applyDisplayedPoints(this.loadedPoints, this.savedStats, this.savedPreviewMap);
                         
                     } catch (e) {
@@ -956,6 +964,8 @@
                         this.recalculatedPreviewMap = res.data.preview_map && typeof res.data.preview_map === 'object' ? res.data.preview_map : {};
                         this.dataCount = Number.isFinite(res.data.total_points) ? res.data.total_points : res.data.data.length;
                         this.displayMode = 'recalculated';
+                        this.isLoading = false;
+                        await this.$nextTick();
                         await this.applyDisplayedPoints(res.data.data, this.recalculatedStats, this.recalculatedPreviewMap);
                         await this.refreshWaveformPreview();
                     } catch (e) {
