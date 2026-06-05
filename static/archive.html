@@ -624,7 +624,7 @@
                         vals_nf_intf_p_up: [], vals_nf_intf_p_dw: []
                     };
                 },
-                applyDisplayedPoints(points, stats = [], previewMap = null) {
+                async applyDisplayedPoints(points, stats = [], previewMap = null) {
                     const source = Array.isArray(points) ? points : [];
                     this.currentCalculatedPoints = source;
                     this.displayedStats = this.normalizeStatsRows(stats);
@@ -636,7 +636,26 @@
                         this.historyMap = newHistoryMap;
                     }
                     this.plotRevision++;
+                    await this.refreshAnalysisView();
+                },
+                resizePlot(plotId) {
+                    const plotEl = document.getElementById(plotId);
+                    if (!plotEl || !plotEl.data) return;
+                    Plotly.Plots.resize(plotEl);
+                },
+                resizeAnalysisPlots() {
+                    window.dispatchEvent(new Event('resize'));
+                    this.resizePlot('resultsPlotUp');
+                    this.resizePlot('resultsPlotDw');
+                    if (this.showTotalPlot()) {
+                        this.resizePlot('resultsPlotTotal');
+                    }
+                },
+                async refreshAnalysisView() {
+                    await this.$nextTick();
                     this.renderMainPlot();
+                    await this.$nextTick();
+                    this.resizeAnalysisPlots();
                 },
                 getTabTitle() { return this.tabs.find(t => t.id === this.currentTab)?.label || 'Results'; },
                 async fetchArchiveTree() { try { const res = await axios.get('/archive/tree'); this.archiveTree = res.data; } catch (e) { } },
@@ -704,7 +723,7 @@
                         this.dataCount = this.savedDataCount;
                         this.loadedRunId = `${this.selectedDay}/${this.selectedRun}`;
                         this.displayMode = 'saved';
-                        this.applyDisplayedPoints(this.loadedPoints, this.savedStats, this.savedPreviewMap);
+                        await this.applyDisplayedPoints(this.loadedPoints, this.savedStats, this.savedPreviewMap);
                         
                     } catch (e) {
                         console.error(e);
@@ -740,7 +759,7 @@
                         this.recalculatedPreviewMap = res.data.preview_map && typeof res.data.preview_map === 'object' ? res.data.preview_map : {};
                         this.dataCount = Number.isFinite(res.data.total_points) ? res.data.total_points : res.data.data.length;
                         this.displayMode = 'recalculated';
-                        this.applyDisplayedPoints(res.data.data, this.recalculatedStats, this.recalculatedPreviewMap);
+                        await this.applyDisplayedPoints(res.data.data, this.recalculatedStats, this.recalculatedPreviewMap);
                         await this.refreshWaveformPreview();
                     } catch (e) {
                         console.error(e);
@@ -758,7 +777,7 @@
                     this.displayMode = 'saved';
                     this.errorMsg = '';
                     this.dataCount = this.savedDataCount;
-                    this.applyDisplayedPoints(this.loadedPoints, this.savedStats, this.savedPreviewMap);
+                    await this.applyDisplayedPoints(this.loadedPoints, this.savedStats, this.savedPreviewMap);
                     await this.refreshWaveformPreview();
                 },
 
@@ -1308,8 +1327,7 @@
                 toggleMaximize(view) {
                     if (this.maximizedView === view) this.maximizedView = null; else this.maximizedView = view;
                     this.$nextTick(() => {
-                        window.dispatchEvent(new Event('resize'));
-                        Plotly.Plots.resize('resultsPlotUp'); Plotly.Plots.resize('resultsPlotDw'); Plotly.Plots.resize('resultsPlotTotal');
+                        this.resizeAnalysisPlots();
                         Plotly.Plots.resize('waveformPlotUp'); Plotly.Plots.resize('waveformPlotDw');
                     });
                 },
