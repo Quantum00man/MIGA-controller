@@ -503,6 +503,19 @@
                 },
                 normalizeSettings(settings) {
                     const normalized = { ...(settings || {}) };
+                    const rpIpRed = String(normalized.rp_ip_red || '').trim().toLowerCase();
+                    if (normalized.hardware_platform !== 'daq' && normalized.hardware_platform !== 'redpitaya') {
+                        normalized.hardware_platform = (rpIpRed.startsWith('127.0.0.1') || rpIpRed.startsWith('localhost') || rpIpRed.includes(':'))
+                            ? 'daq'
+                            : 'redpitaya';
+                    }
+                    const decimation = Number(normalized.decimation);
+                    const daqRate = Number(normalized.daq_rate);
+                    if (!Number.isFinite(daqRate) || daqRate <= 0) {
+                        normalized.daq_rate = Number.isFinite(decimation) && decimation > 0
+                            ? Math.round((125000000 / decimation) * 1000) / 1000
+                            : 3990;
+                    }
                     normalized.atom_area_method = normalized.atom_area_method === 'edge_line' ? 'edge_line' : 'legacy';
                     const baselinePoints = Number.parseInt(normalized.atom_area_baseline_points ?? 2, 10);
                     normalized.atom_area_baseline_points = Number.isFinite(baselinePoints) && baselinePoints > 0 ? baselinePoints : 2;

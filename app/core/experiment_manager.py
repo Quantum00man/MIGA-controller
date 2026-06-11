@@ -34,13 +34,14 @@ class ExperimentManager:
         self.initialized = True
 
         self.seq_editor = SequenceEditor()
-        self.driver = ExperimentDriver() 
-        
+        self.driver = ExperimentDriver()
+
         self.rp_driver_red = RedPitayaDriver(ip_address=config.RP_IP_RED_REAL, timeout=config.NETWORK_TIMEOUT)
         self.rp_driver_green = RedPitayaDriver(ip_address=config.RP_IP_GREEN_REAL, timeout=config.NETWORK_TIMEOUT)
-        
+
         self.data_manager = DataManager()
         self.settings = self._load_initial_settings()
+        self._apply_runtime_settings()
 
         self.status = ExperimentStatus()
         self.stop_flag = False
@@ -75,12 +76,49 @@ class ExperimentManager:
         settings["tmot_args"] = tmot_args
         return settings
 
+    def _infer_hardware_platform(self, settings: Dict[str, Any]) -> str:
+        platform_name = str(settings.get("hardware_platform") or "").strip().lower()
+        if platform_name in {"redpitaya", "daq"}:
+            return platform_name
+
+        rp_ip_red = str(settings.get("rp_ip_red") or "").strip().lower()
+        if rp_ip_red.startswith("127.0.0.1") or rp_ip_red.startswith("localhost") or ":" in rp_ip_red:
+            return "daq"
+        return "redpitaya"
+
+    def _normalize_hardware_settings(self, settings: Dict[str, Any]) -> Dict[str, Any]:
+        settings["hardware_platform"] = self._infer_hardware_platform(settings)
+
+        try:
+            daq_rate = float(settings.get("daq_rate", 0) or 0)
+        except (TypeError, ValueError):
+            daq_rate = 0.0
+
+        if daq_rate <= 0:
+            try:
+                decimation = int(settings.get("decimation", config.DEFAULT_ANALYSIS_SETTINGS.get("decimation", 8192)))
+            except (TypeError, ValueError):
+                decimation = int(config.DEFAULT_ANALYSIS_SETTINGS.get("decimation", 8192))
+            settings["daq_rate"] = round(125000000 / decimation, 6) if decimation > 0 else 0.0
+        else:
+            settings["daq_rate"] = daq_rate
+
+        return settings
+
+    def _apply_runtime_settings(self):
+        self.rp_driver_red.real_ip = self.settings.get("rp_ip_red", config.RP_IP_RED_REAL)
+        self.rp_driver_red.timeout = int(self.settings.get("network_timeout", config.NETWORK_TIMEOUT))
+        self.rp_driver_green.real_ip = self.settings.get("rp_ip_green", config.RP_IP_GREEN_REAL)
+        self.rp_driver_green.timeout = int(self.settings.get("network_timeout", config.NETWORK_TIMEOUT))
+
     def _load_initial_settings(self) -> Dict[str, Any]:
         # 1. 定义所有参数的默认值
         base_settings = {
+            "hardware_platform": "redpitaya",
             "voltage_limit": 0.015,
             "rp_ip_red": config.RP_IP_RED_REAL,
             "rp_ip_green": config.RP_IP_GREEN_REAL,
+            "daq_rate": round(125000000 / config.DEFAULT_ANALYSIS_SETTINGS.get("decimation", 8192), 6),
             "network_timeout": config.NETWORK_TIMEOUT,
             "g_const": config.G_CONST,
             "link_total_time": config.LINK_TOTAL_TIME,
@@ -116,7 +154,10 @@ class ExperimentManager:
         base_settings.setdefault("fit_models", fitting.get_default_fit_models())
 
         return self._normalize_atom_area_settings(
-            self._normalize_fit_settings(self._normalize_tmot_settings(base_settings), strict=False)
+            self._normalize_fit_settings(
+                self._normalize_hardware_settings(self._normalize_tmot_settings(base_settings)),
+                strict=False
+            )
         )
 
     def _save_settings_to_disk(self):
@@ -166,13 +207,13 @@ class ExperimentManager:
         if new_settings.get('tmot_args') is None:
             new_settings['tmot_args'] = self.settings.get('tmot_args', self._default_tmot_args())
         new_settings = self._normalize_atom_area_settings(
-            self._normalize_fit_settings(self._normalize_tmot_settings(new_settings), strict=True)
+            self._normalize_fit_settings(
+                self._normalize_hardware_settings(self._normalize_tmot_settings(new_settings)),
+                strict=True
+            )
         )
         self.settings.update(new_settings)
-        self.rp_driver_red.real_ip = self.settings['rp_ip_red']
-        self.rp_driver_red.timeout = int(self.settings['network_timeout'])
-        self.rp_driver_green.real_ip = self.settings['rp_ip_green']
-        self.rp_driver_green.timeout = int(self.settings['network_timeout'])
+        self._apply_runtime_settings()
         self._save_settings_to_disk()
         print(f">>> System Settings Updated: {self.settings}")
     
@@ -195,17 +236,14 @@ class ExperimentManager:
             # 1. 重新从硬盘加载最新配置
             # 这一步确保即使重启程序没有点Save，也能读到上次保存的配置
             current_settings = self._load_initial_settings()
-            
+
             # 2. 更新内存中的 settings
             self.settings.update(current_settings)
-            
-            # 3. 强制配置 RP 驱动 (RedPitayaDriver)
-            # 这会触发 IP 切换 (RP <-> DAQ) 和 采样率下发给 Server
-            # 注意：我们主要用 rp_driver_red 来控制 DAQ Server
-            if hasattr(self, 'rp_driver_red'):
-                self.rp_driver_red.configure(self.settings)
-                print("[Manager] Driver configured successfully.")
-                
+
+            # 3. 强制把磁盘中的网络设置重新应用到驱动
+            self._apply_runtime_settings()
+            print("[Manager] Runtime driver settings restored from disk.")
+
         except Exception as e:
             print(f"[Manager Error] Failed to auto-configure driver: {e}")
             # 不阻断流程，万一配置失败也尝试继续跑
@@ -272,10 +310,13 @@ class ExperimentManager:
         return max(1, min(3, scan_dimensions))
 
     def _generate_parameters(self, config: Dict[str, Any]) -> List[Any]:
-        def normalize_values(values: List[float], target_type: str) -> List[Any]:
+        def normalize_single_value(value: float, target_type: str) -> Any:
             if target_type == 'int':
-                return [int(round(x)) for x in values]
-            return [round(float(x), 6) for x in values]
+                return int(round(float(value)))
+            return round(float(value), 6)
+
+        def normalize_values(values: List[float], target_type: str) -> List[Any]:
+            return [normalize_single_value(x, target_type) for x in values]
 
         def get_values(scan_type, method, start, stop, step_or_count, clist, target_type='float'):
             if scan_type == 'list':
@@ -365,24 +406,28 @@ class ExperimentManager:
                 dim_specs[0]['list'],
                 target_type=dim_specs[0]['target_type'],
             )
+            target_type = dim_specs[0]['target_type']
             mode_param = float(config.get('mode_param') or 0.0)
             link_formulas = config.get('link_formulas', [])
             final_list = []
             for v in vals_1:
                 s = [v]
                 if mode == 'timing':
-                    s.append(round(mode_param - v, 6))
+                    s.append(normalize_single_value(mode_param - v, target_type))
                 elif mode == 'rabi':
-                    s.append(round(mode_param - v / 2.0, 6))
+                    s.append(normalize_single_value(mode_param - v / 2.0, target_type))
                 elif mode == 'half':
-                    s.append(round(v / 2.0, 6))
+                    s.append(normalize_single_value(v / 2.0, target_type))
                 elif mode == 'link':
                     eval_ctx = {"P0": v, "math": math, "np": np}
                     for i, formula_str in enumerate(link_formulas):
                         try:
-                            val = float(eval(formula_str, {"__builtins__": {}}, eval_ctx))
+                            val = normalize_single_value(
+                                float(eval(formula_str, {"__builtins__": {}}, eval_ctx)),
+                                target_type
+                            )
                             eval_ctx[f"P{i+1}"] = val
-                            s.append(round(val, 6))
+                            s.append(val)
                         except Exception:
                             raise ValueError(f"Formula Error: {formula_str}")
                 final_list.append(s)

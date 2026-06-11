@@ -91,8 +91,10 @@ class ArchiveAnalysisSettings(AnalysisSettings):
 
 class SystemSettings(BaseModel):
     """Comprehensive System Settings."""
+    hardware_platform: str = Field("redpitaya")
     rp_ip_red: str
     rp_ip_green: str
+    daq_rate: Optional[float] = None
     network_timeout: int
     alpha: float
     beta: float
