@@ -404,7 +404,11 @@
                         <label class="form-label small text-muted mb-1">Total Parameter</label>
                         <div class="input-group input-group-sm"><span class="input-group-text bg-white"><i
                                     class="bi bi-calculator"></i></span><input type="text" class="form-control"
-                                v-model="config.mode_param"></div>
+                                :class="{'is-invalid': needsModeParam() && !isValidModeParam(config.mode_param)}"
+                                inputmode="decimal" placeholder="Required numeric value" v-model="config.mode_param"></div>
+                        <div class="invalid-feedback d-block small" v-if="needsModeParam() && !isValidModeParam(config.mode_param)">
+                            Timing/Rabi mode requires a numeric Total Parameter.
+                        </div>
                     </div>
                     <div v-if="config.mode === 'link'" class="mt-1">
                         <label class="form-label small text-muted mb-2">Python Formulas</label>
@@ -863,6 +867,43 @@
                     const parsed = Number(this.config.scan_dimensions || fallback);
                     if (!Number.isFinite(parsed)) return 1;
                     return Math.max(1, Math.min(3, Math.round(parsed)));
+                },
+                parseNumericInput(value) {
+                    if (value === null || value === undefined || value === '') return null;
+                    const parsed = Number(value);
+                    return Number.isFinite(parsed) ? parsed : Number.NaN;
+                },
+                needsModeParam(mode = this.config.mode, scanDimensions = this.getConfiguredScanDimensions()) {
+                    return scanDimensions === 1 && ['timing', 'rabi'].includes(mode);
+                },
+                isValidModeParam(value) {
+                    const parsed = this.parseNumericInput(value);
+                    return parsed !== null && Number.isFinite(parsed);
+                },
+                sanitizeStartPayload(payload) {
+                    const scanDimensions = Math.max(1, Math.min(3, Number(payload.scan_dimensions || this.getConfiguredScanDimensions()) || 1));
+                    if (this.needsModeParam(payload.mode, scanDimensions)) {
+                        const parsedModeParam = this.parseNumericInput(payload.mode_param);
+                        if (!Number.isFinite(parsedModeParam)) {
+                            throw new Error('Timing/Rabi mode requires a numeric Total Parameter.');
+                        }
+                        payload.mode_param = parsedModeParam;
+                    } else {
+                        payload.mode_param = null;
+                    }
+                    return payload;
+                },
+                formatRequestError(error) {
+                    const detail = error?.response?.data?.detail;
+                    if (Array.isArray(detail) && detail.length > 0) {
+                        return detail.map((item) => {
+                            const fieldPath = Array.isArray(item?.loc) ? item.loc.slice(1).join('.') : '';
+                            return fieldPath ? `${fieldPath}: ${item?.msg || 'invalid value'}` : (item?.msg || 'invalid request');
+                        }).join('; ');
+                    }
+                    if (typeof detail === 'string' && detail.trim()) return detail;
+                    if (detail && typeof detail === 'object') return JSON.stringify(detail);
+                    return error?.message || 'Unknown error';
                 },
                 getActiveScanDimensions() {
                     const parsed = Number(this.currentScanDimensions || this.getConfiguredScanDimensions());
@@ -1483,7 +1524,7 @@
                     this.progressPercent = 0;
                     this.plotRevision = 0;
                     try {
-                        const payload = JSON.parse(JSON.stringify(this.config));
+                        const payload = this.sanitizeStartPayload(JSON.parse(JSON.stringify(this.config)));
                         payload.scan_dimensions = this.getConfiguredScanDimensions();
                         payload.dim2_enabled = payload.scan_dimensions >= 2;
                         payload.dim3_enabled = payload.scan_dimensions >= 3;
@@ -1495,7 +1536,7 @@
                             this.statusMessage = "RUNNING";
                         }
                     } catch (error) {
-                        this.addLog("Start failed: " + (error.response?.data?.detail || error.message));
+                        this.addLog("Start failed: " + this.formatRequestError(error));
                     }
                 },
                 async stopScan() { await axios.post('/experiment/stop'); this.isRunning = false; this.statusMessage = "STOPPED"; },

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 from typing import Optional, List, Dict, Any
 
 
@@ -48,6 +48,12 @@ class ScanConfig(BaseModel):
     mode: str = Field("standard")
     mode_param: Optional[float] = Field(None)
     link_formulas: List[str] = Field(default_factory=list)
+
+    @validator("mode_param", pre=True)
+    def normalize_mode_param(cls, value):
+        if value == "":
+            return None
+        return value
     fit_center_up: float = Field(0)
     fit_width_up: float = Field(0)
     fit_center_dw: float = Field(0)

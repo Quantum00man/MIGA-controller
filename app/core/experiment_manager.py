@@ -407,7 +407,10 @@ class ExperimentManager:
                 target_type=dim_specs[0]['target_type'],
             )
             target_type = dim_specs[0]['target_type']
-            mode_param = float(config.get('mode_param') or 0.0)
+            mode_param_raw = config.get('mode_param')
+            if mode in {'timing', 'rabi'} and mode_param_raw in (None, ''):
+                raise ValueError('Timing/Rabi mode requires a numeric Total Parameter')
+            mode_param = float(mode_param_raw or 0.0)
             link_formulas = config.get('link_formulas', [])
             final_list = []
             for v in vals_1:
