@@ -424,7 +424,7 @@
                         <div v-if="showAnalysisTools()" class="analysis-tools">
                             <div v-if="showAllanToolbar()" class="slice-toolbar">
                                 <div class="d-flex align-items-center gap-2">
-                                    <label class="form-label-small mb-0">ORDER N</label>
+                                    <label class="form-label-small mb-0">MAX N</label>
                                     <input type="number" class="form-control form-control-sm" style="width: 92px;"
                                         v-model.number="allanOrder" min="1" :max="getMaxAllanOrder()"
                                         @change="handleAllanOrderChange">
@@ -457,8 +457,8 @@
                                 </div>
                             </div>
                             <div class="slice-summary mt-1" v-if="showAllanToolbar()">
-                                Compute overlapping Allan deviation from the full unsampled shot sequence. Click any Allan
-                                point to load the contributing TOFs.
+                                Compute the full overlapping Allan deviation curve from the unsampled shot sequence.
+                                The x-axis is Allan order n.
                             </div>
                             <div class="slice-summary mt-1" v-else-if="is3DSliceMode()">
                                 Drag the slider to inspect one tomography slice at a time. Click any heatmap cell or
@@ -671,7 +671,7 @@
                     const bucket = this.getAllanCacheBucket();
                     if (!force && bucket[cacheKey]) {
                         this.currentAllanData = bucket[cacheKey];
-                        this.allanOrder = Number(this.currentAllanData?.order || requestedOrder);
+                        this.allanOrder = Number(this.currentAllanData?.used_max_order || requestedOrder);
                         return this.currentAllanData;
                     }
 
@@ -684,10 +684,11 @@
                             display_mode: this.displayMode,
                         }));
                         const allanData = res.data || {};
+                        const usedMaxOrder = Number(allanData.used_max_order || requestedOrder);
                         bucket[cacheKey] = allanData;
-                        bucket[this.getAllanCacheKey(allanData.order || requestedOrder)] = allanData;
+                        bucket[this.getAllanCacheKey(usedMaxOrder)] = allanData;
                         this.currentAllanData = allanData;
-                        this.allanOrder = Number(allanData.order || requestedOrder);
+                        this.allanOrder = usedMaxOrder;
                         return allanData;
                     } catch (e) {
                         console.error(e);
@@ -714,21 +715,26 @@
                 async setPlotMode(mode) {
                     if (this.plotMode === mode) return;
                     this.plotMode = mode === 'allan' ? 'allan' : 'series';
-                    this.allanOrder = this.normalizeAllanOrder();
+                    this.allanOrder = this.plotMode === 'allan' ? this.getMaxAllanOrder() : this.normalizeAllanOrder();
                     this.plotRevision++;
                     if (this.plotMode === 'allan') {
+                        this.selectedPointKey = '';
+                        this.selectedPointKeys = [];
                         this.selectedAllanWindow = null;
+                        this.selectedPointLabel = '';
+                        this.selectedCount = 0;
+                        await this.refreshWaveformPreview();
                         await this.refreshAllanIfNeeded(false);
                     }
                     await this.refreshAnalysisView();
                 },
                 getMaxAllanOrder() {
-                    const count = Number(this.currentAllanData?.sequence_length ?? this.dataCount ?? 0);
-                    return Math.max(1, Math.floor(count / 2));
+                    const count = Number(this.currentAllanData?.max_order ?? Math.floor(Number(this.dataCount ?? 0) / 2));
+                    return Math.max(1, count || 1);
                 },
                 normalizeAllanOrder() {
                     const maxOrder = this.getMaxAllanOrder();
-                    const parsed = Math.round(Number(this.allanOrder) || 1);
+                    const parsed = Math.round(Number(this.allanOrder) || maxOrder || 1);
                     return Math.max(1, Math.min(maxOrder, parsed));
                 },
                 async handleAllanOrderChange() {
@@ -743,11 +749,11 @@
                     this.renderMainPlot();
                 },
                 getAllanSummary() {
-                    const pointCount = Number(this.currentAllanData?.sequence_length ?? this.dataCount ?? 0);
-                    if (pointCount < 2) return 'Need at least 2 full shots';
-                    const order = Number(this.currentAllanData?.order ?? this.normalizeAllanOrder());
-                    const windowCount = Number(this.currentAllanData?.window_count ?? Math.max(0, pointCount - (2 * order) + 1));
-                    return `n=${order} · ${pointCount} full shots · ${windowCount} overlapping windows`;
+                    const shotCount = Number(this.currentAllanData?.sequence_length ?? this.dataCount ?? 0);
+                    if (shotCount < 2) return 'Need at least 2 full shots';
+                    const maxOrder = Number(this.currentAllanData?.used_max_order ?? this.normalizeAllanOrder());
+                    const orderCount = Number(this.currentAllanData?.order_count ?? maxOrder);
+                    return `full sequence: ${shotCount} shots · overlapping Allan orders n=1..${maxOrder} (${orderCount} points)`;
                 },
                 getSliceAxisOptions() {
                     return [
@@ -1029,7 +1035,7 @@
                         this.historyMap = newHistoryMap;
                     }
                     this.syncSliceState(this.displayedStats);
-                    this.allanOrder = this.normalizeAllanOrder();
+                    this.allanOrder = this.getMaxAllanOrder();
                     this.plotRevision++;
                     await this.refreshAnalysisView();
                 },
@@ -1210,15 +1216,6 @@
                 },
 
                 async refreshWaveformPreview() {
-                    if (this.selectedAllanWindow && this.currentAllanData) {
-                        const indices = this.getAllanWindowIndices(this.selectedAllanWindow);
-                        if (indices.length) {
-                            this.selectedCount = indices.length;
-                            await this.loadWaveforms(indices);
-                            return;
-                        }
-                    }
-
                     const keys = Array.isArray(this.selectedPointKeys) && this.selectedPointKeys.length
                         ? this.selectedPointKeys.filter(key => this.historyMap[key])
                         : (this.selectedPointKey && this.historyMap[this.selectedPointKey] ? [this.selectedPointKey] : []);
@@ -1298,21 +1295,8 @@
 
                 async onPlotClick(data) {
                     if (!data || !data.points) return;
+                    if (this.plotMode === 'allan') return;
                     const point = data.points[0];
-                    if (this.plotMode === 'allan') {
-                        const window = this.extractAllanWindow(point);
-                        const indices = this.getAllanWindowIndices(window);
-                        if (indices.length) {
-                            this.selectedAllanWindow = window;
-                            this.selectedPointKey = '';
-                            this.selectedPointKeys = [];
-                            this.selectedPointLabel = this.buildAllanWindowLabel(window);
-                            this.selectedCount = indices.length;
-                            await this.loadWaveforms(indices);
-                        }
-                        return;
-                    }
-
                     const keys = this.resolveClickedKeys(point);
                     const indices = this.collectHistoryIndices(keys);
                     if (indices.length) {
@@ -1588,7 +1572,7 @@
                 buildAllanLayout(channel, metric, sourceLabel, summary = '') {
                     const base = this.buildCommonAnalysisLayout();
                     const isUp = channel === 'up';
-                    const order = Number(this.currentAllanData?.order ?? this.allanOrder);
+                    const maxOrder = Number(this.currentAllanData?.used_max_order ?? this.allanOrder);
                     const channelName = channel === 'total'
                         ? 'TOTAL (UP+DW)'
                         : (isUp ? metric.nameUp : metric.nameDw);
@@ -1596,12 +1580,12 @@
                     return {
                         ...base,
                         margin: isUp ? { t: 42, b: 8, l: 68, r: 20 } : { t: 24, b: 44, l: 68, r: 20 },
-                        yaxis: { ...base.yaxis, title: `Allan Dev. ${metric.label}${suffix}` },
-                        xaxis: { ...base.xaxis, title: isUp ? '' : 'P0 midpoint (full shot sequence)', showticklabels: !isUp },
+                        yaxis: { ...base.yaxis, title: `Overlapping Allan Dev. ${metric.label}${suffix}` },
+                        xaxis: { ...base.xaxis, title: isUp ? '' : 'Allan Order n', showticklabels: !isUp },
                         title: {
                             text: summary
-                                ? `${channelName} · Allan n=${order} · ${sourceLabel}<br><span style="font-size:11px;color:#5b6472">${summary}</span>`
-                                : `${channelName} · Allan n=${order} · ${sourceLabel}`,
+                                ? `${channelName} · Allan n=1..${maxOrder} · ${sourceLabel}<br><span style="font-size:11px;color:#5b6472">${summary}</span>`
+                                : `${channelName} · Allan n=1..${maxOrder} · ${sourceLabel}`,
                             font: { size: 13 },
                             x: 0.05,
                             y: 0.95
@@ -1609,7 +1593,7 @@
                     };
                 },
                 buildAllanHoverTemplate(metric, channelName) {
-                    return `%{text}<br>Allan=%{y:.6g}<extra>${channelName} · ${metric.label}</extra>`;
+                    return `n=%{x}<br>Allan=%{y:.6g}<extra>${channelName} · ${metric.label}</extra>`;
                 },
                 build2DLayout(channel, metric, sourceLabel, xAxisIndex = 0, yAxisIndex = 1, subtitle = '') {
                     const base = this.buildCommonAnalysisLayout();
@@ -1804,21 +1788,16 @@
                 },
                 renderAllanPlot(rows, metric) {
                     const allanData = this.currentAllanData;
-                    const windows = Array.isArray(allanData?.windows) ? allanData.windows : [];
+                    const orders = Array.isArray(allanData?.orders) ? allanData.orders.map(value => Number(value)) : [];
                     const sourceLabel = this.showRawData ? 'NoFit' : 'Fit';
                     const sourceKey = this.showRawData ? 'raw' : 'fit';
                     const metricSeries = allanData?.metrics?.[this.currentTab]?.[sourceKey] || {};
-                    const x = windows.map(window => Number(window.p0_mid ?? 0));
-                    const order = Number(allanData?.order ?? this.allanOrder);
-                    const totalWindows = Number(allanData?.window_count ?? windows.length);
+                    const maxOrder = Number(allanData?.used_max_order ?? this.allanOrder);
                     const totalShots = Number(allanData?.sequence_length ?? 0);
-                    const windowText = windows.map((window) => `P0 ${Number(window.p0_start).toFixed(6)} to ${Number(window.p0_end).toFixed(6)}<br>${Number(window.count || 0)} shots`);
 
                     const makeTrace = (series, color, channelName) => [{
-                        x,
+                        x: orders,
                         y: Array.isArray(series?.y) ? series.y : [],
-                        customdata: windows,
-                        text: windowText,
                         mode: 'lines+markers',
                         type: 'scatter',
                         connectgaps: false,
@@ -1828,25 +1807,26 @@
                         hovertemplate: this.buildAllanHoverTemplate(metric, channelName)
                     }];
                     const buildSummary = (series) => {
-                        const validWindowCount = Number(series?.valid_window_count || 0);
-                        if (!validWindowCount) {
-                            return `Need at least ${2 * order} valid full-shot windows`;
+                        const validCounts = Array.isArray(series?.valid_window_counts) ? series.valid_window_counts : [];
+                        const validOrders = validCounts.filter(count => Number(count) > 0).length;
+                        if (!validOrders) {
+                            return `Need at least 2 full shots to build Allan orders`;
                         }
-                        return `global overlapping adev_${order}=${this.formatMetricValue(series?.sigma)} · ${validWindowCount}/${totalWindows} valid windows · ${totalShots} full shots`;
+                        return `${validOrders}/${orders.length} valid orders · full sequence ${totalShots} shots · overlapping curve up to n=${maxOrder}`;
                     };
 
-                    const upSeries = metricSeries.up || { y: [], sigma: null, valid_window_count: 0 };
-                    const dwSeries = metricSeries.dw || { y: [], sigma: null, valid_window_count: 0 };
+                    const upSeries = metricSeries.up || { y: [], valid_window_counts: [] };
+                    const dwSeries = metricSeries.dw || { y: [], valid_window_counts: [] };
 
                     this.layoutResUp = this.buildAllanLayout('up', metric, sourceLabel, buildSummary(upSeries));
                     this.layoutResDw = this.buildAllanLayout('dw', metric, sourceLabel, buildSummary(dwSeries));
-                    Plotly.react('resultsPlotUp', windows.length ? makeTrace(upSeries, '#dc3545', metric.nameUp) : [], this.layoutResUp);
-                    Plotly.react('resultsPlotDw', windows.length ? makeTrace(dwSeries, '#0d6efd', metric.nameDw) : [], this.layoutResDw);
+                    Plotly.react('resultsPlotUp', orders.length ? makeTrace(upSeries, '#dc3545', metric.nameUp) : [], this.layoutResUp);
+                    Plotly.react('resultsPlotDw', orders.length ? makeTrace(dwSeries, '#0d6efd', metric.nameDw) : [], this.layoutResDw);
 
                     if (this.showTotalPlot()) {
-                        const totalSeries = metricSeries.total || { y: [], sigma: null, valid_window_count: 0 };
+                        const totalSeries = metricSeries.total || { y: [], valid_window_counts: [] };
                         this.layoutResTot = this.buildAllanLayout('total', metric, sourceLabel, buildSummary(totalSeries));
-                        Plotly.react('resultsPlotTotal', windows.length ? makeTrace(totalSeries, '#198754', 'TOTAL') : [], this.layoutResTot);
+                        Plotly.react('resultsPlotTotal', orders.length ? makeTrace(totalSeries, '#198754', 'TOTAL') : [], this.layoutResTot);
                     } else {
                         Plotly.react('resultsPlotTotal', [], this.layoutResTot);
                     }

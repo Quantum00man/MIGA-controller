@@ -307,7 +307,7 @@ class DataLoader:
             },
         }
 
-    def _build_allan_windows(self, points: List[Dict[str, Any]], requested_order: int) -> Dict[str, Any]:
+    def _build_allan_curve_meta(self, points: List[Dict[str, Any]], requested_order: int) -> Dict[str, Any]:
         sequence = [
             {
                 "step": int(point.get("step", index)),
@@ -316,41 +316,17 @@ class DataLoader:
             for index, point in enumerate(points)
         ]
         sequence_length = len(sequence)
-        max_order = sequence_length // 2 if sequence_length >= 2 else 1
-        order = max(1, min(int(requested_order or 1), max_order))
-        sequence_steps = [item["step"] for item in sequence]
-        windows: List[Dict[str, Any]] = []
-
-        if sequence_length >= 2 * order:
-            p0_prefix = [0.0]
-            for item in sequence:
-                p0_prefix.append(p0_prefix[-1] + item["p0"])
-
-            for start in range(0, sequence_length - (2 * order) + 1):
-                split = start + order
-                end = split + order
-                mean_p0_a = (p0_prefix[split] - p0_prefix[start]) / order
-                mean_p0_b = (p0_prefix[end] - p0_prefix[split]) / order
-                windows.append(
-                    {
-                        "start_index": start,
-                        "end_index": end,
-                        "count": end - start,
-                        "p0_start": sequence[start]["p0"],
-                        "p0_end": sequence[end - 1]["p0"],
-                        "p0_mid": (mean_p0_a + mean_p0_b) / 2.0,
-                        "step_start": sequence[start]["step"],
-                        "step_end": sequence[end - 1]["step"],
-                    }
-                )
-
+        max_order = sequence_length // 2
+        requested_max_order = max(1, int(requested_order or max_order or 1))
+        used_max_order = min(requested_max_order, max_order) if max_order > 0 else 0
+        orders = list(range(1, used_max_order + 1))
         return {
-            "requested_order": int(requested_order or 1),
-            "order": order,
+            "requested_order": requested_max_order,
+            "max_order": max_order,
+            "used_max_order": used_max_order,
             "sequence_length": sequence_length,
-            "window_count": len(windows),
-            "sequence_steps": sequence_steps,
-            "windows": windows,
+            "order_count": len(orders),
+            "orders": orders,
         }
 
     def _extract_allan_value(self, point: Dict[str, Any], field_names: Tuple[str, ...]) -> Optional[float]:
@@ -362,53 +338,54 @@ class DataLoader:
             values.append(float(parsed))
         return float(sum(values))
 
-    def _build_allan_channel(self, points: List[Dict[str, Any]], field_names: Tuple[str, ...], order: int, windows: List[Dict[str, Any]]) -> Dict[str, Any]:
-        values = [self._extract_allan_value(point, field_names) for point in points]
-        value_prefix = [0.0]
-        valid_prefix = [0]
-        for value in values:
-            value_prefix.append(value_prefix[-1] + (float(value) if value is not None else 0.0))
-            valid_prefix.append(valid_prefix[-1] + (1 if value is not None else 0))
+    def _build_allan_channel(self, points: List[Dict[str, Any]], field_names: Tuple[str, ...], orders: List[int]) -> Dict[str, Any]:
+        values = np.asarray([self._extract_allan_value(point, field_names) for point in points], dtype=float)
+        if values.size == 0 or not orders:
+            return {"y": [], "valid_window_counts": []}
 
-        y_values: List[Optional[float]] = []
-        sum_squares = 0.0
-        valid_window_count = 0
+        valid = np.isfinite(values)
+        safe_values = np.where(valid, values, 0.0)
+        value_prefix = np.concatenate(([0.0], np.cumsum(safe_values)))
+        valid_prefix = np.concatenate(([0], np.cumsum(valid.astype(np.int64))))
 
-        for window in windows:
-            start = int(window["start_index"])
-            end = int(window["end_index"])
-            split = start + order
-            valid_a = valid_prefix[split] - valid_prefix[start]
-            valid_b = valid_prefix[end] - valid_prefix[split]
-            if valid_a != order or valid_b != order:
-                y_values.append(None)
+        sigma_values: List[Optional[float]] = []
+        valid_window_counts: List[int] = []
+        for order in orders:
+            window_count = values.size - (2 * order) + 1
+            if window_count <= 0:
+                sigma_values.append(None)
+                valid_window_counts.append(0)
                 continue
 
-            mean_a = (value_prefix[split] - value_prefix[start]) / order
-            mean_b = (value_prefix[end] - value_prefix[split]) / order
-            allan_value = abs(mean_b - mean_a) / math.sqrt(2.0)
-            y_values.append(float(allan_value))
-            sum_squares += allan_value * allan_value
-            valid_window_count += 1
+            valid_a = valid_prefix[order:order + window_count] - valid_prefix[:window_count]
+            valid_b = valid_prefix[2 * order:2 * order + window_count] - valid_prefix[order:order + window_count]
+            valid_windows = (valid_a == order) & (valid_b == order)
+            current_valid_count = int(np.count_nonzero(valid_windows))
+            valid_window_counts.append(current_valid_count)
+            if current_valid_count == 0:
+                sigma_values.append(None)
+                continue
 
-        sigma = math.sqrt(sum_squares / valid_window_count) if valid_window_count else None
+            mean_a = (value_prefix[order:order + window_count] - value_prefix[:window_count]) / order
+            mean_b = (value_prefix[2 * order:2 * order + window_count] - value_prefix[order:order + window_count]) / order
+            diffs = (mean_b - mean_a) / math.sqrt(2.0)
+            sigma_values.append(float(np.sqrt(np.mean(np.square(diffs[valid_windows])))))
+
         return {
-            "y": y_values,
-            "sigma": float(sigma) if sigma is not None else None,
-            "valid_window_count": valid_window_count,
+            "y": sigma_values,
+            "valid_window_counts": valid_window_counts,
         }
 
     def _build_allan_payload(self, points: List[Dict[str, Any]], requested_order: int) -> Dict[str, Any]:
-        payload = self._build_allan_windows(points, requested_order)
-        order = payload["order"]
-        windows = payload["windows"]
+        payload = self._build_allan_curve_meta(points, requested_order)
+        orders = payload["orders"]
         metrics: Dict[str, Any] = {}
         for metric_name, source_map in self._get_allan_metric_fields().items():
             metrics[metric_name] = {}
             for source_name, channel_map in source_map.items():
                 metrics[metric_name][source_name] = {}
                 for channel_name, field_names in channel_map.items():
-                    metrics[metric_name][source_name][channel_name] = self._build_allan_channel(points, field_names, order, windows)
+                    metrics[metric_name][source_name][channel_name] = self._build_allan_channel(points, field_names, orders)
         payload["metrics"] = metrics
         payload["overlapping"] = True
         return payload
