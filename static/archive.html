@@ -397,6 +397,14 @@
                                 <label class="form-check-label small fw-bold text-muted" for="showRaw"
                                     style="cursor: pointer;">{{ getActiveScanDimensions() === 1 ? 'NoFit' : 'Use NoFit' }}</label>
                             </div>
+                            <div v-if="canUseAllanMode()" class="btn-group btn-group-sm ms-2">
+                                <button class="btn"
+                                    :class="plotMode === 'series' ? 'btn-dark' : 'btn-outline-dark'"
+                                    @click="setPlotMode('series')">Mean</button>
+                                <button class="btn"
+                                    :class="plotMode === 'allan' ? 'btn-dark' : 'btn-outline-dark'"
+                                    @click="setPlotMode('allan')">Allan</button>
+                            </div>
                             <ul class="nav nav-pills card-header-pills ms-3">
                                 <li class="nav-item" v-for="tab in tabs" :key="tab.id">
                                     <a :class="['nav-link', 'btn-sm', 'py-1', currentTab === tab.id ? 'active' : 'text-muted']"
@@ -406,15 +414,26 @@
                         </div>
                     </div>
                     <div class="card-body p-0 position-relative">
-                        <div v-if="isLoading" class="loading-overlay">
+                        <div v-if="isLoading || isLoadingAllan" class="loading-overlay">
                             <div class="text-center">
                                 <div class="spinner-border text-primary mb-2" role="status"></div>
-                                <div>Loading Data...</div>
+                                <div>{{ isLoadingAllan ? 'Computing Allan...' : 'Loading Data...' }}</div>
                             </div>
                         </div>
 
-                        <div v-if="show3DControls()" class="analysis-tools">
-                            <div class="slice-toolbar">
+                        <div v-if="showAnalysisTools()" class="analysis-tools">
+                            <div v-if="showAllanToolbar()" class="slice-toolbar">
+                                <div class="d-flex align-items-center gap-2">
+                                    <label class="form-label-small mb-0">ORDER N</label>
+                                    <input type="number" class="form-control form-control-sm" style="width: 92px;"
+                                        v-model.number="allanOrder" min="1" :max="getMaxAllanOrder()"
+                                        @change="handleAllanOrderChange">
+                                </div>
+                                <div class="slice-summary">
+                                    <strong>{{ getAllanSummary() }}</strong>
+                                </div>
+                            </div>
+                            <div v-else class="slice-toolbar">
                                 <div class="btn-group btn-group-sm">
                                     <button class="btn"
                                         :class="dim3DisplayMode === 'slice' ? 'btn-primary' : 'btn-outline-primary'"
@@ -437,7 +456,11 @@
                                     <strong>{{ getCurrentSliceSummary() }}</strong>
                                 </div>
                             </div>
-                            <div class="slice-summary mt-1" v-if="is3DSliceMode()">
+                            <div class="slice-summary mt-1" v-if="showAllanToolbar()">
+                                Compute overlapping Allan deviation from the full unsampled shot sequence. Click any Allan
+                                point to load the contributing TOFs.
+                            </div>
+                            <div class="slice-summary mt-1" v-else-if="is3DSliceMode()">
                                 Drag the slider to inspect one tomography slice at a time. Click any heatmap cell or
                                 extrema marker to open the matching TOF.
                             </div>
@@ -502,12 +525,14 @@
             data() {
                 return {
                     archiveTree: {}, selectedYear: '', selectedMonth: '', selectedDay: '', selectedRun: '',
-                    isLoading: false, isLoadingWaveforms: false, isSaving: false,
-                    loadedRunId: '', errorMsg: '', dataCount: 0, selectedPointKey: '', selectedPointLabel: '', selectedCount: 0,
+                    isLoading: false, isLoadingAllan: false, isLoadingWaveforms: false, isSaving: false,
+                    loadedRunId: '', errorMsg: '', dataCount: 0, selectedPointKey: '', selectedPointKeys: [], selectedPointLabel: '', selectedCount: 0,
+                    selectedAllanWindow: null,
                     loadedPoints: [], currentCalculatedPoints: [], originalSettings: {}, loadedConfig: {}, currentScanDimensions: 1,
                     displayMode: 'saved',
                     savedDataCount: 0, displayedStats: [], savedStats: [], recalculatedStats: [],
                     savedPreviewMap: {}, recalculatedPreviewMap: {},
+                    savedAllanCache: {}, recalculatedAllanCache: {}, currentAllanData: null,
                     defaultFitModels: [],
                     analysis: {
                         alpha: 0.0151, beta: 0.0188, R: 1.1, K: 7000,
@@ -520,7 +545,7 @@
                         atom_area_method: 'legacy', atom_area_baseline_points: 2,
                         fit_model_key: 'gaussian', fit_models: []
                     },
-                    showRawData: true, maximizedView: null, currentTab: 'atoms', plotRevision: 0,
+                    showRawData: true, maximizedView: null, currentTab: 'atoms', plotMode: 'series', allanOrder: 1, plotRevision: 0,
                     tabs: [{ id: 'atoms', label: 'Atom Number' }, { id: 'amp', label: 'Max Voltage' }, { id: 'sigma', label: 'Width (ms)' }, { id: 'temp', label: 'Temperature' }, { id: 'arrival', label: 'Arrival Time' }, { id: 'prob', label: 'Transition Prob.' }, { id: 'intf', label: 'Interferometer' }],
                     historyMap: {}, layoutResBase: {}, layoutResUp: {}, layoutResDw: {}, layoutResTot: {}, layoutOscUp: {}, layoutOscDw: {},
                     heatmapColorscale: [[0, '#c62828'], [0.5, '#fff3bf'], [1, '#1565c0']],
@@ -602,11 +627,127 @@
                 show3DControls() {
                     return this.getActiveScanDimensions() === 3;
                 },
+                canUseAllanMode() {
+                    return this.getActiveScanDimensions() === 1 && !Boolean(this.loadedConfig?.randomize);
+                },
+                showAllanToolbar() {
+                    return this.canUseAllanMode() && this.plotMode === 'allan';
+                },
+                showAnalysisTools() {
+                    return this.show3DControls() || this.showAllanToolbar();
+                },
                 isThreeDimensionalView() {
                     return this.getActiveScanDimensions() === 3;
                 },
                 is3DSliceMode() {
                     return this.show3DControls() && this.dim3DisplayMode === 'slice';
+                },
+                getAllanCacheMode() {
+                    return this.displayMode === 'recalculated' ? 'recalculated' : 'saved';
+                },
+                getAllanCacheBucket(mode = this.getAllanCacheMode()) {
+                    return mode === 'recalculated' ? this.recalculatedAllanCache : this.savedAllanCache;
+                },
+                clearAllanCache(mode = null) {
+                    if (!mode || mode === 'saved') this.savedAllanCache = {};
+                    if (!mode || mode === 'recalculated') this.recalculatedAllanCache = {};
+                    this.currentAllanData = null;
+                },
+                getAllanCacheKey(order = this.allanOrder) {
+                    return String(Math.max(1, Math.round(Number(order) || 1)));
+                },
+                syncCurrentAllanData(order = this.allanOrder) {
+                    const bucket = this.getAllanCacheBucket();
+                    this.currentAllanData = bucket[this.getAllanCacheKey(order)] || null;
+                    return this.currentAllanData;
+                },
+                async ensureAllanData(force = false) {
+                    if (!this.canUseAllanMode()) {
+                        this.currentAllanData = null;
+                        return null;
+                    }
+                    const requestedOrder = this.normalizeAllanOrder();
+                    const cacheKey = this.getAllanCacheKey(requestedOrder);
+                    const bucket = this.getAllanCacheBucket();
+                    if (!force && bucket[cacheKey]) {
+                        this.currentAllanData = bucket[cacheKey];
+                        this.allanOrder = Number(this.currentAllanData?.order || requestedOrder);
+                        return this.currentAllanData;
+                    }
+
+                    this.isLoadingAllan = true;
+                    this.errorMsg = '';
+                    try {
+                        this.analysis = this.normalizeAnalysis(this.analysis);
+                        const res = await axios.post('/archive/allan', this.buildArchivePayload({
+                            order: requestedOrder,
+                            display_mode: this.displayMode,
+                        }));
+                        const allanData = res.data || {};
+                        bucket[cacheKey] = allanData;
+                        bucket[this.getAllanCacheKey(allanData.order || requestedOrder)] = allanData;
+                        this.currentAllanData = allanData;
+                        this.allanOrder = Number(allanData.order || requestedOrder);
+                        return allanData;
+                    } catch (e) {
+                        console.error(e);
+                        this.currentAllanData = null;
+                        if (e.response?.data?.detail) {
+                            this.errorMsg = 'Allan Failed: ' + e.response.data.detail;
+                        } else {
+                            this.errorMsg = 'Allan Failed: ' + (e.message || 'Unknown error');
+                        }
+                        return null;
+                    } finally {
+                        this.isLoadingAllan = false;
+                    }
+                },
+                async refreshAllanIfNeeded(force = false) {
+                    if (this.plotMode !== 'allan') return null;
+                    if (!this.canUseAllanMode()) {
+                        this.plotMode = 'series';
+                        this.currentAllanData = null;
+                        return null;
+                    }
+                    return this.ensureAllanData(force);
+                },
+                async setPlotMode(mode) {
+                    if (this.plotMode === mode) return;
+                    this.plotMode = mode === 'allan' ? 'allan' : 'series';
+                    this.allanOrder = this.normalizeAllanOrder();
+                    this.plotRevision++;
+                    if (this.plotMode === 'allan') {
+                        this.selectedAllanWindow = null;
+                        await this.refreshAllanIfNeeded(false);
+                    }
+                    await this.refreshAnalysisView();
+                },
+                getMaxAllanOrder() {
+                    const count = Number(this.currentAllanData?.sequence_length ?? this.dataCount ?? 0);
+                    return Math.max(1, Math.floor(count / 2));
+                },
+                normalizeAllanOrder() {
+                    const maxOrder = this.getMaxAllanOrder();
+                    const parsed = Math.round(Number(this.allanOrder) || 1);
+                    return Math.max(1, Math.min(maxOrder, parsed));
+                },
+                async handleAllanOrderChange() {
+                    this.allanOrder = this.normalizeAllanOrder();
+                    this.selectedAllanWindow = null;
+                    this.plotRevision++;
+                    if (this.plotMode === 'allan') {
+                        await this.refreshAllanIfNeeded(false);
+                        await this.refreshAnalysisView();
+                        return;
+                    }
+                    this.renderMainPlot();
+                },
+                getAllanSummary() {
+                    const pointCount = Number(this.currentAllanData?.sequence_length ?? this.dataCount ?? 0);
+                    if (pointCount < 2) return 'Need at least 2 full shots';
+                    const order = Number(this.currentAllanData?.order ?? this.normalizeAllanOrder());
+                    const windowCount = Number(this.currentAllanData?.window_count ?? Math.max(0, pointCount - (2 * order) + 1));
+                    return `n=${order} · ${pointCount} full shots · ${windowCount} overlapping windows`;
                 },
                 getSliceAxisOptions() {
                     return [
@@ -708,13 +849,12 @@
                 areValuesClose(a, b, epsilon = 1e-6) {
                     return Math.abs(Number(a ?? 0) - Number(b ?? 0)) <= epsilon;
                 },
-                extractHistoryKey(customdata) {
-                    if (typeof customdata === 'string') return customdata;
+                extractHistoryKeys(customdata) {
+                    if (typeof customdata === 'string') return [customdata];
                     if (Array.isArray(customdata)) {
-                        const direct = customdata.find(item => typeof item === 'string');
-                        return typeof direct === 'string' ? direct : '';
+                        return [...new Set(customdata.filter(item => typeof item === 'string'))];
                     }
-                    return '';
+                    return [];
                 },
                 resolveClickedParams(point) {
                     if (!point) return [];
@@ -742,20 +882,24 @@
                     }
                     return [];
                 },
-                resolveClickedKey(point) {
-                    const directKey = this.extractHistoryKey(point?.customdata);
-                    if (directKey && this.historyMap[directKey]) return directKey;
+                resolveClickedKeys(point) {
+                    const directKeys = this.extractHistoryKeys(point?.customdata)
+                        .filter(key => this.historyMap[key]);
+                    if (directKeys.length) return directKeys;
 
                     const params = this.resolveClickedParams(point);
-                    if (!params.length) return '';
+                    if (!params.length) return [];
 
                     const roundedKey = this.getHistoryKey(params);
-                    if (this.historyMap[roundedKey]) return roundedKey;
+                    if (this.historyMap[roundedKey]) return [roundedKey];
 
                     const row = this.getStatsArray().find(item =>
                         params.every((value, index) => this.areValuesClose(item.params?.[index] ?? 0, value))
                     );
-                    return row?.key || '';
+                    return row?.key ? [row.key] : [];
+                },
+                resolveClickedKey(point) {
+                    return this.resolveClickedKeys(point)[0] || '';
                 },
                 formatScanParameters(params) {
                     return params.map((value, index) => `P${index}=${Number(value).toFixed(6)}`).join(', ');
@@ -764,6 +908,53 @@
                     const normalized = params.map(value => Number(value));
                     if (normalized.length === 1) return `P0 = ${normalized[0].toFixed(6)}`;
                     return this.formatScanParameters(normalized);
+                },
+                buildAllanSelectionLabel(keys) {
+                    const items = (Array.isArray(keys) ? keys : [])
+                        .map(key => this.historyMap[key])
+                        .filter(Boolean);
+                    if (!items.length) return '';
+                    const sorted = items
+                        .map(item => Number(item.params?.[0] ?? item.x ?? 0))
+                        .sort((a, b) => a - b);
+                    const first = sorted[0];
+                    const last = sorted[sorted.length - 1];
+                    return `Allan n=${this.normalizeAllanOrder()} · P0 ${first.toFixed(6)} to ${last.toFixed(6)} (${items.length} pts)`;
+                },
+                extractAllanWindow(point) {
+                    const payload = point?.customdata;
+                    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+                    if (!Number.isFinite(Number(payload.start_index)) || !Number.isFinite(Number(payload.end_index))) return null;
+                    return {
+                        ...payload,
+                        start_index: Number(payload.start_index),
+                        end_index: Number(payload.end_index),
+                        count: Number(payload.count || 0),
+                        p0_start: Number(payload.p0_start ?? 0),
+                        p0_end: Number(payload.p0_end ?? 0),
+                        p0_mid: Number(payload.p0_mid ?? 0),
+                    };
+                },
+                getAllanWindowIndices(window) {
+                    if (!window || !this.currentAllanData) return [];
+                    const sequenceSteps = Array.isArray(this.currentAllanData.sequence_steps) ? this.currentAllanData.sequence_steps : [];
+                    const start = Math.max(0, Number(window.start_index) || 0);
+                    const end = Math.max(start, Number(window.end_index) || start);
+                    return sequenceSteps.slice(start, end).map(value => Number(value));
+                },
+                buildAllanWindowLabel(window) {
+                    if (!window) return '';
+                    const order = Number(this.currentAllanData?.order ?? this.allanOrder);
+                    const count = Number(window.count || Math.max(0, window.end_index - window.start_index));
+                    return `Allan n=${order} · P0 ${Number(window.p0_start).toFixed(6)} to ${Number(window.p0_end).toFixed(6)} (${count} shots)`;
+                },
+                collectHistoryIndices(keys = []) {
+                    const collected = new Set();
+                    (Array.isArray(keys) ? keys : []).forEach((key) => {
+                        const item = this.historyMap[key];
+                        (item?.stepIndices || []).forEach((index) => collected.add(index));
+                    });
+                    return [...collected].sort((a, b) => a - b);
                 },
                 normalizeStatsRows(stats = []) {
                     const scanDimensions = this.getActiveScanDimensions();
@@ -838,6 +1029,7 @@
                         this.historyMap = newHistoryMap;
                     }
                     this.syncSliceState(this.displayedStats);
+                    this.allanOrder = this.normalizeAllanOrder();
                     this.plotRevision++;
                     await this.refreshAnalysisView();
                 },
@@ -897,17 +1089,20 @@
                     this.currentCalculatedPoints = [];
                     this.displayedStats = [];
                     this.selectedPointKey = '';
+                    this.selectedPointKeys = [];
                     this.selectedPointLabel = '';
+                    this.selectedAllanWindow = null;
+                    this.clearAllanCache();
                     this.errorMsg = '';
 
                     // 重置波形图
                     Plotly.react('waveformPlotUp', [], this.layoutOscUp);
                     Plotly.react('waveformPlotDw', [], this.layoutOscDw);
-                    
+
                     try {
                         const url = `/archive/load/${this.selectedYear}/${this.selectedMonth}/${this.selectedDay}/${this.selectedRun}?t=${Date.now()}`;
                         const res = await axios.get(url);
-                        
+
                         // [修复] 安全检查：确保返回的数据是合法的数组
                         if (!res.data || !Array.isArray(res.data.data)) {
                             throw new Error("Invalid data format received from server");
@@ -918,7 +1113,7 @@
                         this.currentScanDimensions = this.resolveScanDimensions(res.data.scan_dimensions, this.loadedConfig);
                         this.originalSettings = this.normalizeAnalysis(snap);
                         this.analysis = this.normalizeAnalysis({ ...this.analysis, ...snap });
-                        
+
                         this.loadedPoints = res.data.data;
                         this.savedStats = this.normalizeStatsRows(res.data.stats);
                         this.savedPreviewMap = res.data.preview_map && typeof res.data.preview_map === 'object' ? res.data.preview_map : {};
@@ -926,10 +1121,17 @@
                         this.dataCount = this.savedDataCount;
                         this.loadedRunId = `${this.selectedDay}/${this.selectedRun}`;
                         this.displayMode = 'saved';
+                        if (!this.canUseAllanMode() && this.plotMode === 'allan') {
+                            this.plotMode = 'series';
+                        }
                         this.isLoading = false;
                         await this.$nextTick();
                         await this.applyDisplayedPoints(this.loadedPoints, this.savedStats, this.savedPreviewMap);
-                        
+                        if (this.plotMode === 'allan') {
+                            await this.refreshAllanIfNeeded(false);
+                            await this.refreshAnalysisView();
+                        }
+
                     } catch (e) {
                         console.error(e);
                         if (e.response?.data?.detail) {
@@ -947,6 +1149,9 @@
                 async recalculate() {
                     if (!this.selectedRun) return;
                     this.isLoading = true;
+                    this.currentAllanData = null;
+                    this.selectedAllanWindow = null;
+                    this.clearAllanCache('recalculated');
                     this.errorMsg = '';
                     try {
                         this.analysis = this.normalizeAnalysis(this.analysis);
@@ -964,9 +1169,16 @@
                         this.recalculatedPreviewMap = res.data.preview_map && typeof res.data.preview_map === 'object' ? res.data.preview_map : {};
                         this.dataCount = Number.isFinite(res.data.total_points) ? res.data.total_points : res.data.data.length;
                         this.displayMode = 'recalculated';
+                        if (!this.canUseAllanMode() && this.plotMode === 'allan') {
+                            this.plotMode = 'series';
+                        }
                         this.isLoading = false;
                         await this.$nextTick();
                         await this.applyDisplayedPoints(res.data.data, this.recalculatedStats, this.recalculatedPreviewMap);
+                        if (this.plotMode === 'allan') {
+                            await this.refreshAllanIfNeeded(false);
+                            await this.refreshAnalysisView();
+                        }
                         await this.refreshWaveformPreview();
                     } catch (e) {
                         console.error(e);
@@ -982,22 +1194,49 @@
 
                 async showSavedResults() {
                     this.displayMode = 'saved';
+                    this.currentAllanData = null;
+                    this.selectedAllanWindow = null;
                     this.errorMsg = '';
                     this.dataCount = this.savedDataCount;
                     await this.applyDisplayedPoints(this.loadedPoints, this.savedStats, this.savedPreviewMap);
+                    if (this.plotMode === 'allan') {
+                        this.syncCurrentAllanData();
+                        if (!this.currentAllanData) {
+                            await this.refreshAllanIfNeeded(false);
+                        }
+                        await this.refreshAnalysisView();
+                    }
                     await this.refreshWaveformPreview();
                 },
 
                 async refreshWaveformPreview() {
-                    if (this.selectedPointKey && this.historyMap[this.selectedPointKey]) {
-                        const item = this.historyMap[this.selectedPointKey];
-                        const indices = item.stepIndices || [];
-                        this.selectedCount = item.count || indices.length;
+                    if (this.selectedAllanWindow && this.currentAllanData) {
+                        const indices = this.getAllanWindowIndices(this.selectedAllanWindow);
+                        if (indices.length) {
+                            this.selectedCount = indices.length;
+                            await this.loadWaveforms(indices);
+                            return;
+                        }
+                    }
+
+                    const keys = Array.isArray(this.selectedPointKeys) && this.selectedPointKeys.length
+                        ? this.selectedPointKeys.filter(key => this.historyMap[key])
+                        : (this.selectedPointKey && this.historyMap[this.selectedPointKey] ? [this.selectedPointKey] : []);
+                    const indices = this.collectHistoryIndices(keys);
+                    if (indices.length) {
+                        if (keys.length === 1) {
+                            const item = this.historyMap[keys[0]];
+                            this.selectedCount = item?.count || indices.length;
+                        } else {
+                            this.selectedCount = indices.length;
+                        }
                         await this.loadWaveforms(indices);
                         return;
                     }
 
                     this.selectedPointKey = '';
+                    this.selectedPointKeys = [];
+                    this.selectedAllanWindow = null;
                     this.selectedPointLabel = '';
                     this.selectedCount = 0;
                     this.layoutOscUp.shapes = [];
@@ -1060,13 +1299,34 @@
                 async onPlotClick(data) {
                     if (!data || !data.points) return;
                     const point = data.points[0];
-                    const key = this.resolveClickedKey(point);
-                    if (this.historyMap[key]) {
-                        const item = this.historyMap[key];
-                        const indices = item.stepIndices || [];
-                        this.selectedPointKey = key;
-                        this.selectedPointLabel = this.buildSelectionLabel(item.params || this.getGroupParams(item));
-                        this.selectedCount = item.count || indices.length;
+                    if (this.plotMode === 'allan') {
+                        const window = this.extractAllanWindow(point);
+                        const indices = this.getAllanWindowIndices(window);
+                        if (indices.length) {
+                            this.selectedAllanWindow = window;
+                            this.selectedPointKey = '';
+                            this.selectedPointKeys = [];
+                            this.selectedPointLabel = this.buildAllanWindowLabel(window);
+                            this.selectedCount = indices.length;
+                            await this.loadWaveforms(indices);
+                        }
+                        return;
+                    }
+
+                    const keys = this.resolveClickedKeys(point);
+                    const indices = this.collectHistoryIndices(keys);
+                    if (indices.length) {
+                        this.selectedAllanWindow = null;
+                        this.selectedPointKeys = keys;
+                        this.selectedPointKey = keys[0] || '';
+                        if (keys.length === 1 && this.historyMap[keys[0]]) {
+                            const item = this.historyMap[keys[0]];
+                            this.selectedPointLabel = this.buildSelectionLabel(item.params || this.getGroupParams(item));
+                            this.selectedCount = item.count || indices.length;
+                        } else {
+                            this.selectedPointLabel = this.buildAllanSelectionLabel(keys);
+                            this.selectedCount = indices.length;
+                        }
                         await this.loadWaveforms(indices);
                     }
                 },
@@ -1215,6 +1475,63 @@
 
                     return { fitPrefix, rawPrefix, label, nameUp, nameDw, suffixUp, suffixDw };
                 },
+                formatMetricValue(value) {
+                    const numeric = Number(value);
+                    if (!Number.isFinite(numeric)) return 'n/a';
+                    const abs = Math.abs(numeric);
+                    if ((abs > 0 && abs < 0.001) || abs >= 10000) return numeric.toExponential(3);
+                    return numeric.toPrecision(4);
+                },
+                computeAllanSeries(rows, field, order = this.allanOrder, valueGetter = null) {
+                    const sourceRows = (Array.isArray(rows) ? rows : [])
+                        .filter((row) => {
+                            const value = valueGetter ? valueGetter(row) : row[field];
+                            return Number.isFinite(Number(row?.x ?? row?.params?.[0])) && Number.isFinite(Number(value));
+                        })
+                        .sort((a, b) => Number(a.x ?? a.params?.[0] ?? 0) - Number(b.x ?? b.params?.[0] ?? 0));
+                    const sourceCount = sourceRows.length;
+                    const normalizedOrder = Math.max(1, Math.min(Math.floor(sourceCount / 2) || 1, Math.round(Number(order) || 1)));
+                    if (sourceCount < (2 * normalizedOrder)) {
+                        return { x: [], y: [], customdata: [], sigma: null, order: normalizedOrder, windowCount: 0, sourceCount };
+                    }
+
+                    const values = sourceRows.map((row) => Number(valueGetter ? valueGetter(row) : row[field]));
+                    const times = sourceRows.map((row) => Number(row.x ?? row.params?.[0] ?? 0));
+                    const valuePrefix = [0];
+                    const timePrefix = [0];
+                    values.forEach((value, index) => {
+                        valuePrefix.push(valuePrefix[index] + value);
+                        timePrefix.push(timePrefix[index] + times[index]);
+                    });
+
+                    const allanX = [];
+                    const allanY = [];
+                    const customdata = [];
+                    let sumSquares = 0;
+                    for (let start = 0; start <= sourceCount - (2 * normalizedOrder); start += 1) {
+                        const split = start + normalizedOrder;
+                        const end = split + normalizedOrder;
+                        const meanA = (valuePrefix[split] - valuePrefix[start]) / normalizedOrder;
+                        const meanB = (valuePrefix[end] - valuePrefix[split]) / normalizedOrder;
+                        const centerA = (timePrefix[split] - timePrefix[start]) / normalizedOrder;
+                        const centerB = (timePrefix[end] - timePrefix[split]) / normalizedOrder;
+                        const allan = Math.abs(meanB - meanA) / Math.SQRT2;
+                        allanX.push((centerA + centerB) / 2);
+                        allanY.push(allan);
+                        customdata.push(sourceRows.slice(start, end).map((row) => row.key));
+                        sumSquares += allan * allan;
+                    }
+
+                    return {
+                        x: allanX,
+                        y: allanY,
+                        customdata,
+                        sigma: allanY.length ? Math.sqrt(sumSquares / allanY.length) : null,
+                        order: normalizedOrder,
+                        windowCount: allanY.length,
+                        sourceCount
+                    };
+                },
                 buildPlaneMatrix(rows, field, xAxisIndex, yAxisIndex, fixedAxisIndex = null, fixedAxisValue = null) {
                     const planeRows = (Array.isArray(rows) ? rows : []).filter((row) => {
                         if (fixedAxisIndex === null) return true;
@@ -1267,6 +1584,32 @@
                         xaxis: { ...base.xaxis, title: 'Parameter P0', showticklabels: true },
                         title: { text: 'TOTAL (UP+DW)', font: { size: 13 }, x: 0.05, y: 0.93 }
                     };
+                },
+                buildAllanLayout(channel, metric, sourceLabel, summary = '') {
+                    const base = this.buildCommonAnalysisLayout();
+                    const isUp = channel === 'up';
+                    const order = Number(this.currentAllanData?.order ?? this.allanOrder);
+                    const channelName = channel === 'total'
+                        ? 'TOTAL (UP+DW)'
+                        : (isUp ? metric.nameUp : metric.nameDw);
+                    const suffix = channel === 'total' ? '' : (isUp ? metric.suffixUp : metric.suffixDw);
+                    return {
+                        ...base,
+                        margin: isUp ? { t: 42, b: 8, l: 68, r: 20 } : { t: 24, b: 44, l: 68, r: 20 },
+                        yaxis: { ...base.yaxis, title: `Allan Dev. ${metric.label}${suffix}` },
+                        xaxis: { ...base.xaxis, title: isUp ? '' : 'P0 midpoint (full shot sequence)', showticklabels: !isUp },
+                        title: {
+                            text: summary
+                                ? `${channelName} · Allan n=${order} · ${sourceLabel}<br><span style="font-size:11px;color:#5b6472">${summary}</span>`
+                                : `${channelName} · Allan n=${order} · ${sourceLabel}`,
+                            font: { size: 13 },
+                            x: 0.05,
+                            y: 0.95
+                        }
+                    };
+                },
+                buildAllanHoverTemplate(metric, channelName) {
+                    return `%{text}<br>Allan=%{y:.6g}<extra>${channelName} · ${metric.label}</extra>`;
                 },
                 build2DLayout(channel, metric, sourceLabel, xAxisIndex = 0, yAxisIndex = 1, subtitle = '') {
                     const base = this.buildCommonAnalysisLayout();
@@ -1455,6 +1798,55 @@
 
                         this.layoutResTot = this.buildTotalLayout();
                         Plotly.react('resultsPlotTotal', tracesTot, this.layoutResTot);
+                    } else {
+                        Plotly.react('resultsPlotTotal', [], this.layoutResTot);
+                    }
+                },
+                renderAllanPlot(rows, metric) {
+                    const allanData = this.currentAllanData;
+                    const windows = Array.isArray(allanData?.windows) ? allanData.windows : [];
+                    const sourceLabel = this.showRawData ? 'NoFit' : 'Fit';
+                    const sourceKey = this.showRawData ? 'raw' : 'fit';
+                    const metricSeries = allanData?.metrics?.[this.currentTab]?.[sourceKey] || {};
+                    const x = windows.map(window => Number(window.p0_mid ?? 0));
+                    const order = Number(allanData?.order ?? this.allanOrder);
+                    const totalWindows = Number(allanData?.window_count ?? windows.length);
+                    const totalShots = Number(allanData?.sequence_length ?? 0);
+                    const windowText = windows.map((window) => `P0 ${Number(window.p0_start).toFixed(6)} to ${Number(window.p0_end).toFixed(6)}<br>${Number(window.count || 0)} shots`);
+
+                    const makeTrace = (series, color, channelName) => [{
+                        x,
+                        y: Array.isArray(series?.y) ? series.y : [],
+                        customdata: windows,
+                        text: windowText,
+                        mode: 'lines+markers',
+                        type: 'scatter',
+                        connectgaps: false,
+                        name: `${channelName} Allan`,
+                        line: { color, width: 2 },
+                        marker: { size: 7 },
+                        hovertemplate: this.buildAllanHoverTemplate(metric, channelName)
+                    }];
+                    const buildSummary = (series) => {
+                        const validWindowCount = Number(series?.valid_window_count || 0);
+                        if (!validWindowCount) {
+                            return `Need at least ${2 * order} valid full-shot windows`;
+                        }
+                        return `global overlapping adev_${order}=${this.formatMetricValue(series?.sigma)} · ${validWindowCount}/${totalWindows} valid windows · ${totalShots} full shots`;
+                    };
+
+                    const upSeries = metricSeries.up || { y: [], sigma: null, valid_window_count: 0 };
+                    const dwSeries = metricSeries.dw || { y: [], sigma: null, valid_window_count: 0 };
+
+                    this.layoutResUp = this.buildAllanLayout('up', metric, sourceLabel, buildSummary(upSeries));
+                    this.layoutResDw = this.buildAllanLayout('dw', metric, sourceLabel, buildSummary(dwSeries));
+                    Plotly.react('resultsPlotUp', windows.length ? makeTrace(upSeries, '#dc3545', metric.nameUp) : [], this.layoutResUp);
+                    Plotly.react('resultsPlotDw', windows.length ? makeTrace(dwSeries, '#0d6efd', metric.nameDw) : [], this.layoutResDw);
+
+                    if (this.showTotalPlot()) {
+                        const totalSeries = metricSeries.total || { y: [], sigma: null, valid_window_count: 0 };
+                        this.layoutResTot = this.buildAllanLayout('total', metric, sourceLabel, buildSummary(totalSeries));
+                        Plotly.react('resultsPlotTotal', windows.length ? makeTrace(totalSeries, '#198754', 'TOTAL') : [], this.layoutResTot);
                     } else {
                         Plotly.react('resultsPlotTotal', [], this.layoutResTot);
                     }
@@ -1660,7 +2052,11 @@
                     const scanDimensions = this.getActiveScanDimensions();
 
                     if (scanDimensions === 1) {
-                        this.render1DPlot(rows, metric);
+                        if (this.plotMode === 'allan') {
+                            this.renderAllanPlot(rows, metric);
+                        } else {
+                            this.render1DPlot(rows, metric);
+                        }
                     } else if (scanDimensions === 2) {
                         this.render2DHeatmap(rows, metric);
                     } else {

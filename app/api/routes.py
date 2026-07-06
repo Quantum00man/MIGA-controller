@@ -9,6 +9,7 @@ from app.core.data_loader import DataLoader
 from app.core.data_manager import DataManager
 from app.models.schemas import (
     AnalysisSettings,
+    ArchiveAllanRequest,
     ArchiveWaveformRequest,
     ExperimentResponse,
     FitModelDefinition,
@@ -16,7 +17,7 @@ from app.models.schemas import (
     ScanConfig,
     SystemSettings,
 )
-import config 
+import config
 
 router = APIRouter()
 manager = ExperimentManager()
@@ -37,19 +38,19 @@ async def stop_experiment():
 @router.get("/experiment/status", response_model=ExperimentResponse)
 async def get_status():
     s = manager.status
-    
+
     # [NEW] Logic to determine what Run ID to display
     # If running, show current. If idle, predict next.
     if s.is_running:
         run_label = manager.data_manager.current_run_id_str
     else:
         run_label = manager.data_manager.get_next_run_id_str()
-        
+
     return ExperimentResponse(
-        status="success", 
-        message=s.message, 
+        status="success",
+        message=s.message,
         data={
-            "is_running": s.is_running, 
+            "is_running": s.is_running,
             "current_step": s.current_step,
             "run_id": run_label # <--- This is what index.html needs
         }
@@ -137,6 +138,25 @@ async def recalculate_archived_run(req: ReAnalysisRequest):
     except Exception as exc:
         raise HTTPException(500, str(exc))
 
+@router.post("/archive/allan")
+async def calculate_archived_allan(req: ArchiveAllanRequest):
+    try:
+        return data_loader.calculate_allan_run(
+            req.year,
+            req.month,
+            req.day,
+            req.run_id,
+            req.order,
+            req.display_mode,
+            req.new_settings.dict(),
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
 @router.post("/archive/waveforms/recalculate")
 async def recalculate_archived_waveforms(req: ArchiveWaveformRequest):
     try:
@@ -159,7 +179,7 @@ async def recalculate_archived_waveforms(req: ArchiveWaveformRequest):
 async def overwrite_archived_run(req: ReAnalysisRequest):
     try:
         # Use a fresh DataManager instance for overwrite ops to avoid state conflict
-        dm = DataManager() 
+        dm = DataManager()
         recalculated = data_loader.recalculate_run(
             req.year,
             req.month,

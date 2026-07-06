@@ -274,6 +274,203 @@ class DataLoader:
             "total_points": len(full_points),
         }
 
+
+    def _get_allan_metric_fields(self) -> Dict[str, Dict[str, Dict[str, Tuple[str, ...]]]]:
+        return {
+            "atoms": {
+                "fit": {"up": ("atom_number_up",), "dw": ("atom_number_dw",), "total": ("atom_number_up", "atom_number_dw")},
+                "raw": {"up": ("atom_number_up_nofit",), "dw": ("atom_number_dw_nofit",), "total": ("atom_number_up_nofit", "atom_number_dw_nofit")},
+            },
+            "amp": {
+                "fit": {"up": ("amplitude_up",), "dw": ("amplitude_dw",)},
+                "raw": {"up": ("amplitude_up_nofit",), "dw": ("amplitude_dw_nofit",)},
+            },
+            "sigma": {
+                "fit": {"up": ("sigma_up",), "dw": ("sigma_dw",)},
+                "raw": {"up": ("sigma_up_nofit",), "dw": ("sigma_dw_nofit",)},
+            },
+            "temp": {
+                "fit": {"up": ("temperature_up",), "dw": ("temperature_dw",)},
+                "raw": {"up": ("temperature_up_nofit",), "dw": ("temperature_dw_nofit",)},
+            },
+            "arrival": {
+                "fit": {"up": ("arrival_time_up",), "dw": ("arrival_time_dw",)},
+                "raw": {"up": ("arrival_time_up_nofit",), "dw": ("arrival_time_dw_nofit",)},
+            },
+            "prob": {
+                "fit": {"up": ("transition_probability_up",), "dw": ("transition_probability_dw",)},
+                "raw": {"up": ("transition_probability_up_nofit",), "dw": ("transition_probability_dw_nofit",)},
+            },
+            "intf": {
+                "fit": {"up": ("intf_p1",), "dw": ("intf_p2",)},
+                "raw": {"up": ("intf_p1_nofit",), "dw": ("intf_p2_nofit",)},
+            },
+        }
+
+    def _build_allan_windows(self, points: List[Dict[str, Any]], requested_order: int) -> Dict[str, Any]:
+        sequence = [
+            {
+                "step": int(point.get("step", index)),
+                "p0": float(self._safe_scalar(point.get("parameter"), 0.0)),
+            }
+            for index, point in enumerate(points)
+        ]
+        sequence_length = len(sequence)
+        max_order = sequence_length // 2 if sequence_length >= 2 else 1
+        order = max(1, min(int(requested_order or 1), max_order))
+        sequence_steps = [item["step"] for item in sequence]
+        windows: List[Dict[str, Any]] = []
+
+        if sequence_length >= 2 * order:
+            p0_prefix = [0.0]
+            for item in sequence:
+                p0_prefix.append(p0_prefix[-1] + item["p0"])
+
+            for start in range(0, sequence_length - (2 * order) + 1):
+                split = start + order
+                end = split + order
+                mean_p0_a = (p0_prefix[split] - p0_prefix[start]) / order
+                mean_p0_b = (p0_prefix[end] - p0_prefix[split]) / order
+                windows.append(
+                    {
+                        "start_index": start,
+                        "end_index": end,
+                        "count": end - start,
+                        "p0_start": sequence[start]["p0"],
+                        "p0_end": sequence[end - 1]["p0"],
+                        "p0_mid": (mean_p0_a + mean_p0_b) / 2.0,
+                        "step_start": sequence[start]["step"],
+                        "step_end": sequence[end - 1]["step"],
+                    }
+                )
+
+        return {
+            "requested_order": int(requested_order or 1),
+            "order": order,
+            "sequence_length": sequence_length,
+            "window_count": len(windows),
+            "sequence_steps": sequence_steps,
+            "windows": windows,
+        }
+
+    def _extract_allan_value(self, point: Dict[str, Any], field_names: Tuple[str, ...]) -> Optional[float]:
+        values: List[float] = []
+        for field_name in field_names:
+            parsed = self._parse_float(point.get(field_name))
+            if parsed is None:
+                return None
+            values.append(float(parsed))
+        return float(sum(values))
+
+    def _build_allan_channel(self, points: List[Dict[str, Any]], field_names: Tuple[str, ...], order: int, windows: List[Dict[str, Any]]) -> Dict[str, Any]:
+        values = [self._extract_allan_value(point, field_names) for point in points]
+        value_prefix = [0.0]
+        valid_prefix = [0]
+        for value in values:
+            value_prefix.append(value_prefix[-1] + (float(value) if value is not None else 0.0))
+            valid_prefix.append(valid_prefix[-1] + (1 if value is not None else 0))
+
+        y_values: List[Optional[float]] = []
+        sum_squares = 0.0
+        valid_window_count = 0
+
+        for window in windows:
+            start = int(window["start_index"])
+            end = int(window["end_index"])
+            split = start + order
+            valid_a = valid_prefix[split] - valid_prefix[start]
+            valid_b = valid_prefix[end] - valid_prefix[split]
+            if valid_a != order or valid_b != order:
+                y_values.append(None)
+                continue
+
+            mean_a = (value_prefix[split] - value_prefix[start]) / order
+            mean_b = (value_prefix[end] - value_prefix[split]) / order
+            allan_value = abs(mean_b - mean_a) / math.sqrt(2.0)
+            y_values.append(float(allan_value))
+            sum_squares += allan_value * allan_value
+            valid_window_count += 1
+
+        sigma = math.sqrt(sum_squares / valid_window_count) if valid_window_count else None
+        return {
+            "y": y_values,
+            "sigma": float(sigma) if sigma is not None else None,
+            "valid_window_count": valid_window_count,
+        }
+
+    def _build_allan_payload(self, points: List[Dict[str, Any]], requested_order: int) -> Dict[str, Any]:
+        payload = self._build_allan_windows(points, requested_order)
+        order = payload["order"]
+        windows = payload["windows"]
+        metrics: Dict[str, Any] = {}
+        for metric_name, source_map in self._get_allan_metric_fields().items():
+            metrics[metric_name] = {}
+            for source_name, channel_map in source_map.items():
+                metrics[metric_name][source_name] = {}
+                for channel_name, field_names in channel_map.items():
+                    metrics[metric_name][source_name][channel_name] = self._build_allan_channel(points, field_names, order, windows)
+        payload["metrics"] = metrics
+        payload["overlapping"] = True
+        return payload
+
+    def _load_allan_points(
+        self,
+        run_dir: Path,
+        config_data: Dict[str, Any],
+        display_mode: str,
+        new_settings: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        mode = str(display_mode or "saved").strip().lower()
+        if mode != "recalculated":
+            return self._read_results_csv(run_dir, max_points=None)
+
+        original_settings = (
+            config_data.get("_system_settings_snapshot")
+            or config_data.get("_analysis_snapshot")
+            or {}
+        )
+        settings = self._normalize_archive_settings(new_settings or {}, fallback=original_settings)
+        points = self._read_results_csv(run_dir, max_points=None)
+        recalculated_points: List[Dict[str, Any]] = []
+        for point in points:
+            waveform = self._load_waveform_arrays(run_dir, int(point["step"]))
+            result = self._recalculate_point(point, waveform, settings, original_settings)
+            if result is not None:
+                recalculated_points.append(result)
+        return recalculated_points
+
+    def calculate_allan_run(
+        self,
+        year: str,
+        month: str,
+        day: str,
+        run_id: str,
+        requested_order: int,
+        display_mode: str,
+        new_settings: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        run_dir = self._get_run_dir(year, month, day, run_id)
+        config_data = self._load_config_data(run_dir)
+        scan_dimensions = self._resolve_scan_dimensions(config_data)
+        randomized = bool(config_data.get("randomize", False))
+        if scan_dimensions != 1:
+            raise ValueError("Allan deviation is only available for 1D scans")
+        if randomized:
+            raise ValueError("Allan deviation is only available for non-random scans")
+
+        normalized_mode = "recalculated" if str(display_mode or "saved").strip().lower() == "recalculated" else "saved"
+        points = self._load_allan_points(run_dir, config_data, normalized_mode, new_settings=new_settings)
+        payload = self._build_allan_payload(points, requested_order)
+        payload.update(
+            {
+                "display_mode": normalized_mode,
+                "scan_dimensions": scan_dimensions,
+                "randomize": randomized,
+                "total_points": len(points),
+            }
+        )
+        return payload
+
     def _load_waveform_arrays(self, run_dir: Path, step_index: int) -> Dict[str, Any]:
         npz_path = run_dir / "waveforms" / f"step_{step_index:04d}.npz"
         if not npz_path.exists():

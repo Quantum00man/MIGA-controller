@@ -152,3 +152,13 @@ class ArchiveWaveformRequest(BaseModel):
     run_id: str
     step_indices: List[int]
     new_settings: ArchiveAnalysisSettings
+
+
+class ArchiveAllanRequest(BaseModel):
+    year: str
+    month: str
+    day: str
+    run_id: str
+    order: int = Field(1, ge=1)
+    display_mode: str = Field("saved")
+    new_settings: ArchiveAnalysisSettings
