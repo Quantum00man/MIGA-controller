@@ -340,8 +340,10 @@ class DataLoader:
 
     def _build_allan_channel(self, points: List[Dict[str, Any]], field_names: Tuple[str, ...], orders: List[int]) -> Dict[str, Any]:
         values = np.asarray([self._extract_allan_value(point, field_names) for point in points], dtype=float)
+        finite_values = values[np.isfinite(values)]
+        mean_value = float(np.mean(finite_values)) if finite_values.size else None
         if values.size == 0 or not orders:
-            return {"y": [], "valid_window_counts": []}
+            return {"y": [], "valid_window_counts": [], "mean_value": mean_value}
 
         valid = np.isfinite(values)
         safe_values = np.where(valid, values, 0.0)
@@ -374,6 +376,7 @@ class DataLoader:
         return {
             "y": sigma_values,
             "valid_window_counts": valid_window_counts,
+            "mean_value": mean_value,
         }
 
     def _build_allan_payload(self, points: List[Dict[str, Any]], requested_order: int) -> Dict[str, Any]:

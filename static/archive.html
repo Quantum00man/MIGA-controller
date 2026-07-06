@@ -429,6 +429,17 @@
                                         v-model.number="allanOrder" min="1" :max="getMaxAllanOrder()"
                                         @change="handleAllanOrderChange">
                                 </div>
+                                <div class="d-flex align-items-center gap-2">
+                                    <label class="form-label-small mb-0">SCALE</label>
+                                    <div class="btn-group btn-group-sm">
+                                        <button class="btn"
+                                            :class="allanScaleMode === 'absolute' ? 'btn-primary' : 'btn-outline-primary'"
+                                            @click="setAllanScaleMode('absolute')">Absolute</button>
+                                        <button class="btn"
+                                            :class="allanScaleMode === 'relative' ? 'btn-primary' : 'btn-outline-primary'"
+                                            @click="setAllanScaleMode('relative')">Relative</button>
+                                    </div>
+                                </div>
                                 <div class="slice-summary">
                                     <strong>{{ getAllanSummary() }}</strong>
                                 </div>
@@ -458,7 +469,7 @@
                             </div>
                             <div class="slice-summary mt-1" v-if="showAllanToolbar()">
                                 Compute the full overlapping Allan deviation curve from the unsampled shot sequence.
-                                The x-axis is Allan order n.
+                                Relative mode plots Allan / |full-sequence mean|. The x-axis is Allan order n.
                             </div>
                             <div class="slice-summary mt-1" v-else-if="is3DSliceMode()">
                                 Drag the slider to inspect one tomography slice at a time. Click any heatmap cell or
@@ -545,7 +556,7 @@
                         atom_area_method: 'legacy', atom_area_baseline_points: 2,
                         fit_model_key: 'gaussian', fit_models: []
                     },
-                    showRawData: true, maximizedView: null, currentTab: 'atoms', plotMode: 'series', allanOrder: 1, plotRevision: 0,
+                    showRawData: true, maximizedView: null, currentTab: 'atoms', plotMode: 'series', allanOrder: 1, allanScaleMode: 'absolute', plotRevision: 0,
                     tabs: [{ id: 'atoms', label: 'Atom Number' }, { id: 'amp', label: 'Max Voltage' }, { id: 'sigma', label: 'Width (ms)' }, { id: 'temp', label: 'Temperature' }, { id: 'arrival', label: 'Arrival Time' }, { id: 'prob', label: 'Transition Prob.' }, { id: 'intf', label: 'Interferometer' }],
                     historyMap: {}, layoutResBase: {}, layoutResUp: {}, layoutResDw: {}, layoutResTot: {}, layoutOscUp: {}, layoutOscDw: {},
                     heatmapColorscale: [[0, '#c62828'], [0.5, '#fff3bf'], [1, '#1565c0']],
@@ -629,6 +640,16 @@
                 },
                 canUseAllanMode() {
                     return this.getActiveScanDimensions() === 1 && !Boolean(this.loadedConfig?.randomize);
+                },
+                normalizeAllanScaleMode(mode) {
+                    return mode === 'relative' ? 'relative' : 'absolute';
+                },
+                setAllanScaleMode(mode) {
+                    const nextMode = this.normalizeAllanScaleMode(mode);
+                    if (this.allanScaleMode === nextMode) return;
+                    this.allanScaleMode = nextMode;
+                    this.plotRevision++;
+                    if (this.plotMode === 'allan') this.renderMainPlot();
                 },
                 showAllanToolbar() {
                     return this.canUseAllanMode() && this.plotMode === 'allan';
@@ -1572,20 +1593,25 @@
                 buildAllanLayout(channel, metric, sourceLabel, summary = '') {
                     const base = this.buildCommonAnalysisLayout();
                     const isUp = channel === 'up';
+                    const isRelative = this.normalizeAllanScaleMode(this.allanScaleMode) === 'relative';
                     const maxOrder = Number(this.currentAllanData?.used_max_order ?? this.allanOrder);
                     const channelName = channel === 'total'
                         ? 'TOTAL (UP+DW)'
                         : (isUp ? metric.nameUp : metric.nameDw);
                     const suffix = channel === 'total' ? '' : (isUp ? metric.suffixUp : metric.suffixDw);
+                    const yAxisTitle = isRelative
+                        ? `Relative Allan Dev. ${metric.label}`
+                        : `Overlapping Allan Dev. ${metric.label}${suffix}`;
+                    const titlePrefix = isRelative ? 'Relative Allan' : 'Absolute Allan';
                     return {
                         ...base,
                         margin: isUp ? { t: 42, b: 8, l: 68, r: 20 } : { t: 24, b: 44, l: 68, r: 20 },
-                        yaxis: { ...base.yaxis, title: `Overlapping Allan Dev. ${metric.label}${suffix}` },
+                        yaxis: { ...base.yaxis, title: yAxisTitle },
                         xaxis: { ...base.xaxis, title: isUp ? '' : 'Allan Order n', showticklabels: !isUp },
                         title: {
                             text: summary
-                                ? `${channelName} · Allan n=1..${maxOrder} · ${sourceLabel}<br><span style="font-size:11px;color:#5b6472">${summary}</span>`
-                                : `${channelName} · Allan n=1..${maxOrder} · ${sourceLabel}`,
+                                ? `${channelName} · ${titlePrefix} n=1..${maxOrder} · ${sourceLabel}<br><span style="font-size:11px;color:#5b6472">${summary}</span>`
+                                : `${channelName} · ${titlePrefix} n=1..${maxOrder} · ${sourceLabel}`,
                             font: { size: 13 },
                             x: 0.05,
                             y: 0.95
@@ -1593,7 +1619,21 @@
                     };
                 },
                 buildAllanHoverTemplate(metric, channelName) {
-                    return `n=%{x}<br>Allan=%{y:.6g}<extra>${channelName} · ${metric.label}</extra>`;
+                    const allanLabel = this.normalizeAllanScaleMode(this.allanScaleMode) === 'relative' ? 'Relative Allan' : 'Allan';
+                    return `n=%{x}<br>${allanLabel}=%{y:.6g}<extra>${channelName} · ${metric.label}</extra>`;
+                },
+                getAllanDisplayValues(series) {
+                    const baseValues = Array.isArray(series?.y) ? series.y.map(value => {
+                        const parsed = Number(value);
+                        return value == null || !Number.isFinite(parsed) ? null : parsed;
+                    }) : [];
+                    if (this.normalizeAllanScaleMode(this.allanScaleMode) !== 'relative') return baseValues;
+
+                    const meanValue = Math.abs(Number(series?.mean_value));
+                    if (!Number.isFinite(meanValue) || meanValue <= 1e-12) {
+                        return baseValues.map(() => null);
+                    }
+                    return baseValues.map(value => value == null ? null : value / meanValue);
                 },
                 build2DLayout(channel, metric, sourceLabel, xAxisIndex = 0, yAxisIndex = 1, subtitle = '') {
                     const base = this.buildCommonAnalysisLayout();
@@ -1797,11 +1837,11 @@
 
                     const makeTrace = (series, color, channelName) => [{
                         x: orders,
-                        y: Array.isArray(series?.y) ? series.y : [],
+                        y: this.getAllanDisplayValues(series),
                         mode: 'lines+markers',
                         type: 'scatter',
                         connectgaps: false,
-                        name: `${channelName} Allan`,
+                        name: `${channelName} ${this.allanScaleMode === 'relative' ? 'Relative Allan' : 'Allan'}`,
                         line: { color, width: 2 },
                         marker: { size: 7 },
                         hovertemplate: this.buildAllanHoverTemplate(metric, channelName)
