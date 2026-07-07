@@ -161,4 +161,6 @@ class ArchiveAllanRequest(BaseModel):
     run_id: str
     order: int = Field(1, ge=1)
     display_mode: str = Field("saved")
+    p0_min: Optional[float] = Field(None)
+    p0_max: Optional[float] = Field(None)
     new_settings: ArchiveAnalysisSettings

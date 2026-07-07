@@ -440,6 +440,27 @@
                                             @click="setAllanScaleMode('relative')">Relative</button>
                                     </div>
                                 </div>
+                                <div class="d-flex align-items-center gap-2">
+                                    <label class="form-label-small mb-0">X AXIS</label>
+                                    <div class="btn-group btn-group-sm">
+                                        <button class="btn"
+                                            :class="allanXAxisMode === 'linear' ? 'btn-dark' : 'btn-outline-dark'"
+                                            @click="setAllanXAxisMode('linear')">Linear</button>
+                                        <button class="btn"
+                                            :class="allanXAxisMode === 'log' ? 'btn-dark' : 'btn-outline-dark'"
+                                            @click="setAllanXAxisMode('log')">Log</button>
+                                    </div>
+                                </div>
+                                <div class="d-flex align-items-center gap-2 flex-wrap">
+                                    <label class="form-label-small mb-0">P0 RANGE</label>
+                                    <input type="number" step="any" class="form-control form-control-sm" style="width: 118px;"
+                                        v-model="allanP0MinInput" @keyup.enter="applyAllanP0Range">
+                                    <span class="text-muted small">to</span>
+                                    <input type="number" step="any" class="form-control form-control-sm" style="width: 118px;"
+                                        v-model="allanP0MaxInput" @keyup.enter="applyAllanP0Range">
+                                    <button class="btn btn-outline-secondary btn-sm" @click="applyAllanP0Range" :disabled="isLoadingAllan">Apply</button>
+                                    <button class="btn btn-outline-secondary btn-sm" @click="resetAllanP0Range" :disabled="isLoadingAllan">Full Range</button>
+                                </div>
                                 <div class="slice-summary">
                                     <strong>{{ getAllanSummary() }}</strong>
                                 </div>
@@ -469,7 +490,7 @@
                             </div>
                             <div class="slice-summary mt-1" v-if="showAllanToolbar()">
                                 Compute the full overlapping Allan deviation curve from the unsampled shot sequence.
-                                Relative mode plots Allan / |full-sequence mean|. The x-axis is Allan order n.
+                                Relative mode plots Allan / |full-sequence mean|. P0 range is inclusive. The x-axis is Allan order n.
                             </div>
                             <div class="slice-summary mt-1" v-else-if="is3DSliceMode()">
                                 Drag the slider to inspect one tomography slice at a time. Click any heatmap cell or
@@ -556,7 +577,7 @@
                         atom_area_method: 'legacy', atom_area_baseline_points: 2,
                         fit_model_key: 'gaussian', fit_models: []
                     },
-                    showRawData: true, maximizedView: null, currentTab: 'atoms', plotMode: 'series', allanOrder: 1, allanScaleMode: 'absolute', plotRevision: 0,
+                    showRawData: true, maximizedView: null, currentTab: 'atoms', plotMode: 'series', allanOrder: 1, allanScaleMode: 'absolute', allanXAxisMode: 'linear', allanP0AvailableMin: null, allanP0AvailableMax: null, allanP0Min: null, allanP0Max: null, allanP0MinInput: '', allanP0MaxInput: '', plotRevision: 0,
                     tabs: [{ id: 'atoms', label: 'Atom Number' }, { id: 'amp', label: 'Max Voltage' }, { id: 'sigma', label: 'Width (ms)' }, { id: 'temp', label: 'Temperature' }, { id: 'arrival', label: 'Arrival Time' }, { id: 'prob', label: 'Transition Prob.' }, { id: 'intf', label: 'Interferometer' }],
                     historyMap: {}, layoutResBase: {}, layoutResUp: {}, layoutResDw: {}, layoutResTot: {}, layoutOscUp: {}, layoutOscDw: {},
                     heatmapColorscale: [[0, '#c62828'], [0.5, '#fff3bf'], [1, '#1565c0']],
@@ -644,12 +665,130 @@
                 normalizeAllanScaleMode(mode) {
                     return mode === 'relative' ? 'relative' : 'absolute';
                 },
+                normalizeAllanXAxisMode(mode) {
+                    return mode === 'log' ? 'log' : 'linear';
+                },
                 setAllanScaleMode(mode) {
                     const nextMode = this.normalizeAllanScaleMode(mode);
                     if (this.allanScaleMode === nextMode) return;
                     this.allanScaleMode = nextMode;
                     this.plotRevision++;
                     if (this.plotMode === 'allan') this.renderMainPlot();
+                },
+                setAllanXAxisMode(mode) {
+                    const nextMode = this.normalizeAllanXAxisMode(mode);
+                    if (this.allanXAxisMode === nextMode) return;
+                    this.allanXAxisMode = nextMode;
+                    this.plotRevision++;
+                    if (this.plotMode === 'allan') this.renderMainPlot();
+                },
+                formatAllanP0Input(value) {
+                    const parsed = Number(value);
+                    return Number.isFinite(parsed) ? String(parsed) : '';
+                },
+                getAllanAvailableP0Bounds(rows = this.getStatsArray()) {
+                    const values = (Array.isArray(rows) ? rows : [])
+                        .map(row => Number(row.params?.[0] ?? row.x ?? 0))
+                        .filter(value => Number.isFinite(value))
+                        .sort((a, b) => a - b);
+                    if (!values.length) return { min: null, max: null };
+                    return { min: values[0], max: values[values.length - 1] };
+                },
+                normalizeAllanP0RangeValues(
+                    minValue = this.allanP0MinInput,
+                    maxValue = this.allanP0MaxInput,
+                    fallbackMin = this.allanP0AvailableMin,
+                    fallbackMax = this.allanP0AvailableMax,
+                ) {
+                    const availableMin = Number(fallbackMin);
+                    const availableMax = Number(fallbackMax);
+                    if (!Number.isFinite(availableMin) || !Number.isFinite(availableMax)) return null;
+
+                    let normalizedMin = Number(minValue);
+                    let normalizedMax = Number(maxValue);
+                    if (!Number.isFinite(normalizedMin)) normalizedMin = availableMin;
+                    if (!Number.isFinite(normalizedMax)) normalizedMax = availableMax;
+                    if (normalizedMin > normalizedMax) [normalizedMin, normalizedMax] = [normalizedMax, normalizedMin];
+
+                    normalizedMin = Math.max(availableMin, Math.min(normalizedMin, availableMax));
+                    normalizedMax = Math.min(availableMax, Math.max(normalizedMax, availableMin));
+                    if (normalizedMin > normalizedMax) [normalizedMin, normalizedMax] = [normalizedMax, normalizedMin];
+                    return { min: normalizedMin, max: normalizedMax };
+                },
+                applyCachedAllanRange(selectedMin, selectedMax, availableMin = this.allanP0AvailableMin, availableMax = this.allanP0AvailableMax) {
+                    const parsedAvailableMin = Number(availableMin);
+                    const parsedAvailableMax = Number(availableMax);
+                    this.allanP0AvailableMin = Number.isFinite(parsedAvailableMin) ? parsedAvailableMin : null;
+                    this.allanP0AvailableMax = Number.isFinite(parsedAvailableMax) ? parsedAvailableMax : null;
+
+                    const normalized = this.normalizeAllanP0RangeValues(
+                        selectedMin,
+                        selectedMax,
+                        this.allanP0AvailableMin,
+                        this.allanP0AvailableMax,
+                    );
+                    this.allanP0Min = normalized ? normalized.min : this.allanP0AvailableMin;
+                    this.allanP0Max = normalized ? normalized.max : this.allanP0AvailableMax;
+                    this.allanP0MinInput = this.formatAllanP0Input(this.allanP0Min);
+                    this.allanP0MaxInput = this.formatAllanP0Input(this.allanP0Max);
+                },
+                syncAllanP0RangeFromRows(rows = this.getStatsArray(), resetSelection = false) {
+                    const { min, max } = this.getAllanAvailableP0Bounds(rows);
+                    if (!Number.isFinite(min) || !Number.isFinite(max)) {
+                        this.allanP0AvailableMin = null;
+                        this.allanP0AvailableMax = null;
+                        this.allanP0Min = null;
+                        this.allanP0Max = null;
+                        this.allanP0MinInput = '';
+                        this.allanP0MaxInput = '';
+                        return;
+                    }
+                    if (resetSelection || !Number.isFinite(Number(this.allanP0Min)) || !Number.isFinite(Number(this.allanP0Max))) {
+                        this.applyCachedAllanRange(min, max, min, max);
+                        return;
+                    }
+                    this.applyCachedAllanRange(this.allanP0Min, this.allanP0Max, min, max);
+                },
+                syncAllanP0RangeFromPayload(allanData) {
+                    const availableMin = Number(allanData?.available_p0_min);
+                    const availableMax = Number(allanData?.available_p0_max);
+                    const selectedMin = Number(allanData?.selected_p0_min);
+                    const selectedMax = Number(allanData?.selected_p0_max);
+                    if (!Number.isFinite(availableMin) || !Number.isFinite(availableMax)) return;
+                    this.applyCachedAllanRange(selectedMin, selectedMax, availableMin, availableMax);
+                },
+                isAllanFullP0Range() {
+                    if (!Number.isFinite(Number(this.allanP0AvailableMin)) || !Number.isFinite(Number(this.allanP0AvailableMax))) return true;
+                    if (!Number.isFinite(Number(this.allanP0Min)) || !Number.isFinite(Number(this.allanP0Max))) return true;
+                    return this.areValuesClose(this.allanP0Min, this.allanP0AvailableMin)
+                        && this.areValuesClose(this.allanP0Max, this.allanP0AvailableMax);
+                },
+                async applyAllanP0Range() {
+                    const normalized = this.normalizeAllanP0RangeValues();
+                    if (!normalized) return;
+                    const changed = !this.areValuesClose(this.allanP0Min ?? normalized.min, normalized.min)
+                        || !this.areValuesClose(this.allanP0Max ?? normalized.max, normalized.max);
+                    this.applyCachedAllanRange(normalized.min, normalized.max);
+                    if (this.plotMode !== 'allan') return;
+                    if (changed || !this.currentAllanData) {
+                        await this.refreshAllanIfNeeded(false);
+                    }
+                    await this.refreshAnalysisView();
+                },
+                async resetAllanP0Range() {
+                    if (!Number.isFinite(Number(this.allanP0AvailableMin)) || !Number.isFinite(Number(this.allanP0AvailableMax))) return;
+                    const changed = !this.isAllanFullP0Range();
+                    this.applyCachedAllanRange(
+                        this.allanP0AvailableMin,
+                        this.allanP0AvailableMax,
+                        this.allanP0AvailableMin,
+                        this.allanP0AvailableMax,
+                    );
+                    if (this.plotMode !== 'allan') return;
+                    if (changed || !this.currentAllanData) {
+                        await this.refreshAllanIfNeeded(false);
+                    }
+                    await this.refreshAnalysisView();
                 },
                 showAllanToolbar() {
                     return this.canUseAllanMode() && this.plotMode === 'allan';
@@ -674,12 +813,22 @@
                     if (!mode || mode === 'recalculated') this.recalculatedAllanCache = {};
                     this.currentAllanData = null;
                 },
+                formatAllanCacheFloat(value) {
+                    const parsed = Number(value);
+                    return Number.isFinite(parsed) ? parsed.toFixed(12) : 'na';
+                },
                 getAllanCacheKey(order = this.allanOrder) {
-                    return String(Math.max(1, Math.round(Number(order) || 1)));
+                    const normalizedOrder = Math.max(1, Math.round(Number(order) || 1));
+                    const normalizedRange = this.normalizeAllanP0RangeValues(this.allanP0Min, this.allanP0Max);
+                    if (!normalizedRange) return String(normalizedOrder);
+                    return `${normalizedOrder}|${this.formatAllanCacheFloat(normalizedRange.min)}|${this.formatAllanCacheFloat(normalizedRange.max)}`;
                 },
                 syncCurrentAllanData(order = this.allanOrder) {
                     const bucket = this.getAllanCacheBucket();
                     this.currentAllanData = bucket[this.getAllanCacheKey(order)] || null;
+                    if (this.currentAllanData) {
+                        this.syncAllanP0RangeFromPayload(this.currentAllanData);
+                    }
                     return this.currentAllanData;
                 },
                 async ensureAllanData(force = false) {
@@ -688,10 +837,12 @@
                         return null;
                     }
                     const requestedOrder = this.normalizeAllanOrder();
+                    const normalizedRange = this.normalizeAllanP0RangeValues(this.allanP0Min, this.allanP0Max);
                     const cacheKey = this.getAllanCacheKey(requestedOrder);
                     const bucket = this.getAllanCacheBucket();
                     if (!force && bucket[cacheKey]) {
                         this.currentAllanData = bucket[cacheKey];
+                        this.syncAllanP0RangeFromPayload(this.currentAllanData);
                         this.allanOrder = Number(this.currentAllanData?.used_max_order || requestedOrder);
                         return this.currentAllanData;
                     }
@@ -703,10 +854,13 @@
                         const res = await axios.post('/archive/allan', this.buildArchivePayload({
                             order: requestedOrder,
                             display_mode: this.displayMode,
+                            p0_min: normalizedRange?.min ?? null,
+                            p0_max: normalizedRange?.max ?? null,
                         }));
                         const allanData = res.data || {};
                         const usedMaxOrder = Number(allanData.used_max_order || requestedOrder);
                         bucket[cacheKey] = allanData;
+                        this.syncAllanP0RangeFromPayload(allanData);
                         bucket[this.getAllanCacheKey(usedMaxOrder)] = allanData;
                         this.currentAllanData = allanData;
                         this.allanOrder = usedMaxOrder;
@@ -771,10 +925,18 @@
                 },
                 getAllanSummary() {
                     const shotCount = Number(this.currentAllanData?.sequence_length ?? this.dataCount ?? 0);
-                    if (shotCount < 2) return 'Need at least 2 full shots';
+                    const availableShots = Number(this.currentAllanData?.total_points ?? this.dataCount ?? shotCount);
                     const maxOrder = Number(this.currentAllanData?.used_max_order ?? this.normalizeAllanOrder());
                     const orderCount = Number(this.currentAllanData?.order_count ?? maxOrder);
-                    return `full sequence: ${shotCount} shots · overlapping Allan orders n=1..${maxOrder} (${orderCount} points)`;
+                    const rangeMin = Number(this.currentAllanData?.selected_p0_min ?? this.allanP0Min);
+                    const rangeMax = Number(this.currentAllanData?.selected_p0_max ?? this.allanP0Max);
+                    const rangeLabel = Number.isFinite(rangeMin) && Number.isFinite(rangeMax)
+                        ? (this.isAllanFullP0Range()
+                            ? `P0 full range ${rangeMin.toFixed(6)} to ${rangeMax.toFixed(6)}`
+                            : `P0 ${rangeMin.toFixed(6)} to ${rangeMax.toFixed(6)}`)
+                        : 'P0 range not available';
+                    if (shotCount < 2) return `${rangeLabel} · need at least 2 full shots`;
+                    return `${rangeLabel} · ${shotCount}/${availableShots} shots · overlapping Allan orders n=1..${maxOrder} (${orderCount} points)`;
                 },
                 getSliceAxisOptions() {
                     return [
@@ -1044,7 +1206,7 @@
                         vals_nf_intf_p_up: [], vals_nf_intf_p_dw: []
                     };
                 },
-                async applyDisplayedPoints(points, stats = [], previewMap = null) {
+                async applyDisplayedPoints(points, stats = [], previewMap = null, resetAllanRange = false) {
                     const source = Array.isArray(points) ? points : [];
                     this.currentCalculatedPoints = source;
                     this.displayedStats = this.normalizeStatsRows(stats);
@@ -1056,6 +1218,7 @@
                         this.historyMap = newHistoryMap;
                     }
                     this.syncSliceState(this.displayedStats);
+                    this.syncAllanP0RangeFromRows(this.displayedStats, resetAllanRange);
                     this.allanOrder = this.getMaxAllanOrder();
                     this.plotRevision++;
                     await this.refreshAnalysisView();
@@ -1153,7 +1316,7 @@
                         }
                         this.isLoading = false;
                         await this.$nextTick();
-                        await this.applyDisplayedPoints(this.loadedPoints, this.savedStats, this.savedPreviewMap);
+                        await this.applyDisplayedPoints(this.loadedPoints, this.savedStats, this.savedPreviewMap, true);
                         if (this.plotMode === 'allan') {
                             await this.refreshAllanIfNeeded(false);
                             await this.refreshAnalysisView();
@@ -1201,7 +1364,7 @@
                         }
                         this.isLoading = false;
                         await this.$nextTick();
-                        await this.applyDisplayedPoints(res.data.data, this.recalculatedStats, this.recalculatedPreviewMap);
+                        await this.applyDisplayedPoints(res.data.data, this.recalculatedStats, this.recalculatedPreviewMap, false);
                         if (this.plotMode === 'allan') {
                             await this.refreshAllanIfNeeded(false);
                             await this.refreshAnalysisView();
@@ -1225,7 +1388,7 @@
                     this.selectedAllanWindow = null;
                     this.errorMsg = '';
                     this.dataCount = this.savedDataCount;
-                    await this.applyDisplayedPoints(this.loadedPoints, this.savedStats, this.savedPreviewMap);
+                    await this.applyDisplayedPoints(this.loadedPoints, this.savedStats, this.savedPreviewMap, false);
                     if (this.plotMode === 'allan') {
                         this.syncCurrentAllanData();
                         if (!this.currentAllanData) {
@@ -1607,7 +1770,7 @@
                         ...base,
                         margin: isUp ? { t: 42, b: 8, l: 68, r: 20 } : { t: 24, b: 44, l: 68, r: 20 },
                         yaxis: { ...base.yaxis, title: yAxisTitle },
-                        xaxis: { ...base.xaxis, title: isUp ? '' : 'Allan Order n', showticklabels: !isUp },
+                        xaxis: { ...base.xaxis, title: isUp ? '' : 'Allan Order n', showticklabels: !isUp, type: this.normalizeAllanXAxisMode(this.allanXAxisMode) },
                         title: {
                             text: summary
                                 ? `${channelName} · ${titlePrefix} n=1..${maxOrder} · ${sourceLabel}<br><span style="font-size:11px;color:#5b6472">${summary}</span>`
@@ -1834,6 +1997,7 @@
                     const metricSeries = allanData?.metrics?.[this.currentTab]?.[sourceKey] || {};
                     const maxOrder = Number(allanData?.used_max_order ?? this.allanOrder);
                     const totalShots = Number(allanData?.sequence_length ?? 0);
+                    const availableShots = Number(allanData?.total_points ?? totalShots);
 
                     const makeTrace = (series, color, channelName) => [{
                         x: orders,
@@ -1849,10 +2013,11 @@
                     const buildSummary = (series) => {
                         const validCounts = Array.isArray(series?.valid_window_counts) ? series.valid_window_counts : [];
                         const validOrders = validCounts.filter(count => Number(count) > 0).length;
+                        const sequenceLabel = this.isAllanFullP0Range() ? 'full sequence' : 'selected sequence';
                         if (!validOrders) {
-                            return `Need at least 2 full shots to build Allan orders`;
+                            return `Need at least 2 full shots in the selected P0 range`;
                         }
-                        return `${validOrders}/${orders.length} valid orders · full sequence ${totalShots} shots · overlapping curve up to n=${maxOrder}`;
+                        return `${validOrders}/${orders.length} valid orders · ${sequenceLabel} ${totalShots}/${availableShots} shots · overlapping curve up to n=${maxOrder}`;
                     };
 
                     const upSeries = metricSeries.up || { y: [], valid_window_counts: [] };

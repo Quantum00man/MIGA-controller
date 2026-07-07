@@ -307,11 +307,53 @@ class DataLoader:
             },
         }
 
+    def _extract_allan_p0(self, point: Dict[str, Any]) -> float:
+        parsed_parameter = self._parse_float(point.get("parameter"))
+        if parsed_parameter is not None:
+            return float(parsed_parameter)
+
+        all_parameters = point.get("all_parameters")
+        if isinstance(all_parameters, (list, tuple)) and all_parameters:
+            parsed_first = self._parse_float(all_parameters[0])
+            if parsed_first is not None:
+                return float(parsed_first)
+
+        return float(self._safe_scalar(point.get("parameter"), 0.0))
+
+    def _filter_allan_points_by_p0_range(
+        self,
+        points: List[Dict[str, Any]],
+        p0_min: Optional[float] = None,
+        p0_max: Optional[float] = None,
+    ) -> Tuple[List[Dict[str, Any]], Optional[float], Optional[float], Optional[float], Optional[float]]:
+        if not points:
+            return [], None, None, None, None
+
+        p0_values = [self._extract_allan_p0(point) for point in points]
+        available_p0_min = float(min(p0_values))
+        available_p0_max = float(max(p0_values))
+        selected_p0_min = available_p0_min if p0_min is None else float(p0_min)
+        selected_p0_max = available_p0_max if p0_max is None else float(p0_max)
+
+        if selected_p0_min > selected_p0_max:
+            selected_p0_min, selected_p0_max = selected_p0_max, selected_p0_min
+
+        selected_p0_min = max(available_p0_min, min(selected_p0_min, available_p0_max))
+        selected_p0_max = min(available_p0_max, max(selected_p0_max, available_p0_min))
+        epsilon = 1e-12
+        filtered_points = [
+            point
+            for point, p0_value in zip(points, p0_values)
+            if (selected_p0_min - epsilon) <= p0_value <= (selected_p0_max + epsilon)
+        ]
+
+        return filtered_points, available_p0_min, available_p0_max, float(selected_p0_min), float(selected_p0_max)
+
     def _build_allan_curve_meta(self, points: List[Dict[str, Any]], requested_order: int) -> Dict[str, Any]:
         sequence = [
             {
                 "step": int(point.get("step", index)),
-                "p0": float(self._safe_scalar(point.get("parameter"), 0.0)),
+                "p0": self._extract_allan_p0(point),
             }
             for index, point in enumerate(points)
         ]
@@ -428,6 +470,8 @@ class DataLoader:
         requested_order: int,
         display_mode: str,
         new_settings: Optional[Dict[str, Any]] = None,
+        p0_min: Optional[float] = None,
+        p0_max: Optional[float] = None,
     ) -> Dict[str, Any]:
         run_dir = self._get_run_dir(year, month, day, run_id)
         config_data = self._load_config_data(run_dir)
@@ -439,14 +483,24 @@ class DataLoader:
             raise ValueError("Allan deviation is only available for non-random scans")
 
         normalized_mode = "recalculated" if str(display_mode or "saved").strip().lower() == "recalculated" else "saved"
-        points = self._load_allan_points(run_dir, config_data, normalized_mode, new_settings=new_settings)
-        payload = self._build_allan_payload(points, requested_order)
+        all_points = self._load_allan_points(run_dir, config_data, normalized_mode, new_settings=new_settings)
+        filtered_points, available_p0_min, available_p0_max, selected_p0_min, selected_p0_max = self._filter_allan_points_by_p0_range(
+            all_points,
+            p0_min=p0_min,
+            p0_max=p0_max,
+        )
+        payload = self._build_allan_payload(filtered_points, requested_order)
         payload.update(
             {
                 "display_mode": normalized_mode,
                 "scan_dimensions": scan_dimensions,
                 "randomize": randomized,
-                "total_points": len(points),
+                "total_points": len(all_points),
+                "filtered_points": len(filtered_points),
+                "available_p0_min": available_p0_min,
+                "available_p0_max": available_p0_max,
+                "selected_p0_min": selected_p0_min,
+                "selected_p0_max": selected_p0_max,
             }
         )
         return payload

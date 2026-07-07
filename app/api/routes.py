@@ -149,6 +149,8 @@ async def calculate_archived_allan(req: ArchiveAllanRequest):
             req.order,
             req.display_mode,
             req.new_settings.dict(),
+            p0_min=req.p0_min,
+            p0_max=req.p0_max,
         )
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc))
