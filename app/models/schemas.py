@@ -45,6 +45,8 @@ class ScanConfig(BaseModel):
     averages: int = Field(1)
     randomize: bool = Field(False)
     ext_trigger: bool = Field(False)
+    run_label: str = Field("")
+    sequence_name: str = Field("")
     mode: str = Field("standard")
     mode_param: Optional[float] = Field(None)
     link_formulas: List[str] = Field(default_factory=list)
@@ -152,6 +154,13 @@ class ReAnalysisRequest(BaseModel):
     run_id: str
     new_settings: ArchiveAnalysisSettings
     updated_data: Optional[List[Dict[str, Any]]] = None
+
+
+class ArchiveRunReference(BaseModel):
+    year: str
+    month: str
+    day: str
+    run_id: str
 
 
 class ArchiveWaveformRequest(BaseModel):

@@ -258,6 +258,7 @@
                         <span class="fw-bold text-warning font-monospace" style="font-size: 1.5em;">{{ currentRunId
                             }}</span>
                     </div>
+                    <div class="small text-white-50 text-truncate" v-if="config.run_label">{{ config.run_label }}</div>
                     <div class="progress w-100" style="height: 8px; background-color: #445566; border-radius: 4px;">
                         <div class="progress-bar bg-warning" role="progressbar" :style="{width: progressPercent + '%'}"
                             :aria-valuenow="progressPercent" aria-valuemin="0" aria-valuemax="100"></div>
@@ -304,6 +305,51 @@
                 <input type="file" ref="seqInput" style="display:none" accept=".mot" @change="selectSequence">
 
                 <div class="form-text mt-1" style="font-size: 0.7rem;">Selected file will overwrite current template.
+                </div>
+            </div>
+
+            <span class="section-label">Repeat Previous Run</span>
+            <div class="card p-3 mb-3">
+                <div class="row g-2 mb-2">
+                    <div class="col-4">
+                        <label class="form-label small text-muted mb-1">Year</label>
+                        <select class="form-select form-select-sm" v-model="repeatYear" @change="resetRepeatDay">
+                            <option value="" disabled>Select</option>
+                            <option v-for="year in getRepeatYears().slice().reverse()" :key="year" :value="year">{{ year }}</option>
+                        </select>
+                    </div>
+                    <div class="col-4">
+                        <label class="form-label small text-muted mb-1">Month</label>
+                        <select class="form-select form-select-sm" v-model="repeatMonth" @change="resetRepeatRun" :disabled="!repeatYear">
+                            <option value="" disabled>Select</option>
+                            <option v-for="month in getRepeatMonths().slice().reverse()" :key="month" :value="month">{{ month }}</option>
+                        </select>
+                    </div>
+                    <div class="col-4">
+                        <label class="form-label small text-muted mb-1">Day</label>
+                        <select class="form-select form-select-sm" v-model="repeatDay" @change="resetRepeatSelection" :disabled="!repeatMonth">
+                            <option value="" disabled>Select</option>
+                            <option v-for="day in getRepeatDays().slice().reverse()" :key="day" :value="day">{{ day }}</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label small text-muted mb-1">Run</label>
+                    <select class="form-select form-select-sm" v-model="repeatRun" :disabled="!repeatDay">
+                        <option value="" disabled>Select Run...</option>
+                        <option v-for="run in getRepeatRuns().slice().reverse()" :key="run.id" :value="run.id">{{ run.display_name }}</option>
+                    </select>
+                </div>
+                <div class="small text-muted mb-2" style="font-size:0.72rem;" v-if="getSelectedRepeatRunEntry()?.summary">
+                    {{ getSelectedRepeatRunEntry().summary }}
+                </div>
+                <button class="btn btn-outline-primary btn-sm w-100 fw-bold" @click="loadRunPreset" :disabled="isRunning || isPresetLoading || !repeatRun">
+                    <span v-if="isPresetLoading" class="spinner-border spinner-border-sm me-1"></span>
+                    {{ isPresetLoading ? 'Loading Preset...' : 'Load Config & Sequence' }}
+                </button>
+                <div v-if="loadedPresetInfo?.display_name" class="mt-3 p-2 bg-light rounded border text-center">
+                    <div class="small fw-bold text-primary">{{ loadedPresetInfo.display_name }}</div>
+                    <div class="small text-muted" style="font-size:0.75rem;" v-if="loadedPresetInfo.summary">{{ loadedPresetInfo.summary }}</div>
                 </div>
             </div>
 
@@ -547,6 +593,12 @@
                             </div>
                         </div>
                     </div>
+                    <div class="mb-3 px-1">
+                        <label class="form-label small text-muted mb-1">Run Label</label>
+                        <input type="text" class="form-control form-control-sm" v-model="config.run_label"
+                            placeholder="e.g. MOT optimize / drift test / Raman scan">
+                        <div class="form-text" style="font-size:0.72rem;">Saved into the run config and shown in Archive and preset selectors.</div>
+                    </div>
                     <div class="d-grid gap-2">
                         <button class="btn btn-success py-2 fs-6 fw-bold shadow-sm" @click="startScan"
                             :disabled="isRunning"><i class="bi bi-play-fill me-1 fs-5"></i> START EXPERIMENT</button>
@@ -685,7 +737,7 @@
                         param_type: 'float', dim1_method: 'step_size',
                         dim2_enabled: false, dim2_type: 'range', dim2_param_type: 'float', dim2_method: 'step_size', dim2_start: 0, dim2_stop: 5, dim2_step: 1, dim2_list: '',
                         dim3_enabled: false, dim3_type: 'range', dim3_param_type: 'float', dim3_method: 'step_size', dim3_start: 0, dim3_stop: 5, dim3_step: 1, dim3_list: '',
-                        averages: 1, randomize: false, ext_trigger: false, mode: 'standard', mode_param: 100,
+                        averages: 1, randomize: false, ext_trigger: false, run_label: '', sequence_name: 'Default (seq0.mot)', mode: 'standard', mode_param: 100,
                         link_formulas: ["(P0-151)/2+26", "100-P1"],
                         fit_center_up: 0, fit_width_up: 0, fit_center_dw: 0, fit_width_dw: 0,
                         bragg_shape: 'blackman',
@@ -696,6 +748,7 @@
                     currentSequenceName: "Default (seq0.mot)",
                     currentRunId: "...",
                     seqFile: null,
+                    archiveTree: {}, repeatYear: '', repeatMonth: '', repeatDay: '', repeatRun: '', isPresetLoading: false, loadedPresetInfo: null,
                     showRawData: true, // Toggle State
                     maximizedView: null,
                     currentTab: 'atoms',
@@ -730,6 +783,7 @@
                 this.connectWebSocket();
                 this.fetchSystemMode();
                 this.fetchStatus();
+                this.fetchArchiveTree();
                 setInterval(this.fetchStatus, 2000);
                 this.addLog("System initialized ready.");
             },
@@ -770,6 +824,7 @@
                             headers: { 'Content-Type': 'multipart/form-data' }
                         });
                         this.currentSequenceName = res.data.filename;
+                        this.config.sequence_name = res.data.filename;
                         this.addLog("Sequence uploaded successfully.");
                         return true; // 上传成功
                     } catch (e) {
@@ -801,6 +856,9 @@
                                 Object.entries(state.config || {}).filter(([key]) => knownConfigKeys.includes(key))
                             );
                             this.config = { ...this.config, ...restoredConfig };
+                            if (restoredConfig.sequence_name) {
+                                this.currentSequenceName = restoredConfig.sequence_name;
+                            }
                             if (!restoredConfig.scan_dimensions) {
                                 this.config.scan_dimensions = restoredConfig.dim3_enabled ? 3 : (restoredConfig.dim2_enabled ? 2 : 1);
                             }
@@ -812,6 +870,138 @@
                                 this.dim3DisplayMode = state.dim3DisplayMode;
                             }
                         } catch (e) { console.error("Load state failed", e); }
+                    }
+                },
+
+                normalizeRunEntry(entry) {
+                    if (typeof entry === 'string') {
+                        return { id: entry, run_id: entry, run_label: '', display_name: entry, summary: '' };
+                    }
+                    const runId = String(entry?.id || entry?.run_id || '').trim();
+                    const runLabel = String(entry?.run_label || '').trim();
+                    return {
+                        id: runId,
+                        run_id: runId,
+                        run_label: runLabel,
+                        display_name: String(entry?.display_name || (runLabel ? `${runId} | ${runLabel}` : runId) || runId),
+                        summary: String(entry?.summary || '').trim(),
+                        sequence_name: String(entry?.sequence_name || '').trim(),
+                    };
+                },
+                getRepeatYears() {
+                    return Object.keys(this.archiveTree || {}).sort();
+                },
+                getRepeatMonths() {
+                    return this.repeatYear ? Object.keys(this.archiveTree?.[this.repeatYear] || {}).sort() : [];
+                },
+                getRepeatDays() {
+                    return (this.repeatYear && this.repeatMonth) ? Object.keys(this.archiveTree?.[this.repeatYear]?.[this.repeatMonth] || {}).sort() : [];
+                },
+                getRepeatRuns() {
+                    if (!this.repeatDay) return [];
+                    const runs = this.archiveTree?.[this.repeatYear]?.[this.repeatMonth]?.[this.repeatDay] || [];
+                    return (Array.isArray(runs) ? runs : [])
+                        .map(entry => this.normalizeRunEntry(entry))
+                        .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+                },
+                getSelectedRepeatRunEntry() {
+                    return this.getRepeatRuns().find(run => run.id === this.repeatRun) || null;
+                },
+                resetRepeatDay() {
+                    this.repeatMonth = '';
+                    this.repeatDay = '';
+                    this.repeatRun = '';
+                },
+                resetRepeatRun() {
+                    this.repeatDay = '';
+                    this.repeatRun = '';
+                },
+                resetRepeatSelection() {
+                    this.repeatRun = '';
+                },
+                ensureRepeatRunSelection() {
+                    const years = this.getRepeatYears();
+                    if (!years.length) return;
+                    if (!this.repeatYear || !years.includes(this.repeatYear)) {
+                        this.repeatYear = years[years.length - 1];
+                    }
+                    const months = this.getRepeatMonths();
+                    if (!months.length) return;
+                    if (!this.repeatMonth || !months.includes(this.repeatMonth)) {
+                        this.repeatMonth = months[months.length - 1];
+                    }
+                    const days = this.getRepeatDays();
+                    if (!days.length) return;
+                    if (!this.repeatDay || !days.includes(this.repeatDay)) {
+                        this.repeatDay = days[days.length - 1];
+                    }
+                    const runs = this.getRepeatRuns();
+                    if (!runs.length) return;
+                    if (!this.repeatRun || !runs.some(run => run.id === this.repeatRun)) {
+                        this.repeatRun = runs[runs.length - 1].id;
+                    }
+                },
+                async fetchArchiveTree() {
+                    try {
+                        const res = await axios.get('/archive/tree');
+                        this.archiveTree = res.data || {};
+                        this.ensureRepeatRunSelection();
+                    } catch (e) {
+                        console.error(e);
+                    }
+                },
+                applyLoadedRunPreset(payload = {}) {
+                    const knownConfigKeys = Object.keys(this.config);
+                    const restoredConfig = Object.fromEntries(
+                        Object.entries(payload.config || {}).filter(([key]) => knownConfigKeys.includes(key))
+                    );
+                    this.config = { ...this.config, ...restoredConfig };
+                    this.config.scan_dimensions = Number(this.config.scan_dimensions || (this.config.dim3_enabled ? 3 : (this.config.dim2_enabled ? 2 : 1))) || 1;
+                    this.config.dim2_enabled = this.config.scan_dimensions >= 2;
+                    this.config.dim3_enabled = this.config.scan_dimensions >= 3;
+                    this.useList1 = this.config.dim1_type === 'list';
+                    this.useList2 = this.config.dim2_type === 'list';
+                    this.useList3 = this.config.dim3_type === 'list';
+                    this.seqFile = null;
+                    this.currentSequenceName = payload.sequence_name || this.config.sequence_name || this.currentSequenceName;
+                    this.config.sequence_name = this.currentSequenceName;
+                    this.loadedPresetInfo = {
+                        ...this.normalizeRunEntry({
+                            id: payload.run_id,
+                            run_id: payload.run_id,
+                            run_label: payload.run_label,
+                            display_name: payload.display_name,
+                        }),
+                        summary: this.getSelectedRepeatRunEntry()?.summary || '',
+                        sequence_loaded: Boolean(payload.sequence_loaded),
+                    };
+                    this.currentScanDimensions = this.getConfiguredScanDimensions();
+                    this.plotRevision++;
+                    this.renderMainPlot();
+                },
+                async loadRunPreset() {
+                    if (!this.repeatRun || this.isRunning) return;
+                    this.isPresetLoading = true;
+                    try {
+                        const res = await axios.post('/experiment/load-run-preset', {
+                            year: this.repeatYear,
+                            month: this.repeatMonth,
+                            day: this.repeatDay,
+                            run_id: this.repeatRun,
+                        });
+                        const payload = res.data?.data || {};
+                        this.applyLoadedRunPreset(payload);
+                        const displayName = payload.display_name || this.repeatRun;
+                        this.addLog(`Loaded preset from ${displayName}.`);
+                        if (payload.sequence_loaded) {
+                            this.addLog(`Sequence restored: ${payload.sequence_name || 'sequence.mot'}.`);
+                        } else {
+                            this.addLog('Preset loaded, but archived sequence.mot was not found.');
+                        }
+                    } catch (e) {
+                        this.addLog('Preset load failed: ' + this.formatRequestError(e));
+                    } finally {
+                        this.isPresetLoading = false;
                     }
                 },
                 addLog(msg) {
@@ -882,6 +1072,8 @@
                 },
                 sanitizeStartPayload(payload) {
                     const scanDimensions = Math.max(1, Math.min(3, Number(payload.scan_dimensions || this.getConfiguredScanDimensions()) || 1));
+                    payload.run_label = String(payload.run_label || '').trim();
+                    payload.sequence_name = String(this.currentSequenceName || payload.sequence_name || 'sequence.mot').trim();
                     if (this.needsModeParam(payload.mode, scanDimensions)) {
                         const parsedModeParam = this.parseNumericInput(payload.mode_param);
                         if (!Number.isFinite(parsedModeParam)) {

@@ -6,6 +6,7 @@ import random
 import math
 import queue
 import os
+import shutil
 import shlex
 import subprocess
 import numpy as np
@@ -18,6 +19,7 @@ import config
 from app.drivers.hardware import SequenceEditor, ExperimentDriver, RedPitayaDriver
 from app.drivers.vcd_parser import VCDParser
 from app.analysis import fitting, physics
+from app.models.schemas import ScanConfig
 from app.core.data_manager import DataManager
 from app.core.structures import ExperimentStatus, ScanResult
 from app.core.pulse_generator import generate_bragg_pulse
@@ -206,6 +208,59 @@ class ExperimentManager:
         updated_status["requested_branch"] = target_branch
         updated_status["reload_expected"] = True
         return updated_status
+
+    def _build_run_display_name(self, run_id: str, run_label: str) -> str:
+        clean_label = str(run_label or "").strip()
+        return f"{run_id} | {clean_label}" if clean_label else run_id
+
+    def _load_run_preset_config(self, run_dir: Path) -> Dict[str, Any]:
+        config_path = run_dir / "config.json"
+        if not config_path.exists():
+            raise FileNotFoundError(f"Config not found for run: {run_dir.name}")
+
+        with open(config_path, "r") as handle:
+            stored_config = json.load(handle)
+
+        defaults = ScanConfig().dict()
+        allowed_keys = set(defaults.keys())
+        restored = {**defaults}
+        restored.update({key: value for key, value in stored_config.items() if key in allowed_keys})
+        restored["run_label"] = str(restored.get("run_label") or "").strip()
+        restored["sequence_name"] = str(restored.get("sequence_name") or "").strip()
+        restored["scan_dimensions"] = self._resolve_scan_dimensions(restored)
+        restored["dim2_enabled"] = restored["scan_dimensions"] >= 2
+        restored["dim3_enabled"] = restored["scan_dimensions"] >= 3
+        return restored
+
+    def load_run_preset(self, year: str, month: str, day: str, run_id: str) -> Dict[str, Any]:
+        if getattr(self.status, "is_running", False):
+            raise ValueError("Cannot load a previous run while an experiment is running")
+
+        run_dir = Path(config.DATA_BASE_DIR) / year / month / day / run_id
+        if not run_dir.exists():
+            raise FileNotFoundError(f"Run not found: {run_id}")
+
+        restored_config = self._load_run_preset_config(run_dir)
+        source_sequence = run_dir / "sequence.mot"
+        target_sequence = Path(config.SEQUENCE_TEMPLATE_PATH_WIN if config.IS_WINDOWS else config.SEQUENCE_TEMPLATE_PATH_LINUX)
+        sequence_loaded = False
+        sequence_name = restored_config.get("sequence_name") or source_sequence.name
+
+        if source_sequence.exists():
+            target_sequence.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy(source_sequence, target_sequence)
+            sequence_loaded = True
+
+        restored_config["sequence_name"] = sequence_name
+        run_label = restored_config.get("run_label", "")
+        return {
+            "config": restored_config,
+            "sequence_loaded": sequence_loaded,
+            "sequence_name": sequence_name,
+            "run_id": run_id,
+            "run_label": run_label,
+            "display_name": self._build_run_display_name(run_id, run_label),
+        }
 
     def _normalize_tmot_settings(self, settings: Dict[str, Any]) -> Dict[str, Any]:
         tmot_path = (settings.get("tmot_path") or "").strip()

@@ -18,6 +18,53 @@ class DataLoader:
     def __init__(self):
         self.base_dir = config.DATA_BASE_DIR
 
+    def _clean_run_label(self, value: Any) -> str:
+        return str(value or "").strip()
+
+    def _get_run_summary(self, config_data: Dict[str, Any]) -> str:
+        scan_dimensions = self._resolve_scan_dimensions(config_data)
+        mode = str(config_data.get("mode") or "standard").strip().lower() or "standard"
+        averages = max(1, self._parse_int(config_data.get("averages"), 1))
+        randomize = bool(config_data.get("randomize", False))
+        sequence_name = str(config_data.get("sequence_name") or "").strip()
+
+        summary_parts = [f"{scan_dimensions}D"]
+        if scan_dimensions == 1:
+            summary_parts.append(mode)
+        elif scan_dimensions == 2:
+            summary_parts.append("P0-P1")
+        else:
+            summary_parts.append("P0-P1-P2")
+        if randomize:
+            summary_parts.append("random")
+        if averages > 1:
+            summary_parts.append(f"avg×{averages}")
+        if sequence_name:
+            summary_parts.append(sequence_name)
+        return " · ".join(summary_parts)
+
+    def _build_run_entry(self, run_dir: Path) -> Dict[str, Any]:
+        config_data = self._load_config_data(run_dir)
+        run_id = run_dir.name
+        run_label = self._clean_run_label(config_data.get("run_label"))
+        display_name = f"{run_id} | {run_label}" if run_label else run_id
+        scan_dimensions = self._resolve_scan_dimensions(config_data)
+        return {
+            "id": run_id,
+            "run_id": run_id,
+            "run_label": run_label,
+            "display_name": display_name,
+            "summary": self._get_run_summary(config_data),
+            "sequence_name": str(config_data.get("sequence_name") or "").strip(),
+            "scan_dimensions": scan_dimensions,
+            "randomize": bool(config_data.get("randomize", False)),
+            "mode": str(config_data.get("mode") or "standard").strip().lower() or "standard",
+        }
+
+    def get_run_entry(self, year: str, month: str, day: str, run_id: str) -> Dict[str, Any]:
+        run_dir = self._get_run_dir(year, month, day, run_id)
+        return self._build_run_entry(run_dir)
+
     def get_archive_tree(self) -> Dict[str, Any]:
         tree = {}
         if not self.base_dir.exists():
@@ -33,7 +80,7 @@ class DataLoader:
                         for day_dir in sorted(month_dir.iterdir()):
                             if day_dir.is_dir():
                                 day = day_dir.name
-                                runs = [r.name for r in sorted(day_dir.iterdir()) if r.is_dir() and r.name.startswith("run")]
+                                runs = [self._build_run_entry(r) for r in sorted(day_dir.iterdir()) if r.is_dir() and r.name.startswith("run")]
                                 tree[year][month][day] = runs
         return tree
 
@@ -267,6 +314,7 @@ class DataLoader:
         sampled_points = self._sample_sequence(full_points, MAX_DISPLAY_POINTS)
         return {
             "config": config_data,
+            "run_entry": self._build_run_entry(run_dir),
             "scan_dimensions": scan_dimensions,
             "data": sampled_points,
             "stats": self._build_stats_array(full_points, scan_dimensions=scan_dimensions),

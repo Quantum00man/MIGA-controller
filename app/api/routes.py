@@ -10,6 +10,7 @@ from app.core.data_manager import DataManager
 from app.models.schemas import (
     AnalysisSettings,
     ArchiveAllanRequest,
+    ArchiveRunReference,
     ArchiveWaveformRequest,
     ExperimentResponse,
     FitModelDefinition,
@@ -68,6 +69,18 @@ async def upload_sequence(file: UploadFile = File(...)):
         return {"status": "success", "message": f"Sequence loaded: {file.filename}", "filename": file.filename}
     except Exception as e:
         raise HTTPException(500, f"Failed to upload sequence: {str(e)}")
+
+@router.post("/experiment/load-run-preset", response_model=ExperimentResponse)
+async def load_run_preset(req: ArchiveRunReference):
+    try:
+        data = manager.load_run_preset(req.year, req.month, req.day, req.run_id)
+        return ExperimentResponse(status="success", message="Run preset loaded", data=data)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
 
 # --- 2. System Config ---
 class SystemMode(BaseModel): simulation: bool

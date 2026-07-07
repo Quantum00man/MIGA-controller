@@ -239,8 +239,11 @@
                             <label class="form-label-small">RUN ID</label>
                             <select class="form-select form-select-sm" v-model="selectedRun" :disabled="!selectedDay">
                                 <option value="" disabled>Select Run...</option>
-                                <option v-for="r in getRuns().reverse()" :key="r" :value="r">{{ r }}</option>
+                                <option v-for="r in getRuns().slice().reverse()" :key="r.id" :value="r.id">{{ r.display_name }}</option>
                             </select>
+                        </div>
+                        <div v-if="getSelectedRunEntry()?.summary" class="small text-muted mb-3" style="font-size:0.75rem;">
+                            {{ getSelectedRunEntry().summary }}
                         </div>
 
                         <button class="btn btn-primary w-100 btn-sm fw-bold shadow-sm" @click="loadRun"
@@ -253,6 +256,8 @@
                             <div class="text-success fw-bold small mb-1"><i
                                     class="bi bi-check-circle-fill me-1"></i>Loaded</div>
                             <div class="small text-muted font-monospace">{{ loadedRunId }}</div>
+                            <div class="small fw-bold text-dark" v-if="loadedRunEntry?.run_label">{{ loadedRunEntry.run_label }}</div>
+                            <div class="small text-muted" style="font-size: 0.75em;" v-if="loadedRunEntry?.summary">{{ loadedRunEntry.summary }}</div>
                             <div class="small text-muted" style="font-size: 0.75em;">{{ dataCount }} Points</div>
                         </div>
 
@@ -558,7 +563,7 @@
                 return {
                     archiveTree: {}, selectedYear: '', selectedMonth: '', selectedDay: '', selectedRun: '',
                     isLoading: false, isLoadingAllan: false, isLoadingWaveforms: false, isSaving: false,
-                    loadedRunId: '', errorMsg: '', dataCount: 0, selectedPointKey: '', selectedPointKeys: [], selectedPointLabel: '', selectedCount: 0,
+                    loadedRunId: '', loadedRunEntry: null, errorMsg: '', dataCount: 0, selectedPointKey: '', selectedPointKeys: [], selectedPointLabel: '', selectedCount: 0,
                     selectedAllanWindow: null,
                     loadedPoints: [], currentCalculatedPoints: [], originalSettings: {}, loadedConfig: {}, currentScanDimensions: 1,
                     displayMode: 'saved',
@@ -1255,7 +1260,31 @@
                 },
                 getMonths() { return this.selectedYear ? Object.keys(this.archiveTree[this.selectedYear] || {}).sort() : []; },
                 getDays() { return (this.selectedYear && this.selectedMonth) ? Object.keys(this.archiveTree[this.selectedYear][this.selectedMonth] || {}).sort() : []; },
-                getRuns() { return (this.selectedDay) ? (this.archiveTree[this.selectedYear][this.selectedMonth][this.selectedDay] || []).sort() : []; },
+                normalizeRunEntry(entry) {
+                    if (typeof entry === 'string') {
+                        return { id: entry, run_id: entry, run_label: '', display_name: entry, summary: '' };
+                    }
+                    const runId = String(entry?.id || entry?.run_id || '').trim();
+                    const runLabel = String(entry?.run_label || '').trim();
+                    return {
+                        id: runId,
+                        run_id: runId,
+                        run_label: runLabel,
+                        display_name: String(entry?.display_name || (runLabel ? `${runId} | ${runLabel}` : runId) || runId),
+                        summary: String(entry?.summary || '').trim(),
+                        sequence_name: String(entry?.sequence_name || '').trim(),
+                    };
+                },
+                getRuns() {
+                    if (!this.selectedDay) return [];
+                    const runs = this.archiveTree?.[this.selectedYear]?.[this.selectedMonth]?.[this.selectedDay] || [];
+                    return (Array.isArray(runs) ? runs : [])
+                        .map(entry => this.normalizeRunEntry(entry))
+                        .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+                },
+                getSelectedRunEntry() {
+                    return this.getRuns().find(run => run.id === this.selectedRun) || null;
+                },
                 resetMonth() { this.selectedMonth = ''; this.selectedDay = ''; this.selectedRun = ''; },
                 resetDay() { this.selectedDay = ''; this.selectedRun = ''; }, resetRun() { },
 
@@ -1268,7 +1297,7 @@
                     const days = this.getDays(); if (!days.length) return;
                     this.selectedDay = days[days.length - 1];
                     const runs = this.getRuns(); if (!runs.length) return;
-                    this.selectedRun = runs[runs.length - 1];
+                    this.selectedRun = runs[runs.length - 1].id;
                     await this.loadRun();
                 },
 
@@ -1310,6 +1339,7 @@
                         this.savedDataCount = Number.isFinite(res.data.total_points) ? res.data.total_points : this.loadedPoints.length;
                         this.dataCount = this.savedDataCount;
                         this.loadedRunId = `${this.selectedDay}/${this.selectedRun}`;
+                        this.loadedRunEntry = this.normalizeRunEntry(res.data.run_entry || this.getSelectedRunEntry() || this.selectedRun);
                         this.displayMode = 'saved';
                         if (!this.canUseAllanMode() && this.plotMode === 'allan') {
                             this.plotMode = 'series';
