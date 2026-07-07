@@ -16,6 +16,7 @@ from app.models.schemas import (
     ReAnalysisRequest,
     ScanConfig,
     SystemSettings,
+    SystemUpdateRequest,
 )
 import config
 
@@ -99,6 +100,35 @@ async def get_analysis_settings(): return manager.get_analysis_config()
 async def update_analysis_settings(settings: AnalysisSettings):
     manager.update_analysis_config(settings.dict())
     return ExperimentResponse(status="success", message="Updated")
+
+@router.get("/system/update/status", response_model=ExperimentResponse)
+async def get_system_update_status():
+    try:
+        return ExperimentResponse(status="success", message="Update status loaded", data=manager.get_update_status())
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+@router.post("/system/update/fetch", response_model=ExperimentResponse)
+async def fetch_system_update_status(req: SystemUpdateRequest):
+    try:
+        data = manager.fetch_update_metadata(repo_url=req.repo_url, branch=req.branch)
+        return ExperimentResponse(status="success", message="Remote metadata refreshed", data=data)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+@router.post("/system/update/apply", response_model=ExperimentResponse)
+async def apply_system_update(req: SystemUpdateRequest):
+    try:
+        data = manager.apply_system_update(repo_url=req.repo_url, branch=req.branch)
+        return ExperimentResponse(status="success", message="System update completed", data=data)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
 
 
 @router.get("/fitting/models/defaults", response_model=List[FitModelDefinition])

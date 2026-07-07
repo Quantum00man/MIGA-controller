@@ -130,6 +130,15 @@ class SystemSettings(BaseModel):
     atom_area_baseline_points: int = Field(2)
     fit_model_key: str = Field("gaussian")
     fit_models: List[FitModelDefinition] = Field(default_factory=list)
+    update_repo_url: str = Field("")
+    update_branch: str = Field("main")
+
+
+
+class SystemUpdateRequest(BaseModel):
+    repo_url: Optional[str] = Field(None)
+    branch: Optional[str] = Field(None)
+
 
 class ExperimentResponse(BaseModel):
     status: str

@@ -7,6 +7,7 @@ import math
 import queue
 import os
 import shlex
+import subprocess
 import numpy as np
 from pathlib import Path
 from itertools import product
@@ -53,6 +54,158 @@ class ExperimentManager:
 
     def _default_tmot_args(self) -> str:
         return config.TMOT_EXTRA_ARGS_WIN if config.IS_WINDOWS else config.TMOT_EXTRA_ARGS_LINUX
+
+    def _git_base_command(self) -> List[str]:
+        return [
+            "git",
+            "-c",
+            f"safe.directory={config.BASE_DIR}",
+            "-C",
+            str(config.BASE_DIR),
+        ]
+
+    def _run_git_command(self, args: List[str]) -> str:
+        completed = subprocess.run(
+            self._git_base_command() + args,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        stdout = (completed.stdout or "").strip()
+        stderr = (completed.stderr or "").strip()
+        if completed.returncode != 0:
+            raise ValueError(stderr or stdout or f"Git command failed: {' '.join(args)}")
+        return stdout
+
+    def _git_ref_exists(self, ref_name: str) -> bool:
+        completed = subprocess.run(
+            self._git_base_command() + ["rev-parse", "--verify", "--quiet", ref_name],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return completed.returncode == 0
+
+    def _get_git_remote_url(self) -> str:
+        try:
+            return self._run_git_command(["remote", "get-url", "origin"])
+        except Exception:
+            return ""
+
+    def _get_git_current_branch(self) -> str:
+        try:
+            return self._run_git_command(["branch", "--show-current"])
+        except Exception:
+            return ""
+
+    def _list_git_branches(self) -> List[str]:
+        refs = self._run_git_command([
+            "for-each-ref",
+            "--format=%(refname:short)",
+            "refs/heads",
+            "refs/remotes/origin",
+        ])
+        branches: List[str] = []
+        seen = set()
+        for raw_line in refs.splitlines():
+            branch_name = raw_line.strip()
+            if not branch_name or branch_name == "origin/HEAD":
+                continue
+            if branch_name.startswith("origin/"):
+                branch_name = branch_name[len("origin/"):]
+            if branch_name not in seen:
+                seen.add(branch_name)
+                branches.append(branch_name)
+        return sorted(branches)
+
+    def _is_allowed_update_repo_url(self, repo_url: str) -> bool:
+        normalized = str(repo_url or "").strip()
+        if not normalized:
+            return False
+        return normalized.startswith("https://github.com/") or normalized.startswith("git@github.com:")
+
+    def _normalize_update_settings(self, settings: Dict[str, Any]) -> Dict[str, Any]:
+        remote_url = self._get_git_remote_url()
+        current_branch = self._get_git_current_branch()
+        repo_url = str(settings.get("update_repo_url") or remote_url or "").strip()
+        branch = str(settings.get("update_branch") or current_branch or "main").strip() or "main"
+
+        if repo_url and not self._is_allowed_update_repo_url(repo_url):
+            repo_url = remote_url
+
+        settings["update_repo_url"] = repo_url
+        settings["update_branch"] = branch
+        return settings
+
+    def get_update_status(self) -> Dict[str, Any]:
+        remote_url = self._get_git_remote_url()
+        current_branch = self._get_git_current_branch()
+        current_commit = self._run_git_command(["rev-parse", "HEAD"])
+        current_commit_short = self._run_git_command(["rev-parse", "--short", "HEAD"])
+        last_commit_subject = self._run_git_command(["log", "-1", "--pretty=%s"])
+        dirty_entries = [line for line in self._run_git_command(["status", "--porcelain"]).splitlines() if line.strip()]
+        configured_repo_url = str(self.settings.get("update_repo_url") or remote_url or "").strip()
+        configured_branch = str(self.settings.get("update_branch") or current_branch or "main").strip() or "main"
+        branches = self._list_git_branches()
+        return {
+            "repo_root": str(config.BASE_DIR),
+            "origin_url": remote_url,
+            "configured_repo_url": configured_repo_url,
+            "configured_branch": configured_branch,
+            "current_branch": current_branch,
+            "current_commit": current_commit,
+            "current_commit_short": current_commit_short,
+            "last_commit_subject": last_commit_subject,
+            "branches": branches,
+            "dirty": bool(dirty_entries),
+            "dirty_entries": dirty_entries,
+            "reload_expected": True,
+        }
+
+    def fetch_update_metadata(self, repo_url: Optional[str] = None, branch: Optional[str] = None) -> Dict[str, Any]:
+        target_repo_url = str(repo_url or self.settings.get("update_repo_url") or self._get_git_remote_url() or "").strip()
+        target_branch = str(branch or self.settings.get("update_branch") or self._get_git_current_branch() or "main").strip() or "main"
+        if not self._is_allowed_update_repo_url(target_repo_url):
+            raise ValueError("Update repo URL must be a GitHub HTTPS or SSH URL")
+
+        current_remote = self._get_git_remote_url()
+        if current_remote != target_repo_url:
+            self._run_git_command(["remote", "set-url", "origin", target_repo_url])
+
+        self._run_git_command(["fetch", "--prune", "origin"])
+        self.settings["update_repo_url"] = target_repo_url
+        self.settings["update_branch"] = target_branch
+        self._save_settings_to_disk()
+        return self.get_update_status()
+
+    def apply_system_update(self, repo_url: Optional[str] = None, branch: Optional[str] = None) -> Dict[str, Any]:
+        status = self.fetch_update_metadata(repo_url=repo_url, branch=branch)
+        target_repo_url = status.get("configured_repo_url") or status.get("origin_url")
+        target_branch = str(branch or status.get("configured_branch") or status.get("current_branch") or "main").strip() or "main"
+
+        local_exists = self._git_ref_exists(f"refs/heads/{target_branch}")
+        remote_exists = self._git_ref_exists(f"refs/remotes/origin/{target_branch}")
+        if not local_exists and not remote_exists:
+            raise ValueError(f"Branch '{target_branch}' was not found in origin")
+
+        current_branch = status.get("current_branch") or ""
+        if current_branch != target_branch:
+            if local_exists:
+                self._run_git_command(["checkout", target_branch])
+            else:
+                self._run_git_command(["checkout", "-b", target_branch, "--track", f"origin/{target_branch}"])
+
+        pull_output = self._run_git_command(["pull", "--ff-only", "origin", target_branch]) if remote_exists else ""
+        self.settings["update_repo_url"] = target_repo_url
+        self.settings["update_branch"] = target_branch
+        self._save_settings_to_disk()
+
+        updated_status = self.get_update_status()
+        updated_status["pull_output"] = pull_output
+        updated_status["requested_repo_url"] = target_repo_url
+        updated_status["requested_branch"] = target_branch
+        updated_status["reload_expected"] = True
+        return updated_status
 
     def _normalize_tmot_settings(self, settings: Dict[str, Any]) -> Dict[str, Any]:
         tmot_path = (settings.get("tmot_path") or "").strip()
@@ -155,7 +308,9 @@ class ExperimentManager:
 
         return self._normalize_atom_area_settings(
             self._normalize_fit_settings(
-                self._normalize_hardware_settings(self._normalize_tmot_settings(base_settings)),
+                self._normalize_update_settings(
+                    self._normalize_hardware_settings(self._normalize_tmot_settings(base_settings))
+                ),
                 strict=False
             )
         )
@@ -208,7 +363,9 @@ class ExperimentManager:
             new_settings['tmot_args'] = self.settings.get('tmot_args', self._default_tmot_args())
         new_settings = self._normalize_atom_area_settings(
             self._normalize_fit_settings(
-                self._normalize_hardware_settings(self._normalize_tmot_settings(new_settings)),
+                self._normalize_update_settings(
+                    self._normalize_hardware_settings(self._normalize_tmot_settings(new_settings))
+                ),
                 strict=True
             )
         )

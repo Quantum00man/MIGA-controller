@@ -35,11 +35,13 @@
                             href="#">Logic & Channels</a></li>
                     <li class="nav-item"><a class="nav-link" :class="{active: tab==='paths'}" @click="tab='paths'"
                             href="#">System Paths</a></li>
+                    <li class="nav-item"><a class="nav-link" :class="{active: tab==='update'}" @click="tab='update'"
+                            href="#">System Update</a></li>
                 </ul>
             </div>
             <div class="card-body p-4">
 
-                
+
 
                 <div v-if="tab==='net'">
                     <div class="row g-3">
@@ -67,7 +69,7 @@
                 <input type="number" class="form-control" v-model.number="s.voltage_limit" step="0.1" placeholder="9.5">
             </div>
         </div>
-                        
+
                     </div>
                 </div>
 
@@ -83,7 +85,7 @@
                         <div class="col-12 mt-3">
                             <h6 class="text-muted fw-bold text-uppercase mb-2">Signal Validation Filters</h6>
                         </div>
-                        
+
                         <div class="col-md-6">
                             <label class="form-label text-danger fw-bold small">Max Limit (e.g. 0.015V)</label>
                             <div class="input-group input-group-sm">
@@ -92,7 +94,7 @@
                             </div>
                             <div class="form-text" style="font-size: 0.7rem;">Discard if Raw > Limit (Saturation/Error).</div>
                         </div>
-                        
+
                         <div class="col-md-6">
                             <label class="form-label text-primary fw-bold small">Min Threshold (e.g. 0.0001V)</label>
                             <div class="input-group input-group-sm">
@@ -101,13 +103,13 @@
                             </div>
                             <div class="form-text" style="font-size: 0.7rem;">Discard if Raw < Threshold (Noise/Empty).</div>
                             </div>
-                        
+
                             <div class="col-12">
                                 <hr class="my-3 text-muted opacity-25">
                             </div>
 
                         <div class="col-12"><hr class="my-1 text-muted opacity-25"></div>
-                        
+
                         <div class="col-12">
                             <h6 class="text-muted fw-bold text-uppercase mb-2">Calibration & Constants</h6>
                         </div>
@@ -131,7 +133,7 @@
 <small class="text-muted" style="font-size:0.75rem">Virtual Decimation: {{ s.decimation }}</small>
                             <small class="text-muted" style="font-size:0.75rem">Rate = 125MHz / Decimation</small>
                         </div>
-                        
+
                         <div class="col-md-4" v-if="s.hardware_platform === 'daq'">
                             <label class="form-label text-success fw-bold">Sample Rate (Hz)</label>
                             <input type="number" class="form-control fw-bold" v-model.number="s.daq_rate" placeholder="e.g. 3990">
@@ -360,6 +362,77 @@
                             class="form-control font-monospace small" v-model="s.template_path"></div>
                 </div>
 
+                <div v-if="tab==='update'">
+                    <div class="bg-light p-3 mb-4 rounded border">
+                        <h6 class="fw-bold text-primary"><i class="bi bi-arrow-repeat me-2"></i>GitHub Update</h6>
+                        <div class="form-text">Pull the latest code from a GitHub repository and switch branches from this page. Because the server is running with <code>uvicorn --reload</code>, a short automatic reload is expected after a successful update.</div>
+                    </div>
+                    <div class="row g-3">
+                        <div class="col-md-8">
+                            <label class="form-label">Repository URL</label>
+                            <input type="text" class="form-control font-monospace small" v-model="s.update_repo_url"
+                                placeholder="https://github.com/owner/repo.git">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Branch</label>
+                            <select class="form-select font-monospace small" v-model="s.update_branch">
+                                <option v-for="branch in getUpdateBranches()" :key="branch" :value="branch">{{ branch }}</option>
+                            </select>
+                        </div>
+                        <div class="col-12 d-flex gap-2 flex-wrap">
+                            <button class="btn btn-outline-primary btn-sm" @click="fetchUpdateStatus(true)" :disabled="updateBusy">
+                                <span v-if="updateBusy" class="spinner-border spinner-border-sm me-2"></span>
+                                Refresh Remote
+                            </button>
+                            <button class="btn btn-warning btn-sm fw-bold" @click="applySystemUpdate" :disabled="updateBusy">
+                                <span v-if="updateBusy" class="spinner-border spinner-border-sm me-2"></span>
+                                Update Now
+                            </button>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="card border-0 shadow-sm h-100">
+                                <div class="card-body">
+                                    <h6 class="text-muted fw-bold text-uppercase mb-3">Current Checkout</h6>
+                                    <div class="small mb-2"><span class="text-muted">Branch:</span> <span class="font-monospace">{{ updateInfo.current_branch || '-' }}</span></div>
+                                    <div class="small mb-2"><span class="text-muted">Commit:</span> <span class="font-monospace">{{ updateInfo.current_commit_short || '-' }}</span></div>
+                                    <div class="small mb-2"><span class="text-muted">Message:</span> {{ updateInfo.last_commit_subject || '-' }}</div>
+                                    <div class="small"><span class="text-muted">Dirty Worktree:</span> <span :class="updateInfo.dirty ? 'text-danger fw-bold' : 'text-success fw-bold'">{{ updateInfo.dirty ? 'YES' : 'NO' }}</span></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="card border-0 shadow-sm h-100">
+                                <div class="card-body">
+                                    <h6 class="text-muted fw-bold text-uppercase mb-3">Configured Source</h6>
+                                    <div class="small mb-2"><span class="text-muted">Origin:</span> <span class="font-monospace">{{ updateInfo.origin_url || s.update_repo_url || '-' }}</span></div>
+                                    <div class="small mb-2"><span class="text-muted">Saved Branch:</span> <span class="font-monospace">{{ updateInfo.configured_branch || s.update_branch || '-' }}</span></div>
+                                    <div class="small mb-2"><span class="text-muted">Repo Root:</span> <span class="font-monospace">{{ updateInfo.repo_root || '-' }}</span></div>
+                                    <div class="small"><span class="text-muted">Known Branches:</span> {{ getUpdateBranches().length }}</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-12" v-if="Array.isArray(updateInfo.dirty_entries) && updateInfo.dirty_entries.length">
+                            <div class="card border-0 shadow-sm">
+                                <div class="card-body">
+                                    <h6 class="text-muted fw-bold text-uppercase mb-2">Worktree Changes</h6>
+                                    <pre class="mb-0 small bg-light border rounded p-3 font-monospace">{{ updateInfo.dirty_entries.join('\n') }}</pre>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-12" v-if="updateInfo.pull_output">
+                            <div class="card border-0 shadow-sm">
+                                <div class="card-body">
+                                    <h6 class="text-muted fw-bold text-uppercase mb-2">Last Pull Output</h6>
+                                    <pre class="mb-0 small bg-light border rounded p-3 font-monospace">{{ updateInfo.pull_output }}</pre>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-12" v-if="updateMsg">
+                            <div :class="['alert mb-0', updateIsError ? 'alert-danger' : 'alert-info']">{{ updateMsg }}</div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="mt-4 d-flex justify-content-end gap-2 pt-3 border-top">
                     <button class="btn btn-secondary" @click="fetchSettings">Discard</button>
                     <button class="btn btn-success px-4 fw-bold" @click="saveSettings" :disabled="saving">
@@ -382,6 +455,7 @@
             data() {
                 return {
                     tab: 'phys', s: {}, msg: '', isError: false, saving: false,
+                    updateInfo: {}, updateMsg: '', updateIsError: false, updateBusy: false,
                     fitRoleOptions: [
                         { key: 'amplitude', label: 'Amplitude' },
                         { key: 'width', label: 'Width' },
@@ -403,6 +477,7 @@
                     try {
                         const res = await axios.get('/settings/all');
                         this.s = this.normalizeSettings(res.data);
+                        await this.fetchUpdateStatus(false);
                     } catch (e) { console.error(e); }
                 },
 
@@ -523,7 +598,75 @@
                     if (!normalized.fit_models.find(model => model.key === normalized.fit_model_key)) {
                         normalized.fit_model_key = normalized.fit_models[0].key;
                     }
+                    normalized.update_repo_url = String(normalized.update_repo_url || '').trim();
+                    normalized.update_branch = String(normalized.update_branch || 'main').trim() || 'main';
                     return normalized;
+                },
+                getUpdateBranches() {
+                    const branches = Array.isArray(this.updateInfo?.branches)
+                        ? this.updateInfo.branches.filter(branch => typeof branch === 'string' && branch.trim())
+                        : [];
+                    const current = String(this.s.update_branch || '').trim() || 'main';
+                    if (!branches.length) return [current];
+                    if (!branches.includes(current)) {
+                        return [current, ...branches];
+                    }
+                    return branches;
+                },
+                consumeUpdateResponse(res, successMessage = '') {
+                    const payload = res?.data?.data && typeof res.data.data === 'object' ? res.data.data : {};
+                    this.updateInfo = payload;
+                    if (payload.configured_repo_url) this.s.update_repo_url = payload.configured_repo_url;
+                    else if (payload.origin_url && !this.s.update_repo_url) this.s.update_repo_url = payload.origin_url;
+                    if (payload.configured_branch) this.s.update_branch = payload.configured_branch;
+                    else if (payload.current_branch && !this.s.update_branch) this.s.update_branch = payload.current_branch;
+                    if (successMessage) {
+                        this.updateIsError = false;
+                        this.updateMsg = successMessage;
+                    }
+                },
+                async fetchUpdateStatus(refreshRemote = false) {
+                    this.updateBusy = true;
+                    if (!refreshRemote) {
+                        this.updateMsg = '';
+                        this.updateIsError = false;
+                    }
+                    try {
+                        const res = refreshRemote
+                            ? await axios.post('/system/update/fetch', {
+                                repo_url: this.s.update_repo_url,
+                                branch: this.s.update_branch,
+                            })
+                            : await axios.get('/system/update/status');
+                        this.consumeUpdateResponse(res, refreshRemote ? 'Remote metadata refreshed.' : '');
+                    } catch (e) {
+                        this.updateIsError = true;
+                        this.updateMsg = 'Update Status Error: ' + (e.response?.data?.detail || e.message || 'Unknown error');
+                    } finally {
+                        this.updateBusy = false;
+                    }
+                },
+                async applySystemUpdate() {
+                    this.updateBusy = true;
+                    this.updateMsg = '';
+                    this.updateIsError = false;
+                    try {
+                        const res = await axios.post('/system/update/apply', {
+                            repo_url: this.s.update_repo_url,
+                            branch: this.s.update_branch,
+                        });
+                        this.consumeUpdateResponse(res, 'System update completed. uvicorn --reload may reconnect in a few seconds.');
+                    } catch (e) {
+                        if (!e.response) {
+                            this.updateIsError = false;
+                            this.updateMsg = 'Update request was sent. If the connection dropped, the server may be auto-reloading. Refresh this page in a few seconds.';
+                        } else {
+                            this.updateIsError = true;
+                            this.updateMsg = 'System Update Error: ' + (e.response?.data?.detail || e.message || 'Unknown error');
+                        }
+                    } finally {
+                        this.updateBusy = false;
+                    }
                 },
                 createFitModel() {
                     this.s = this.normalizeSettings(this.s);
