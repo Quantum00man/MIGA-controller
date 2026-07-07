@@ -12,7 +12,7 @@ import subprocess
 import numpy as np
 from pathlib import Path
 from itertools import product
-from typing import List, Dict, Optional, Callable, Any
+from typing import List, Dict, Optional, Callable, Any, Tuple
 from dataclasses import asdict
 
 import config
@@ -120,6 +120,91 @@ class ExperimentManager:
                 branches.append(branch_name)
         return sorted(branches)
 
+    def _get_git_commit(self, ref_name: str) -> str:
+        try:
+            return self._run_git_command(["rev-parse", ref_name])
+        except Exception:
+            return ""
+
+    def _get_git_commit_short(self, ref_name: str) -> str:
+        try:
+            return self._run_git_command(["rev-parse", "--short", ref_name])
+        except Exception:
+            return ""
+
+    def _get_git_commit_subject(self, ref_name: str) -> str:
+        try:
+            return self._run_git_command(["log", "-1", "--pretty=%s", ref_name])
+        except Exception:
+            return ""
+
+    def _get_git_ahead_behind(self, local_ref: str, remote_ref: str) -> Tuple[Optional[int], Optional[int]]:
+        if not local_ref or not remote_ref:
+            return None, None
+        try:
+            counts = self._run_git_command(["rev-list", "--left-right", "--count", f"{local_ref}...{remote_ref}"])
+            ahead_raw, behind_raw = (counts.split() + ["0", "0"])[:2]
+            return int(ahead_raw), int(behind_raw)
+        except Exception:
+            return None, None
+
+    def _build_update_comparison(self, current_branch: str, current_commit: str, configured_branch: str) -> Dict[str, Any]:
+        comparison_branch = str(configured_branch or current_branch or "main").strip() or "main"
+        local_ref = "HEAD" if current_branch == comparison_branch and current_commit else ""
+        local_exists = bool(local_ref)
+        if not local_exists and self._git_ref_exists(f"refs/heads/{comparison_branch}"):
+            local_ref = f"refs/heads/{comparison_branch}"
+            local_exists = True
+
+        remote_ref = f"refs/remotes/origin/{comparison_branch}"
+        remote_exists = self._git_ref_exists(remote_ref)
+
+        local_commit = current_commit if current_branch == comparison_branch and current_commit else self._get_git_commit(local_ref)
+        local_commit_short = self._get_git_commit_short(local_ref) if local_ref else ""
+        remote_commit = self._get_git_commit(remote_ref) if remote_exists else ""
+        remote_commit_short = self._get_git_commit_short(remote_ref) if remote_exists else ""
+        remote_subject = self._get_git_commit_subject(remote_ref) if remote_exists else ""
+        ahead, behind = self._get_git_ahead_behind(local_ref, remote_ref) if local_exists and remote_exists else (None, None)
+
+        branch_matches_checkout = bool(current_branch) and current_branch == comparison_branch
+        is_latest = branch_matches_checkout and remote_exists and ahead == 0 and behind == 0
+
+        if not remote_exists:
+            version_status = "unknown"
+            version_message = f"Remote branch origin/{comparison_branch} is not available locally yet. Click Refresh Remote to fetch the latest GitHub state."
+        elif not branch_matches_checkout:
+            version_status = "branch_mismatch"
+            version_message = f"Current checkout is on {current_branch or '-'}, while the selected update branch is {comparison_branch}."
+        elif ahead and behind:
+            version_status = "diverged"
+            version_message = f"Local checkout has diverged from origin/{comparison_branch} ({ahead} ahead, {behind} behind)."
+        elif behind:
+            version_status = "behind"
+            version_message = f"Local checkout is behind origin/{comparison_branch} by {behind} commit(s)."
+        elif ahead:
+            version_status = "ahead"
+            version_message = f"Local checkout is ahead of origin/{comparison_branch} by {ahead} commit(s)."
+        else:
+            version_status = "latest"
+            version_message = f"Local checkout is up to date with origin/{comparison_branch}."
+
+        return {
+            "comparison_branch": comparison_branch,
+            "comparison_branch_matches_checkout": branch_matches_checkout,
+            "comparison_local_exists": local_exists,
+            "comparison_local_commit": local_commit,
+            "comparison_local_commit_short": local_commit_short,
+            "comparison_remote_exists": remote_exists,
+            "comparison_remote_commit": remote_commit,
+            "comparison_remote_commit_short": remote_commit_short,
+            "comparison_remote_subject": remote_subject,
+            "comparison_ahead": ahead,
+            "comparison_behind": behind,
+            "is_latest": is_latest,
+            "version_status": version_status,
+            "version_message": version_message,
+        }
+
     def _is_allowed_update_repo_url(self, repo_url: str) -> bool:
         normalized = str(repo_url or "").strip()
         if not normalized:
@@ -149,6 +234,7 @@ class ExperimentManager:
         configured_repo_url = str(self.settings.get("update_repo_url") or remote_url or "").strip()
         configured_branch = str(self.settings.get("update_branch") or current_branch or "main").strip() or "main"
         branches = self._list_git_branches()
+        comparison = self._build_update_comparison(current_branch, current_commit, configured_branch)
         return {
             "repo_root": str(config.BASE_DIR),
             "origin_url": remote_url,
@@ -162,6 +248,7 @@ class ExperimentManager:
             "dirty": bool(dirty_entries),
             "dirty_entries": dirty_entries,
             "reload_expected": True,
+            **comparison,
         }
 
     def fetch_update_metadata(self, repo_url: Optional[str] = None, branch: Optional[str] = None) -> Dict[str, Any]:

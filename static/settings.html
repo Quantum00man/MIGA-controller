@@ -375,7 +375,7 @@
                         </div>
                         <div class="col-md-4">
                             <label class="form-label">Branch</label>
-                            <select class="form-select font-monospace small" v-model="s.update_branch">
+                            <select class="form-select font-monospace small" v-model="s.update_branch" @change="fetchUpdateStatus(true)">
                                 <option v-for="branch in getUpdateBranches()" :key="branch" :value="branch">{{ branch }}</option>
                             </select>
                         </div>
@@ -388,6 +388,18 @@
                                 <span v-if="updateBusy" class="spinner-border spinner-border-sm me-2"></span>
                                 Update Now
                             </button>
+                        </div>
+                        <div class="col-12" v-if="updateInfo.version_status">
+                            <div :class="['alert mb-0', getUpdateVersionAlertClass()]">
+                                <div class="fw-bold">{{ getUpdateVersionTitle() }}</div>
+                                <div class="small mb-1">{{ updateInfo.version_message }}</div>
+                                <div class="small" v-if="updateInfo.comparison_remote_commit_short">
+                                    <span class="text-muted">Remote HEAD:</span>
+                                    <span class="font-monospace">origin/{{ updateInfo.comparison_branch }} @ {{ updateInfo.comparison_remote_commit_short }}</span>
+                                    <span v-if="updateInfo.comparison_behind > 0"> · behind {{ updateInfo.comparison_behind }}</span>
+                                    <span v-if="updateInfo.comparison_ahead > 0"> · ahead {{ updateInfo.comparison_ahead }}</span>
+                                </div>
+                            </div>
                         </div>
                         <div class="col-md-6">
                             <div class="card border-0 shadow-sm h-100">
@@ -406,8 +418,11 @@
                                     <h6 class="text-muted fw-bold text-uppercase mb-3">Configured Source</h6>
                                     <div class="small mb-2"><span class="text-muted">Origin:</span> <span class="font-monospace">{{ updateInfo.origin_url || s.update_repo_url || '-' }}</span></div>
                                     <div class="small mb-2"><span class="text-muted">Saved Branch:</span> <span class="font-monospace">{{ updateInfo.configured_branch || s.update_branch || '-' }}</span></div>
+                                    <div class="small mb-2"><span class="text-muted">Remote Commit:</span> <span class="font-monospace">{{ updateInfo.comparison_remote_commit_short || '-' }}</span></div>
+                                    <div class="small mb-2"><span class="text-muted">Remote Message:</span> {{ updateInfo.comparison_remote_subject || '-' }}</div>
                                     <div class="small mb-2"><span class="text-muted">Repo Root:</span> <span class="font-monospace">{{ updateInfo.repo_root || '-' }}</span></div>
-                                    <div class="small"><span class="text-muted">Known Branches:</span> {{ getUpdateBranches().length }}</div>
+                                    <div class="small mb-2"><span class="text-muted">Known Branches:</span> {{ getUpdateBranches().length }}</div>
+                                    <div class="small"><span class="text-muted">Latest Status:</span> <span :class="getUpdateVersionTextClass()">{{ getUpdateVersionTitle() }}</span></div>
                                 </div>
                             </div>
                         </div>
@@ -477,7 +492,7 @@
                     try {
                         const res = await axios.get('/settings/all');
                         this.s = this.normalizeSettings(res.data);
-                        await this.fetchUpdateStatus(false);
+                        await this.fetchUpdateStatus(true);
                     } catch (e) { console.error(e); }
                 },
 
@@ -612,6 +627,36 @@
                         return [current, ...branches];
                     }
                     return branches;
+                },
+                getUpdateVersionTitle() {
+                    switch (String(this.updateInfo?.version_status || '').trim()) {
+                        case 'latest': return 'Local checkout is latest';
+                        case 'behind': return 'Update available';
+                        case 'ahead': return 'Local checkout is ahead of remote';
+                        case 'diverged': return 'Local and remote have diverged';
+                        case 'branch_mismatch': return 'Selected branch is not the current checkout';
+                        default: return 'Remote comparison unavailable';
+                    }
+                },
+                getUpdateVersionAlertClass() {
+                    switch (String(this.updateInfo?.version_status || '').trim()) {
+                        case 'latest': return 'alert-success';
+                        case 'behind':
+                        case 'branch_mismatch': return 'alert-warning';
+                        case 'ahead':
+                        case 'diverged': return 'alert-danger';
+                        default: return 'alert-secondary';
+                    }
+                },
+                getUpdateVersionTextClass() {
+                    switch (String(this.updateInfo?.version_status || '').trim()) {
+                        case 'latest': return 'text-success fw-bold';
+                        case 'behind':
+                        case 'branch_mismatch': return 'text-warning fw-bold';
+                        case 'ahead':
+                        case 'diverged': return 'text-danger fw-bold';
+                        default: return 'text-muted';
+                    }
                 },
                 consumeUpdateResponse(res, successMessage = '') {
                     const payload = res?.data?.data && typeof res.data.data === 'object' ? res.data.data : {};
