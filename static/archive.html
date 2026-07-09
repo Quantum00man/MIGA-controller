@@ -466,6 +466,13 @@
                                     <button class="btn btn-outline-secondary btn-sm" @click="applyAllanP0Range" :disabled="isLoadingAllan">Apply</button>
                                     <button class="btn btn-outline-secondary btn-sm" @click="resetAllanP0Range" :disabled="isLoadingAllan">Full Range</button>
                                 </div>
+                                <div class="d-flex align-items-center gap-2">
+                                    <label class="form-label-small mb-0">EXPORT</label>
+                                    <button class="btn btn-outline-success btn-sm"
+                                        @click="exportAllanCSV" :disabled="isLoadingAllan || !currentAllanData">
+                                        <i class="bi bi-download me-1"></i>CSV
+                                    </button>
+                                </div>
                                 <div class="slice-summary">
                                     <strong>{{ getAllanSummary() }}</strong>
                                 </div>
@@ -2198,6 +2205,126 @@
                         const url = URL.createObjectURL(blob);
                         const link = document.createElement("a"); link.setAttribute("href", url); link.setAttribute("download", `analysis_${this.selectedDay}_${this.selectedRun}.csv`);
                         document.body.appendChild(link); link.click(); document.body.removeChild(link);
+                    }
+                },
+
+                csvCell(value) {
+                    if (value === null || value === undefined) return '';
+                    if (typeof value === 'number') {
+                        return Number.isFinite(value) ? String(value) : '';
+                    }
+                    const text = String(value);
+                    if (!text) return '';
+                    if (/[\",\n]/.test(text)) {
+                        return `"${text.replace(/"/g, '""')}"`;
+                    }
+                    return text;
+                },
+
+                async exportAllanCSV() {
+                    if (!this.showAllanToolbar()) return;
+                    const allanData = this.currentAllanData || await this.ensureAllanData(false);
+                    if (!allanData) {
+                        this.errorMsg = 'Allan export failed: no Allan data available.';
+                        return;
+                    }
+
+                    try {
+                        this.errorMsg = '';
+                        const metric = this.getMetricConfig();
+                        const scaleMode = this.normalizeAllanScaleMode(this.allanScaleMode);
+                        const sourceKey = this.showRawData ? 'raw' : 'fit';
+                        const sourceLabel = this.showRawData ? 'nofit' : 'fit';
+                        const orders = Array.isArray(allanData.orders) ? allanData.orders.map(value => Number(value)) : [];
+                        const metricSeries = allanData?.metrics?.[this.currentTab]?.[sourceKey] || {};
+                        const channelDefs = [
+                            { key: 'up', label: metric.nameUp },
+                            { key: 'dw', label: metric.nameDw }
+                        ];
+                        if (this.showTotalPlot()) {
+                            channelDefs.push({ key: 'total', label: 'TOTAL' });
+                        }
+
+                        const seriesByChannel = {};
+                        channelDefs.forEach(channel => {
+                            const series = metricSeries[channel.key] || {};
+                            seriesByChannel[channel.key] = {
+                                label: channel.label,
+                                values: this.getAllanDisplayValues(series),
+                                validCounts: Array.isArray(series.valid_window_counts) ? series.valid_window_counts : [],
+                                meanValue: series.mean_value ?? ''
+                            };
+                        });
+
+                        const metadataRows = [
+                            ['run_id', this.loadedRunId || this.selectedRun || ''],
+                            ['run_label', this.loadedRunEntry?.run_label || ''],
+                            ['tab', this.currentTab],
+                            ['metric', metric.label],
+                            ['source', sourceLabel],
+                            ['scale_mode', scaleMode],
+                            ['x_axis_mode', this.normalizeAllanXAxisMode(this.allanXAxisMode)],
+                            ['display_mode', allanData.display_mode || this.displayMode || 'saved'],
+                            ['max_order', Number(allanData.used_max_order ?? this.allanOrder)],
+                            ['sequence_length', Number(allanData.sequence_length ?? 0)],
+                            ['total_points', Number(allanData.total_points ?? 0)],
+                            ['filtered_points', Number(allanData.filtered_points ?? allanData.sequence_length ?? 0)],
+                            ['selected_p0_min', allanData.selected_p0_min ?? ''],
+                            ['selected_p0_max', allanData.selected_p0_max ?? ''],
+                            ['summary', this.getAllanSummary()]
+                        ];
+                        channelDefs.forEach(channel => {
+                            metadataRows.push([`${channel.key}_label`, seriesByChannel[channel.key].label]);
+                            metadataRows.push([`${channel.key}_mean_value`, seriesByChannel[channel.key].meanValue]);
+                        });
+
+                        const header = ['order'];
+                        channelDefs.forEach(channel => {
+                            header.push(`${channel.key}_allan_${scaleMode}`, `${channel.key}_valid_windows`);
+                        });
+
+                        const csvRows = metadataRows.map(([key, value]) => `# ${key},${this.csvCell(value)}`);
+                        csvRows.push(header.join(','));
+                        orders.forEach((order, index) => {
+                            const row = [this.csvCell(order)];
+                            channelDefs.forEach(channel => {
+                                const current = seriesByChannel[channel.key];
+                                row.push(this.csvCell(current.values[index]), this.csvCell(current.validCounts[index]));
+                            });
+                            csvRows.push(row.join(','));
+                        });
+
+                        const suggestedName = [
+                            'allan',
+                            this.selectedDay || 'day',
+                            this.selectedRun || this.loadedRunId || 'run',
+                            this.currentTab,
+                            sourceLabel,
+                            scaleMode
+                        ].filter(Boolean).join('_') + '.csv';
+                        const csvContent = csvRows.join('\n');
+
+                        if (window.showSaveFilePicker) {
+                            window.showSaveFilePicker({
+                                suggestedName,
+                                types: [{ description: 'CSV File', accept: { 'text/csv': ['.csv'] } }]
+                            }).then(async handle => {
+                                const writable = await handle.createWritable();
+                                await writable.write(csvContent);
+                                await writable.close();
+                            }).catch(err => { });
+                        } else {
+                            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                            const url = URL.createObjectURL(blob);
+                            const link = document.createElement("a");
+                            link.setAttribute("href", url);
+                            link.setAttribute("download", suggestedName);
+                            document.body.appendChild(link);
+                            link.click();
+                            document.body.removeChild(link);
+                        }
+                    } catch (e) {
+                        this.errorMsg = 'Allan export failed: ' + (e.message || 'Unknown error');
                     }
                 },
 
