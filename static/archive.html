@@ -170,6 +170,50 @@
             color: #495057;
         }
 
+        .collapsible-card-header {
+            width: 100%;
+            text-align: left;
+            border: 0;
+        }
+
+        .collapsible-card-header:focus {
+            box-shadow: none;
+        }
+
+        .collapse-arrow {
+            font-size: 0.95rem;
+        }
+
+        .scan-fit-formula {
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+            min-height: 88px;
+        }
+
+        .scan-fit-result {
+            border: 1px solid #d8e2ef;
+            background: #ffffff;
+            border-radius: 8px;
+            padding: 10px 12px;
+        }
+
+        .scan-fit-param-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 8px;
+        }
+
+        .scan-fit-param-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 6px 8px;
+            border: 1px solid #edf2f7;
+            border-radius: 6px;
+            background: #f8fafc;
+            font-size: 0.78rem;
+        }
+
         @media (max-width: 1200px) {
             .analysis-card-body.analysis-3d-layout {
                 display: block;
@@ -268,11 +312,14 @@
                 </div>
 
                 <div class="card border-primary shadow-sm" v-if="loadedPoints.length > 0">
-                    <div
-                        class="card-header bg-primary text-white border-0 d-flex justify-content-between align-items-center">
+                    <button type="button"
+                        class="card-header collapsible-card-header bg-primary text-white border-0 d-flex justify-content-between align-items-center"
+                        @click="togglePanel('reanalysis')">
                         <span><i class="bi bi-sliders me-2"></i>Re-Analysis</span>
-                    </div>
-                    <div class="card-body p-3 bg-light">
+                        <i class="bi collapse-arrow"
+                            :class="isPanelCollapsed('reanalysis') ? 'bi-chevron-right' : 'bi-chevron-down'"></i>
+                    </button>
+                    <div v-show="!isPanelCollapsed('reanalysis')" class="card-body p-3 bg-light">
                         <div class="row g-2 mb-2">
                             <div class="col-6"><label class="form-label-small">GAIN UP</label><input type="number"
                                     class="form-control form-control-sm fw-bold text-danger"
@@ -338,7 +385,7 @@
                         </div>
 
                         <div class="row g-2 mb-3 border-top pt-2 mt-2">
-                            <div class="col-12"><label class="form-label-small text-dark fw-bold">FITTING</label></div>
+                            <div class="col-12"><label class="form-label-small text-dark fw-bold">TOF FITTING</label></div>
                             <div class="col-12">
                                 <label class="form-label-small">FIT MODEL</label>
                                 <select class="form-select form-select-sm" v-model="analysis.fit_model_key">
@@ -374,7 +421,128 @@
                         </div>
                     </div>
                 </div>
-            </div>
+
+                <div class="card border-info shadow-sm" v-if="loadedPoints.length > 0">
+                    <button type="button"
+                        class="card-header collapsible-card-header bg-info text-white border-0 d-flex justify-content-between align-items-center"
+                        @click="togglePanel('scanFitting')">
+                        <span><i class="bi bi-bezier2 me-2"></i>Fitting</span>
+                        <i class="bi collapse-arrow"
+                            :class="isPanelCollapsed('scanFitting') ? 'bi-chevron-right' : 'bi-chevron-down'"></i>
+                    </button>
+                    <div v-show="!isPanelCollapsed('scanFitting')" class="card-body p-3 bg-light">
+                        <div class="small text-muted mb-2">
+                            Current metric <span class="fw-bold text-dark">{{ getMetricConfig().label }}</span>
+                            <span class="badge bg-secondary ms-2">{{ showRawData ? 'NoFit source' : 'Fit source' }}</span>
+                        </div>
+                        <div v-if="getScanFitAvailabilityMessage()" class="alert alert-warning small p-2 mb-3">
+                            {{ getScanFitAvailabilityMessage() }}
+                        </div>
+
+                        <div class="row g-2 mb-2">
+                            <div class="col-6">
+                                <label class="form-label-small">CHANNEL</label>
+                                <select class="form-select form-select-sm" v-model="scanFit.channel" @change="deactivateScanFitOverlay(true)">
+                                    <option value="up">UP</option>
+                                    <option value="dw">DOWN</option>
+                                </select>
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label-small">MODEL</label>
+                                <select class="form-select form-select-sm" v-model="scanFit.model_key" @change="applyScanFitPreset">
+                                    <option v-for="model in defaultScanFitModels" :key="model.key" :value="model.key">
+                                        {{ model.label }}
+                                    </option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="row g-2 mb-1">
+                            <div class="col-5">
+                                <label class="form-label-small">RANGE MIN</label>
+                                <input type="number" class="form-control form-control-sm" v-model.number="scanFit.range_min"
+                                    @change="deactivateScanFitOverlay(true)" :placeholder="formatScanFitBound(getScanFitBounds().min)">
+                            </div>
+                            <div class="col-5">
+                                <label class="form-label-small">RANGE MAX</label>
+                                <input type="number" class="form-control form-control-sm" v-model.number="scanFit.range_max"
+                                    @change="deactivateScanFitOverlay(true)" :placeholder="formatScanFitBound(getScanFitBounds().max)">
+                            </div>
+                            <div class="col-2 d-grid">
+                                <button class="btn btn-outline-secondary btn-sm mt-auto" @click="useFullScanFitRange"
+                                    :disabled="!getScanFitBounds().hasRange">All</button>
+                            </div>
+                        </div>
+                        <div v-if="getScanFitBounds().hasRange" class="form-text mb-2">
+                            Available P0 range: {{ formatScanFitBound(getScanFitBounds().min) }} to {{ formatScanFitBound(getScanFitBounds().max) }}
+                        </div>
+
+                        <div class="mb-2">
+                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                <label class="form-label-small mb-0">FORMULA</label>
+                                <button class="btn btn-outline-secondary btn-sm py-0 px-2" @click="resetScanFitModel">Reset Model</button>
+                            </div>
+                            <textarea class="form-control form-control-sm scan-fit-formula" rows="3"
+                                v-model="scanFit.model_definition.formula"
+                                placeholder="offset + amp * exp(-((x - center)**2) / (2 * width**2))"></textarea>
+                            <div class="form-text">Presets are editable. Click Run Fit after changing the formula or parameters.</div>
+                        </div>
+
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <label class="form-label-small mb-0">PARAMETERS</label>
+                            <button class="btn btn-outline-secondary btn-sm py-0 px-2" @click="addScanFitParameter"><i class="bi bi-plus"></i></button>
+                        </div>
+                        <div v-if="!(scanFit.model_definition.parameters || []).length" class="small text-muted border rounded bg-white p-2 mb-2">
+                            No parameter rows. Add rows for any symbols used in the formula.
+                        </div>
+                        <div class="scan-fit-param-list">
+                            <div class="row g-2 align-items-end mb-2"
+                                v-for="(param, paramIndex) in (scanFit.model_definition.parameters || [])"
+                                :key="`${scanFit.model_key}-${paramIndex}`">
+                                <div class="col-4">
+                                    <label class="form-label-small">NAME</label>
+                                    <input class="form-control form-control-sm" v-model="param.name" placeholder="amp">
+                                </div>
+                                <div class="col-5">
+                                    <label class="form-label-small">GUESS</label>
+                                    <input class="form-control form-control-sm" v-model="param.guess" placeholder="x_peak / y_min / 0.0">
+                                </div>
+                                <div class="col-2">
+                                    <div class="form-check mt-4 pt-1">
+                                        <input class="form-check-input" type="checkbox"
+                                            :id="`scan-fit-fixed-${paramIndex}`" v-model="param.fixed">
+                                        <label class="form-check-label small" :for="`scan-fit-fixed-${paramIndex}`">Fixed</label>
+                                    </div>
+                                </div>
+                                <div class="col-1 d-grid">
+                                    <button class="btn btn-outline-danger btn-sm" @click="removeScanFitParameter(paramIndex)"><i class="bi bi-x"></i></button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="d-grid gap-2 mt-3">
+                            <button class="btn btn-info btn-sm fw-bold text-white shadow-sm" @click="runScanFit()"
+                                :disabled="isScanFitLoading || !!getScanFitAvailabilityMessage()">
+                                <span v-if="isScanFitLoading" class="spinner-border spinner-border-sm me-1"></span>{{ isScanFitLoading ? 'Fitting...' : 'Run Fit' }}
+                            </button>
+                            <button class="btn btn-outline-secondary btn-sm fw-bold shadow-sm" @click="clearScanFit"
+                                :disabled="!scanFitResult && !scanFit.active">Clear Fit</button>
+                        </div>
+
+                        <div v-if="scanFitError" class="alert alert-danger small p-2 mt-3 mb-0">{{ scanFitError }}</div>
+                        <div v-else-if="scanFitResult" class="scan-fit-result mt-3">
+                            <div class="small fw-bold text-dark mb-1">Overlay Active</div>
+                            <div class="small text-muted mb-2">{{ getScanFitResultSummary() }}</div>
+                            <div class="scan-fit-param-grid">
+                                <div class="scan-fit-param-row" v-for="(value, name) in (scanFitResult.parameter_values || {})" :key="name">
+                                    <span>{{ name }}</span>
+                                    <strong>{{ formatMetricValue(value) }}</strong>
+                                </div>
+                            </div>
+                            <div class="small text-muted mt-2">Residual variance: {{ formatMetricValue(scanFitResult.residual_variance) }}</div>
+                        </div>
+                    </div>
+                </div>
 
             <div class="col-md-9 col-xxl-10">
                 <div class="card mb-4 border-0 shadow-sm" :class="{'maximized': maximizedView === 'analysis'}">
@@ -577,7 +745,8 @@
                     savedDataCount: 0, displayedStats: [], savedStats: [], recalculatedStats: [],
                     savedPreviewMap: {}, recalculatedPreviewMap: {},
                     savedAllanCache: {}, recalculatedAllanCache: {}, currentAllanData: null,
-                    defaultFitModels: [],
+                    defaultFitModels: [], defaultScanFitModels: [],
+                    collapsedPanels: { reanalysis: true, scanFitting: true },
                     analysis: {
                         alpha: 0.0151, beta: 0.0188, R: 1.1, K: 7000,
                         gain_up: -1, gain_dw: -1,
@@ -589,6 +758,15 @@
                         atom_area_method: 'legacy', atom_area_baseline_points: 2,
                         fit_model_key: 'gaussian', fit_models: []
                     },
+                    scanFit: {
+                        active: false,
+                        channel: 'up',
+                        range_min: '',
+                        range_max: '',
+                        model_key: 'gaussian',
+                        model_definition: { key: 'gaussian', label: 'Gaussian', formula: '', parameters: [], roles: {}, area_mode: 'window_integral' }
+                    },
+                    isScanFitLoading: false, scanFitError: '', scanFitResult: null,
                     showRawData: true, maximizedView: null, currentTab: 'atoms', plotMode: 'series', allanOrder: 1, allanScaleMode: 'absolute', allanXAxisMode: 'linear', allanP0AvailableMin: null, allanP0AvailableMax: null, allanP0Min: null, allanP0Max: null, allanP0MinInput: '', allanP0MaxInput: '', plotRevision: 0,
                     tabs: [{ id: 'atoms', label: 'Atom Number' }, { id: 'amp', label: 'Max Voltage' }, { id: 'sigma', label: 'Width (ms)' }, { id: 'temp', label: 'Temperature' }, { id: 'arrival', label: 'Arrival Time' }, { id: 'prob', label: 'Transition Prob.' }, { id: 'intf', label: 'Interferometer' }],
                     historyMap: {}, layoutResBase: {}, layoutResUp: {}, layoutResDw: {}, layoutResTot: {}, layoutOscUp: {}, layoutOscDw: {},
@@ -597,10 +775,10 @@
                 }
             },
             watch: {
-                currentTab() { this.plotRevision++; this.renderMainPlot(); },
-                showRawData() { this.plotRevision++; this.renderMainPlot(); }
+                currentTab() { this.handlePlotContextChange(); },
+                showRawData() { this.handlePlotContextChange(); }
             },
-            mounted() { this.fetchArchiveTree(); this.fetchDefaultFitModels(); this.initPlots(); },
+            mounted() { this.fetchArchiveTree(); this.fetchDefaultFitModels(); this.fetchDefaultScanFitModels(); this.initPlots(); },
             methods: {
                 baseAnalysis() {
                     return {
@@ -615,25 +793,49 @@
                         fit_model_key: 'gaussian', fit_models: []
                     };
                 },
+                baseFitParameter() {
+                    return { name: '', guess: '', fixed: false };
+                },
+                baseFitModel(fallbackKey = 'fit_model') {
+                    const key = String(fallbackKey || 'fit_model');
+                    return { key, label: key, formula: '', parameters: [], roles: {}, area_mode: 'window_integral' };
+                },
+                baseScanFit() {
+                    return {
+                        active: false,
+                        channel: 'up',
+                        range_min: '',
+                        range_max: '',
+                        model_key: this.defaultScanFitModels[0]?.key || 'gaussian',
+                        model_definition: this.cloneFitModel(this.defaultScanFitModels[0] || this.baseFitModel('gaussian'))
+                    };
+                },
+                cloneFitModel(model) {
+                    return JSON.parse(JSON.stringify(model || this.baseFitModel()));
+                },
                 cloneFitModels(models) {
                     return JSON.parse(JSON.stringify(Array.isArray(models) ? models : []));
+                },
+                normalizeFitModel(model = {}, fallbackKey = 'fit_model') {
+                    const key = String(model?.key || fallbackKey || 'fit_model');
+                    return {
+                        key,
+                        label: String(model?.label || key),
+                        formula: String(model?.formula || ''),
+                        parameters: Array.isArray(model?.parameters) ? model.parameters.map(param => ({
+                            name: String(param?.name ?? ''),
+                            guess: String(param?.guess ?? ''),
+                            fixed: Boolean(param?.fixed)
+                        })) : [],
+                        roles: model?.roles && typeof model.roles === 'object' ? { ...model.roles } : {},
+                        area_mode: String(model?.area_mode || 'window_integral')
+                    };
                 },
                 normalizeFitModels(models) {
                     const source = Array.isArray(models) && models.length
                         ? models
                         : this.cloneFitModels(this.defaultFitModels);
-                    return source.map((model, index) => ({
-                        key: String(model?.key || `fit_model_${index + 1}`),
-                        label: String(model?.label || model?.key || `Fit Model ${index + 1}`),
-                        formula: String(model?.formula || ''),
-                        parameters: Array.isArray(model?.parameters) ? model.parameters.map(param => ({
-                            name: String(param?.name || 'param'),
-                            guess: String(param?.guess || ''),
-                            fixed: Boolean(param?.fixed)
-                        })) : [],
-                        roles: model?.roles && typeof model.roles === 'object' ? { ...model.roles } : {},
-                        area_mode: String(model?.area_mode || 'window_integral')
-                    }));
+                    return source.map((model, index) => this.normalizeFitModel(model, `fit_model_${index + 1}`));
                 },
                 normalizeAnalysis(settings = {}) {
                     const normalized = { ...this.baseAnalysis(), ...(settings || {}) };
@@ -648,6 +850,84 @@
                         normalized.fit_model_key = normalized.fit_models[0]?.key || 'gaussian';
                     }
                     return normalized;
+                },
+                normalizeScanFit(settings = {}) {
+                    const defaults = this.defaultScanFitModels.length
+                        ? this.defaultScanFitModels
+                        : [this.baseFitModel('gaussian')];
+                    const normalized = { ...this.baseScanFit(), ...(settings || {}) };
+                    normalized.active = Boolean(normalized.active);
+                    normalized.channel = normalized.channel === 'dw' ? 'dw' : 'up';
+                    const selectedPreset = defaults.find(model => model.key === normalized.model_key) || defaults[0] || this.baseFitModel('gaussian');
+                    normalized.model_key = selectedPreset?.key || normalized.model_key || 'gaussian';
+                    const sourceModel = normalized.model_definition && Object.keys(normalized.model_definition || {}).length
+                        ? normalized.model_definition
+                        : selectedPreset;
+                    normalized.model_definition = this.normalizeFitModel(sourceModel, normalized.model_key || 'scan_fit_model');
+                    normalized.range_min = normalized.range_min === '' || normalized.range_min == null ? '' : Number(normalized.range_min);
+                    normalized.range_max = normalized.range_max === '' || normalized.range_max == null ? '' : Number(normalized.range_max);
+                    return normalized;
+                },
+                handlePlotContextChange() {
+                    if (this.scanFit.active) {
+                        this.scanFitResult = null;
+                    }
+                    this.plotRevision++;
+                    this.renderMainPlot();
+                    this.refreshScanFitIfActive(true);
+                },
+                togglePanel(panelKey) {
+                    this.collapsedPanels = {
+                        ...this.collapsedPanels,
+                        [panelKey]: !Boolean(this.collapsedPanels?.[panelKey])
+                    };
+                    this.$nextTick(() => {
+                        this.resizeAnalysisPlots();
+                        Plotly.Plots.resize('waveformPlotUp');
+                        Plotly.Plots.resize('waveformPlotDw');
+                    });
+                },
+                isPanelCollapsed(panelKey) {
+                    return Boolean(this.collapsedPanels?.[panelKey]);
+                },
+                deactivateScanFitOverlay(clearError = false) {
+                    this.scanFit.active = false;
+                    this.scanFitResult = null;
+                    if (clearError) this.scanFitError = '';
+                    this.plotRevision++;
+                    this.renderMainPlot();
+                },
+                applyScanFitPreset() {
+                    const selected = this.defaultScanFitModels.find(model => model.key === this.scanFit.model_key)
+                        || this.defaultScanFitModels[0]
+                        || this.baseFitModel('gaussian');
+                    this.scanFit = this.normalizeScanFit({
+                        ...this.scanFit,
+                        active: false,
+                        model_key: selected.key,
+                        model_definition: this.cloneFitModel(selected)
+                    });
+                    this.scanFitResult = null;
+                    this.scanFitError = '';
+                    this.plotRevision++;
+                    this.renderMainPlot();
+                },
+                resetScanFitModel() {
+                    this.applyScanFitPreset();
+                },
+                addScanFitParameter() {
+                    if (!Array.isArray(this.scanFit.model_definition?.parameters)) {
+                        this.scanFit.model_definition.parameters = [];
+                    }
+                    this.scanFit.model_definition.parameters.push(this.baseFitParameter());
+                },
+                removeScanFitParameter(index) {
+                    if (!Array.isArray(this.scanFit.model_definition?.parameters)) return;
+                    this.scanFit.model_definition.parameters.splice(index, 1);
+                },
+                formatScanFitBound(value) {
+                    const numeric = Number(value);
+                    return Number.isFinite(numeric) ? numeric.toFixed(6) : '';
                 },
                 buildArchivePayload(extra = {}) {
                     return {
@@ -808,6 +1088,230 @@
                 showAnalysisTools() {
                     return this.show3DControls() || this.showAllanToolbar();
                 },
+                canUseScanFit() {
+                    return !this.getScanFitAvailabilityMessage();
+                },
+                getScanFitAvailabilityMessage() {
+                    if (!this.loadedPoints.length) return 'Load a run first.';
+                    if (this.getActiveScanDimensions() !== 1) return 'Scan fitting only supports 1D scan results.';
+                    if (this.plotMode !== 'series') return 'Switch to Mean mode to fit scan data.';
+                    const series = this.getScanFitSeries();
+                    if (!series.points.length) return 'No finite data points are available for the selected metric.';
+                    return '';
+                },
+                getScanFitSeries(rows = this.getStatsArray()) {
+                    const metric = this.getMetricConfig();
+                    const channel = this.scanFit.channel === 'dw' ? 'dw' : 'up';
+                    const sourceKey = this.showRawData ? 'raw' : 'fit';
+                    const sourceLabel = this.showRawData ? 'NoFit' : 'Fit';
+                    const field = `${this.showRawData ? metric.rawPrefix : metric.fitPrefix}_${channel}`;
+                    const points = (Array.isArray(rows) ? rows : [])
+                        .map(row => ({
+                            x: Number(row.x ?? row.params?.[0] ?? 0),
+                            y: Number(row[field]),
+                            key: row.key
+                        }))
+                        .filter(point => Number.isFinite(point.x) && Number.isFinite(point.y))
+                        .sort((a, b) => a.x - b.x);
+                    return {
+                        metric,
+                        channel,
+                        channelLabel: channel === 'dw' ? metric.nameDw : metric.nameUp,
+                        sourceKey,
+                        sourceLabel,
+                        field,
+                        points
+                    };
+                },
+                getScanFitBounds(points = null) {
+                    const sourcePoints = Array.isArray(points) ? points : this.getScanFitSeries().points;
+                    if (!sourcePoints.length) return { min: null, max: null, hasRange: false };
+                    return {
+                        min: Number(sourcePoints[0].x),
+                        max: Number(sourcePoints[sourcePoints.length - 1].x),
+                        hasRange: true
+                    };
+                },
+                normalizeScanFitRange(points = null) {
+                    const bounds = this.getScanFitBounds(points);
+                    if (!bounds.hasRange) return null;
+
+                    let min = Number(this.scanFit.range_min);
+                    let max = Number(this.scanFit.range_max);
+                    if (!Number.isFinite(min)) min = bounds.min;
+                    if (!Number.isFinite(max)) max = bounds.max;
+                    if (min > max) [min, max] = [max, min];
+
+                    min = Math.max(bounds.min, Math.min(min, bounds.max));
+                    max = Math.min(bounds.max, Math.max(max, bounds.min));
+                    if (min > max) [min, max] = [max, min];
+                    return { min, max };
+                },
+                useFullScanFitRange() {
+                    const bounds = this.getScanFitBounds();
+                    if (!bounds.hasRange) return;
+                    this.scanFit.range_min = bounds.min;
+                    this.scanFit.range_max = bounds.max;
+                    this.deactivateScanFitOverlay(true);
+                },
+                buildScanFitRequestModel() {
+                    const normalized = this.normalizeFitModel(
+                        {
+                            ...this.scanFit.model_definition,
+                            key: this.scanFit.model_key || this.scanFit.model_definition?.key || 'custom',
+                            label: this.scanFit.model_definition?.label || this.scanFit.model_key || 'Custom'
+                        },
+                        this.scanFit.model_key || 'custom'
+                    );
+                    normalized.parameters = (normalized.parameters || [])
+                        .map(param => ({
+                            name: String(param?.name || '').trim(),
+                            guess: String(param?.guess || '').trim(),
+                            fixed: Boolean(param?.fixed)
+                        }))
+                        .filter(param => param.name);
+                    return normalized;
+                },
+                getCurrentScanFitOverlay() {
+                    const result = this.scanFitResult;
+                    if (!result) return null;
+                    if (result.metric_tab !== this.currentTab) return null;
+                    if (result.source_key !== (this.showRawData ? 'raw' : 'fit')) return null;
+                    if (result.channel !== (this.scanFit.channel === 'dw' ? 'dw' : 'up')) return null;
+                    return result;
+                },
+                buildScanFitTrace(result, color) {
+                    return {
+                        x: result.fit_x || [],
+                        y: result.fit_y || [],
+                        type: 'scatter',
+                        mode: 'lines',
+                        name: `${result.channel_label} Scan Fit`,
+                        line: { color, width: 2.5, dash: 'dash' },
+                        hovertemplate: `P0=%{x:.6f}<br>Fit=%{y:.6g}<extra>${result.model_label}</extra>`,
+                        meta: { nonSelectable: true }
+                    };
+                },
+                applyScanFitLayout(layout, result, color) {
+                    if (!result) return layout;
+                    const shapes = Array.isArray(layout.shapes) ? [...layout.shapes] : [];
+                    shapes.push({
+                        type: 'rect',
+                        xref: 'x',
+                        yref: 'paper',
+                        x0: Number(result.fit_min),
+                        x1: Number(result.fit_max),
+                        y0: 0,
+                        y1: 1,
+                        fillcolor: color,
+                        opacity: 0.05,
+                        line: { width: 0 }
+                    });
+                    shapes.push({
+                        type: 'line',
+                        xref: 'x',
+                        yref: 'paper',
+                        x0: Number(result.fit_min),
+                        x1: Number(result.fit_min),
+                        y0: 0,
+                        y1: 1,
+                        line: { color, width: 1, dash: 'dot' }
+                    });
+                    shapes.push({
+                        type: 'line',
+                        xref: 'x',
+                        yref: 'paper',
+                        x0: Number(result.fit_max),
+                        x1: Number(result.fit_max),
+                        y0: 0,
+                        y1: 1,
+                        line: { color, width: 1, dash: 'dot' }
+                    });
+                    return { ...layout, shapes };
+                },
+                async runScanFit(options = {}) {
+                    const silent = Boolean(options?.silent);
+                    const availability = this.getScanFitAvailabilityMessage();
+                    if (availability) {
+                        this.scanFitResult = null;
+                        if (!silent) this.scanFitError = availability;
+                        this.plotRevision++;
+                        this.renderMainPlot();
+                        return null;
+                    }
+
+                    const series = this.getScanFitSeries();
+                    const range = this.normalizeScanFitRange(series.points);
+                    if (!range) {
+                        this.scanFitResult = null;
+                        if (!silent) this.scanFitError = 'No scan range is available for fitting.';
+                        this.plotRevision++;
+                        this.renderMainPlot();
+                        return null;
+                    }
+
+                    this.scanFit.range_min = range.min;
+                    this.scanFit.range_max = range.max;
+                    this.isScanFitLoading = true;
+                    this.scanFitResult = null;
+                    if (!silent) this.scanFitError = '';
+                    this.plotRevision++;
+                    this.renderMainPlot();
+
+                    try {
+                        const res = await axios.post('/archive/scan-fit', {
+                            x_values: series.points.map(point => point.x),
+                            y_values: series.points.map(point => point.y),
+                            fit_min: range.min,
+                            fit_max: range.max,
+                            eval_points: 400,
+                            model: this.buildScanFitRequestModel()
+                        });
+                        this.scanFit.active = true;
+                        this.scanFitResult = {
+                            ...res.data,
+                            metric_tab: this.currentTab,
+                            metric_label: series.metric.label,
+                            source_key: series.sourceKey,
+                            source_label: series.sourceLabel,
+                            channel: series.channel,
+                            channel_label: series.channelLabel
+                        };
+                        this.scanFitError = '';
+                        this.plotRevision++;
+                        await this.$nextTick();
+                        this.renderMainPlot();
+                        await this.$nextTick();
+                        this.resizeAnalysisPlots();
+                        return this.scanFitResult;
+                    } catch (e) {
+                        this.scanFitResult = null;
+                        if (!silent) {
+                            this.scanFitError = 'Scan fit failed: ' + (e.response?.data?.detail || e.message || 'Unknown error');
+                        }
+                        this.plotRevision++;
+                        this.renderMainPlot();
+                        return null;
+                    } finally {
+                        this.isScanFitLoading = false;
+                    }
+                },
+                async refreshScanFitIfActive(silent = true) {
+                    if (!this.scanFit.active) return null;
+                    return this.runScanFit({ silent });
+                },
+                clearScanFit() {
+                    this.scanFit.active = false;
+                    this.scanFitResult = null;
+                    this.scanFitError = '';
+                    this.plotRevision++;
+                    this.renderMainPlot();
+                    this.$nextTick(() => this.resizeAnalysisPlots());
+                },
+                getScanFitResultSummary() {
+                    if (!this.scanFitResult) return '';
+                    return `${this.scanFitResult.metric_label} · ${this.scanFitResult.source_label} · ${this.scanFitResult.channel_label} · ${this.scanFitResult.model_label} · ${this.scanFitResult.point_count} pts · P0 ${this.formatScanFitBound(this.scanFitResult.fit_min)} to ${this.formatScanFitBound(this.scanFitResult.fit_max)}`;
+                },
                 isThreeDimensionalView() {
                     return this.getActiveScanDimensions() === 3;
                 },
@@ -904,6 +1408,7 @@
                     this.plotMode = mode === 'allan' ? 'allan' : 'series';
                     this.allanOrder = this.plotMode === 'allan' ? this.getMaxAllanOrder() : this.normalizeAllanOrder();
                     this.plotRevision++;
+                    this.scanFitResult = null;
                     if (this.plotMode === 'allan') {
                         this.selectedPointKey = '';
                         this.selectedPointKeys = [];
@@ -914,6 +1419,7 @@
                         await this.refreshAllanIfNeeded(false);
                     }
                     await this.refreshAnalysisView();
+                    await this.refreshScanFitIfActive(true);
                 },
                 getMaxAllanOrder() {
                     const count = Number(this.currentAllanData?.max_order ?? Math.floor(Number(this.dataCount ?? 0) / 2));
@@ -1234,6 +1740,7 @@
                     this.allanOrder = this.getMaxAllanOrder();
                     this.plotRevision++;
                     await this.refreshAnalysisView();
+                    await this.refreshScanFitIfActive(true);
                 },
                 resizePlot(plotId) {
                     const plotEl = document.getElementById(plotId);
@@ -1261,6 +1768,15 @@
                         const res = await axios.get('/fitting/models/defaults');
                         this.defaultFitModels = this.normalizeFitModels(res.data);
                         this.analysis = this.normalizeAnalysis(this.analysis);
+                    } catch (e) {
+                        console.error(e);
+                    }
+                },
+                async fetchDefaultScanFitModels() {
+                    try {
+                        const res = await axios.get('/fitting/models/scan-defaults');
+                        this.defaultScanFitModels = this.normalizeFitModels(res.data);
+                        this.scanFit = this.normalizeScanFit(this.scanFit);
                     } catch (e) {
                         console.error(e);
                     }
@@ -1320,6 +1836,8 @@
                     this.selectedAllanWindow = null;
                     this.clearAllanCache();
                     this.errorMsg = '';
+                    this.scanFitResult = null;
+                    this.scanFitError = '';
 
                     // 重置波形图
                     Plotly.react('waveformPlotUp', [], this.layoutOscUp);
@@ -1380,6 +1898,8 @@
                     this.selectedAllanWindow = null;
                     this.clearAllanCache('recalculated');
                     this.errorMsg = '';
+                    this.scanFitResult = null;
+                    this.scanFitError = '';
                     try {
                         this.analysis = this.normalizeAnalysis(this.analysis);
                         const res = await axios.post('/archive/recalculate', this.buildArchivePayload());
@@ -1425,6 +1945,8 @@
                     this.selectedAllanWindow = null;
                     this.errorMsg = '';
                     this.dataCount = this.savedDataCount;
+                    this.scanFitResult = null;
+                    this.scanFitError = '';
                     await this.applyDisplayedPoints(this.loadedPoints, this.savedStats, this.savedPreviewMap, false);
                     if (this.plotMode === 'allan') {
                         this.syncCurrentAllanData();
@@ -1518,6 +2040,7 @@
                     if (!data || !data.points) return;
                     if (this.plotMode === 'allan') return;
                     const point = data.points[0];
+                    if (point?.data?.meta?.nonSelectable) return;
                     const keys = this.resolveClickedKeys(point);
                     const indices = this.collectHistoryIndices(keys);
                     if (indices.length) {
@@ -1996,8 +2519,21 @@
                         });
                     }
 
-                    this.layoutResUp = this.build1DLayout('up', metric);
-                    this.layoutResDw = this.build1DLayout('dw', metric);
+                    const scanFitOverlay = this.getCurrentScanFitOverlay();
+                    let layoutUp = this.build1DLayout('up', metric);
+                    let layoutDw = this.build1DLayout('dw', metric);
+
+                    if (scanFitOverlay?.channel === 'up') {
+                        tracesUp.push(this.buildScanFitTrace(scanFitOverlay, '#6f42c1'));
+                        layoutUp = this.applyScanFitLayout(layoutUp, scanFitOverlay, '#6f42c1');
+                    }
+                    if (scanFitOverlay?.channel === 'dw') {
+                        tracesDw.push(this.buildScanFitTrace(scanFitOverlay, '#0f766e'));
+                        layoutDw = this.applyScanFitLayout(layoutDw, scanFitOverlay, '#0f766e');
+                    }
+
+                    this.layoutResUp = layoutUp;
+                    this.layoutResDw = layoutDw;
                     Plotly.react('resultsPlotUp', tracesUp, this.layoutResUp);
                     Plotly.react('resultsPlotDw', tracesDw, this.layoutResDw);
 

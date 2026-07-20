@@ -182,3 +182,12 @@ class ArchiveAllanRequest(BaseModel):
     p0_min: Optional[float] = Field(None)
     p0_max: Optional[float] = Field(None)
     new_settings: ArchiveAnalysisSettings
+
+
+class ArchiveScanFitRequest(BaseModel):
+    x_values: List[float] = Field(default_factory=list)
+    y_values: List[float] = Field(default_factory=list)
+    fit_min: Optional[float] = Field(None)
+    fit_max: Optional[float] = Field(None)
+    eval_points: int = Field(400, ge=32, le=4000)
+    model: FitModelDefinition

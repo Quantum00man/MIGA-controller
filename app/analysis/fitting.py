@@ -109,6 +109,75 @@ DEFAULT_FIT_MODELS: List[Dict[str, Any]] = [
     },
 ]
 
+
+DEFAULT_SCAN_FIT_MODELS: List[Dict[str, Any]] = [
+    {
+        "key": "gaussian",
+        "label": "Gaussian",
+        "formula": "offset + amp * exp(-((x - center)**2) / (2 * sigma**2))",
+        "parameters": [
+            {"name": "amp", "guess": "max(y_range, 1e-6)", "fixed": False},
+            {"name": "sigma", "guess": "max(x_span / 6, 1e-4)", "fixed": False},
+            {"name": "center", "guess": "x_peak", "fixed": False},
+            {"name": "offset", "guess": "y_min", "fixed": False},
+        ],
+        "roles": {"amplitude": "amp", "width": "sigma", "center": "center", "offset": "offset"},
+        "area_mode": "window_integral",
+    },
+    {
+        "key": "lorentzian",
+        "label": "Lorentzian",
+        "formula": "offset + amp / (1 + ((x - center) / width)**2)",
+        "parameters": [
+            {"name": "amp", "guess": "max(y_range, 1e-6)", "fixed": False},
+            {"name": "width", "guess": "max(x_span / 8, 1e-4)", "fixed": False},
+            {"name": "center", "guess": "x_peak", "fixed": False},
+            {"name": "offset", "guess": "y_min", "fixed": False},
+        ],
+        "roles": {"amplitude": "amp", "width": "width", "center": "center", "offset": "offset"},
+        "area_mode": "window_integral",
+    },
+    {
+        "key": "rabi_oscillation",
+        "label": "Rabi Oscillation",
+        "formula": "offset + amp * sin(2 * pi * x / period + phase)**2",
+        "parameters": [
+            {"name": "amp", "guess": "max(y_range, 1e-6)", "fixed": False},
+            {"name": "period", "guess": "max(x_span / 3, 1e-4)", "fixed": False},
+            {"name": "phase", "guess": "0.0", "fixed": False},
+            {"name": "offset", "guess": "y_min", "fixed": False},
+        ],
+        "roles": {"amplitude": "amp", "width": "period", "offset": "offset"},
+        "area_mode": "window_integral",
+    },
+    {
+        "key": "ai_fringes",
+        "label": "AI Fringes",
+        "formula": "offset + amp * cos(2 * pi * x / period + phase)",
+        "parameters": [
+            {"name": "amp", "guess": "max(y_range / 2, 1e-6)", "fixed": False},
+            {"name": "period", "guess": "max(x_span / 3, 1e-4)", "fixed": False},
+            {"name": "phase", "guess": "0.0", "fixed": False},
+            {"name": "offset", "guess": "y_mean", "fixed": False},
+        ],
+        "roles": {"amplitude": "amp", "width": "period", "offset": "offset"},
+        "area_mode": "window_integral",
+    },
+    {
+        "key": "custom",
+        "label": "Custom",
+        "formula": "offset + amp * exp(-((x - center)**2) / (2 * width**2))",
+        "parameters": [
+            {"name": "amp", "guess": "max(y_range, 1e-6)", "fixed": False},
+            {"name": "width", "guess": "max(x_span / 6, 1e-4)", "fixed": False},
+            {"name": "center", "guess": "x_peak", "fixed": False},
+            {"name": "offset", "guess": "y_min", "fixed": False},
+        ],
+        "roles": {"amplitude": "amp", "width": "width", "center": "center", "offset": "offset"},
+        "area_mode": "window_integral",
+    },
+]
+
 _ALLOWED_AST_NODES = (
     ast.Expression,
     ast.BinOp,
@@ -301,6 +370,10 @@ def calculate_area_with_edge_baseline(x_data: np.ndarray, y_data: np.ndarray, ba
 
 def get_default_fit_models() -> List[Dict[str, Any]]:
     return copy.deepcopy(DEFAULT_FIT_MODELS)
+
+
+def get_default_scan_fit_models() -> List[Dict[str, Any]]:
+    return copy.deepcopy(DEFAULT_SCAN_FIT_MODELS)
 
 
 def sanitize_model_key(value: Any) -> str:

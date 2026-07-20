@@ -1,5 +1,7 @@
 import os
 import shutil
+
+import numpy as np
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from pydantic import BaseModel
 from typing import Dict, Any, List
@@ -11,6 +13,7 @@ from app.models.schemas import (
     AnalysisSettings,
     ArchiveAllanRequest,
     ArchiveRunReference,
+    ArchiveScanFitRequest,
     ArchiveWaveformRequest,
     ExperimentResponse,
     FitModelDefinition,
@@ -148,6 +151,11 @@ async def apply_system_update(req: SystemUpdateRequest):
 async def get_default_fitting_models():
     return fitting.get_default_fit_models()
 
+
+@router.get("/fitting/models/scan-defaults", response_model=List[FitModelDefinition])
+async def get_default_scan_fitting_models():
+    return fitting.get_default_scan_fit_models()
+
 # --- 4. Archive ---
 @router.get("/archive/tree")
 async def get_archive_tree(): return data_loader.get_archive_tree()
@@ -219,6 +227,68 @@ async def recalculate_archived_waveforms(req: ArchiveWaveformRequest):
         raise HTTPException(400, str(exc))
     except Exception as exc:
         raise HTTPException(500, str(exc))
+
+
+@router.post("/archive/scan-fit")
+async def fit_archive_scan(req: ArchiveScanFitRequest):
+    if len(req.x_values) != len(req.y_values):
+        raise HTTPException(400, "x_values and y_values must have the same length")
+
+    model_definition = req.model.dict()
+    model_error = fitting.validate_fit_model_definition(model_definition)
+    if model_error:
+        raise HTTPException(400, f"Invalid fit model: {model_error}")
+
+    fit_min = float(req.fit_min) if req.fit_min is not None else None
+    fit_max = float(req.fit_max) if req.fit_max is not None else None
+    if fit_min is not None and fit_max is not None and fit_min > fit_max:
+        fit_min, fit_max = fit_max, fit_min
+
+    filtered_pairs = []
+    for raw_x, raw_y in zip(req.x_values, req.y_values):
+        x_val = float(raw_x)
+        y_val = float(raw_y)
+        if not np.isfinite(x_val) or not np.isfinite(y_val):
+            continue
+        if fit_min is not None and x_val < fit_min:
+            continue
+        if fit_max is not None and x_val > fit_max:
+            continue
+        filtered_pairs.append((x_val, y_val))
+
+    if len(filtered_pairs) < 2:
+        raise HTTPException(400, "Need at least 2 valid points inside the selected scan range")
+
+    filtered_pairs.sort(key=lambda item: item[0])
+    x_data = np.asarray([item[0] for item in filtered_pairs], dtype=float)
+    y_data = np.asarray([item[1] for item in filtered_pairs], dtype=float)
+
+    eval_points = max(32, min(int(req.eval_points or 400), 4000))
+    if np.isclose(x_data[0], x_data[-1]):
+        eval_x = x_data.copy()
+    else:
+        eval_x = np.linspace(float(x_data[0]), float(x_data[-1]), eval_points)
+
+    fit_result = fitting.perform_configured_fit(model_definition, x_data, y_data, eval_x=eval_x)
+    if fit_result is None:
+        raise HTTPException(400, "Fit failed. Try a different model, scan range, or initial guesses.")
+
+    return {
+        "model_key": fit_result.model_key,
+        "model_label": fit_result.model_label,
+        "point_count": len(filtered_pairs),
+        "fit_min": float(x_data[0]),
+        "fit_max": float(x_data[-1]),
+        "fit_x": eval_x.tolist(),
+        "fit_y": fit_result.fit_curve.tolist(),
+        "parameter_values": fit_result.parameter_values,
+        "residual_variance": fit_result.residual_variance,
+        "amplitude": fit_result.amplitude,
+        "width": fit_result.width,
+        "center": fit_result.center,
+        "offset": fit_result.offset,
+    }
+
 
 @router.post("/archive/overwrite", response_model=ExperimentResponse)
 async def overwrite_archived_run(req: ReAnalysisRequest):
