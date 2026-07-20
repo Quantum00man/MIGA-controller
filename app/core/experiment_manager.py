@@ -465,6 +465,101 @@ class ExperimentManager:
         except Exception as e:
             print(f"[Settings] Save failed: {e}")
 
+    def _load_user_json_payload(self) -> Dict[str, Any]:
+        payload_path = Path(config.USER_JSON_PATH)
+        if not payload_path.exists():
+            return {}
+        try:
+            with open(payload_path, 'r') as f:
+                payload = json.load(f)
+            return payload if isinstance(payload, dict) else {}
+        except Exception as exc:
+            print(f"[User JSON] Load failed: {exc}")
+            return {}
+
+    def _save_user_json_payload(self, payload: Dict[str, Any]):
+        try:
+            with open(config.USER_JSON_PATH, 'w') as f:
+                json.dump(payload, f, indent=4)
+            print(f"[User JSON] Saved to {config.USER_JSON_PATH}")
+        except Exception as exc:
+            print(f"[User JSON] Save failed: {exc}")
+
+    def _normalize_custom_scan_fit_models(self, models: List[Dict[str, Any]], strict: bool = False) -> List[Dict[str, Any]]:
+        normalized: List[Dict[str, Any]] = []
+        seen = set()
+        for idx, model in enumerate(models or []):
+            try:
+                norm = fitting.normalize_fit_model_definition(model, fallback_key=f"user_scan_fit_model_{idx + 1}")
+                raw_key = str(norm.get('key') or '').strip()
+                if raw_key.startswith('user_'):
+                    base_key = raw_key
+                else:
+                    base_key = f"user_{fitting.sanitize_model_key(norm.get('label') or raw_key or f'user_scan_fit_model_{idx + 1}') }"
+                key = base_key
+                suffix = 1
+                while key in seen:
+                    suffix += 1
+                    key = f"{base_key}_{suffix}"
+                norm['key'] = key
+                error = fitting.validate_fit_model_definition(norm)
+                if error:
+                    raise ValueError(error)
+                normalized.append(norm)
+                seen.add(key)
+            except Exception as exc:
+                if strict:
+                    raise ValueError(f"Invalid custom scan fit model #{idx + 1}: {exc}")
+                print(f"[User JSON] Skipping invalid custom scan fit model #{idx + 1}: {exc}")
+        return normalized
+
+    def get_custom_scan_fit_models(self) -> List[Dict[str, Any]]:
+        payload = self._load_user_json_payload()
+        raw_models = payload.get('scan_fit_models')
+        if not isinstance(raw_models, list):
+            raw_models = []
+        return self._normalize_custom_scan_fit_models(raw_models, strict=False)
+
+    def get_scan_fit_models(self) -> List[Dict[str, Any]]:
+        return fitting.get_default_scan_fit_models() + self.get_custom_scan_fit_models()
+
+    def save_custom_scan_fit_model(self, model_definition: Dict[str, Any], name: str) -> Dict[str, Any]:
+        label = str(name or '').strip()
+        if not label:
+            raise ValueError('Model name is required')
+
+        source_key = str((model_definition or {}).get('key') or '').strip()
+        requested_key = source_key if source_key.startswith('user_') else label
+        candidate = fitting.normalize_fit_model_definition(
+            {
+                **(model_definition or {}),
+                'key': requested_key,
+                'label': label,
+            },
+            fallback_key=label,
+        )
+        if not candidate['key'].startswith('user_'):
+            candidate['key'] = f"user_{candidate['key']}"
+
+        validation_error = fitting.validate_fit_model_definition(candidate)
+        if validation_error:
+            raise ValueError(f"Invalid model: {validation_error}")
+
+        payload = self._load_user_json_payload()
+        models = self.get_custom_scan_fit_models()
+        replaced = False
+        for idx, model in enumerate(models):
+            if model.get('key') == candidate['key']:
+                models[idx] = candidate
+                replaced = True
+                break
+        if not replaced:
+            models.append(candidate)
+
+        payload['scan_fit_models'] = self._normalize_custom_scan_fit_models(models, strict=True)
+        self._save_user_json_payload(payload)
+        return candidate
+
     def get_settings(self) -> Dict[str, Any]: return self.settings
 
     def _normalize_fit_settings(self, settings: Dict[str, Any], strict: bool = False) -> Dict[str, Any]:

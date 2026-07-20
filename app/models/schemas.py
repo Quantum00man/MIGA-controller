@@ -191,3 +191,8 @@ class ArchiveScanFitRequest(BaseModel):
     fit_max: Optional[float] = Field(None)
     eval_points: int = Field(400, ge=32, le=4000)
     model: FitModelDefinition
+
+
+class ScanFitModelSaveRequest(BaseModel):
+    name: str
+    model: FitModelDefinition

@@ -12,6 +12,7 @@ DATA_BASE_DIR = BASE_DIR / "Data_log"
 
 # Persistent Settings File
 SETTINGS_FILE_PATH = BASE_DIR / "user_settings.json"
+USER_JSON_PATH = BASE_DIR / "user.json"
 
 # --- Hardware Paths ---
 TMOT_BINARY_PATH_WIN = str(BASE_DIR / "mock_bin" / "tmot4_mock.exe")

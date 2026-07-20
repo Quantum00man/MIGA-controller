@@ -214,6 +214,45 @@
             font-size: 0.78rem;
         }
 
+        .archive-display-menu {
+            position: relative;
+        }
+
+        .archive-display-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            white-space: nowrap;
+        }
+
+        .archive-display-panel {
+            position: absolute;
+            top: calc(100% + 8px);
+            right: 0;
+            width: 268px;
+            padding: 12px;
+            background: #ffffff;
+            border: 1px solid #dbe5ef;
+            border-radius: 10px;
+            box-shadow: 0 14px 32px rgba(15, 23, 42, 0.12);
+            z-index: 40;
+        }
+
+        .archive-display-group + .archive-display-group {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid #eef2f7;
+        }
+
+        .archive-display-source .btn {
+            flex: 1 1 50%;
+        }
+
+        .archive-display-switches {
+            display: grid;
+            gap: 8px;
+        }
+
         @media (max-width: 1200px) {
             .analysis-card-body.analysis-3d-layout {
                 display: block;
@@ -520,6 +559,21 @@
                             </div>
                         </div>
 
+                        <div class="row g-2 mt-3 mb-2">
+                            <div class="col-8">
+                                <label class="form-label-small">SAVE NAME</label>
+                                <input class="form-control form-control-sm" v-model.trim="scanFit.save_name"
+                                    placeholder="My custom scan model">
+                            </div>
+                            <div class="col-4 d-grid">
+                                <button class="btn btn-outline-primary btn-sm mt-auto fw-bold" @click="saveScanFitModel"
+                                    :disabled="isSavingScanFitModel || !canSaveScanFitModel()">
+                                    <span v-if="isSavingScanFitModel" class="spinner-border spinner-border-sm me-1"></span>{{ isSavingScanFitModel ? 'Saving...' : 'Save Model' }}
+                                </button>
+                            </div>
+                        </div>
+                        <div v-if="scanFitSaveMsg" class="small text-success mb-2">{{ scanFitSaveMsg }}</div>
+
                         <div class="d-grid gap-2 mt-3">
                             <button class="btn btn-info btn-sm fw-bold text-white shadow-sm" @click="runScanFit()"
                                 :disabled="isScanFitLoading || !!getScanFitAvailabilityMessage()">
@@ -566,11 +620,45 @@
                                 <button class="btn btn-outline-success fw-bold" @click="exportAllPlots"
                                     :disabled="!loadedRunId"><i class="bi bi-camera-fill"></i> Plots</button>
                             </div>
-                            <div class="form-check form-switch ms-2">
-                                <input class="form-check-input m-0" type="checkbox" id="showRaw" v-model="showRawData"
-                                    style="cursor: pointer;">
-                                <label class="form-check-label small fw-bold text-muted" for="showRaw"
-                                    style="cursor: pointer;">{{ getActiveScanDimensions() === 1 ? 'NoFit' : 'Use NoFit' }}</label>
+                            <div class="archive-display-menu ms-2" ref="displayMenuWrap">
+                                <button class="btn btn-outline-secondary btn-sm archive-display-btn"
+                                    @click.stop="toggleDisplayMenu">
+                                    <i class="bi bi-sliders2"></i>
+                                    <span class="fw-bold">Display</span>
+                                    <span class="badge bg-light text-dark border">{{ showRawData ? 'NoFit' : 'Fit' }}</span>
+                                    <i class="bi" :class="showDisplayMenu ? 'bi-chevron-up' : 'bi-chevron-down'"></i>
+                                </button>
+                                <div v-show="showDisplayMenu" class="archive-display-panel" @click.stop>
+                                    <div class="archive-display-group">
+                                        <div class="form-label-small text-uppercase mb-2">Analysis Source</div>
+                                        <div class="btn-group btn-group-sm d-flex archive-display-source">
+                                            <button class="btn"
+                                                :class="showRawData ? 'btn-outline-primary' : 'btn-primary'"
+                                                @click="setAnalysisSource(false)">Fit</button>
+                                            <button class="btn"
+                                                :class="showRawData ? 'btn-primary' : 'btn-outline-primary'"
+                                                @click="setAnalysisSource(true)">NoFit</button>
+                                        </div>
+                                        <div class="form-text mt-2">Affects scan-fit source and non-1D analysis views.</div>
+                                    </div>
+                                    <div class="archive-display-group">
+                                        <div class="form-label-small text-uppercase mb-2">Curve Visibility</div>
+                                        <div class="archive-display-switches">
+                                            <div class="form-check form-switch mb-0">
+                                                <input class="form-check-input" type="checkbox" id="showTofFitCurve" v-model="showTofFitCurve">
+                                                <label class="form-check-label small fw-bold text-muted" for="showTofFitCurve">TOF Fit</label>
+                                            </div>
+                                            <div class="form-check form-switch mb-0">
+                                                <input class="form-check-input" type="checkbox" id="showTofRawCurve" v-model="showTofRawCurve">
+                                                <label class="form-check-label small fw-bold text-muted" for="showTofRawCurve">TOF Raw</label>
+                                            </div>
+                                            <div class="form-check form-switch mb-0">
+                                                <input class="form-check-input" type="checkbox" id="showScanFitCurve" v-model="showScanFitCurve">
+                                                <label class="form-check-label small fw-bold text-muted" for="showScanFitCurve">Scan Fit Curve</label>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                             <div v-if="canUseAllanMode()" class="btn-group btn-group-sm ms-2">
                                 <button class="btn"
@@ -766,9 +854,11 @@
                         range_min: '',
                         range_max: '',
                         model_key: 'gaussian',
+                        save_name: '',
                         model_definition: { key: 'gaussian', label: 'Gaussian', formula: '', parameters: [], roles: {}, area_mode: 'window_integral' }
                     },
-                    isScanFitLoading: false, scanFitError: '', scanFitResult: null,
+                    isScanFitLoading: false, isSavingScanFitModel: false, scanFitError: '', scanFitResult: null, scanFitSaveMsg: '',
+                    showDisplayMenu: false, showTofFitCurve: true, showTofRawCurve: true, showScanFitCurve: true,
                     showRawData: true, maximizedView: null, currentTab: 'atoms', plotMode: 'series', allanOrder: 1, allanScaleMode: 'absolute', allanXAxisMode: 'linear', allanP0AvailableMin: null, allanP0AvailableMax: null, allanP0Min: null, allanP0Max: null, allanP0MinInput: '', allanP0MaxInput: '', plotRevision: 0,
                     tabs: [{ id: 'atoms', label: 'Atom Number' }, { id: 'amp', label: 'Max Voltage' }, { id: 'sigma', label: 'Width (ms)' }, { id: 'temp', label: 'Temperature' }, { id: 'arrival', label: 'Arrival Time' }, { id: 'prob', label: 'Transition Prob.' }, { id: 'intf', label: 'Interferometer' }],
                     historyMap: {}, layoutResBase: {}, layoutResUp: {}, layoutResDw: {}, layoutResTot: {}, layoutOscUp: {}, layoutOscDw: {},
@@ -778,9 +868,21 @@
             },
             watch: {
                 currentTab() { this.handlePlotContextChange(); },
-                showRawData() { this.handlePlotContextChange(); }
+                showRawData() { this.handlePlotContextChange(); },
+                showTofFitCurve() { this.handleCurveVisibilityChange(); },
+                showTofRawCurve() { this.handleCurveVisibilityChange(); },
+                showScanFitCurve() { this.handleScanFitVisibilityChange(); }
             },
-            mounted() { this.fetchArchiveTree(); this.fetchDefaultFitModels(); this.fetchDefaultScanFitModels(); this.initPlots(); },
+            mounted() {
+                this.fetchArchiveTree();
+                this.fetchDefaultFitModels();
+                this.fetchDefaultScanFitModels();
+                this.initPlots();
+                document.addEventListener('click', this.handleDocumentClick, true);
+            },
+            beforeUnmount() {
+                document.removeEventListener('click', this.handleDocumentClick, true);
+            },
             methods: {
                 baseAnalysis() {
                     return {
@@ -809,6 +911,7 @@
                         range_min: '',
                         range_max: '',
                         model_key: this.defaultScanFitModels[0]?.key || 'gaussian',
+                        save_name: '',
                         model_definition: this.cloneFitModel(this.defaultScanFitModels[0] || this.baseFitModel('gaussian'))
                     };
                 },
@@ -853,6 +956,12 @@
                     }
                     return normalized;
                 },
+                hasConfiguredScanFitModel(model) {
+                    return Boolean(model && typeof model === 'object' && String(model.formula || '').trim());
+                },
+                defaultScanFitSaveName(model) {
+                    return String(model?.key || '').startsWith('user_') ? String(model?.label || '').trim() : '';
+                },
                 normalizeScanFit(settings = {}) {
                     const defaults = this.defaultScanFitModels.length
                         ? this.defaultScanFitModels
@@ -862,10 +971,12 @@
                     normalized.channel = normalized.channel === 'dw' ? 'dw' : 'up';
                     const selectedPreset = defaults.find(model => model.key === normalized.model_key) || defaults[0] || this.baseFitModel('gaussian');
                     normalized.model_key = selectedPreset?.key || normalized.model_key || 'gaussian';
-                    const sourceModel = normalized.model_definition && Object.keys(normalized.model_definition || {}).length
+                    const sourceModel = this.hasConfiguredScanFitModel(normalized.model_definition)
                         ? normalized.model_definition
                         : selectedPreset;
                     normalized.model_definition = this.normalizeFitModel(sourceModel, normalized.model_key || 'scan_fit_model');
+                    const explicitSaveName = String(settings?.save_name ?? '').trim();
+                    normalized.save_name = explicitSaveName || this.defaultScanFitSaveName(normalized.model_definition);
                     normalized.range_min = normalized.range_min === '' || normalized.range_min == null ? '' : Number(normalized.range_min);
                     normalized.range_max = normalized.range_max === '' || normalized.range_max == null ? '' : Number(normalized.range_max);
                     return normalized;
@@ -874,9 +985,32 @@
                     if (this.scanFit.active) {
                         this.scanFitResult = null;
                     }
+                    this.showDisplayMenu = false;
                     this.plotRevision++;
                     this.renderMainPlot();
                     this.refreshScanFitIfActive(true);
+                },
+                async handleCurveVisibilityChange() {
+                    this.plotRevision++;
+                    this.renderMainPlot();
+                    await this.refreshWaveformPreview();
+                },
+                handleScanFitVisibilityChange() {
+                    this.plotRevision++;
+                    this.renderMainPlot();
+                },
+                toggleDisplayMenu() {
+                    this.showDisplayMenu = !this.showDisplayMenu;
+                },
+                handleDocumentClick(event) {
+                    if (!this.showDisplayMenu) return;
+                    const root = this.$refs.displayMenuWrap;
+                    if (root && !root.contains(event.target)) {
+                        this.showDisplayMenu = false;
+                    }
+                },
+                setAnalysisSource(useRaw) {
+                    this.showRawData = Boolean(useRaw);
                 },
                 togglePanel(panelKey) {
                     this.collapsedPanels = {
@@ -892,10 +1026,23 @@
                 isPanelCollapsed(panelKey) {
                     return Boolean(this.collapsedPanels?.[panelKey]);
                 },
+                resetScanFitSession(options = {}) {
+                    const clearRange = options.clearRange !== false;
+                    this.scanFit = this.normalizeScanFit({
+                        ...this.scanFit,
+                        active: false,
+                        range_min: clearRange ? '' : this.scanFit.range_min,
+                        range_max: clearRange ? '' : this.scanFit.range_max,
+                    });
+                    this.scanFitResult = null;
+                    this.scanFitError = '';
+                    this.scanFitSaveMsg = '';
+                },
                 deactivateScanFitOverlay(clearError = false) {
                     this.scanFit.active = false;
                     this.scanFitResult = null;
                     if (clearError) this.scanFitError = '';
+                    this.scanFitSaveMsg = '';
                     this.plotRevision++;
                     this.renderMainPlot();
                 },
@@ -907,15 +1054,57 @@
                         ...this.scanFit,
                         active: false,
                         model_key: selected.key,
-                        model_definition: this.cloneFitModel(selected)
+                        model_definition: this.cloneFitModel(selected),
+                        save_name: this.defaultScanFitSaveName(selected)
                     });
                     this.scanFitResult = null;
                     this.scanFitError = '';
+                    this.scanFitSaveMsg = '';
                     this.plotRevision++;
                     this.renderMainPlot();
                 },
                 resetScanFitModel() {
                     this.applyScanFitPreset();
+                },
+                canSaveScanFitModel() {
+                    return Boolean(String(this.scanFit.save_name || '').trim());
+                },
+                async saveScanFitModel() {
+                    const saveName = String(this.scanFit.save_name || '').trim();
+                    if (!saveName) {
+                        this.scanFitSaveMsg = '';
+                        this.scanFitError = 'Please enter a model name before saving.';
+                        return;
+                    }
+
+                    this.isSavingScanFitModel = true;
+                    this.scanFitSaveMsg = '';
+                    try {
+                        const model = this.buildScanFitRequestModel();
+                        model.label = saveName;
+                        model.key = String(this.scanFit.model_key || '').startsWith('user_')
+                            ? this.scanFit.model_key
+                            : saveName;
+                        const res = await axios.post('/fitting/models/scan-custom', {
+                            name: saveName,
+                            model,
+                        });
+                        this.defaultScanFitModels = this.normalizeFitModels(res.data?.models || []);
+                        const savedModel = this.normalizeFitModel(res.data?.saved_model || model, saveName);
+                        this.scanFit = this.normalizeScanFit({
+                            ...this.scanFit,
+                            model_key: savedModel.key,
+                            model_definition: savedModel,
+                            save_name: savedModel.label,
+                        });
+                        this.scanFitError = '';
+                        this.scanFitSaveMsg = `Saved model "${savedModel.label}".`;
+                    } catch (e) {
+                        this.scanFitSaveMsg = '';
+                        this.scanFitError = 'Save model failed: ' + (e.response?.data?.detail || e.message || 'Unknown error');
+                    } finally {
+                        this.isSavingScanFitModel = false;
+                    }
                 },
                 addScanFitParameter() {
                     if (!Array.isArray(this.scanFit.model_definition?.parameters)) {
@@ -1175,6 +1364,7 @@
                     return normalized;
                 },
                 getCurrentScanFitOverlay() {
+                    if (!this.showScanFitCurve) return null;
                     const result = this.scanFitResult;
                     if (!result) return null;
                     if (result.metric_tab !== this.currentTab) return null;
@@ -1838,8 +2028,7 @@
                     this.selectedAllanWindow = null;
                     this.clearAllanCache();
                     this.errorMsg = '';
-                    this.scanFitResult = null;
-                    this.scanFitError = '';
+                    this.resetScanFitSession({ clearRange: true });
 
                     // 重置波形图
                     Plotly.react('waveformPlotUp', [], this.layoutOscUp);
@@ -2096,13 +2285,17 @@
                             }
 
                             // 2. 添加波形数据 Traces
-                            tracesUp.push({ x: timeMs, y: data.raw_up, type: 'scatter', mode: 'lines', line: { color: '#ffc107', width: 1 }, opacity: 0.5, name: `Raw #${idx}`, showlegend: false });
-                            tracesUp.push({ x: timeMs, y: data.fit_up, type: 'scatter', mode: 'lines', line: { color: '#dc3545', width: 1.5 }, opacity: 0.6, name: `Fit #${idx}`, showlegend: false });
-                            tracesDw.push({ x: timeMs, y: data.raw_dw, type: 'scatter', mode: 'lines', line: { color: '#20c997', width: 1 }, opacity: 0.5, name: `Raw #${idx}`, showlegend: false });
-                            tracesDw.push({ x: timeMs, y: data.fit_dw, type: 'scatter', mode: 'lines', line: { color: '#0d6efd', width: 1.5 }, opacity: 0.6, name: `Fit #${idx}`, showlegend: false });
+                            if (this.showTofRawCurve) {
+                                tracesUp.push({ x: timeMs, y: data.raw_up, type: 'scatter', mode: 'lines', line: { color: '#ffc107', width: 1 }, opacity: 0.5, name: `Raw #${idx}`, showlegend: false });
+                                tracesDw.push({ x: timeMs, y: data.raw_dw, type: 'scatter', mode: 'lines', line: { color: '#20c997', width: 1 }, opacity: 0.5, name: `Raw #${idx}`, showlegend: false });
+                            }
+                            if (this.showTofFitCurve) {
+                                tracesUp.push({ x: timeMs, y: data.fit_up, type: 'scatter', mode: 'lines', line: { color: '#dc3545', width: 1.5 }, opacity: 0.6, name: `Fit #${idx}`, showlegend: false });
+                                tracesDw.push({ x: timeMs, y: data.fit_dw, type: 'scatter', mode: 'lines', line: { color: '#0d6efd', width: 1.5 }, opacity: 0.6, name: `Fit #${idx}`, showlegend: false });
+                            }
 
                             // 3. 绘制拟合窗口 (只画第一个点的窗口，避免重叠混乱)
-                            if (i === 0) {
+                            if (i === 0 && this.showTofFitCurve) {
                                 if (data.window_up && data.window_up[0] !== -1) {
                                     const wStart = data.window_up[0] * 1000;
                                     const wEnd = data.window_up[1] * 1000;
@@ -2497,18 +2690,23 @@
                     const yDwNF = rows.map(row => row[`${metric.rawPrefix}_dw`]);
                     const yDwNFStd = rows.map(row => row[`${metric.rawPrefix}_dw_std`]);
 
-                    const tracesUp = [{
-                        x, y: yUp, customdata: keys, mode: 'lines+markers', name: metric.nameUp + ' (Fit)',
-                        line: { color: '#dc3545', width: 2 }, marker: { size: 8 },
-                        error_y: { type: 'data', array: yUpStd, visible: true, color: '#dc3545' }
-                    }];
-                    const tracesDw = [{
-                        x, y: yDw, customdata: keys, mode: 'lines+markers', name: metric.nameDw + ' (Fit)',
-                        line: { color: '#0d6efd', width: 2 }, marker: { size: 8 },
-                        error_y: { type: 'data', array: yDwStd, visible: true, color: '#0d6efd' }
-                    }];
+                    const tracesUp = [];
+                    const tracesDw = [];
 
-                    if (this.showRawData) {
+                    if (this.showTofFitCurve) {
+                        tracesUp.push({
+                            x, y: yUp, customdata: keys, mode: 'lines+markers', name: metric.nameUp + ' (Fit)',
+                            line: { color: '#dc3545', width: 2 }, marker: { size: 8 },
+                            error_y: { type: 'data', array: yUpStd, visible: true, color: '#dc3545' }
+                        });
+                        tracesDw.push({
+                            x, y: yDw, customdata: keys, mode: 'lines+markers', name: metric.nameDw + ' (Fit)',
+                            line: { color: '#0d6efd', width: 2 }, marker: { size: 8 },
+                            error_y: { type: 'data', array: yDwStd, visible: true, color: '#0d6efd' }
+                        });
+                    }
+
+                    if (this.showTofRawCurve) {
                         tracesUp.push({
                             x, y: yUpNF, customdata: keys, mode: 'lines+markers', name: metric.nameUp + ' (Raw)',
                             line: { color: '#dc3545', width: 1, dash: 'dot' }, marker: { size: 6, symbol: 'circle-open', opacity: 0.6 },
@@ -2542,13 +2740,16 @@
                     if (this.showTotalPlot()) {
                         const yTot = yUp.map((value, index) => (value != null && yDw[index] != null) ? value + yDw[index] : null);
                         const yTotStd = yUpStd.map((value, index) => (value != null && yDwStd[index] != null) ? Math.sqrt(value * value + yDwStd[index] * yDwStd[index]) : 0);
-                        const tracesTot = [{
-                            x, y: yTot, customdata: keys, mode: 'lines+markers', name: 'Total (Fit)',
-                            line: { color: '#198754', width: 2 }, marker: { size: 8 },
-                            error_y: { type: 'data', array: yTotStd, visible: true, color: '#198754' }
-                        }];
+                        const tracesTot = [];
+                        if (this.showTofFitCurve) {
+                            tracesTot.push({
+                                x, y: yTot, customdata: keys, mode: 'lines+markers', name: 'Total (Fit)',
+                                line: { color: '#198754', width: 2 }, marker: { size: 8 },
+                                error_y: { type: 'data', array: yTotStd, visible: true, color: '#198754' }
+                            });
+                        }
 
-                        if (this.showRawData) {
+                        if (this.showTofRawCurve) {
                             const yTotNF = yUpNF.map((value, index) => (value != null && yDwNF[index] != null) ? value + yDwNF[index] : null);
                             const yTotNFStd = yUpNFStd.map((value, index) => (value != null && yDwNFStd[index] != null) ? Math.sqrt(value * value + yDwNFStd[index] * yDwNFStd[index]) : 0);
                             tracesTot.push({

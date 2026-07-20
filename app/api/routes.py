@@ -15,6 +15,7 @@ from app.models.schemas import (
     ArchiveRunReference,
     ArchiveScanFitRequest,
     ArchiveWaveformRequest,
+    ScanFitModelSaveRequest,
     ExperimentResponse,
     FitModelDefinition,
     ReAnalysisRequest,
@@ -154,7 +155,21 @@ async def get_default_fitting_models():
 
 @router.get("/fitting/models/scan-defaults", response_model=List[FitModelDefinition])
 async def get_default_scan_fitting_models():
-    return fitting.get_default_scan_fit_models()
+    return manager.get_scan_fit_models()
+
+
+@router.post("/fitting/models/scan-custom")
+async def save_custom_scan_fitting_model(req: ScanFitModelSaveRequest):
+    try:
+        saved_model = manager.save_custom_scan_fit_model(req.model.dict(), req.name)
+        return {
+            "saved_model": saved_model,
+            "models": manager.get_scan_fit_models(),
+        }
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
 
 # --- 4. Archive ---
 @router.get("/archive/tree")
