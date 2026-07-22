@@ -793,6 +793,11 @@
                         <div class="d-flex align-items-center"><i class="bi bi-activity me-2 text-danger"></i><span
                                 class="fw-bold">Selected Waveform</span></div>
                         <div class="d-flex align-items-center gap-3">
+                            <button class="btn btn-outline-success btn-sm"
+                                @click="exportWaveformCSV"
+                                :disabled="isLoadingWaveforms || !currentWaveforms.length">
+                                <i class="bi bi-download me-1"></i>CSV
+                            </button>
                             <button class="btn btn-sm btn-link btn-max p-0 text-decoration-none"
                                 @click="toggleMaximize('scope')" title="Maximize/Restore"><i class="bi"
                                     :class="maximizedView === 'scope' ? 'bi-fullscreen-exit' : 'bi-fullscreen'"></i></button>
@@ -829,6 +834,7 @@
                     archiveTree: {}, selectedYear: '', selectedMonth: '', selectedDay: '', selectedRun: '',
                     isLoading: false, isLoadingAllan: false, isLoadingWaveforms: false, isSaving: false,
                     loadedRunId: '', loadedRunEntry: null, errorMsg: '', dataCount: 0, selectedPointKey: '', selectedPointKeys: [], selectedPointLabel: '', selectedCount: 0,
+                    currentWaveforms: [],
                     selectedAllanWindow: null,
                     loadedPoints: [], currentCalculatedPoints: [], originalSettings: {}, loadedConfig: {}, currentScanDimensions: 1,
                     displayMode: 'saved',
@@ -1893,6 +1899,105 @@
                     });
                     return normalized;
                 },
+                normalizeWaveformWindow(window) {
+                    if (!Array.isArray(window) || window.length !== 2) return [-1, -1];
+                    const start = Number(window[0]);
+                    const end = Number(window[1]);
+                    if (!Number.isFinite(start) || !Number.isFinite(end) || start === -1 || end === -1) {
+                        return [-1, -1];
+                    }
+                    return [start, end];
+                },
+                normalizeWaveformResponse(data = {}, fallbackStep = null, waveformIndex = 0) {
+                    const safeArray = (value) => Array.isArray(value)
+                        ? value.map(item => {
+                            const numeric = Number(item);
+                            return Number.isFinite(numeric) ? numeric : null;
+                        })
+                        : [];
+                    const parsedStep = Number(data?.step ?? fallbackStep ?? waveformIndex);
+                    return {
+                        waveform_index: waveformIndex + 1,
+                        step: Number.isFinite(parsedStep) ? parsedStep : waveformIndex,
+                        time_axis: safeArray(data?.time_axis),
+                        raw_up: safeArray(data?.raw_up),
+                        raw_dw: safeArray(data?.raw_dw),
+                        fit_up: safeArray(data?.fit_up),
+                        fit_dw: safeArray(data?.fit_dw),
+                        window_up: this.normalizeWaveformWindow(data?.window_up),
+                        window_dw: this.normalizeWaveformWindow(data?.window_dw),
+                    };
+                },
+                getSelectedWaveformKeys() {
+                    if (Array.isArray(this.selectedPointKeys) && this.selectedPointKeys.length) {
+                        return this.selectedPointKeys.filter(key => this.historyMap[key]);
+                    }
+                    if (this.selectedPointKey && this.historyMap[this.selectedPointKey]) {
+                        return [this.selectedPointKey];
+                    }
+                    return [];
+                },
+                getSelectedWaveformParams() {
+                    const keys = this.getSelectedWaveformKeys();
+                    if (keys.length === 1 && this.historyMap[keys[0]]) {
+                        return this.getGroupParams(this.historyMap[keys[0]]);
+                    }
+                    return [];
+                },
+                getWaveformAxisName(scanDimensions = this.getActiveScanDimensions()) {
+                    return Array.from({ length: Math.max(1, Number(scanDimensions) || 1) }, (_, index) => `P${index}`).join('_');
+                },
+                buildWaveformSelectionSlug(params = this.getSelectedWaveformParams()) {
+                    if (Array.isArray(params) && params.length) {
+                        return params
+                            .map((value, index) => `P${index}_${Number(value ?? 0).toFixed(6)}`)
+                            .join('_');
+                    }
+                    if (this.selectedPointLabel) {
+                        return this.selectedPointLabel;
+                    }
+                    return this.getWaveformAxisName();
+                },
+                getWaveformRunName() {
+                    return String(
+                        this.loadedRunEntry?.display_name
+                        || this.loadedRunEntry?.run_label
+                        || this.loadedRunEntry?.run_id
+                        || this.selectedRun
+                        || this.loadedRunId
+                        || 'run'
+                    ).trim();
+                },
+                sanitizeFilenamePart(value, fallback = 'item') {
+                    const normalized = String(value || '')
+                        .trim()
+                        .replace(/\s+/g, '_')
+                        .replace(/[^a-zA-Z0-9._-]+/g, '_')
+                        .replace(/_+/g, '_')
+                        .replace(/^[_.]+|[_.]+$/g, '');
+                    return normalized || fallback;
+                },
+                async downloadCsvContent(csvContent, suggestedName) {
+                    if (window.showSaveFilePicker) {
+                        window.showSaveFilePicker({
+                            suggestedName,
+                            types: [{ description: 'CSV File', accept: { 'text/csv': ['.csv'] } }]
+                        }).then(async handle => {
+                            const writable = await handle.createWritable();
+                            await writable.write(csvContent);
+                            await writable.close();
+                        }).catch(err => { });
+                        return;
+                    }
+                    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement("a");
+                    link.setAttribute("href", url);
+                    link.setAttribute("download", suggestedName);
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                },
                 createHistoryAccumulator(params, key = this.getHistoryKey(params)) {
                     return {
                         key,
@@ -2026,6 +2131,7 @@
                     this.selectedPointKeys = [];
                     this.selectedPointLabel = '';
                     this.selectedAllanWindow = null;
+                    this.currentWaveforms = [];
                     this.clearAllanCache();
                     this.errorMsg = '';
                     this.resetScanFitSession({ clearRange: true });
@@ -2070,6 +2176,7 @@
 
                     } catch (e) {
                         console.error(e);
+                        this.currentWaveforms = [];
                         if (e.response?.data?.detail) {
                             this.errorMsg = "Load Failed: " + e.response.data.detail;
                         } else if (e.response && e.response.status === 500) {
@@ -2170,6 +2277,7 @@
                     this.selectedAllanWindow = null;
                     this.selectedPointLabel = '';
                     this.selectedCount = 0;
+                    this.currentWaveforms = [];
                     this.layoutOscUp.shapes = [];
                     this.layoutOscDw.shapes = [];
                     Plotly.react('waveformPlotUp', [], this.layoutOscUp);
@@ -2263,6 +2371,10 @@
                             const fetched = await Promise.all(requests);
                             responses = fetched.map((res, index) => ({ step: indices[index], ...res.data }));
                         }
+                        const normalizedResponses = responses.map((data, index) =>
+                            this.normalizeWaveformResponse(data, indices[index], index)
+                        );
+                        this.currentWaveforms = normalizedResponses;
                         const tracesUp = []; const tracesDw = [];
 
                         // 用于记录所有波形的整体时间范围
@@ -2271,15 +2383,19 @@
                         this.layoutOscUp.shapes = [];
                         this.layoutOscDw.shapes = [];
 
-                        responses.forEach((data, i) => {
+                        normalizedResponses.forEach((data, i) => {
                             // 将秒转换为毫秒
-                            const timeMs = (data.time_axis || []).map(t => t * 1000);
+                            const timeMs = (data.time_axis || []).map(t => {
+                                const numeric = Number(t);
+                                return Number.isFinite(numeric) ? numeric * 1000 : null;
+                            });
                             const idx = data.step ?? indices[i];
 
                             // 1. 更新全局时间范围 (用于后续自动缩放)
-                            if (timeMs.length > 0) {
-                                const tFirst = timeMs[0];
-                                const tLast = timeMs[timeMs.length - 1];
+                            const validTimes = timeMs.filter(value => Number.isFinite(value));
+                            if (validTimes.length > 0) {
+                                const tFirst = validTimes[0];
+                                const tLast = validTimes[validTimes.length - 1];
                                 if (globalMin === null || tFirst < globalMin) globalMin = tFirst;
                                 if (globalMax === null || tLast > globalMax) globalMax = tLast;
                             }
@@ -2958,6 +3074,84 @@
                         return `"${text.replace(/"/g, '""')}"`;
                     }
                     return text;
+                },
+
+                async exportWaveformCSV() {
+                    if (!Array.isArray(this.currentWaveforms) || !this.currentWaveforms.length) {
+                        this.errorMsg = 'TOF export failed: no waveform data loaded.';
+                        return;
+                    }
+
+                    try {
+                        this.errorMsg = '';
+                        const selectionLabel = this.selectedPointLabel || this.buildSelectionLabel(this.getSelectedWaveformParams());
+                        const metadataRows = [
+                            ['run_name', this.getWaveformRunName()],
+                            ['run_id', this.loadedRunId || this.selectedRun || ''],
+                            ['run_label', this.loadedRunEntry?.run_label || ''],
+                            ['selection', selectionLabel || ''],
+                            ['scan_axes', this.getWaveformAxisName()],
+                            ['display_mode', this.displayMode || 'saved'],
+                            ['waveform_count', this.currentWaveforms.length],
+                            ['exported_at', new Date().toISOString()],
+                        ];
+                        const header = [
+                            'waveform_index',
+                            'step',
+                            'time_s',
+                            'time_ms',
+                            'raw_up_v',
+                            'raw_dw_v',
+                            'fit_up_v',
+                            'fit_dw_v',
+                            'window_up_start_s',
+                            'window_up_end_s',
+                            'window_dw_start_s',
+                            'window_dw_end_s',
+                        ];
+                        const csvRows = metadataRows.map(([key, value]) => `# ${key},${this.csvCell(value)}`);
+                        csvRows.push(header.join(','));
+
+                        this.currentWaveforms.forEach((waveform, index) => {
+                            const timeAxis = Array.isArray(waveform?.time_axis) ? waveform.time_axis : [];
+                            const rawUp = Array.isArray(waveform?.raw_up) ? waveform.raw_up : [];
+                            const rawDw = Array.isArray(waveform?.raw_dw) ? waveform.raw_dw : [];
+                            const fitUp = Array.isArray(waveform?.fit_up) ? waveform.fit_up : [];
+                            const fitDw = Array.isArray(waveform?.fit_dw) ? waveform.fit_dw : [];
+                            const rowCount = Math.max(timeAxis.length, rawUp.length, rawDw.length, fitUp.length, fitDw.length);
+                            const [windowUpStart, windowUpEnd] = this.normalizeWaveformWindow(waveform?.window_up);
+                            const [windowDwStart, windowDwEnd] = this.normalizeWaveformWindow(waveform?.window_dw);
+
+                            for (let rowIndex = 0; rowIndex < rowCount; rowIndex += 1) {
+                                const timeSeconds = Number(timeAxis[rowIndex]);
+                                const row = [
+                                    this.csvCell(Number(waveform?.waveform_index ?? index + 1)),
+                                    this.csvCell(Number(waveform?.step ?? index)),
+                                    this.csvCell(Number.isFinite(timeSeconds) ? timeSeconds : ''),
+                                    this.csvCell(Number.isFinite(timeSeconds) ? timeSeconds * 1000 : ''),
+                                    this.csvCell(rawUp[rowIndex]),
+                                    this.csvCell(rawDw[rowIndex]),
+                                    this.csvCell(fitUp[rowIndex]),
+                                    this.csvCell(fitDw[rowIndex]),
+                                    this.csvCell(windowUpStart === -1 ? '' : windowUpStart),
+                                    this.csvCell(windowUpEnd === -1 ? '' : windowUpEnd),
+                                    this.csvCell(windowDwStart === -1 ? '' : windowDwStart),
+                                    this.csvCell(windowDwEnd === -1 ? '' : windowDwEnd),
+                                ];
+                                csvRows.push(row.join(','));
+                            }
+                        });
+
+                        const suggestedName = [
+                            this.sanitizeFilenamePart(this.getWaveformRunName(), 'run'),
+                            this.sanitizeFilenamePart(this.buildWaveformSelectionSlug(), this.getWaveformAxisName()),
+                            'tof'
+                        ].filter(Boolean).join('_') + '.csv';
+
+                        await this.downloadCsvContent(csvRows.join('\n'), suggestedName);
+                    } catch (e) {
+                        this.errorMsg = 'TOF export failed: ' + (e.message || 'Unknown error');
+                    }
                 },
 
                 async exportAllanCSV() {
