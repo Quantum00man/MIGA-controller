@@ -798,6 +798,9 @@
                                 :disabled="isLoadingWaveforms || !currentWaveforms.length">
                                 <i class="bi bi-download me-1"></i>CSV
                             </button>
+                            <span v-if="getWaveformR2Summary()" class="badge bg-light text-dark border shadow-sm">
+                                {{ getWaveformR2Summary() }}
+                            </span>
                             <button class="btn btn-sm btn-link btn-max p-0 text-decoration-none"
                                 @click="toggleMaximize('scope')" title="Maximize/Restore"><i class="bi"
                                     :class="maximizedView === 'scope' ? 'bi-fullscreen-exit' : 'bi-fullscreen'"></i></button>
@@ -1997,6 +2000,60 @@
                     document.body.appendChild(link);
                     link.click();
                     document.body.removeChild(link);
+                },
+                getWaveformChannelSamples(waveform, channel) {
+                    const timeAxis = Array.isArray(waveform?.time_axis) ? waveform.time_axis : [];
+                    const rawSeries = Array.isArray(waveform?.[`raw_${channel}`]) ? waveform[`raw_${channel}`] : [];
+                    const fitSeries = Array.isArray(waveform?.[`fit_${channel}`]) ? waveform[`fit_${channel}`] : [];
+                    const [windowStart, windowEnd] = this.normalizeWaveformWindow(waveform?.[`window_${channel}`]);
+                    const useWindow = windowStart !== -1 && windowEnd !== -1;
+                    const samples = [];
+
+                    for (let index = 0; index < Math.max(timeAxis.length, rawSeries.length, fitSeries.length); index += 1) {
+                        const timeValue = Number(timeAxis[index]);
+                        const rawValue = Number(rawSeries[index]);
+                        const fitValue = Number(fitSeries[index]);
+                        if (!Number.isFinite(rawValue) || !Number.isFinite(fitValue)) continue;
+                        if (useWindow) {
+                            if (!Number.isFinite(timeValue) || timeValue < windowStart || timeValue > windowEnd) continue;
+                        }
+                        samples.push({ raw: rawValue, fit: fitValue });
+                    }
+
+                    return samples;
+                },
+                calculateR2FromSamples(samples = []) {
+                    const points = Array.isArray(samples)
+                        ? samples.filter(sample => Number.isFinite(sample?.raw) && Number.isFinite(sample?.fit))
+                        : [];
+                    if (points.length < 2) return null;
+                    const meanRaw = points.reduce((sum, sample) => sum + sample.raw, 0) / points.length;
+                    const totalVariance = points.reduce((sum, sample) => sum + Math.pow(sample.raw - meanRaw, 2), 0);
+                    if (totalVariance <= 0) return null;
+                    const residualVariance = points.reduce((sum, sample) => sum + Math.pow(sample.raw - sample.fit, 2), 0);
+                    return 1 - (residualVariance / totalVariance);
+                },
+                getWaveformR2Values(channel) {
+                    return (Array.isArray(this.currentWaveforms) ? this.currentWaveforms : [])
+                        .map(waveform => this.calculateR2FromSamples(this.getWaveformChannelSamples(waveform, channel)))
+                        .filter(value => Number.isFinite(value));
+                },
+                getAverageWaveformR2(channel) {
+                    const values = this.getWaveformR2Values(channel);
+                    if (!values.length) return null;
+                    return values.reduce((sum, value) => sum + value, 0) / values.length;
+                },
+                formatWaveformR2Value(value) {
+                    return Number.isFinite(value) ? value.toFixed(4) : '--';
+                },
+                getWaveformR2Summary() {
+                    if (!Array.isArray(this.currentWaveforms) || !this.currentWaveforms.length) return '';
+                    const upR2 = this.getAverageWaveformR2('up');
+                    const dwR2 = this.getAverageWaveformR2('dw');
+                    if (!Number.isFinite(upR2) && !Number.isFinite(dwR2)) return '';
+                    const prefix = this.currentWaveforms.length > 1 ? 'Avg R²' : 'R²';
+                    const countSuffix = this.currentWaveforms.length > 1 ? ` (${this.currentWaveforms.length} TOF)` : '';
+                    return `${prefix} UP ${this.formatWaveformR2Value(upR2)} | DW ${this.formatWaveformR2Value(dwR2)}${countSuffix}`;
                 },
                 createHistoryAccumulator(params, key = this.getHistoryKey(params)) {
                     return {
