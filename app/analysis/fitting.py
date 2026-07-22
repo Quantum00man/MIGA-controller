@@ -62,7 +62,7 @@ DEFAULT_FIT_MODELS: List[Dict[str, Any]] = [
             {"name": "offset", "guess": "0.0", "fixed": False},
         ],
         "roles": {"amplitude": "amp", "width": "sigma", "center": "center", "offset": "offset"},
-        "area_mode": "gaussian_sigma",
+        "area_mode": "window_integral",
     },
     {
         "key": "mod_gaussian_2",
@@ -78,7 +78,7 @@ DEFAULT_FIT_MODELS: List[Dict[str, Any]] = [
             {"name": "offset", "guess": "0.0", "fixed": False},
         ],
         "roles": {"amplitude": "amp", "width": "sigma", "center": "center", "offset": "offset"},
-        "area_mode": "gaussian_sigma",
+        "area_mode": "window_integral",
     },
     {
         "key": "lorentzian",
@@ -108,6 +108,17 @@ DEFAULT_FIT_MODELS: List[Dict[str, Any]] = [
         "area_mode": "window_integral",
     },
 ]
+
+
+_BUILTIN_FIT_MODEL_AREA_MODES: Dict[str, str] = {
+    "gaussian": "gaussian_sigma",
+    "mod_gaussian_1": "window_integral",
+    "mod_gaussian_2": "window_integral",
+    "lorentzian": "window_integral",
+    "sinc_sq": "window_integral",
+}
+
+_EFFECTIVE_SIGMA_MODEL_KEYS = {"mod_gaussian_1", "mod_gaussian_2", "lorentzian", "sinc_sq"}
 
 
 DEFAULT_SCAN_FIT_MODELS: List[Dict[str, Any]] = [
@@ -424,6 +435,9 @@ def normalize_fit_model_definition(model: Dict[str, Any], fallback_key: str = "g
     area_mode = str(source.get("area_mode") or "window_integral").strip() or "window_integral"
     if area_mode not in {"gaussian_sigma", "window_integral"}:
         area_mode = "window_integral"
+    builtin_area_mode = _BUILTIN_FIT_MODEL_AREA_MODES.get(key)
+    if builtin_area_mode is not None:
+        area_mode = builtin_area_mode
 
     return {
         "key": key,
@@ -711,8 +725,12 @@ def perform_configured_fit(
         center = float(x_data[int(np.argmax(fit_window_curve))])
 
     width = _role_value("width", model, parameter_values)
-    if width is None:
+    if model.get("key") in _EFFECTIVE_SIGMA_MODEL_KEYS:
         width = float(calc_sigma(fit_window_curve, x_data) or 0.0)
+    elif width is None:
+        width = float(calc_sigma(fit_window_curve, x_data) or 0.0)
+    else:
+        width = float(width)
 
     residuals = y_data - fit_window_curve
     res_var = float(np.mean(residuals ** 2)) if len(residuals) else None
