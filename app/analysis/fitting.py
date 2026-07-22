@@ -110,15 +110,20 @@ DEFAULT_FIT_MODELS: List[Dict[str, Any]] = [
 ]
 
 
-_BUILTIN_FIT_MODEL_AREA_MODES: Dict[str, str] = {
-    "gaussian": "gaussian_sigma",
-    "mod_gaussian_1": "window_integral",
-    "mod_gaussian_2": "window_integral",
-    "lorentzian": "window_integral",
-    "sinc_sq": "window_integral",
+_GAUSSIAN_AREA_FORMULA_SIGNATURES = {
+    "amp*exp(-((x-center)**2)/(2*sigma**2))+offset",
+    "offset+amp*exp(-((x-center)**2)/(2*sigma**2))",
 }
 
 _EFFECTIVE_SIGMA_MODEL_KEYS = {"mod_gaussian_1", "mod_gaussian_2", "lorentzian", "sinc_sq"}
+
+
+def _normalize_formula_signature(formula: Any) -> str:
+    return re.sub(r"\s+", "", str(formula or "")).lower()
+
+
+def _supports_gaussian_sigma_area_mode(model_key: str, formula: str) -> bool:
+    return str(model_key or "").strip().lower() == "gaussian" or _normalize_formula_signature(formula) in _GAUSSIAN_AREA_FORMULA_SIGNATURES
 
 
 DEFAULT_SCAN_FIT_MODELS: List[Dict[str, Any]] = [
@@ -435,9 +440,8 @@ def normalize_fit_model_definition(model: Dict[str, Any], fallback_key: str = "g
     area_mode = str(source.get("area_mode") or "window_integral").strip() or "window_integral"
     if area_mode not in {"gaussian_sigma", "window_integral"}:
         area_mode = "window_integral"
-    builtin_area_mode = _BUILTIN_FIT_MODEL_AREA_MODES.get(key)
-    if builtin_area_mode is not None:
-        area_mode = builtin_area_mode
+    if not _supports_gaussian_sigma_area_mode(key, formula):
+        area_mode = "window_integral"
 
     return {
         "key": key,

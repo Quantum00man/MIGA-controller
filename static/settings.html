@@ -251,7 +251,7 @@
                                             <div class="small text-muted fw-bold">Editing</div>
                                             <div class="font-monospace small">{{ selectedFitModel.key }}</div>
                                         </div>
-                                        <div class="badge bg-light text-dark border">{{ selectedFitModel.area_mode }}</div>
+                                        <div class="badge bg-light text-dark border">{{ getFitModelAreaModeLabel(getEffectiveFitModelAreaMode(selectedFitModel)) }}</div>
                                     </div>
 
                                     <div class="row g-3 mb-3">
@@ -261,10 +261,14 @@
                                         </div>
                                         <div class="col-md-5">
                                             <label class="form-label small text-muted fw-bold">Area Mode</label>
-                                            <select class="form-select" v-model="selectedFitModel.area_mode">
+                                            <select v-if="supportsGaussianAreaMode(selectedFitModel)" class="form-select" v-model="selectedFitModel.area_mode">
                                                 <option value="gaussian_sigma">Gaussian Sigma</option>
                                                 <option value="window_integral">Integral In Window</option>
                                             </select>
+                                            <input v-else type="text" class="form-control" :value="getFitModelAreaModeLabel('window_integral')" disabled>
+                                            <div class="form-text" v-if="!supportsGaussianAreaMode(selectedFitModel)">
+                                                Non-Gaussian models always use window integration.
+                                            </div>
                                         </div>
                                     </div>
 
@@ -549,6 +553,23 @@
                         area_mode: 'gaussian_sigma'
                     }];
                 },
+                normalizeFormulaSignature(value) {
+                    return String(value || '').replace(/\s+/g, '').toLowerCase();
+                },
+                supportsGaussianAreaMode(model) {
+                    const key = this.normalizeFitModelKey(model?.key || '', 'fit_model');
+                    const formula = this.normalizeFormulaSignature(model?.formula || '');
+                    return key === 'gaussian' || formula === 'amp*exp(-((x-center)**2)/(2*sigma**2))+offset' || formula === 'offset+amp*exp(-((x-center)**2)/(2*sigma**2))';
+                },
+                getEffectiveFitModelAreaMode(model) {
+                    const requested = String(model?.area_mode || 'window_integral');
+                    return this.supportsGaussianAreaMode(model) && requested === 'gaussian_sigma'
+                        ? 'gaussian_sigma'
+                        : 'window_integral';
+                },
+                getFitModelAreaModeLabel(mode) {
+                    return mode === 'gaussian_sigma' ? 'Gaussian Sigma' : 'Integral In Window';
+                },
                 normalizeFitModel(model, index = 0) {
                     const source = model || {};
                     const parameters = Array.isArray(source.parameters) && source.parameters.length
@@ -559,7 +580,7 @@
                         }))
                         : this.cloneDeep(this.defaultFitModelFallback()[0].parameters);
                     const roles = source.roles || {};
-                    return {
+                    const normalized = {
                         key: this.normalizeFitModelKey(source.key || source.label || `fit_model_${index + 1}`, `fit_model_${index + 1}`),
                         label: String(source.label || `FIT_MODEL_${index + 1}`).trim() || `FIT_MODEL_${index + 1}`,
                         formula: String(source.formula || ''),
@@ -570,8 +591,13 @@
                             center: roles.center || '',
                             offset: roles.offset || ''
                         },
-                        area_mode: source.area_mode === 'gaussian_sigma' ? 'gaussian_sigma' : 'window_integral'
+                        area_mode: 'window_integral'
                     };
+                    normalized.area_mode = this.getEffectiveFitModelAreaMode({
+                        ...normalized,
+                        area_mode: source.area_mode === 'gaussian_sigma' ? 'gaussian_sigma' : 'window_integral'
+                    });
+                    return normalized;
                 },
                 normalizeFitModels(models) {
                     const source = Array.isArray(models) && models.length ? models : this.defaultFitModelFallback();
