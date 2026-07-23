@@ -147,6 +147,16 @@
             border: 1px solid #e9ecef;
         }
 
+        .scheduled-task-card.selected {
+            border-color: #0d6efd !important;
+            box-shadow: inset 0 0 0 1px rgba(13, 110, 253, 0.14);
+            background: linear-gradient(180deg, #f9fbff 0%, #f4f8ff 100%);
+        }
+
+        .scheduled-task-card .form-control-sm {
+            min-width: 0;
+        }
+
         .nav-tabs .nav-link {
             cursor: pointer;
             color: #495057;
@@ -250,26 +260,41 @@
                     <span style="font-size:0.5em;">powered by Yiming</span>
                 </span>
             </div>
-            <div class="d-flex align-items-center flex-grow-1 mx-4" style="max-width: 400px;">
+            <div class="d-flex align-items-center flex-grow-1 mx-4" style="max-width: 560px;">
                 <div class="d-flex flex-column w-100">
                     <div class="d-flex justify-content-between small mb-1">
-                        <span class="fw-bold text-white-50" style="font-size: 1em;">{{ isRunning ? 'CURRENT RUN' :
-                            'NEXT RUN' }}</span>
-                        <span class="fw-bold text-warning font-monospace" style="font-size: 1.5em;">{{ currentRunId
-                            }}</span>
+                        <span class="fw-bold text-white-50" style="font-size: 1em;">{{ getRunHeaderLabel() }}</span>
+                        <span class="fw-bold text-warning font-monospace" style="font-size: 1.5em;">{{ currentRunId }}</span>
                     </div>
-                    <div class="small text-white-50 text-truncate" v-if="config.run_label">{{ config.run_label }}</div>
-                    <div class="progress w-100" style="height: 8px; background-color: #445566; border-radius: 4px;">
+                    <div class="small text-white-50 text-truncate" v-if="getHeaderPrimaryLabel()">{{ getHeaderPrimaryLabel() }}</div>
+                    <template v-if="showScheduledHeader()">
+                        <div class="d-flex justify-content-between small text-white-50 mt-1">
+                            <span>{{ getHeaderCurrentTaskLabel() }}</span>
+                            <span>{{ formatDuration(getCurrentTaskRemainingSeconds()) }}</span>
+                        </div>
+                        <div class="progress w-100 mt-1" style="height: 6px; background-color: #445566; border-radius: 4px;">
+                            <div class="progress-bar bg-info" role="progressbar" :style="{width: getCurrentTaskProgressPercent() + '%'}"
+                                :aria-valuenow="getCurrentTaskProgressPercent()" aria-valuemin="0" aria-valuemax="100"></div>
+                        </div>
+                        <div class="d-flex justify-content-between small text-white-50 mt-2">
+                            <span>{{ getHeaderTotalLabel() }}</span>
+                            <span>{{ formatDuration(getTotalRemainingSeconds()) }}</span>
+                        </div>
+                        <div class="progress w-100 mt-1" style="height: 8px; background-color: #445566; border-radius: 4px;">
+                            <div class="progress-bar bg-warning" role="progressbar" :style="{width: getTotalScheduleProgressPercent() + '%'}"
+                                :aria-valuenow="getTotalScheduleProgressPercent()" aria-valuemin="0" aria-valuemax="100"></div>
+                        </div>
+                    </template>
+                    <div v-else class="progress w-100" style="height: 8px; background-color: #445566; border-radius: 4px;">
                         <div class="progress-bar bg-warning" role="progressbar" :style="{width: progressPercent + '%'}"
                             :aria-valuenow="progressPercent" aria-valuemin="0" aria-valuemax="100"></div>
                     </div>
                 </div>
-                <span class="ms-2 small fw-bold text-warning" style="min-width: 40px;">{{ isNaN(progressPercent) ? 0 :
-                    progressPercent }}%</span>
+                <span class="ms-2 small fw-bold text-warning" style="min-width: 52px;">{{ Math.round(getHeaderPercentValue()) }}%</span>
             </div>
             <div class="d-flex align-items-center gap-4">
-                <div :class="['status-badge', isRunning ? 'running' : 'idle']">
-                    <i class="bi" :class="isRunning ? 'bi-activity' : 'bi-pause-fill'"></i>
+                <div :class="['status-badge', isStatusActive() ? 'running' : 'idle']">
+                    <i class="bi" :class="isStatusActive() ? 'bi-activity' : 'bi-pause-fill'"></i>
                     {{ statusMessage }}
                 </div>
                 <a href="/archive.html" class="btn btn-outline-light btn-sm d-flex align-items-center gap-2 px-3"><i
@@ -282,24 +307,30 @@
 
         <aside class="sidebar">
             <div class="card mode-switch-card mb-3">
-                <div class="card-body p-3 d-flex justify-content-between align-items-center">
-                    <div>
-                        <div class="small text-muted fw-bold" style="font-size: 0.7em;">SYSTEM MODE</div>
-                        <div class="fw-bold" :class="isSimulation ? 'text-primary' : 'text-danger'">{{ isSimulation ?
-                            'SIMULATION' : 'REAL HW' }}</div>
+                <div class="card-body p-3">
+                    <div class="small text-muted fw-bold" style="font-size: 0.7em;">RUN MODE</div>
+                    <div class="btn-group btn-group-sm w-100 mt-2" role="group">
+                        <input type="radio" class="btn-check" name="runMode" id="runModeLive" value="live"
+                            v-model="runMode" :disabled="isRunning || isScheduleActive()">
+                        <label class="btn btn-outline-secondary" for="runModeLive">Live Mode</label>
+                        <input type="radio" class="btn-check" name="runMode" id="runModeScheduled" value="scheduled"
+                            v-model="runMode" :disabled="isRunning || isScheduleActive()">
+                        <label class="btn btn-outline-secondary" for="runModeScheduled">Scheduled Mode</label>
                     </div>
-                    <div class="form-check form-switch">
-                        <input class="form-check-input" type="checkbox" v-model="isSimulation" @change="toggleMode"
-                            :disabled="isRunning" style="width: 45px; height: 24px; cursor: pointer;">
+                    <div class="form-text mt-2" style="font-size: 0.72rem;">
+                        {{ runMode === 'scheduled'
+                        ? 'Scheduled mode lets you queue multiple sequence-specific scans, reorder them, and run them sequentially or at specific times.'
+                        : 'Live mode runs the current sequence and scan settings immediately on the main control page.' }}
                     </div>
                 </div>
             </div>
+
             <span class="section-label">Sequence Selection</span>
             <div class="card p-3 mb-3">
                 <div class="input-group input-group-sm">
                     <span class="input-group-text bg-white text-muted"><i class="bi bi-file-code"></i></span>
                     <input type="text" class="form-control bg-white" readonly :value="currentSequenceName">
-                    <button class="btn btn-primary" @click="$refs.seqInput.click()" :disabled="isRunning"
+                    <button class="btn btn-primary" @click="$refs.seqInput.click()" :disabled="isRunning || isScheduleActive()"
                         title="Load .mot file"><i class="bi bi-folder2-open"></i></button>
                 </div>
                 <input type="file" ref="seqInput" style="display:none" accept=".mot" @change="selectSequence">
@@ -310,7 +341,7 @@
 
             <div class="d-flex align-items-center justify-content-between mt-3 mb-2">
                 <span class="section-label" style="margin:0;">Repeat Previous Run</span>
-                <button type="button" class="btn btn-outline-secondary btn-sm" @click="toggleRepeatLoader" :disabled="isRunning && !showRepeatLoader">
+                <button type="button" class="btn btn-outline-secondary btn-sm" @click="toggleRepeatLoader" :disabled="(isRunning || isScheduleActive()) && !showRepeatLoader">
                     <i :class="showRepeatLoader ? 'bi bi-chevron-up me-1' : 'bi bi-clock-history me-1'"></i>
                     {{ showRepeatLoader ? 'Hide' : 'Load Previous Run' }}
                 </button>
@@ -349,7 +380,7 @@
                 <div class="small text-muted mb-2" style="font-size:0.72rem;" v-if="getSelectedRepeatRunEntry()?.summary">
                     {{ getSelectedRepeatRunEntry().summary }}
                 </div>
-                <button class="btn btn-outline-primary btn-sm w-100 fw-bold" @click="loadRunPreset" :disabled="isRunning || isPresetLoading || !repeatRun">
+                <button class="btn btn-outline-primary btn-sm w-100 fw-bold" @click="loadRunPreset" :disabled="isRunning || isScheduleActive() || isPresetLoading || !repeatRun">
                     <span v-if="isPresetLoading" class="spinner-border spinner-border-sm me-1"></span>
                     {{ isPresetLoading ? 'Loading Preset...' : 'Load Config & Sequence' }}
                 </button>
@@ -358,6 +389,48 @@
                     <div class="small text-muted" style="font-size:0.75rem;" v-if="loadedPresetInfo.summary">{{ loadedPresetInfo.summary }}</div>
                 </div>
             </div>
+
+
+<div v-if="isScheduledMode()" class="card p-3 mb-3">
+    <div class="small text-muted fw-bold mb-2">SCHEDULE PLANNER</div>
+    <div class="row g-2">
+        <div class="col-6">
+            <label class="form-label small text-muted mb-1">Shot Time (s)</label>
+            <input type="number" class="form-control form-control-sm" v-model.number="scheduleSettings.singlePointDurationSec"
+                min="0.001" step="0.001" :disabled="isScheduleActive()">
+        </div>
+        <div class="col-6">
+            <label class="form-label small text-muted mb-1">Task Timing</label>
+            <select class="form-select form-select-sm" v-model="scheduleSettings.timingMode" :disabled="isScheduleActive()">
+                <option value="sequential">Sequential</option>
+                <option value="specific">Specific Time</option>
+            </select>
+        </div>
+        <div class="col-12" v-if="scheduleSettings.timingMode === 'sequential'">
+            <label class="form-label small text-muted mb-1">Gap Between Tasks (s)</label>
+            <input type="number" class="form-control form-control-sm" v-model.number="scheduleSettings.sequentialGapSec"
+                min="0" step="1" :disabled="isScheduleActive()">
+        </div>
+        <div class="col-12" v-else>
+            <div class="form-text mt-1" style="font-size:0.72rem;">
+                Set each task start time in the queue below. If a previous task runs long, the next task starts as soon as the hardware becomes free.
+            </div>
+        </div>
+    </div>
+    <div class="row g-2 mt-2">
+        <div class="col-6">
+            <button class="btn btn-outline-primary btn-sm w-100 fw-bold" @click="addScheduledTaskFromCurrentSetup"
+                :disabled="isScheduleActive()"><i class="bi bi-plus-circle me-1"></i>Add Current Setup</button>
+        </div>
+        <div class="col-6">
+            <button class="btn btn-outline-secondary btn-sm w-100 fw-bold" @click="updateSelectedScheduledTask"
+                :disabled="isScheduleActive() || !selectedScheduledTaskId"><i class="bi bi-arrow-repeat me-1"></i>Update Selected</button>
+        </div>
+    </div>
+    <div class="form-text mt-2" style="font-size:0.72rem;">
+        Estimate basis: {{ getSinglePointDurationSec().toFixed(3) }} s per scan point.
+    </div>
+</div>
 
             <form @submit.prevent>
                 <span class="section-label">Scan Dimension</span>
@@ -582,6 +655,58 @@
                             placeholder="e.g. 1, 3, 5" rows="2"></textarea></div>
                 </div>
 
+
+<span class="section-label" v-if="isScheduledMode()">Scheduled Tasks</span>
+<div class="card p-3" v-if="isScheduledMode()">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+        <div class="small text-muted fw-bold">TASK QUEUE</div>
+        <button class="btn btn-outline-danger btn-sm" @click="clearScheduledTasks"
+            :disabled="isScheduleActive() || !scheduledTasks.length">Clear</button>
+    </div>
+    <div v-if="!scheduledTasks.length" class="small text-muted">
+        No scheduled tasks yet. Load or edit a sequence/config, then snapshot it into the queue.
+    </div>
+    <div v-for="(task, index) in scheduledTasks" :key="task.id"
+        class="scheduled-task-card p-2 mb-2 border rounded"
+        :class="{selected: selectedScheduledTaskId === task.id}">
+        <div class="d-flex align-items-start gap-2">
+            <div class="text-muted fw-bold small pt-1" style="min-width: 20px;">{{ index + 1 }}</div>
+            <div class="flex-grow-1">
+                <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
+                    <input type="text" class="form-control form-control-sm" v-model="task.name"
+                        :disabled="isScheduleActive()">
+                    <span :class="['badge', getScheduledTaskBadgeClass(task, index)]">{{ getScheduledTaskStateLabel(task, index) }}</span>
+                    <span class="badge bg-light text-dark border">{{ task.sequence_file_name || task.sequence_name }}</span>
+                </div>
+                <div class="small fw-bold text-dark">{{ getScheduledTaskModeLabel(task) }} · {{ task.estimated_points }} shots · {{ formatDuration(task.estimated_duration_sec) }}</div>
+                <div class="small text-muted mt-1">{{ getScheduledTaskAxisLabel(task.config) }}</div>
+                <div class="small text-muted mt-1" v-if="scheduleSettings.timingMode === 'sequential'">
+                    {{ index === 0 ? 'Starts immediately after schedule start.' : `Starts after previous task + ${formatDuration(getSequentialGapSec())}` }}
+                </div>
+                <div class="mt-2" v-else>
+                    <label class="form-label small text-muted mb-1">Start Time</label>
+                    <input type="datetime-local" class="form-control form-control-sm" v-model="task.scheduled_at"
+                        :disabled="isScheduleActive()">
+                </div>
+                <div class="small text-danger mt-1" v-if="task.validation_error">{{ task.validation_error }}</div>
+            </div>
+            <div class="btn-group-vertical btn-group-sm">
+                <button class="btn btn-outline-secondary" @click="loadScheduledTaskIntoEditor(task.id)"
+                    :disabled="isScheduleActive()">Load</button>
+                <button class="btn btn-outline-secondary" @click="moveScheduledTask(index, -1)"
+                    :disabled="index === 0 || isScheduleActive()"><i class="bi bi-arrow-up"></i></button>
+                <button class="btn btn-outline-secondary" @click="moveScheduledTask(index, 1)"
+                    :disabled="index === scheduledTasks.length - 1 || isScheduleActive()"><i class="bi bi-arrow-down"></i></button>
+                <button class="btn btn-outline-danger" @click="removeScheduledTask(task.id)"
+                    :disabled="isScheduleActive()"><i class="bi bi-trash"></i></button>
+            </div>
+        </div>
+    </div>
+    <div class="small text-muted mt-2" v-if="scheduledTasks.length">
+        {{ scheduledTasks.length }} tasks · {{ getScheduledTaskCountTotal() }} shots · {{ formatDuration(getScheduledMeasurementDurationSeconds()) }} planned measurement time
+    </div>
+</div>
+
                 <span class="section-label">Execution Control</span>
                 <div class="card p-3 mb-5 border-0 bg-transparent shadow-none ps-0 pe-0">
                     <div class="row g-2 align-items-center mb-3 px-1">
@@ -607,9 +732,12 @@
                     </div>
                     <div class="d-grid gap-2">
                         <button class="btn btn-success py-2 fs-6 fw-bold shadow-sm" @click="startScan"
-                            :disabled="isRunning"><i class="bi bi-play-fill me-1 fs-5"></i> START EXPERIMENT</button>
+                            :disabled="isStartDisabled()"><i class="bi bi-play-fill me-1 fs-5"></i> {{ isScheduledMode() ? 'START SCHEDULE' : 'START EXPERIMENT' }}</button>
                         <button class="btn btn-danger py-2 fs-6 fw-bold shadow-sm" @click="stopScan"
-                            :disabled="!isRunning"><i class="bi bi-stop-fill me-1 fs-5"></i> STOP</button>
+                            :disabled="isStopDisabled()"><i class="bi bi-stop-fill me-1 fs-5"></i> {{ isScheduledMode() ? 'STOP SCHEDULE' : 'STOP' }}</button>
+                    </div>
+                    <div class="form-text mt-2" style="font-size:0.72rem;" v-if="isScheduledMode()">
+                        The header shows current task progress/ETA and total queue progress/ETA after the schedule starts.
                     </div>
                 </div>
             </form>
@@ -749,11 +877,29 @@
                         bragg_shape: 'blackman',
                         bragg_base_timing: 331119
                     },
-                    isRunning: false, isSimulation: true, statusMessage: "IDLE", currentStep: 0, plotRevision: 0, logs: [], ws: null,
+                    isRunning: false, isSimulation: false, statusMessage: "IDLE", currentStep: 0, plotRevision: 0, logs: [], ws: null,
                     progressPercent: 0,
                     currentSequenceName: "Default (seq0.mot)",
                     currentRunId: "...",
                     seqFile: null,
+                    runMode: 'live',
+                    scheduleSettings: { singlePointDurationSec: 1.615, timingMode: 'sequential', sequentialGapSec: 60 },
+                    scheduledTasks: [],
+                    selectedScheduledTaskId: null,
+                    scheduleRuntime: {
+                        active: false,
+                        stopRequested: false,
+                        waiting: false,
+                        activeTaskIndex: -1,
+                        activeTaskId: null,
+                        currentTaskStep: 0,
+                        currentTaskTotalSteps: 0,
+                        currentTaskStartedAtMs: null,
+                        waitUntilMs: null,
+                        scheduleStartedAtMs: null,
+                        completedTaskIds: []
+                    },
+                    schedulerClockMs: Date.now(),
                     archiveTree: {}, repeatYear: '', repeatMonth: '', repeatDay: '', repeatRun: '', isPresetLoading: false, loadedPresetInfo: null, showRepeatLoader: false,
                     showRawData: true, // Toggle State
                     maximizedView: null,
@@ -780,20 +926,43 @@
                         this.renderMainPlot();
                     }
                 },
+                runMode() { this.saveState(); },
+                scheduleSettings: {
+                    handler() {
+                        this.refreshScheduledTaskEstimates();
+                        this.saveState();
+                    },
+                    deep: true
+                },
                 config: { handler() { this.saveState(); }, deep: true }
             },
             mounted() {
                 this.loadState();
                 this.currentScanDimensions = this.getConfiguredScanDimensions();
+                this.refreshScheduledTaskEstimates();
                 this.initPlots();
                 this.connectWebSocket();
-                this.fetchSystemMode();
+                this.ensureRealHardwareMode().catch(() => { });
                 this.fetchStatus();
                 setInterval(this.fetchStatus, 2000);
+                setInterval(this.updateScheduledClock, 1000);
                 this.addLog("System initialized ready.");
             },
             methods: {
-                async fetchStatus() { try { const res = await axios.get('/experiment/status'); const d = res.data.data; this.currentRunId = d.run_id || "Loading..."; if (!this.isRunning) { this.isRunning = d.is_running; } } catch (e) { } },
+                async fetchStatus() {
+                    try {
+                        const res = await axios.get('/experiment/status');
+                        const d = res.data.data || {};
+                        this.currentRunId = d.run_id || "Loading...";
+                        this.isRunning = Boolean(d.is_running);
+                        if (!this.isRunning && !this.isScheduleActive()) {
+                            this.statusMessage = "IDLE";
+                        }
+                        return d;
+                    } catch (e) {
+                        return null;
+                    }
+                },
                 isNaN(val) { return Number.isNaN(val); },
                 toggleMaximize(view) {
                     if (this.maximizedView === view) { this.maximizedView = null; } else { this.maximizedView = view; }
@@ -843,10 +1012,16 @@
                         useList2: this.useList2,
                         useList3: this.useList3,
                         config: this.config,
+                        runMode: this.runMode,
+                        scheduleSettings: this.scheduleSettings,
                         showRawData: this.showRawData,
                         dim3DisplayMode: this.dim3DisplayMode
                     };
-                    localStorage.setItem('miga_scan_state', JSON.stringify(state));
+                    try {
+                        localStorage.setItem('miga_scan_state', JSON.stringify(state));
+                    } catch (error) {
+                        console.error('Save state failed', error);
+                    }
                 },
                 loadState() {
                     const stored = localStorage.getItem('miga_scan_state');
@@ -870,6 +1045,15 @@
                             this.useList1 = state.useList1 ?? (this.config.dim1_type === 'list');
                             this.useList2 = state.useList2 ?? (this.config.dim2_type === 'list');
                             this.useList3 = state.useList3 ?? (this.config.dim3_type === 'list');
+                            if (state.runMode === 'live' || state.runMode === 'scheduled') {
+                                this.runMode = state.runMode;
+                            }
+                            if (state.scheduleSettings && typeof state.scheduleSettings === 'object') {
+                                this.scheduleSettings = {
+                                    ...this.scheduleSettings,
+                                    ...state.scheduleSettings,
+                                };
+                            }
                             if (state.showRawData !== undefined) this.showRawData = state.showRawData;
                             if (state.dim3DisplayMode === 'slice' || state.dim3DisplayMode === 'cloud') {
                                 this.dim3DisplayMode = state.dim3DisplayMode;
@@ -1015,6 +1199,578 @@
                         this.isPresetLoading = false;
                     }
                 },
+
+getDefaultScheduleRuntime() {
+    return {
+        active: false,
+        stopRequested: false,
+        waiting: false,
+        activeTaskIndex: -1,
+        activeTaskId: null,
+        currentTaskStep: 0,
+        currentTaskTotalSteps: 0,
+        currentTaskStartedAtMs: null,
+        waitUntilMs: null,
+        scheduleStartedAtMs: null,
+        completedTaskIds: []
+    };
+},
+updateScheduledClock() {
+    this.schedulerClockMs = Date.now();
+},
+isScheduledMode() {
+    return this.runMode === 'scheduled';
+},
+isScheduleActive() {
+    return Boolean(this.scheduleRuntime?.active);
+},
+isStatusActive() {
+    return this.isRunning || this.isScheduleActive();
+},
+isStartDisabled() {
+    return this.isRunning || this.isScheduleActive() || (this.isScheduledMode() && !this.scheduledTasks.length);
+},
+isStopDisabled() {
+    return !this.isRunning && !this.isScheduleActive();
+},
+getRunHeaderLabel() {
+    if (this.isRunning) return 'CURRENT RUN';
+    if (this.isScheduleActive()) return 'SCHEDULE';
+    if (this.showScheduledHeader()) return 'NEXT TASK';
+    return 'NEXT RUN';
+},
+getHeaderPrimaryLabel() {
+    if (this.showScheduledHeader()) {
+        const task = this.getRuntimeTask();
+        if (task) {
+            const runLabel = String(task.config?.run_label || '').trim();
+            return runLabel ? `${task.name} · ${runLabel}` : task.name;
+        }
+        return `${this.scheduledTasks.length} scheduled tasks queued`;
+    }
+    return String(this.config.run_label || '').trim();
+},
+showScheduledHeader() {
+    return this.isScheduledMode() && (this.isScheduleActive() || this.scheduledTasks.length > 0);
+},
+getHeaderPercentValue() {
+    if (this.showScheduledHeader()) return this.getTotalScheduleProgressPercent();
+    return Number.isFinite(this.progressPercent) ? this.progressPercent : 0;
+},
+getHeaderCurrentTaskLabel() {
+    const task = this.getRuntimeTask();
+    if (!task) return 'Current task';
+    const index = this.isScheduleActive() && this.scheduleRuntime.activeTaskIndex >= 0 ? this.scheduleRuntime.activeTaskIndex + 1 : 1;
+    const prefix = `Task ${index}/${Math.max(this.scheduledTasks.length, 1)}`;
+    return this.scheduleRuntime.waiting ? `${prefix} waiting · ${task.name}` : `${prefix} · ${task.name}`;
+},
+getHeaderTotalLabel() {
+    return `Total schedule · ${Math.round(this.getTotalScheduleProgressPercent())}%`;
+},
+getSinglePointDurationSec() {
+    const parsed = Number(this.scheduleSettings?.singlePointDurationSec);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 1.615;
+},
+getSequentialGapSec() {
+    const parsed = Number(this.scheduleSettings?.sequentialGapSec);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 60;
+},
+formatDuration(seconds) {
+    const safeSeconds = Math.max(0, Math.round(Number(seconds) || 0));
+    const hours = Math.floor(safeSeconds / 3600);
+    const minutes = Math.floor((safeSeconds % 3600) / 60);
+    const secs = safeSeconds % 60;
+    if (hours > 0) return `${hours}h ${String(minutes).padStart(2, '0')}m ${String(secs).padStart(2, '0')}s`;
+    if (minutes > 0) return `${minutes}m ${String(secs).padStart(2, '0')}s`;
+    return `${secs}s`;
+},
+cloneConfig(configObj) {
+    return JSON.parse(JSON.stringify(configObj || {}));
+},
+resolveScanDimensionsFromConfig(configObj = this.config) {
+    const fallback = configObj?.dim3_enabled ? 3 : (configObj?.dim2_enabled ? 2 : 1);
+    const parsed = Number(configObj?.scan_dimensions || fallback);
+    if (!Number.isFinite(parsed)) return 1;
+    return Math.max(1, Math.min(3, Math.round(parsed)));
+},
+getConfiguredScanDimensions() {
+    return this.resolveScanDimensionsFromConfig(this.config);
+},
+estimateAxisPointCount(spec = {}) {
+    const scanType = String(spec.scan_type || 'range');
+    const method = String(spec.method || 'step_size');
+    if (scanType === 'list') {
+        const values = String(spec.list || '')
+            .split(',')
+            .map((item) => item.trim())
+            .filter(Boolean)
+            .map((item) => Number(item));
+        if (!values.length || values.some((item) => !Number.isFinite(item))) {
+            throw new Error('Invalid scan list values.');
+        }
+        return values.length;
+    }
+    const start = Number(spec.start);
+    const stop = Number(spec.stop);
+    if (!Number.isFinite(start) || !Number.isFinite(stop)) {
+        throw new Error('Scan start/stop must be numeric.');
+    }
+    if (method === 'n_points') {
+        const count = Number(spec.step);
+        if (!Number.isFinite(count)) throw new Error('Point count must be numeric.');
+        return Math.max(1, Math.round(count));
+    }
+    const step = Number(spec.step);
+    if (!Number.isFinite(step)) throw new Error('Step size must be numeric.');
+    if (step === 0) return 1;
+    const direction = stop >= start ? 1 : -1;
+    const effectiveStep = Math.abs(step) * direction;
+    const tolerance = Math.abs(effectiveStep) * 1e-9 + 1e-12;
+    let current = start;
+    let count = 0;
+    const compare = direction > 0
+        ? (value) => value <= stop + tolerance
+        : (value) => value >= stop - tolerance;
+    while (compare(current)) {
+        count += 1;
+        current += effectiveStep;
+        if (count > 1000000) {
+            throw new Error('Scan point estimate exceeds safe limit.');
+        }
+    }
+    return Math.max(count, 1);
+},
+estimateScanStepCount(configObj = this.config) {
+    const scanDimensions = this.resolveScanDimensionsFromConfig(configObj);
+    const specs = [
+        {
+            scan_type: configObj.dim1_type,
+            method: configObj.dim1_method,
+            start: configObj.start,
+            stop: configObj.stop,
+            step: configObj.step,
+            list: configObj.custom_list,
+        },
+        {
+            scan_type: configObj.dim2_type,
+            method: configObj.dim2_method,
+            start: configObj.dim2_start,
+            stop: configObj.dim2_stop,
+            step: configObj.dim2_step,
+            list: configObj.dim2_list,
+        },
+        {
+            scan_type: configObj.dim3_type,
+            method: configObj.dim3_method,
+            start: configObj.dim3_start,
+            stop: configObj.dim3_stop,
+            step: configObj.dim3_step,
+            list: configObj.dim3_list,
+        }
+    ];
+    let baseCount = 1;
+    for (let index = 0; index < scanDimensions; index += 1) {
+        baseCount *= this.estimateAxisPointCount(specs[index]);
+    }
+    const averages = Math.max(1, Math.round(Number(configObj.averages) || 1));
+    return baseCount * averages;
+},
+getScheduledTaskCountTotal() {
+    return this.scheduledTasks.reduce((sum, task) => sum + Math.max(0, Number(task.estimated_points) || 0), 0);
+},
+getScheduledMeasurementDurationSeconds() {
+    let total = this.scheduledTasks.reduce((sum, task) => sum + Math.max(0, Number(task.estimated_duration_sec) || 0), 0);
+    if (this.scheduleSettings.timingMode === 'sequential' && this.scheduledTasks.length > 1) {
+        total += this.getSequentialGapSec() * (this.scheduledTasks.length - 1);
+    }
+    return total;
+},
+refreshScheduledTaskEstimates() {
+    this.scheduledTasks.forEach((task) => {
+        try {
+            const points = this.estimateScanStepCount(task.config);
+            task.estimated_points = points;
+            task.estimated_duration_sec = points * this.getSinglePointDurationSec();
+            task.validation_error = '';
+        } catch (error) {
+            task.estimated_points = 0;
+            task.estimated_duration_sec = 0;
+            task.validation_error = error?.message || 'Invalid task configuration.';
+        }
+    });
+},
+getScheduledTaskModeLabel(task) {
+    const configObj = task?.config || {};
+    const scanDimensions = this.resolveScanDimensionsFromConfig(configObj);
+    if (scanDimensions > 1) return `${scanDimensions}D standard scan`;
+    const modeMap = {
+        standard: '1D standard scan',
+        timing: '1D timing scan',
+        rabi: '1D rabi scan',
+        half: '1D half scan',
+        link: '1D linked scan',
+        bragg_rabi: '1D Bragg Rabi scan'
+    };
+    return modeMap[String(configObj.mode || 'standard')] || '1D scan';
+},
+getScheduledTaskAxisLabel(configObj = {}) {
+    const scanDimensions = this.resolveScanDimensionsFromConfig(configObj);
+    const axisLabels = [];
+    try {
+        axisLabels.push(`P0:${this.estimateAxisPointCount({ scan_type: configObj.dim1_type, method: configObj.dim1_method, start: configObj.start, stop: configObj.stop, step: configObj.step, list: configObj.custom_list })}`);
+        if (scanDimensions >= 2) {
+            axisLabels.push(`P1:${this.estimateAxisPointCount({ scan_type: configObj.dim2_type, method: configObj.dim2_method, start: configObj.dim2_start, stop: configObj.dim2_stop, step: configObj.dim2_step, list: configObj.dim2_list })}`);
+        }
+        if (scanDimensions >= 3) {
+            axisLabels.push(`P2:${this.estimateAxisPointCount({ scan_type: configObj.dim3_type, method: configObj.dim3_method, start: configObj.dim3_start, stop: configObj.dim3_stop, step: configObj.dim3_step, list: configObj.dim3_list })}`);
+        }
+    } catch (error) {
+        axisLabels.push('scan estimate unavailable');
+    }
+    const averages = Math.max(1, Math.round(Number(configObj.averages) || 1));
+    return `${axisLabels.join(' · ')} · avg:${averages}`;
+},
+getScheduledTaskById(taskId) {
+    return this.scheduledTasks.find((task) => task.id === taskId) || null;
+},
+buildScheduledTaskName(configSnapshot, sequenceName) {
+    const runLabel = String(configSnapshot?.run_label || '').trim();
+    if (runLabel) return runLabel;
+    const cleanSequence = String(sequenceName || '').replace(/\.mot$/i, '').trim();
+    if (cleanSequence) return cleanSequence;
+    return `Task ${this.scheduledTasks.length + 1}`;
+},
+toDateTimeLocalValue(inputDate) {
+    const date = inputDate instanceof Date ? inputDate : new Date(inputDate);
+    if (Number.isNaN(date.getTime())) return '';
+    const pad = (value) => String(value).padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+},
+parseScheduledDateTime(value) {
+    if (!value) return null;
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return parsed.getTime();
+},
+getDefaultScheduledTimeValue() {
+    const validTimes = this.scheduledTasks
+        .map((task) => this.parseScheduledDateTime(task.scheduled_at))
+        .filter((value) => Number.isFinite(value));
+    const baseMs = validTimes.length ? Math.max(...validTimes) + 60000 : Date.now() + 60000;
+    return this.toDateTimeLocalValue(baseMs);
+},
+async captureCurrentSequenceForTask() {
+    if (this.seqFile) {
+        return {
+            sequence_name: this.seqFile.name,
+            sequence_file_name: this.seqFile.name,
+            sequence_source: 'local_file',
+            sequence_snapshot: await this.seqFile.text(),
+        };
+    }
+    const res = await axios.get('/experiment/sequence/template');
+    return {
+        sequence_name: String(this.currentSequenceName || 'sequence.mot').trim() || 'sequence.mot',
+        sequence_file_name: String(this.currentSequenceName || 'sequence.mot').trim() || 'sequence.mot',
+        sequence_source: 'template_snapshot',
+        sequence_snapshot: String(res.data?.content || ''),
+    };
+},
+async addScheduledTaskFromCurrentSetup() {
+    if (this.isScheduleActive()) return;
+    try {
+        const configSnapshot = this.prepareScanPayload(this.config, this.currentSequenceName);
+        const sequenceInfo = await this.captureCurrentSequenceForTask();
+        const task = {
+            id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            name: this.buildScheduledTaskName(configSnapshot, sequenceInfo.sequence_file_name),
+            config: configSnapshot,
+            sequence_name: sequenceInfo.sequence_name,
+            sequence_file_name: sequenceInfo.sequence_file_name,
+            sequence_source: sequenceInfo.sequence_source,
+            sequence_snapshot: sequenceInfo.sequence_snapshot,
+            scheduled_at: this.scheduleSettings.timingMode === 'specific' ? this.getDefaultScheduledTimeValue() : '',
+            estimated_points: 0,
+            estimated_duration_sec: 0,
+            validation_error: ''
+        };
+        this.scheduledTasks.push(task);
+        this.selectedScheduledTaskId = task.id;
+        this.refreshScheduledTaskEstimates();
+        this.addLog(`Scheduled task added: ${task.name}.`);
+    } catch (error) {
+        this.addLog(`Add task failed: ${error?.message || error}`);
+    }
+},
+async updateSelectedScheduledTask() {
+    if (this.isScheduleActive() || !this.selectedScheduledTaskId) return;
+    const task = this.getScheduledTaskById(this.selectedScheduledTaskId);
+    if (!task) return;
+    try {
+        const configSnapshot = this.prepareScanPayload(this.config, this.currentSequenceName);
+        const sequenceInfo = await this.captureCurrentSequenceForTask();
+        task.config = configSnapshot;
+        task.sequence_name = sequenceInfo.sequence_name;
+        task.sequence_file_name = sequenceInfo.sequence_file_name;
+        task.sequence_source = sequenceInfo.sequence_source;
+        task.sequence_snapshot = sequenceInfo.sequence_snapshot;
+        if (!String(task.name || '').trim()) {
+            task.name = this.buildScheduledTaskName(configSnapshot, sequenceInfo.sequence_file_name);
+        }
+        this.refreshScheduledTaskEstimates();
+        this.addLog(`Scheduled task updated: ${task.name}.`);
+    } catch (error) {
+        this.addLog(`Update task failed: ${error?.message || error}`);
+    }
+},
+loadScheduledTaskIntoEditor(taskId) {
+    const task = this.getScheduledTaskById(taskId);
+    if (!task || this.isScheduleActive()) return;
+    this.selectedScheduledTaskId = task.id;
+    const restoredConfig = this.cloneConfig(task.config);
+    this.config = { ...this.config, ...restoredConfig };
+    this.config.scan_dimensions = this.resolveScanDimensionsFromConfig(this.config);
+    this.config.dim2_enabled = this.config.scan_dimensions >= 2;
+    this.config.dim3_enabled = this.config.scan_dimensions >= 3;
+    this.useList1 = this.config.dim1_type === 'list';
+    this.useList2 = this.config.dim2_type === 'list';
+    this.useList3 = this.config.dim3_type === 'list';
+    this.currentSequenceName = task.sequence_file_name || task.sequence_name || this.currentSequenceName;
+    this.config.sequence_name = this.currentSequenceName;
+    this.seqFile = new File([task.sequence_snapshot || ''], this.currentSequenceName, { type: 'text/plain' });
+    this.currentScanDimensions = this.getConfiguredScanDimensions();
+    this.plotRevision++;
+    this.renderMainPlot();
+    this.addLog(`Loaded scheduled task into editor: ${task.name}.`);
+},
+moveScheduledTask(index, delta) {
+    if (this.isScheduleActive()) return;
+    const targetIndex = index + delta;
+    if (targetIndex < 0 || targetIndex >= this.scheduledTasks.length) return;
+    const [task] = this.scheduledTasks.splice(index, 1);
+    this.scheduledTasks.splice(targetIndex, 0, task);
+},
+removeScheduledTask(taskId) {
+    if (this.isScheduleActive()) return;
+    this.scheduledTasks = this.scheduledTasks.filter((task) => task.id !== taskId);
+    if (this.selectedScheduledTaskId === taskId) this.selectedScheduledTaskId = null;
+},
+clearScheduledTasks() {
+    if (this.isScheduleActive()) return;
+    this.scheduledTasks = [];
+    this.selectedScheduledTaskId = null;
+},
+getScheduledTaskStateLabel(task, index) {
+    if (!this.isScheduleActive()) return 'Queued';
+    if (this.scheduleRuntime.completedTaskIds.includes(task.id)) return 'Done';
+    if (this.scheduleRuntime.activeTaskId === task.id) {
+        if (this.scheduleRuntime.waiting) return 'Waiting';
+        return this.isRunning ? 'Running' : 'Next';
+    }
+    if (this.scheduleRuntime.activeTaskIndex >= 0 && index < this.scheduleRuntime.activeTaskIndex) return 'Done';
+    return 'Queued';
+},
+getScheduledTaskBadgeClass(task, index) {
+    const label = this.getScheduledTaskStateLabel(task, index);
+    if (label === 'Done') return 'bg-success';
+    if (label === 'Running') return 'bg-primary';
+    if (label === 'Waiting') return 'bg-warning text-dark';
+    return 'bg-secondary';
+},
+getRuntimeTask() {
+    if (this.scheduleRuntime.activeTaskId) {
+        return this.getScheduledTaskById(this.scheduleRuntime.activeTaskId);
+    }
+    return this.scheduledTasks[0] || null;
+},
+getCurrentTaskProgressPercent() {
+    const task = this.getRuntimeTask();
+    if (!task || !this.isScheduleActive()) return 0;
+    const total = Math.max(1, Number(this.scheduleRuntime.currentTaskTotalSteps || task.estimated_points) || 1);
+    const current = this.scheduleRuntime.waiting ? 0 : Math.max(0, Math.min(total, Number(this.scheduleRuntime.currentTaskStep) || 0));
+    return (current / total) * 100;
+},
+getTotalScheduleProgressPercent() {
+    const totalShots = this.getScheduledTaskCountTotal();
+    if (totalShots <= 0 || !this.isScheduleActive()) return 0;
+    const completedShots = this.scheduledTasks.reduce((sum, task) => {
+        return sum + (this.scheduleRuntime.completedTaskIds.includes(task.id) ? Math.max(0, Number(task.estimated_points) || 0) : 0);
+    }, 0);
+    const activeTask = this.getRuntimeTask();
+    const activeShots = activeTask && this.scheduleRuntime.activeTaskId === activeTask.id
+        ? Math.max(0, Math.min(Number(this.scheduleRuntime.currentTaskStep) || 0, Number(this.scheduleRuntime.currentTaskTotalSteps || activeTask.estimated_points) || 0))
+        : 0;
+    return ((completedShots + activeShots) / totalShots) * 100;
+},
+getCurrentTaskRemainingSeconds() {
+    const task = this.getRuntimeTask();
+    if (!task) return 0;
+    const nowMs = this.schedulerClockMs || Date.now();
+    if (!this.isScheduleActive()) return Number(task.estimated_duration_sec) || 0;
+    if (this.scheduleRuntime.waiting) {
+        const waitSec = Math.max(0, ((this.scheduleRuntime.waitUntilMs || nowMs) - nowMs) / 1000);
+        return waitSec + (Number(task.estimated_duration_sec) || 0);
+    }
+    const total = Math.max(0, Number(this.scheduleRuntime.currentTaskTotalSteps || task.estimated_points) || 0);
+    const current = Math.max(0, Number(this.scheduleRuntime.currentTaskStep) || 0);
+    return Math.max(0, total - current) * this.getSinglePointDurationSec();
+},
+getTotalRemainingSeconds() {
+    const nowMs = this.schedulerClockMs || Date.now();
+    if (!this.isScheduledMode() || !this.scheduledTasks.length) return 0;
+    if (!this.isScheduleActive()) {
+        if (this.scheduleSettings.timingMode === 'sequential') {
+            return this.getScheduledMeasurementDurationSeconds();
+        }
+        let cursorMs = nowMs;
+        let totalSec = 0;
+        this.scheduledTasks.forEach((task) => {
+            const scheduledMs = this.parseScheduledDateTime(task.scheduled_at);
+            if (Number.isFinite(scheduledMs) && scheduledMs > cursorMs) {
+                totalSec += (scheduledMs - cursorMs) / 1000;
+                cursorMs = scheduledMs;
+            }
+            totalSec += Number(task.estimated_duration_sec) || 0;
+            cursorMs += (Number(task.estimated_duration_sec) || 0) * 1000;
+        });
+        return totalSec;
+    }
+    let totalSec = 0;
+    let cursorMs = nowMs;
+    const activeIndex = Math.max(0, this.scheduleRuntime.activeTaskIndex);
+    for (let index = activeIndex; index < this.scheduledTasks.length; index += 1) {
+        const task = this.scheduledTasks[index];
+        const durationSec = Number(task.estimated_duration_sec) || 0;
+        if (index === activeIndex) {
+            if (this.scheduleRuntime.waiting) {
+                const waitSec = Math.max(0, ((this.scheduleRuntime.waitUntilMs || nowMs) - nowMs) / 1000);
+                totalSec += waitSec + durationSec;
+                cursorMs = Math.max(cursorMs, this.scheduleRuntime.waitUntilMs || nowMs) + durationSec * 1000;
+            } else {
+                const totalSteps = Math.max(0, Number(this.scheduleRuntime.currentTaskTotalSteps || task.estimated_points) || 0);
+                const currentSteps = Math.max(0, Number(this.scheduleRuntime.currentTaskStep) || 0);
+                const remainingSec = Math.max(0, totalSteps - currentSteps) * this.getSinglePointDurationSec();
+                totalSec += remainingSec;
+                cursorMs += remainingSec * 1000;
+            }
+            continue;
+        }
+        if (this.scheduleSettings.timingMode === 'sequential') {
+            totalSec += this.getSequentialGapSec();
+            cursorMs += this.getSequentialGapSec() * 1000;
+        } else {
+            const scheduledMs = this.parseScheduledDateTime(task.scheduled_at);
+            if (Number.isFinite(scheduledMs) && scheduledMs > cursorMs) {
+                totalSec += (scheduledMs - cursorMs) / 1000;
+                cursorMs = scheduledMs;
+            }
+        }
+        totalSec += durationSec;
+        cursorMs += durationSec * 1000;
+    }
+    return totalSec;
+},
+prepareScanPayload(sourceConfig = this.config, sequenceNameOverride = null) {
+    const payload = this.cloneConfig(sourceConfig);
+    payload.scan_dimensions = this.resolveScanDimensionsFromConfig(payload);
+    payload.dim2_enabled = payload.scan_dimensions >= 2;
+    payload.dim3_enabled = payload.scan_dimensions >= 3;
+    if (payload.scan_dimensions > 1) payload.mode = 'standard';
+    return this.sanitizeStartPayload(payload, sequenceNameOverride);
+},
+ensureScheduledTasksValid() {
+    if (!this.scheduledTasks.length) {
+        throw new Error('No scheduled tasks configured.');
+    }
+    const invalidTask = this.scheduledTasks.find((task) => task.validation_error || !task.estimated_points || typeof task.sequence_snapshot !== 'string');
+    if (invalidTask) {
+        throw new Error(`Task invalid: ${invalidTask.name}.`);
+    }
+    if (this.scheduleSettings.timingMode === 'specific') {
+        const missingTime = this.scheduledTasks.find((task) => !Number.isFinite(this.parseScheduledDateTime(task.scheduled_at)));
+        if (missingTime) {
+            throw new Error(`Task start time missing: ${missingTime.name}.`);
+        }
+    }
+},
+sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+},
+async waitForScheduleWindow(task, index) {
+    let waitUntilMs = null;
+    if (this.scheduleSettings.timingMode === 'sequential') {
+        if (index > 0) {
+            waitUntilMs = Date.now() + this.getSequentialGapSec() * 1000;
+        }
+    } else {
+        const scheduledMs = this.parseScheduledDateTime(task.scheduled_at);
+        if (Number.isFinite(scheduledMs) && scheduledMs > Date.now()) {
+            waitUntilMs = scheduledMs;
+        }
+    }
+    if (!Number.isFinite(waitUntilMs)) return;
+    this.scheduleRuntime.waiting = true;
+    this.scheduleRuntime.waitUntilMs = waitUntilMs;
+    this.scheduleRuntime.activeTaskId = task.id;
+    this.scheduleRuntime.activeTaskIndex = index;
+    this.scheduleRuntime.currentTaskStep = 0;
+    this.scheduleRuntime.currentTaskTotalSteps = task.estimated_points;
+    this.statusMessage = 'WAITING';
+    this.addLog(`Waiting before task ${index + 1}: ${task.name} (${this.formatDuration((waitUntilMs - Date.now()) / 1000)}).`);
+    while (!this.scheduleRuntime.stopRequested && Date.now() < waitUntilMs) {
+        await this.sleep(Math.min(1000, Math.max(200, waitUntilMs - Date.now())));
+    }
+    this.scheduleRuntime.waiting = false;
+    this.scheduleRuntime.waitUntilMs = null;
+},
+async uploadScheduledTaskSequence(task) {
+    const fileName = task.sequence_file_name || task.sequence_name || 'sequence.mot';
+    const file = new File([task.sequence_snapshot || ''], fileName, { type: 'text/plain' });
+    const formData = new FormData();
+    formData.append('file', file);
+    this.addLog(`Uploading ${fileName} for ${task.name}...`);
+    const res = await axios.post('/experiment/sequence', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+    });
+    this.currentSequenceName = res.data.filename || fileName;
+    return this.currentSequenceName;
+},
+async startScheduledTask(task, index) {
+    const sequenceName = await this.uploadScheduledTaskSequence(task);
+    this.resetHistory(this.resolveScanDimensionsFromConfig(task.config));
+    this.currentStep = 0;
+    this.progressPercent = 0;
+    this.plotRevision = 0;
+    this.scheduleRuntime.activeTaskId = task.id;
+    this.scheduleRuntime.activeTaskIndex = index;
+    this.scheduleRuntime.currentTaskStep = 0;
+    this.scheduleRuntime.currentTaskTotalSteps = task.estimated_points;
+    this.scheduleRuntime.currentTaskStartedAtMs = Date.now();
+    const payload = this.prepareScanPayload(task.config, sequenceName);
+    this.currentScanDimensions = payload.scan_dimensions;
+    const res = await axios.post('/experiment/start', payload);
+    if (res.data.status !== 'success') {
+        throw new Error(res.data.message || 'Task start failed.');
+    }
+    this.isRunning = true;
+    this.statusMessage = `TASK ${index + 1}/${this.scheduledTasks.length}`;
+    this.addLog(`Task started: ${task.name}.`);
+},
+async waitForCurrentTaskToFinish() {
+    while (true) {
+        const status = await this.fetchStatus();
+        if (!status || !status.is_running) {
+            this.isRunning = false;
+            return;
+        }
+        await this.sleep(1000);
+    }
+},
+finishScheduledRun(finalStatus = 'IDLE') {
+    this.scheduleRuntime = this.getDefaultScheduleRuntime();
+    this.isRunning = false;
+    this.statusMessage = finalStatus;
+},
                 addLog(msg) {
                     const time = new Date().toLocaleTimeString('en-GB', { hour12: false });
                     this.logs.unshift(`[${time}] ${msg}`);
@@ -1063,12 +1819,6 @@
                     Plotly.newPlot('waveformPlotUp', [], this.layoutOscUp); Plotly.newPlot('waveformPlotDw', [], this.layoutOscDw);
                     this.renderMainPlot();
                 },
-                getConfiguredScanDimensions() {
-                    const fallback = this.config.dim3_enabled ? 3 : (this.config.dim2_enabled ? 2 : 1);
-                    const parsed = Number(this.config.scan_dimensions || fallback);
-                    if (!Number.isFinite(parsed)) return 1;
-                    return Math.max(1, Math.min(3, Math.round(parsed)));
-                },
                 parseNumericInput(value) {
                     if (value === null || value === undefined || value === '') return null;
                     const parsed = Number(value);
@@ -1081,10 +1831,10 @@
                     const parsed = this.parseNumericInput(value);
                     return parsed !== null && Number.isFinite(parsed);
                 },
-                sanitizeStartPayload(payload) {
-                    const scanDimensions = Math.max(1, Math.min(3, Number(payload.scan_dimensions || this.getConfiguredScanDimensions()) || 1));
+                sanitizeStartPayload(payload, sequenceNameOverride = null) {
+                    const scanDimensions = Math.max(1, Math.min(3, Number(payload.scan_dimensions || this.resolveScanDimensionsFromConfig(payload)) || 1));
                     payload.run_label = String(payload.run_label || '').trim();
-                    payload.sequence_name = String(this.currentSequenceName || payload.sequence_name || 'sequence.mot').trim();
+                    payload.sequence_name = String(sequenceNameOverride || payload.sequence_name || this.currentSequenceName || 'sequence.mot').trim();
                     if (this.needsModeParam(payload.mode, scanDimensions)) {
                         const parsedModeParam = this.parseNumericInput(payload.mode_param);
                         if (!Number.isFinite(parsedModeParam)) {
@@ -1641,6 +2391,10 @@
                     this.currentStep = data.current_step || 0;
                     const total = data.total_steps || 1;
                     this.progressPercent = total > 0 ? Math.round((this.currentStep / total) * 100) : 0;
+                    if (this.isScheduleActive()) {
+                        this.scheduleRuntime.currentTaskStep = this.currentStep;
+                        this.scheduleRuntime.currentTaskTotalSteps = total;
+                    }
                     const scanDimensions = Math.max(1, Math.min(3, Number(data.scan_dimensions || this.currentScanDimensions || this.getConfiguredScanDimensions()) || 1));
                     const scannedParams = this.getScannedParameters(data, scanDimensions);
                     this.currentScanDimensions = scanDimensions;
@@ -1708,44 +2462,122 @@
                         }
                     });
                 },
-                async fetchSystemMode() { try { const res = await axios.get('/system/mode'); this.isSimulation = res.data.simulation; } catch (e) { } },
-                async toggleMode() { try { await axios.post('/system/mode', { simulation: this.isSimulation }); this.resetHistory(); } catch (e) { this.isSimulation = !this.isSimulation; } },
-                async startScan() {
-                    if (this.isRunning) return;
 
-                    // 第一步：尝试重新上传最新的 .mot 文件
-                    // 这样即使文件名没变，只要内容变了，也会应用新内容
-                    const uploadSuccess = await this.uploadSequenceFile();
-                    if (!uploadSuccess) {
-                        this.addLog("Aborting start due to sequence upload failure.");
-                        return;
-                    }
 
-                    // 第二步：执行原来的启动逻辑
-                    this.resetHistory();
-                    this.currentStep = 0;
-                    this.progressPercent = 0;
-                    this.plotRevision = 0;
-                    try {
-                        const payload = this.sanitizeStartPayload(JSON.parse(JSON.stringify(this.config)));
-                        payload.scan_dimensions = this.getConfiguredScanDimensions();
-                        payload.dim2_enabled = payload.scan_dimensions >= 2;
-                        payload.dim3_enabled = payload.scan_dimensions >= 3;
-                        if (payload.scan_dimensions > 1) payload.mode = 'standard';
-                        this.currentScanDimensions = payload.scan_dimensions;
-                        const res = await axios.post('/experiment/start', payload);
-                        if (res.data.status === 'success') {
-                            this.isRunning = true;
-                            this.statusMessage = "RUNNING";
-                        }
-                    } catch (error) {
-                        this.addLog("Start failed: " + this.formatRequestError(error));
-                    }
-                },
-                async stopScan() { await axios.post('/experiment/stop'); this.isRunning = false; this.statusMessage = "STOPPED"; },
-                resetHistory() { this.currentScanDimensions = this.getConfiguredScanDimensions(); this.historyMap = {}; this.initPlots(); }
+        async ensureRealHardwareMode() {
+            this.isSimulation = false;
+            await axios.post('/system/mode', { simulation: false });
+        },
+        async startScan() {
+            if (this.isScheduledMode()) {
+                await this.startScheduledRun();
+                return;
             }
-        }).mount('#app');
+            await this.startImmediateScan();
+        },
+        async startImmediateScan() {
+            if (this.isRunning || this.isScheduleActive()) return;
+            try {
+                await this.ensureRealHardwareMode();
+            } catch (error) {
+                this.addLog('REAL HW mode setup failed: ' + this.formatRequestError(error));
+                return;
+            }
+            const uploadSuccess = await this.uploadSequenceFile();
+            if (!uploadSuccess) {
+                this.addLog('Aborting start due to sequence upload failure.');
+                return;
+            }
+            this.resetHistory();
+            this.currentStep = 0;
+            this.progressPercent = 0;
+            this.plotRevision = 0;
+            try {
+                const payload = this.prepareScanPayload(this.config, this.currentSequenceName);
+                this.currentScanDimensions = payload.scan_dimensions;
+                const res = await axios.post('/experiment/start', payload);
+                if (res.data.status === 'success') {
+                    this.isRunning = true;
+                    this.statusMessage = 'RUNNING';
+                }
+            } catch (error) {
+                this.addLog('Start failed: ' + this.formatRequestError(error));
+            }
+        },
+        async startScheduledRun() {
+            if (this.isRunning || this.isScheduleActive()) return;
+            try {
+                this.refreshScheduledTaskEstimates();
+                this.ensureScheduledTasksValid();
+                await this.ensureRealHardwareMode();
+            } catch (error) {
+                this.addLog('Schedule start failed: ' + (error?.message || this.formatRequestError(error)));
+                return;
+            }
+            this.scheduleRuntime = {
+                ...this.getDefaultScheduleRuntime(),
+                active: true,
+                scheduleStartedAtMs: Date.now(),
+            };
+            this.statusMessage = 'SCHEDULE READY';
+            this.runScheduledTaskQueue().catch((error) => {
+                this.addLog('Schedule execution failed: ' + (error?.message || error));
+                this.finishScheduledRun('ERROR');
+            });
+        },
+        async runScheduledTaskQueue() {
+            try {
+                for (let index = 0; index < this.scheduledTasks.length; index += 1) {
+                    const task = this.scheduledTasks[index];
+                    this.scheduleRuntime.activeTaskId = task.id;
+                    this.scheduleRuntime.activeTaskIndex = index;
+                    this.scheduleRuntime.currentTaskStep = 0;
+                    this.scheduleRuntime.currentTaskTotalSteps = task.estimated_points;
+                    await this.waitForScheduleWindow(task, index);
+                    if (this.scheduleRuntime.stopRequested) break;
+                    await this.startScheduledTask(task, index);
+                    await this.waitForCurrentTaskToFinish();
+                    this.scheduleRuntime.completedTaskIds = [...this.scheduleRuntime.completedTaskIds, task.id];
+                    this.scheduleRuntime.currentTaskStep = task.estimated_points;
+                    this.scheduleRuntime.currentTaskTotalSteps = task.estimated_points;
+                    this.addLog(`Task finished: ${task.name}.`);
+                    if (this.scheduleRuntime.stopRequested) break;
+                }
+                if (this.scheduleRuntime.stopRequested) {
+                    this.addLog('Scheduled queue stopped.');
+                    this.finishScheduledRun('STOPPED');
+                } else {
+                    this.addLog('Scheduled queue completed.');
+                    this.finishScheduledRun('IDLE');
+                }
+            } catch (error) {
+                this.addLog('Scheduled queue failed: ' + (error?.message || error));
+                this.finishScheduledRun('ERROR');
+            }
+        },
+        async stopScan() {
+            if (this.isScheduleActive()) {
+                this.scheduleRuntime.stopRequested = true;
+                this.statusMessage = this.isRunning ? 'STOPPING' : 'STOPPED';
+            }
+            if (!this.isRunning) return;
+            await axios.post('/experiment/stop');
+            if (!this.isScheduleActive()) {
+                this.isRunning = false;
+                this.statusMessage = 'STOPPED';
+            }
+        },
+        resetHistory(scanDimensions = null) {
+            const targetDimensions = Number(scanDimensions);
+            this.currentScanDimensions = Number.isFinite(targetDimensions)
+                ? Math.max(1, Math.min(3, Math.round(targetDimensions)))
+                : this.getConfiguredScanDimensions();
+            this.historyMap = {};
+            this.initPlots();
+        }
+    }
+}).mount('#app');
+
     </script>
 </body>
 

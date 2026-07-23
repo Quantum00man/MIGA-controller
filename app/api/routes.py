@@ -74,6 +74,23 @@ async def upload_sequence(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(500, f"Failed to upload sequence: {str(e)}")
 
+@router.get("/experiment/sequence/template")
+async def get_sequence_template_snapshot():
+    target_path = config.SEQUENCE_TEMPLATE_PATH_WIN if config.IS_WINDOWS else config.SEQUENCE_TEMPLATE_PATH_LINUX
+    if not os.path.exists(target_path):
+        raise HTTPException(404, "Current sequence template not found")
+
+    encodings = ("utf-8", "latin-1")
+    last_error = None
+    for encoding in encodings:
+        try:
+            with open(target_path, "r", encoding=encoding) as handle:
+                return {"status": "success", "content": handle.read()}
+        except UnicodeDecodeError as exc:
+            last_error = exc
+
+    raise HTTPException(500, f"Failed to read current sequence template: {last_error}")
+
 @router.post("/experiment/load-run-preset", response_model=ExperimentResponse)
 async def load_run_preset(req: ArchiveRunReference):
     try:
