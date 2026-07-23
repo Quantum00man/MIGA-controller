@@ -1,5 +1,8 @@
+import json
 import os
 import shutil
+import time
+from copy import deepcopy
 
 import numpy as np
 from fastapi import APIRouter, HTTPException, UploadFile, File
@@ -18,6 +21,7 @@ from app.models.schemas import (
     ScanFitModelSaveRequest,
     ExperimentResponse,
     FitModelDefinition,
+    IndexUiStateRequest,
     ReAnalysisRequest,
     ScanConfig,
     SystemSettings,
@@ -25,9 +29,125 @@ from app.models.schemas import (
 )
 import config
 
+
 router = APIRouter()
 manager = ExperimentManager()
 data_loader = DataLoader()
+
+
+def _default_index_ui_state() -> Dict[str, Any]:
+    return {
+        "runMode": "live",
+        "currentSequenceName": "Default (seq0.mot)",
+        "config": ScanConfig().dict(),
+        "scheduleSettings": {
+            "singlePointDurationSec": 1.615,
+            "timingMode": "sequential",
+            "sequentialGapSec": 60,
+        },
+        "scheduledTasks": [],
+        "scheduleRuntime": {
+            "active": False,
+            "stopRequested": False,
+            "waiting": False,
+            "activeTaskIndex": -1,
+            "activeTaskId": None,
+            "currentTaskStep": 0,
+            "currentTaskTotalSteps": 0,
+            "currentTaskStartedAtMs": None,
+            "waitUntilMs": None,
+            "scheduleStartedAtMs": None,
+            "completedTaskIds": [],
+        },
+        "statusMessage": "IDLE",
+    }
+
+
+def _sanitize_index_ui_state(payload: Dict[str, Any]) -> Dict[str, Any]:
+    defaults = _default_index_ui_state()
+    sanitized = deepcopy(defaults)
+    if not isinstance(payload, dict):
+        return sanitized
+
+    run_mode = str(payload.get("runMode") or defaults["runMode"]).strip().lower()
+    sanitized["runMode"] = run_mode if run_mode in {"live", "scheduled"} else defaults["runMode"]
+
+    current_sequence_name = str(payload.get("currentSequenceName") or defaults["currentSequenceName"]).strip()
+    sanitized["currentSequenceName"] = current_sequence_name or defaults["currentSequenceName"]
+
+    config_payload = payload.get("config") if isinstance(payload.get("config"), dict) else {}
+    allowed_config_keys = set(defaults["config"].keys())
+    sanitized["config"].update({key: value for key, value in config_payload.items() if key in allowed_config_keys})
+
+    schedule_settings_payload = payload.get("scheduleSettings") if isinstance(payload.get("scheduleSettings"), dict) else {}
+    timing_mode = str(schedule_settings_payload.get("timingMode") or defaults["scheduleSettings"]["timingMode"]).strip().lower()
+    single_point_duration = schedule_settings_payload.get("singlePointDurationSec", defaults["scheduleSettings"]["singlePointDurationSec"])
+    sequential_gap = schedule_settings_payload.get("sequentialGapSec", defaults["scheduleSettings"]["sequentialGapSec"])
+    try:
+        single_point_duration = float(single_point_duration)
+    except (TypeError, ValueError):
+        single_point_duration = defaults["scheduleSettings"]["singlePointDurationSec"]
+    try:
+        sequential_gap = float(sequential_gap)
+    except (TypeError, ValueError):
+        sequential_gap = defaults["scheduleSettings"]["sequentialGapSec"]
+    sanitized["scheduleSettings"] = {
+        "singlePointDurationSec": max(0.001, single_point_duration),
+        "timingMode": timing_mode if timing_mode in {"sequential", "specific"} else defaults["scheduleSettings"]["timingMode"],
+        "sequentialGapSec": max(0.0, sequential_gap),
+    }
+
+    scheduled_tasks_payload = payload.get("scheduledTasks")
+    if isinstance(scheduled_tasks_payload, list):
+        sanitized["scheduledTasks"] = [task for task in scheduled_tasks_payload if isinstance(task, dict)]
+
+    schedule_runtime_payload = payload.get("scheduleRuntime") if isinstance(payload.get("scheduleRuntime"), dict) else {}
+    allowed_runtime_keys = set(defaults["scheduleRuntime"].keys())
+    sanitized_runtime = deepcopy(defaults["scheduleRuntime"])
+    for key, value in schedule_runtime_payload.items():
+        if key in allowed_runtime_keys:
+            sanitized_runtime[key] = value
+    if not isinstance(sanitized_runtime.get("completedTaskIds"), list):
+        sanitized_runtime["completedTaskIds"] = []
+    sanitized["scheduleRuntime"] = sanitized_runtime
+
+    status_message = str(payload.get("statusMessage") or defaults["statusMessage"]).strip()
+    sanitized["statusMessage"] = status_message or defaults["statusMessage"]
+    return sanitized
+
+
+def _load_index_ui_state_record() -> Dict[str, Any]:
+    path = config.INDEX_UI_STATE_PATH
+    defaults = {
+        "state": _default_index_ui_state(),
+        "updated_at_ms": 0,
+        "source_id": None,
+    }
+    if not path.exists():
+        return defaults
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            raw = json.load(handle)
+    except Exception:
+        return defaults
+    return {
+        "state": _sanitize_index_ui_state(raw.get("state") if isinstance(raw, dict) else {}),
+        "updated_at_ms": int(raw.get("updated_at_ms") or 0) if isinstance(raw, dict) else 0,
+        "source_id": str(raw.get("source_id") or "").strip() or None if isinstance(raw, dict) else None,
+    }
+
+
+def _save_index_ui_state_record(state: Dict[str, Any], source_id: str | None = None) -> Dict[str, Any]:
+    record = {
+        "state": _sanitize_index_ui_state(state),
+        "updated_at_ms": int(time.time() * 1000),
+        "source_id": str(source_id or "").strip() or None,
+    }
+    path = config.INDEX_UI_STATE_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(record, handle, ensure_ascii=False, indent=2)
+    return record
 
 # --- 1. Experiment Control ---
 @router.post("/experiment/start", response_model=ExperimentResponse)
@@ -40,6 +160,19 @@ async def start_experiment(config: ScanConfig):
 async def stop_experiment():
     result = manager.stop_scan()
     return ExperimentResponse(status=result["status"], message=result["message"])
+
+
+@router.get("/index/state", response_model=ExperimentResponse)
+async def get_index_state():
+    record = _load_index_ui_state_record()
+    return ExperimentResponse(status="success", message="Index state loaded", data=record)
+
+
+@router.post("/index/state", response_model=ExperimentResponse)
+async def update_index_state(req: IndexUiStateRequest):
+    record = _save_index_ui_state_record(req.state, req.source_id)
+    return ExperimentResponse(status="success", message="Index state updated", data=record)
+
 
 @router.get("/experiment/status", response_model=ExperimentResponse)
 async def get_status():

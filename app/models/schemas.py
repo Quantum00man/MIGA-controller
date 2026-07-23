@@ -196,3 +196,8 @@ class ArchiveScanFitRequest(BaseModel):
 class ScanFitModelSaveRequest(BaseModel):
     name: str
     model: FitModelDefinition
+
+
+class IndexUiStateRequest(BaseModel):
+    state: Dict[str, Any] = Field(default_factory=dict)
+    source_id: Optional[str] = Field(None)

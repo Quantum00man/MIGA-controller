@@ -133,11 +133,12 @@
             position: fixed;
             top: var(--header-height);
             bottom: 0;
-            left: calc(var(--sidebar-width) - 4px);
-            width: 8px;
+            left: calc(var(--sidebar-width) - 7px);
+            width: 14px;
             cursor: col-resize;
             z-index: 101;
             background: transparent;
+            touch-action: none;
         }
 
         .sidebar-resizer::after {
@@ -145,9 +146,9 @@
             position: absolute;
             top: 0;
             bottom: 0;
-            left: 3px;
+            left: 6px;
             width: 2px;
-            background: rgba(44, 62, 80, 0.06);
+            background: rgba(44, 62, 80, 0.12);
             transition: background 0.15s ease;
         }
 
@@ -382,7 +383,6 @@
                     </div>
                     <div class="run-id-block text-end flex-shrink-0">
                         <div class="fw-bold text-warning font-monospace" style="font-size: 1.35em; line-height: 1;">{{ currentRunId }}</div>
-                        <div class="small text-white-50 mt-1" v-if="!showScheduledHeader()">{{ formatPercent(progressPercent) }}</div>
                     </div>
                 </div>
                 <template v-if="showScheduledHeader()">
@@ -406,7 +406,11 @@
                     </div>
                 </template>
                 <div v-else class="run-progress-row mt-2">
-                    <div class="run-progress-track">
+                    <div class="run-progress-meta">
+                        <span class="run-progress-title">{{ getLiveHeaderLabel() }}</span>
+                        <span class="run-progress-stats">{{ getLiveHeaderStats() }}</span>
+                    </div>
+                    <div class="run-progress-track mt-1">
                         <div class="run-progress-fill run-progress-fill-warning" :style="{ width: getSafeProgressWidth(progressPercent) }"></div>
                     </div>
                 </div>
@@ -849,6 +853,9 @@
                             placeholder="e.g. MOT optimize / drift test / Raman scan">
                         <div class="form-text" style="font-size:0.72rem;">Saved into the run config and shown in Archive and preset selectors.</div>
                     </div>
+                    <div class="small text-muted px-1 mb-2" v-if="!isScheduledMode()">
+                        Estimated duration: <span class="fw-bold text-primary">{{ getLiveEstimateSummary() }}</span>
+                    </div>
                     <div class="d-grid gap-2">
                         <button class="btn btn-success py-2 fs-6 fw-bold shadow-sm" @click="startScan"
                             :disabled="isStartDisabled()"><i class="bi bi-play-fill me-1 fs-5"></i> {{ isScheduledMode() ? 'START SCHEDULE' : 'START EXPERIMENT' }}</button>
@@ -861,7 +868,7 @@
                 </div>
             </form>
         </aside>
-        <div class="sidebar-resizer" @mousedown="startSidebarResize" title="Drag to resize panels"></div>
+        <div class="sidebar-resizer" @pointerdown="startSidebarResize" title="Drag to resize panels"></div>
 
         <main class="main-content">
             <div class="card mb-4 border-0 shadow-sm" :class="{'maximized': maximizedView === 'analysis'}">
@@ -1006,8 +1013,16 @@
                     isResizingSidebar: false,
                     sidebarResizeMoveHandler: null,
                     sidebarResizeUpHandler: null,
+                    sidebarResizePointerId: null,
                     windowResizeHandler: null,
                     layoutResizeRaf: null,
+                    sharedStateClientId: '',
+                    sharedStateSyncTimer: null,
+                    sharedStatePollTimer: null,
+                    statusPollTimer: null,
+                    clockPollTimer: null,
+                    isApplyingSharedState: false,
+                    lastSharedStateUpdatedAtMs: 0,
                     runMode: 'live',
                     scheduleSettings: { singlePointDurationSec: 1.615, timingMode: 'sequential', sequentialGapSec: 60 },
                     scheduledTasks: [],
@@ -1053,6 +1068,7 @@
                     }
                 },
                 runMode() { this.saveState(); this.requestPlotResize(); },
+                currentSequenceName() { this.saveState(); },
                 scheduleSettings: {
                     handler() {
                         this.refreshScheduledTaskEstimates();
@@ -1060,9 +1076,27 @@
                     },
                     deep: true
                 },
+                scheduledTasks: {
+                    handler() {
+                        this.saveState();
+                    },
+                    deep: true
+                },
+                scheduleRuntime: {
+                    handler() {
+                        if (!this.isApplyingSharedState) this.queueSharedStateSync();
+                    },
+                    deep: true
+                },
+                statusMessage() {
+                    if (!this.isApplyingSharedState && (this.isScheduledMode() || this.isScheduleActive())) {
+                        this.queueSharedStateSync();
+                    }
+                },
                 config: { handler() { this.saveState(); }, deep: true }
             },
             mounted() {
+                this.sharedStateClientId = this.createClientId();
                 this.loadState();
                 this.sidebarWidth = this.normalizeSidebarWidth(this.sidebarWidth);
                 this.currentScanDimensions = this.getConfiguredScanDimensions();
@@ -1071,10 +1105,12 @@
                 this.connectWebSocket();
                 this.ensureRealHardwareMode().catch(() => { });
                 this.fetchStatus();
+                this.fetchSharedIndexState(true).catch(() => { });
                 this.windowResizeHandler = () => this.handleWindowResize();
                 window.addEventListener('resize', this.windowResizeHandler);
-                setInterval(this.fetchStatus, 2000);
-                setInterval(this.updateScheduledClock, 1000);
+                this.statusPollTimer = setInterval(() => this.fetchStatus(), 2000);
+                this.clockPollTimer = setInterval(() => this.updateScheduledClock(), 1000);
+                this.sharedStatePollTimer = setInterval(() => this.fetchSharedIndexState(false), 2000);
                 this.addLog("System initialized ready.");
             },
             beforeUnmount() {
@@ -1082,6 +1118,22 @@
                 if (this.windowResizeHandler) {
                     window.removeEventListener('resize', this.windowResizeHandler);
                     this.windowResizeHandler = null;
+                }
+                if (this.statusPollTimer) {
+                    clearInterval(this.statusPollTimer);
+                    this.statusPollTimer = null;
+                }
+                if (this.clockPollTimer) {
+                    clearInterval(this.clockPollTimer);
+                    this.clockPollTimer = null;
+                }
+                if (this.sharedStatePollTimer) {
+                    clearInterval(this.sharedStatePollTimer);
+                    this.sharedStatePollTimer = null;
+                }
+                if (this.sharedStateSyncTimer) {
+                    clearTimeout(this.sharedStateSyncTimer);
+                    this.sharedStateSyncTimer = null;
                 }
                 if (this.layoutResizeRaf !== null) {
                     cancelAnimationFrame(this.layoutResizeRaf);
@@ -1101,6 +1153,127 @@
                         return d;
                     } catch (e) {
                         return null;
+                    }
+                },
+                createClientId() {
+                    return `client_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+                },
+                getScheduleRuntimeSnapshot(runtime = this.scheduleRuntime) {
+                    return {
+                        active: Boolean(runtime?.active),
+                        stopRequested: Boolean(runtime?.stopRequested),
+                        waiting: Boolean(runtime?.waiting),
+                        activeTaskIndex: Number.isFinite(Number(runtime?.activeTaskIndex)) ? Number(runtime.activeTaskIndex) : -1,
+                        activeTaskId: runtime?.activeTaskId ?? null,
+                        currentTaskStep: Number(runtime?.currentTaskStep) || 0,
+                        currentTaskTotalSteps: Number(runtime?.currentTaskTotalSteps) || 0,
+                        currentTaskStartedAtMs: runtime?.currentTaskStartedAtMs ?? null,
+                        waitUntilMs: runtime?.waitUntilMs ?? null,
+                        scheduleStartedAtMs: runtime?.scheduleStartedAtMs ?? null,
+                        completedTaskIds: Array.isArray(runtime?.completedTaskIds) ? [...runtime.completedTaskIds] : [],
+                    };
+                },
+                buildSharedIndexState() {
+                    return {
+                        runMode: this.runMode,
+                        currentSequenceName: this.currentSequenceName,
+                        config: this.cloneConfig(this.config),
+                        scheduleSettings: this.cloneConfig(this.scheduleSettings),
+                        scheduledTasks: this.cloneConfig(this.scheduledTasks),
+                        scheduleRuntime: this.getScheduleRuntimeSnapshot(),
+                        statusMessage: this.statusMessage,
+                    };
+                },
+                queueSharedStateSync() {
+                    if (this.isApplyingSharedState) return;
+                    if (this.sharedStateSyncTimer) {
+                        clearTimeout(this.sharedStateSyncTimer);
+                    }
+                    this.sharedStateSyncTimer = setTimeout(() => {
+                        this.sharedStateSyncTimer = null;
+                        this.syncSharedIndexStateNow().catch(() => { });
+                    }, 250);
+                },
+                async syncSharedIndexStateNow() {
+                    if (this.isApplyingSharedState) return;
+                    if (!this.sharedStateClientId) {
+                        this.sharedStateClientId = this.createClientId();
+                    }
+                    const res = await axios.post('/index/state', {
+                        state: this.buildSharedIndexState(),
+                        source_id: this.sharedStateClientId,
+                    });
+                    const data = res.data?.data || {};
+                    this.lastSharedStateUpdatedAtMs = Number(data.updated_at_ms) || this.lastSharedStateUpdatedAtMs;
+                },
+                applySharedIndexState(state = {}) {
+                    this.isApplyingSharedState = true;
+                    try {
+                        const knownConfigKeys = Object.keys(this.config);
+                        const restoredConfig = Object.fromEntries(
+                            Object.entries(state.config || {}).filter(([key]) => knownConfigKeys.includes(key))
+                        );
+                        this.runMode = state.runMode === 'scheduled' ? 'scheduled' : 'live';
+                        this.config = { ...this.config, ...restoredConfig };
+                        this.currentSequenceName = String(state.currentSequenceName || restoredConfig.sequence_name || this.currentSequenceName).trim() || this.currentSequenceName;
+                        this.config.sequence_name = this.currentSequenceName;
+                        this.config.scan_dimensions = Number(this.config.scan_dimensions || (this.config.dim3_enabled ? 3 : (this.config.dim2_enabled ? 2 : 1))) || 1;
+                        this.config.dim2_enabled = this.config.scan_dimensions >= 2;
+                        this.config.dim3_enabled = this.config.scan_dimensions >= 3;
+                        this.useList1 = this.config.dim1_type === 'list';
+                        this.useList2 = this.config.dim2_type === 'list';
+                        this.useList3 = this.config.dim3_type === 'list';
+                        if (state.scheduleSettings && typeof state.scheduleSettings === 'object') {
+                            this.scheduleSettings = {
+                                ...this.scheduleSettings,
+                                ...state.scheduleSettings,
+                            };
+                        }
+                        this.scheduledTasks = Array.isArray(state.scheduledTasks)
+                            ? this.cloneConfig(state.scheduledTasks)
+                            : [];
+                        this.scheduleRuntime = {
+                            ...this.getDefaultScheduleRuntime(),
+                            ...(state.scheduleRuntime && typeof state.scheduleRuntime === 'object' ? state.scheduleRuntime : {}),
+                        };
+                        if (typeof state.statusMessage === 'string' && state.statusMessage.trim()) {
+                            this.statusMessage = state.statusMessage.trim();
+                        }
+                        this.seqFile = null;
+                        this.refreshScheduledTaskEstimates();
+                        const runtimeTask = this.getRuntimeTask();
+                        this.currentScanDimensions = runtimeTask && this.isScheduledMode()
+                            ? this.resolveScanDimensionsFromConfig(runtimeTask.config || {})
+                            : this.getConfiguredScanDimensions();
+                        this.saveState();
+                        this.requestPlotResize();
+                    } finally {
+                        this.isApplyingSharedState = false;
+                    }
+                },
+                async fetchSharedIndexState(initialLoad = false) {
+                    try {
+                        const res = await axios.get('/index/state');
+                        const payload = res.data?.data || {};
+                        const updatedAtMs = Number(payload.updated_at_ms) || 0;
+                        const sourceId = String(payload.source_id || '').trim();
+                        const state = payload.state && typeof payload.state === 'object' ? payload.state : {};
+                        if (updatedAtMs <= 0) {
+                            if (initialLoad) this.queueSharedStateSync();
+                            return;
+                        }
+                        if (sourceId === this.sharedStateClientId) {
+                            this.lastSharedStateUpdatedAtMs = updatedAtMs;
+                            return;
+                        }
+                        if (updatedAtMs > this.lastSharedStateUpdatedAtMs) {
+                            this.lastSharedStateUpdatedAtMs = updatedAtMs;
+                            this.applySharedIndexState(state);
+                        }
+                    } catch (error) {
+                        if (initialLoad) {
+                            this.queueSharedStateSync();
+                        }
                     }
                 },
                 isNaN(val) { return Number.isNaN(val); },
@@ -1152,6 +1325,7 @@
                         useList2: this.useList2,
                         useList3: this.useList3,
                         config: this.config,
+                        currentSequenceName: this.currentSequenceName,
                         sidebarWidth: this.sidebarWidth,
                         runMode: this.runMode,
                         scheduleSettings: this.scheduleSettings,
@@ -1162,6 +1336,9 @@
                         localStorage.setItem('miga_scan_state', JSON.stringify(state));
                     } catch (error) {
                         console.error('Save state failed', error);
+                    }
+                    if (!this.isApplyingSharedState) {
+                        this.queueSharedStateSync();
                     }
                 },
                 loadState() {
@@ -1177,9 +1354,7 @@
                                 Object.entries(state.config || {}).filter(([key]) => knownConfigKeys.includes(key))
                             );
                             this.config = { ...this.config, ...restoredConfig };
-                            if (restoredConfig.sequence_name) {
-                                this.currentSequenceName = restoredConfig.sequence_name;
-                            }
+                            this.currentSequenceName = state.currentSequenceName || restoredConfig.sequence_name || this.currentSequenceName;
                             if (!restoredConfig.scan_dimensions) {
                                 this.config.scan_dimensions = restoredConfig.dim3_enabled ? 3 : (restoredConfig.dim2_enabled ? 2 : 1);
                             }
@@ -1391,28 +1566,43 @@ startSidebarResize(event) {
     event.preventDefault();
     this.endSidebarResize();
     this.isResizingSidebar = true;
+    this.sidebarResizePointerId = event.pointerId ?? null;
+    if (event.target && typeof event.target.setPointerCapture === 'function' && event.pointerId !== undefined) {
+        try {
+            event.target.setPointerCapture(event.pointerId);
+        } catch (error) { }
+    }
     this.sidebarResizeMoveHandler = (moveEvent) => this.handleSidebarResize(moveEvent);
-    this.sidebarResizeUpHandler = () => this.endSidebarResize();
-    window.addEventListener('mousemove', this.sidebarResizeMoveHandler);
-    window.addEventListener('mouseup', this.sidebarResizeUpHandler);
+    this.sidebarResizeUpHandler = (upEvent) => this.endSidebarResize(upEvent?.pointerId);
+    window.addEventListener('pointermove', this.sidebarResizeMoveHandler);
+    window.addEventListener('pointerup', this.sidebarResizeUpHandler);
+    window.addEventListener('pointercancel', this.sidebarResizeUpHandler);
 },
 handleSidebarResize(event) {
     if (!this.isResizingSidebar) return;
+    if (this.sidebarResizePointerId !== null && event.pointerId !== undefined && event.pointerId !== this.sidebarResizePointerId) {
+        return;
+    }
     const nextWidth = this.normalizeSidebarWidth(event.clientX);
     if (nextWidth !== this.sidebarWidth) {
         this.sidebarWidth = nextWidth;
         this.requestPlotResize();
     }
 },
-endSidebarResize() {
+endSidebarResize(pointerId = null) {
+    if (pointerId !== null && this.sidebarResizePointerId !== null && pointerId !== this.sidebarResizePointerId) {
+        return;
+    }
     if (this.sidebarResizeMoveHandler) {
-        window.removeEventListener('mousemove', this.sidebarResizeMoveHandler);
+        window.removeEventListener('pointermove', this.sidebarResizeMoveHandler);
         this.sidebarResizeMoveHandler = null;
     }
     if (this.sidebarResizeUpHandler) {
-        window.removeEventListener('mouseup', this.sidebarResizeUpHandler);
+        window.removeEventListener('pointerup', this.sidebarResizeUpHandler);
+        window.removeEventListener('pointercancel', this.sidebarResizeUpHandler);
         this.sidebarResizeUpHandler = null;
     }
+    this.sidebarResizePointerId = null;
     if (this.isResizingSidebar) {
         this.isResizingSidebar = false;
         this.saveState();
@@ -1478,6 +1668,39 @@ getHeaderTotalLabel() {
 getSinglePointDurationSec() {
     const parsed = Number(this.scheduleSettings?.singlePointDurationSec);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : 1.615;
+},
+getLiveEstimatedShotCount() {
+    try {
+        return this.estimateScanStepCount(this.config);
+    } catch (error) {
+        return 0;
+    }
+},
+getLiveEstimatedDurationSeconds() {
+    const shots = this.getLiveEstimatedShotCount();
+    return shots > 0 ? shots * this.getSinglePointDurationSec() : 0;
+},
+getLiveRemainingSeconds() {
+    if (!this.isRunning) return this.getLiveEstimatedDurationSeconds();
+    const totalShots = this.getLiveEstimatedShotCount();
+    const currentStep = Math.max(0, Number(this.currentStep) || 0);
+    return Math.max(0, totalShots - currentStep) * this.getSinglePointDurationSec();
+},
+getLiveHeaderLabel() {
+    return this.isRunning ? 'Current scan' : 'Estimated run';
+},
+getLiveHeaderStats() {
+    const estimateSeconds = this.getLiveEstimatedDurationSeconds();
+    if (estimateSeconds <= 0) return 'Estimate unavailable';
+    if (this.isRunning) {
+        return `${this.formatPercent(this.progressPercent)} · ${this.formatDuration(this.getLiveRemainingSeconds())} left`;
+    }
+    return `${this.formatDuration(estimateSeconds)} total`;
+},
+getLiveEstimateSummary() {
+    const shots = this.getLiveEstimatedShotCount();
+    if (shots <= 0) return 'Estimate unavailable';
+    return `${shots} shots · ${this.formatDuration(this.getLiveEstimatedDurationSeconds())} @ ${this.getSinglePointDurationSec().toFixed(3)} s/shot`;
 },
 getSequentialGapSec() {
     const parsed = Number(this.scheduleSettings?.sequentialGapSec);
