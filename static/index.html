@@ -9,7 +9,12 @@
     <style>
         :root {
             --sidebar-width: 360px;
-            --header-height: 60px;
+            --header-height: 76px;
+        }
+
+        #app {
+            --sidebar-width: 360px;
+            --header-height: 76px;
         }
 
         body {
@@ -33,8 +38,9 @@
 
         .main-content {
             margin-left: var(--sidebar-width);
-            padding: 25px;
+            padding: 25px 25px 25px 28px;
             margin-top: var(--header-height);
+            transition: margin-left 0.08s ease-out, margin-top 0.12s ease-out;
         }
 
         .navbar-fixed {
@@ -42,15 +48,118 @@
             top: 0;
             left: 0;
             right: 0;
-            height: var(--header-height);
+            min-height: var(--header-height);
             z-index: 1030;
             background: #2c3e50;
             color: white;
-            padding: 0 25px;
+            padding: 10px 25px;
             display: flex;
             align-items: center;
             justify-content: space-between;
+            gap: 20px;
+            box-sizing: border-box;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .run-header-panel {
+            flex: 1 1 680px;
+            min-width: 0;
+            max-width: 860px;
+            margin: 0 24px;
+        }
+
+        .run-id-block {
+            min-width: 92px;
+        }
+
+        .run-progress-row {
+            min-width: 0;
+        }
+
+        .run-progress-meta {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            font-size: 0.78rem;
+            color: rgba(255, 255, 255, 0.72);
+        }
+
+        .run-progress-title {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .run-progress-stats {
+            flex-shrink: 0;
+            color: #f8fafc;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+
+        .run-progress-track {
+            width: 100%;
+            height: 8px;
+            background-color: #445566;
+            border-radius: 999px;
+            overflow: hidden;
+        }
+
+        .run-progress-track.run-progress-track-sm {
+            height: 6px;
+        }
+
+        .run-progress-fill {
+            height: 100%;
+            border-radius: inherit;
+            transition: width 0.2s ease;
+        }
+
+        .run-progress-fill-info {
+            background: linear-gradient(90deg, #63b3ed 0%, #2b6cb0 100%);
+        }
+
+        .run-progress-fill-warning {
+            background: linear-gradient(90deg, #ffd54f 0%, #f59f00 100%);
+        }
+
+        .navbar-fixed-actions {
+            flex: 0 0 auto;
+        }
+
+        .sidebar-resizer {
+            position: fixed;
+            top: var(--header-height);
+            bottom: 0;
+            left: calc(var(--sidebar-width) - 4px);
+            width: 8px;
+            cursor: col-resize;
+            z-index: 101;
+            background: transparent;
+        }
+
+        .sidebar-resizer::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            left: 3px;
+            width: 2px;
+            background: rgba(44, 62, 80, 0.06);
+            transition: background 0.15s ease;
+        }
+
+        .sidebar-resizer:hover::after,
+        #app.app-resizing .sidebar-resizer::after {
+            background: rgba(13, 110, 253, 0.55);
+        }
+
+        #app.app-resizing,
+        #app.app-resizing * {
+            user-select: none !important;
+            cursor: col-resize !important;
         }
 
         .card {
@@ -245,13 +354,18 @@
                 border-left: none;
                 border-top: 1px solid #eee;
             }
+
+            .run-header-panel {
+                max-width: none;
+                margin: 0 16px;
+            }
         }
     </style>
 </head>
 
 <body>
 
-    <div id="app">
+    <div id="app" :style="getLayoutCssVars()" :class="{ 'app-resizing': isResizingSidebar }">
         <header class="navbar-fixed">
             <div class="d-flex align-items-center">
 
@@ -260,39 +374,44 @@
                     <span style="font-size:0.5em;">powered by Yiming</span>
                 </span>
             </div>
-            <div class="d-flex align-items-center flex-grow-1 mx-4" style="max-width: 560px;">
-                <div class="d-flex flex-column w-100">
-                    <div class="d-flex justify-content-between small mb-1">
-                        <span class="fw-bold text-white-50" style="font-size: 1em;">{{ getRunHeaderLabel() }}</span>
-                        <span class="fw-bold text-warning font-monospace" style="font-size: 1.5em;">{{ currentRunId }}</span>
+            <div class="run-header-panel">
+                <div class="d-flex justify-content-between align-items-start gap-3 small mb-1">
+                    <div class="min-w-0 flex-grow-1">
+                        <div class="fw-bold text-white-50" style="font-size: 1em;">{{ getRunHeaderLabel() }}</div>
+                        <div class="small text-white-50 text-truncate" v-if="getHeaderPrimaryLabel()">{{ getHeaderPrimaryLabel() }}</div>
                     </div>
-                    <div class="small text-white-50 text-truncate" v-if="getHeaderPrimaryLabel()">{{ getHeaderPrimaryLabel() }}</div>
-                    <template v-if="showScheduledHeader()">
-                        <div class="d-flex justify-content-between small text-white-50 mt-1">
-                            <span>{{ getHeaderCurrentTaskLabel() }}</span>
-                            <span>{{ formatDuration(getCurrentTaskRemainingSeconds()) }}</span>
-                        </div>
-                        <div class="progress w-100 mt-1" style="height: 6px; background-color: #445566; border-radius: 4px;">
-                            <div class="progress-bar bg-info" role="progressbar" :style="{width: getCurrentTaskProgressPercent() + '%'}"
-                                :aria-valuenow="getCurrentTaskProgressPercent()" aria-valuemin="0" aria-valuemax="100"></div>
-                        </div>
-                        <div class="d-flex justify-content-between small text-white-50 mt-2">
-                            <span>{{ getHeaderTotalLabel() }}</span>
-                            <span>{{ formatDuration(getTotalRemainingSeconds()) }}</span>
-                        </div>
-                        <div class="progress w-100 mt-1" style="height: 8px; background-color: #445566; border-radius: 4px;">
-                            <div class="progress-bar bg-warning" role="progressbar" :style="{width: getTotalScheduleProgressPercent() + '%'}"
-                                :aria-valuenow="getTotalScheduleProgressPercent()" aria-valuemin="0" aria-valuemax="100"></div>
-                        </div>
-                    </template>
-                    <div v-else class="progress w-100" style="height: 8px; background-color: #445566; border-radius: 4px;">
-                        <div class="progress-bar bg-warning" role="progressbar" :style="{width: progressPercent + '%'}"
-                            :aria-valuenow="progressPercent" aria-valuemin="0" aria-valuemax="100"></div>
+                    <div class="run-id-block text-end flex-shrink-0">
+                        <div class="fw-bold text-warning font-monospace" style="font-size: 1.35em; line-height: 1;">{{ currentRunId }}</div>
+                        <div class="small text-white-50 mt-1" v-if="!showScheduledHeader()">{{ formatPercent(progressPercent) }}</div>
                     </div>
                 </div>
-                <span class="ms-2 small fw-bold text-warning" style="min-width: 52px;">{{ Math.round(getHeaderPercentValue()) }}%</span>
+                <template v-if="showScheduledHeader()">
+                    <div class="run-progress-row mt-1">
+                        <div class="run-progress-meta">
+                            <span class="run-progress-title">{{ getHeaderCurrentTaskLabel() }}</span>
+                            <span class="run-progress-stats">{{ formatPercent(getCurrentTaskProgressPercent()) }} · {{ formatDuration(getCurrentTaskRemainingSeconds()) }} left</span>
+                        </div>
+                        <div class="run-progress-track run-progress-track-sm mt-1">
+                            <div class="run-progress-fill run-progress-fill-info" :style="{ width: getSafeProgressWidth(getCurrentTaskProgressPercent()) }"></div>
+                        </div>
+                    </div>
+                    <div class="run-progress-row mt-2">
+                        <div class="run-progress-meta">
+                            <span class="run-progress-title">{{ getHeaderTotalLabel() }}</span>
+                            <span class="run-progress-stats">{{ formatPercent(getTotalScheduleProgressPercent()) }} · {{ formatDuration(getTotalRemainingSeconds()) }} left</span>
+                        </div>
+                        <div class="run-progress-track mt-1">
+                            <div class="run-progress-fill run-progress-fill-warning" :style="{ width: getSafeProgressWidth(getTotalScheduleProgressPercent()) }"></div>
+                        </div>
+                    </div>
+                </template>
+                <div v-else class="run-progress-row mt-2">
+                    <div class="run-progress-track">
+                        <div class="run-progress-fill run-progress-fill-warning" :style="{ width: getSafeProgressWidth(progressPercent) }"></div>
+                    </div>
+                </div>
             </div>
-            <div class="d-flex align-items-center gap-4">
+            <div class="navbar-fixed-actions d-flex align-items-center gap-3">
                 <div :class="['status-badge', isStatusActive() ? 'running' : 'idle']">
                     <i class="bi" :class="isStatusActive() ? 'bi-activity' : 'bi-pause-fill'"></i>
                     {{ statusMessage }}
@@ -742,6 +861,7 @@
                 </div>
             </form>
         </aside>
+        <div class="sidebar-resizer" @mousedown="startSidebarResize" title="Drag to resize panels"></div>
 
         <main class="main-content">
             <div class="card mb-4 border-0 shadow-sm" :class="{'maximized': maximizedView === 'analysis'}">
@@ -882,6 +1002,12 @@
                     currentSequenceName: "Default (seq0.mot)",
                     currentRunId: "...",
                     seqFile: null,
+                    sidebarWidth: 360,
+                    isResizingSidebar: false,
+                    sidebarResizeMoveHandler: null,
+                    sidebarResizeUpHandler: null,
+                    windowResizeHandler: null,
+                    layoutResizeRaf: null,
                     runMode: 'live',
                     scheduleSettings: { singlePointDurationSec: 1.615, timingMode: 'sequential', sequentialGapSec: 60 },
                     scheduledTasks: [],
@@ -926,7 +1052,7 @@
                         this.renderMainPlot();
                     }
                 },
-                runMode() { this.saveState(); },
+                runMode() { this.saveState(); this.requestPlotResize(); },
                 scheduleSettings: {
                     handler() {
                         this.refreshScheduledTaskEstimates();
@@ -938,15 +1064,29 @@
             },
             mounted() {
                 this.loadState();
+                this.sidebarWidth = this.normalizeSidebarWidth(this.sidebarWidth);
                 this.currentScanDimensions = this.getConfiguredScanDimensions();
                 this.refreshScheduledTaskEstimates();
                 this.initPlots();
                 this.connectWebSocket();
                 this.ensureRealHardwareMode().catch(() => { });
                 this.fetchStatus();
+                this.windowResizeHandler = () => this.handleWindowResize();
+                window.addEventListener('resize', this.windowResizeHandler);
                 setInterval(this.fetchStatus, 2000);
                 setInterval(this.updateScheduledClock, 1000);
                 this.addLog("System initialized ready.");
+            },
+            beforeUnmount() {
+                this.endSidebarResize();
+                if (this.windowResizeHandler) {
+                    window.removeEventListener('resize', this.windowResizeHandler);
+                    this.windowResizeHandler = null;
+                }
+                if (this.layoutResizeRaf !== null) {
+                    cancelAnimationFrame(this.layoutResizeRaf);
+                    this.layoutResizeRaf = null;
+                }
             },
             methods: {
                 async fetchStatus() {
@@ -1012,6 +1152,7 @@
                         useList2: this.useList2,
                         useList3: this.useList3,
                         config: this.config,
+                        sidebarWidth: this.sidebarWidth,
                         runMode: this.runMode,
                         scheduleSettings: this.scheduleSettings,
                         showRawData: this.showRawData,
@@ -1045,6 +1186,9 @@
                             this.useList1 = state.useList1 ?? (this.config.dim1_type === 'list');
                             this.useList2 = state.useList2 ?? (this.config.dim2_type === 'list');
                             this.useList3 = state.useList3 ?? (this.config.dim3_type === 'list');
+                            if (Number.isFinite(Number(state.sidebarWidth))) {
+                                this.sidebarWidth = Number(state.sidebarWidth);
+                            }
                             if (state.runMode === 'live' || state.runMode === 'scheduled') {
                                 this.runMode = state.runMode;
                             }
@@ -1218,6 +1362,70 @@ getDefaultScheduleRuntime() {
 updateScheduledClock() {
     this.schedulerClockMs = Date.now();
 },
+getLayoutCssVars() {
+    return {
+        '--sidebar-width': `${this.sidebarWidth}px`,
+        '--header-height': this.showScheduledHeader() ? '126px' : '76px',
+    };
+},
+normalizeSidebarWidth(width) {
+    const parsed = Number(width);
+    const viewportWidth = Math.max(0, window.innerWidth || 0);
+    const minWidth = 320;
+    const maxWidth = Math.max(minWidth, Math.min(680, viewportWidth - 420));
+    const fallback = Math.min(Math.max(360, minWidth), maxWidth);
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.round(Math.max(minWidth, Math.min(maxWidth, parsed)));
+},
+requestPlotResize() {
+    if (this.layoutResizeRaf !== null) return;
+    this.layoutResizeRaf = requestAnimationFrame(() => {
+        this.layoutResizeRaf = null;
+        ['resultsPlotUp', 'resultsPlotDw', 'waveformPlotUp', 'waveformPlotDw'].forEach((plotId) => {
+            const plotEl = document.getElementById(plotId);
+            if (plotEl) Plotly.Plots.resize(plotEl);
+        });
+    });
+},
+startSidebarResize(event) {
+    event.preventDefault();
+    this.endSidebarResize();
+    this.isResizingSidebar = true;
+    this.sidebarResizeMoveHandler = (moveEvent) => this.handleSidebarResize(moveEvent);
+    this.sidebarResizeUpHandler = () => this.endSidebarResize();
+    window.addEventListener('mousemove', this.sidebarResizeMoveHandler);
+    window.addEventListener('mouseup', this.sidebarResizeUpHandler);
+},
+handleSidebarResize(event) {
+    if (!this.isResizingSidebar) return;
+    const nextWidth = this.normalizeSidebarWidth(event.clientX);
+    if (nextWidth !== this.sidebarWidth) {
+        this.sidebarWidth = nextWidth;
+        this.requestPlotResize();
+    }
+},
+endSidebarResize() {
+    if (this.sidebarResizeMoveHandler) {
+        window.removeEventListener('mousemove', this.sidebarResizeMoveHandler);
+        this.sidebarResizeMoveHandler = null;
+    }
+    if (this.sidebarResizeUpHandler) {
+        window.removeEventListener('mouseup', this.sidebarResizeUpHandler);
+        this.sidebarResizeUpHandler = null;
+    }
+    if (this.isResizingSidebar) {
+        this.isResizingSidebar = false;
+        this.saveState();
+        this.requestPlotResize();
+    }
+},
+handleWindowResize() {
+    const normalizedWidth = this.normalizeSidebarWidth(this.sidebarWidth);
+    if (normalizedWidth !== this.sidebarWidth) {
+        this.sidebarWidth = normalizedWidth;
+    }
+    this.requestPlotResize();
+},
 isScheduledMode() {
     return this.runMode === 'scheduled';
 },
@@ -1265,7 +1473,7 @@ getHeaderCurrentTaskLabel() {
     return this.scheduleRuntime.waiting ? `${prefix} waiting · ${task.name}` : `${prefix} · ${task.name}`;
 },
 getHeaderTotalLabel() {
-    return `Total schedule · ${Math.round(this.getTotalScheduleProgressPercent())}%`;
+    return 'Total schedule';
 },
 getSinglePointDurationSec() {
     const parsed = Number(this.scheduleSettings?.singlePointDurationSec);
@@ -1283,6 +1491,14 @@ formatDuration(seconds) {
     if (hours > 0) return `${hours}h ${String(minutes).padStart(2, '0')}m ${String(secs).padStart(2, '0')}s`;
     if (minutes > 0) return `${minutes}m ${String(secs).padStart(2, '0')}s`;
     return `${secs}s`;
+},
+formatPercent(value) {
+    const safeValue = Math.max(0, Math.min(100, Number(value) || 0));
+    return `${Math.round(safeValue)}%`;
+},
+getSafeProgressWidth(value) {
+    const safeValue = Math.max(0, Math.min(100, Number(value) || 0));
+    return `${safeValue}%`;
 },
 cloneConfig(configObj) {
     return JSON.parse(JSON.stringify(configObj || {}));
