@@ -2411,8 +2411,25 @@ finishScheduledRun(finalStatus = 'IDLE') {
                         : [data.parameter];
                     return rawParams.map(value => Number(value));
                 },
-                formatScanParameters(params) {
-                    return params.map((value, index) => `P${index}=${Number(value).toFixed(6)}`).join(", ");
+                getActiveParameterDisplayConfig() {
+                    const runtimeTask = this.isScheduleActive() ? this.getRuntimeTask() : null;
+                    return runtimeTask?.config || this.config;
+                },
+                getParameterTypeForAxis(axisIndex, configObj = this.getActiveParameterDisplayConfig()) {
+                    if (axisIndex === 0) return configObj?.param_type === 'int' ? 'int' : 'float';
+                    if (axisIndex === 1) return configObj?.dim2_param_type === 'int' ? 'int' : 'float';
+                    if (axisIndex === 2) return configObj?.dim3_param_type === 'int' ? 'int' : 'float';
+                    return 'float';
+                },
+                formatScanParameterValue(value, axisIndex, configObj = this.getActiveParameterDisplayConfig()) {
+                    const numericValue = Number(value);
+                    if (!Number.isFinite(numericValue)) return String(value);
+                    const parameterType = this.getParameterTypeForAxis(axisIndex, configObj);
+                    if (parameterType === 'int') return String(Math.round(numericValue));
+                    return numericValue.toFixed(6);
+                },
+                formatScanParameters(params, configObj = this.getActiveParameterDisplayConfig()) {
+                    return params.map((value, index) => `P${index}=${this.formatScanParameterValue(value, index, configObj)}`).join(", ");
                 },
                 getHistoryKey(params) {
                     return params.map(value => Number(value).toFixed(6)).join('|');
