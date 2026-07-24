@@ -1023,6 +1023,8 @@
                     clockPollTimer: null,
                     isApplyingSharedState: false,
                     lastSharedStateUpdatedAtMs: 0,
+                    lastLocalUiStateEditAtMs: 0,
+                    sharedStateApplyCooldownMs: 3000,
                     runMode: 'live',
                     scheduleSettings: { singlePointDurationSec: 1.615, timingMode: 'sequential', sequentialGapSec: 60 },
                     scheduledTasks: [],
@@ -1160,6 +1162,16 @@
                 createClientId() {
                     return `client_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
                 },
+                markLocalUiStateEdit() {
+                    if (this.isApplyingSharedState) return;
+                    this.lastLocalUiStateEditAtMs = Date.now();
+                },
+                shouldDeferSharedStateApply() {
+                    if (this.isApplyingSharedState) return false;
+                    const cooldownMs = Number(this.sharedStateApplyCooldownMs) || 3000;
+                    const lastEditAtMs = Number(this.lastLocalUiStateEditAtMs) || 0;
+                    return lastEditAtMs > 0 && (Date.now() - lastEditAtMs) < cooldownMs;
+                },
                 getScheduleRuntimeSnapshot(runtime = this.scheduleRuntime) {
                     return {
                         active: Boolean(runtime?.active),
@@ -1269,6 +1281,10 @@
                             return;
                         }
                         if (updatedAtMs > this.lastSharedStateUpdatedAtMs) {
+                            if (this.shouldDeferSharedStateApply()) {
+                                this.queueSharedStateSync();
+                                return;
+                            }
                             this.lastSharedStateUpdatedAtMs = updatedAtMs;
                             this.applySharedIndexState(state);
                         }
@@ -1340,6 +1356,7 @@
                         console.error('Save state failed', error);
                     }
                     if (!this.isApplyingSharedState) {
+                        this.markLocalUiStateEdit();
                         this.queueSharedStateSync();
                     }
                 },
