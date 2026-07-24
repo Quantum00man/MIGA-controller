@@ -868,7 +868,7 @@
                 </div>
             </form>
         </aside>
-        <div class="sidebar-resizer" @pointerdown="startSidebarResize" title="Drag to resize panels"></div>
+        <div class="sidebar-resizer" @pointerdown.prevent="startSidebarResize" title="Drag to resize panels"></div>
 
         <main class="main-content">
             <div class="card mb-4 border-0 shadow-sm" :class="{'maximized': maximizedView === 'analysis'}">
@@ -988,7 +988,7 @@
     <script>
         const { createApp } = Vue;
 
-        createApp({
+        const app = createApp({
             data() {
                 return {
                     useList1: false, useList2: false, useList3: false,
@@ -1068,6 +1068,7 @@
                     }
                 },
                 runMode() { this.saveState(); this.requestPlotResize(); },
+                sidebarWidth(value) { this.applySidebarWidthCss(value); },
                 currentSequenceName() { this.saveState(); },
                 scheduleSettings: {
                     handler() {
@@ -1099,6 +1100,7 @@
                 this.sharedStateClientId = this.createClientId();
                 this.loadState();
                 this.sidebarWidth = this.normalizeSidebarWidth(this.sidebarWidth);
+                this.applySidebarWidthCss(this.sidebarWidth);
                 this.currentScanDimensions = this.getConfiguredScanDimensions();
                 this.refreshScheduledTaskEstimates();
                 this.initPlots();
@@ -1552,6 +1554,13 @@ normalizeSidebarWidth(width) {
     if (!Number.isFinite(parsed)) return fallback;
     return Math.round(Math.max(minWidth, Math.min(maxWidth, parsed)));
 },
+applySidebarWidthCss(width = this.sidebarWidth) {
+    const appEl = document.getElementById('app');
+    if (!appEl) return;
+    const numericWidth = Number(width);
+    if (!Number.isFinite(numericWidth)) return;
+    appEl.style.setProperty('--sidebar-width', `${Math.round(numericWidth)}px`);
+},
 requestPlotResize() {
     if (this.layoutResizeRaf !== null) return;
     this.layoutResizeRaf = requestAnimationFrame(() => {
@@ -1563,6 +1572,7 @@ requestPlotResize() {
     });
 },
 startSidebarResize(event) {
+    if (event.button !== undefined && event.button !== 0) return;
     event.preventDefault();
     this.endSidebarResize();
     this.isResizingSidebar = true;
@@ -1573,33 +1583,41 @@ startSidebarResize(event) {
         } catch (error) { }
     }
     this.sidebarResizeMoveHandler = (moveEvent) => this.handleSidebarResize(moveEvent);
-    this.sidebarResizeUpHandler = (upEvent) => this.endSidebarResize(upEvent?.pointerId);
-    window.addEventListener('pointermove', this.sidebarResizeMoveHandler);
-    window.addEventListener('pointerup', this.sidebarResizeUpHandler);
-    window.addEventListener('pointercancel', this.sidebarResizeUpHandler);
+    this.sidebarResizeUpHandler = (upEvent) => this.endSidebarResize(upEvent);
+    document.addEventListener('pointermove', this.sidebarResizeMoveHandler);
+    document.addEventListener('pointerup', this.sidebarResizeUpHandler);
+    document.addEventListener('pointercancel', this.sidebarResizeUpHandler);
 },
 handleSidebarResize(event) {
     if (!this.isResizingSidebar) return;
     if (this.sidebarResizePointerId !== null && event.pointerId !== undefined && event.pointerId !== this.sidebarResizePointerId) {
         return;
     }
+    if (!Number.isFinite(event.clientX)) return;
     const nextWidth = this.normalizeSidebarWidth(event.clientX);
+    this.applySidebarWidthCss(nextWidth);
     if (nextWidth !== this.sidebarWidth) {
         this.sidebarWidth = nextWidth;
         this.requestPlotResize();
     }
 },
-endSidebarResize(pointerId = null) {
+endSidebarResize(eventOrPointerId = null) {
+    let pointerId = null;
+    if (typeof eventOrPointerId === 'number') {
+        pointerId = eventOrPointerId;
+    } else if (eventOrPointerId && typeof eventOrPointerId.pointerId === 'number') {
+        pointerId = eventOrPointerId.pointerId;
+    }
     if (pointerId !== null && this.sidebarResizePointerId !== null && pointerId !== this.sidebarResizePointerId) {
         return;
     }
     if (this.sidebarResizeMoveHandler) {
-        window.removeEventListener('pointermove', this.sidebarResizeMoveHandler);
+        document.removeEventListener('pointermove', this.sidebarResizeMoveHandler);
         this.sidebarResizeMoveHandler = null;
     }
     if (this.sidebarResizeUpHandler) {
-        window.removeEventListener('pointerup', this.sidebarResizeUpHandler);
-        window.removeEventListener('pointercancel', this.sidebarResizeUpHandler);
+        document.removeEventListener('pointerup', this.sidebarResizeUpHandler);
+        document.removeEventListener('pointercancel', this.sidebarResizeUpHandler);
         this.sidebarResizeUpHandler = null;
     }
     this.sidebarResizePointerId = null;
@@ -1611,6 +1629,7 @@ endSidebarResize(pointerId = null) {
 },
 handleWindowResize() {
     const normalizedWidth = this.normalizeSidebarWidth(this.sidebarWidth);
+    this.applySidebarWidthCss(normalizedWidth);
     if (normalizedWidth !== this.sidebarWidth) {
         this.sidebarWidth = normalizedWidth;
     }
@@ -3015,7 +3034,9 @@ finishScheduledRun(finalStatus = 'IDLE') {
             this.initPlots();
         }
     }
-}).mount('#app');
+});
+const __migaApp = app.mount('#app');
+window.__migaApp = __migaApp;
 
     </script>
 </body>
