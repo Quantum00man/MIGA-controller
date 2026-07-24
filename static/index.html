@@ -453,8 +453,11 @@
                 <div class="input-group input-group-sm">
                     <span class="input-group-text bg-white text-muted"><i class="bi bi-file-code"></i></span>
                     <input type="text" class="form-control bg-white" readonly :value="currentSequenceName">
-                    <button class="btn btn-primary" @click="$refs.seqInput.click()" :disabled="isRunning || isScheduleActive()"
+                    <button class="btn btn-primary" @click="openSequenceFileDialog" :disabled="isRunning || isScheduleActive()"
                         title="Load .mot file"><i class="bi bi-folder2-open"></i></button>
+                    <button class="btn btn-outline-secondary" @click="reloadSequenceFile"
+                        :disabled="isRunning || isScheduleActive() || isReloadingSequence || !canReloadSequenceFile()"
+                        title="Reload latest local .mot file"><span v-if="isReloadingSequence" class="spinner-border spinner-border-sm"></span><i v-else class="bi bi-arrow-clockwise"></i></button>
                 </div>
                 <input type="file" ref="seqInput" style="display:none" accept=".mot" @change="selectSequence">
 
@@ -1009,6 +1012,9 @@
                     currentSequenceName: "Default (seq0.mot)",
                     currentRunId: "...",
                     seqFile: null,
+                    seqFileHandle: null,
+                    isExternalSequenceFile: false,
+                    isReloadingSequence: false,
                     sidebarWidth: 360,
                     isResizingSidebar: false,
                     sidebarResizeMoveHandler: null,
@@ -1021,6 +1027,7 @@
                     sharedStatePollTimer: null,
                     statusPollTimer: null,
                     clockPollTimer: null,
+                    completionStatusSyncTimer: null,
                     isApplyingSharedState: false,
                     lastSharedStateUpdatedAtMs: 0,
                     lastLocalUiStateEditAtMs: 0,
@@ -1130,6 +1137,10 @@
                 if (this.clockPollTimer) {
                     clearInterval(this.clockPollTimer);
                     this.clockPollTimer = null;
+                }
+                if (this.completionStatusSyncTimer) {
+                    clearTimeout(this.completionStatusSyncTimer);
+                    this.completionStatusSyncTimer = null;
                 }
                 if (this.sharedStatePollTimer) {
                     clearInterval(this.sharedStatePollTimer);
@@ -1254,6 +1265,8 @@
                             this.statusMessage = state.statusMessage.trim();
                         }
                         this.seqFile = null;
+                        this.seqFileHandle = null;
+                        this.isExternalSequenceFile = false;
                         this.refreshScheduledTaskEstimates();
                         const runtimeTask = this.getRuntimeTask();
                         this.currentScanDimensions = runtimeTask && this.isScheduledMode()
@@ -1304,18 +1317,73 @@
                     });
                 },
 
-                selectSequence(event) {
+                canReloadSequenceFile() {
+                    return this.isExternalSequenceFile && Boolean(this.seqFileHandle || this.seqFile);
+                },
+                async openSequenceFileDialog() {
+                    if (this.isRunning || this.isScheduleActive()) return;
+                    if (window.showOpenFilePicker) {
+                        try {
+                            const [handle] = await window.showOpenFilePicker({
+                                multiple: false,
+                                types: [{
+                                    description: 'MOT Sequence File',
+                                    accept: {
+                                        'text/plain': ['.mot'],
+                                        'application/octet-stream': ['.mot'],
+                                    },
+                                }],
+                            });
+                            if (!handle) return;
+                            await this.loadSequenceFromHandle(handle);
+                            return;
+                        } catch (error) {
+                            if (error?.name === 'AbortError') return;
+                            this.addLog('System file picker unavailable, falling back to browser file selection.');
+                        }
+                    }
+                    this.$refs.seqInput.click();
+                },
+                async loadSequenceFromHandle(handle, options = {}) {
+                    const file = await handle.getFile();
+                    this.seqFileHandle = handle;
+                    this.seqFile = file;
+                    this.isExternalSequenceFile = true;
+                    const success = await this.uploadSequenceFile();
+                    if (success && options.reload) {
+                        this.addLog(`Sequence reloaded from disk: ${file.name}.`);
+                    }
+                    return success;
+                },
+                async reloadSequenceFile() {
+                    if (this.isRunning || this.isScheduleActive() || !this.canReloadSequenceFile()) return;
+                    if (this.seqFileHandle && typeof this.seqFileHandle.getFile === 'function') {
+                        this.isReloadingSequence = true;
+                        try {
+                            await this.loadSequenceFromHandle(this.seqFileHandle, { reload: true });
+                        } catch (error) {
+                            if (error?.name !== 'AbortError') {
+                                this.addLog('Sequence reload failed: ' + (error?.message || error));
+                            }
+                        } finally {
+                            this.isReloadingSequence = false;
+                        }
+                        return;
+                    }
+                    this.addLog('Direct reload is not available in this browser session. Please reselect the .mot file.');
+                    this.$refs.seqInput.click();
+                },
+                async selectSequence(event) {
                     const file = event.target.files[0];
                     if (!file) return;
-
-                    // 保存文件对象到 data 中，以便 Start 时再次使用
-                    this.seqFile = file;
-
-                    // 立即上传一次，让用户确认文件已加载
-                    this.uploadSequenceFile();
-
-                    // 清空 input value 以便允许重新选择同名文件
-                    event.target.value = '';
+                    try {
+                        this.seqFileHandle = null;
+                        this.seqFile = file;
+                        this.isExternalSequenceFile = true;
+                        await this.uploadSequenceFile();
+                    } finally {
+                        event.target.value = '';
+                    }
                 },
                 async uploadSequenceFile() {
                     if (!this.seqFile) return true; // 如果没选文件，视为使用默认，返回成功
@@ -1496,6 +1564,8 @@
                     this.useList2 = this.config.dim2_type === 'list';
                     this.useList3 = this.config.dim3_type === 'list';
                     this.seqFile = null;
+                    this.seqFileHandle = null;
+                    this.isExternalSequenceFile = false;
                     this.currentSequenceName = payload.sequence_name || this.config.sequence_name || this.currentSequenceName;
                     this.config.sequence_name = this.currentSequenceName;
                     this.loadedPresetInfo = {
@@ -2013,6 +2083,8 @@ loadScheduledTaskIntoEditor(taskId) {
     this.currentSequenceName = task.sequence_file_name || task.sequence_name || this.currentSequenceName;
     this.config.sequence_name = this.currentSequenceName;
     this.seqFile = new File([task.sequence_snapshot || ''], this.currentSequenceName, { type: 'text/plain' });
+    this.seqFileHandle = null;
+    this.isExternalSequenceFile = false;
     this.currentScanDimensions = this.getConfiguredScanDimensions();
     this.plotRevision++;
     this.renderMainPlot();
@@ -2879,6 +2951,20 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     this.ws.onclose = () => setTimeout(this.connectWebSocket, 3000);
                     this.ws.onmessage = (event) => this.handleData(JSON.parse(event.data));
                 },
+                finalizeImmediateScanCompletion(totalSteps = this.currentStep) {
+                    if (this.isScheduleActive()) return;
+                    this.currentStep = Math.max(Number(this.currentStep) || 0, Number(totalSteps) || 0);
+                    this.progressPercent = 100;
+                    this.isRunning = false;
+                    this.statusMessage = 'IDLE';
+                    if (this.completionStatusSyncTimer) {
+                        clearTimeout(this.completionStatusSyncTimer);
+                    }
+                    this.completionStatusSyncTimer = setTimeout(() => {
+                        this.completionStatusSyncTimer = null;
+                        this.fetchStatus();
+                    }, 500);
+                },
                 handleData(data) {
                     this.currentStep = data.current_step || 0;
                     const total = data.total_steps || 1;
@@ -2889,6 +2975,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     }
                     const scanDimensions = Math.max(1, Math.min(3, Number(data.scan_dimensions || this.currentScanDimensions || this.getConfiguredScanDimensions()) || 1));
                     const scannedParams = this.getScannedParameters(data, scanDimensions);
+                    const isFinalImmediateStep = !this.isScheduleActive() && total > 0 && this.currentStep >= total;
                     this.currentScanDimensions = scanDimensions;
                     this.statusMessage = `Scanning: ${this.formatScanParameters(scannedParams)}`;
 
@@ -2896,7 +2983,11 @@ finishScheduledRun(finalStatus = 'IDLE') {
                         if (data.error) {
                             this.addLog(`${this.formatScanParameters(scannedParams)} | ${data.error}`);
                         }
-                        if (this.isRunning) this.fetchStatus();
+                        if (isFinalImmediateStep) {
+                            this.finalizeImmediateScanCompletion(total);
+                        } else if (this.isRunning) {
+                            this.fetchStatus();
+                        }
                         return;
                     }
 
@@ -2948,7 +3039,11 @@ finishScheduledRun(finalStatus = 'IDLE') {
                             }
                             this.addLog(paramLog);
 
-                            if (this.isRunning) this.fetchStatus();
+                            if (isFinalImmediateStep) {
+                                this.finalizeImmediateScanCompletion(total);
+                            } else if (this.isRunning) {
+                                this.fetchStatus();
+                            }
                         } finally {
                             this.isPlotting = false;
                         }
@@ -2984,6 +3079,10 @@ finishScheduledRun(finalStatus = 'IDLE') {
             this.currentStep = 0;
             this.progressPercent = 0;
             this.plotRevision = 0;
+            if (this.completionStatusSyncTimer) {
+                clearTimeout(this.completionStatusSyncTimer);
+                this.completionStatusSyncTimer = null;
+            }
             try {
                 const payload = this.prepareScanPayload(this.config, this.currentSequenceName);
                 this.currentScanDimensions = payload.scan_dimensions;
