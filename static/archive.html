@@ -341,7 +341,16 @@
                             <div class="small text-muted font-monospace">{{ loadedRunId }}</div>
                             <div class="small fw-bold text-dark" v-if="loadedRunEntry?.run_label">{{ loadedRunEntry.run_label }}</div>
                             <div class="small text-muted" style="font-size: 0.75em;" v-if="loadedRunEntry?.summary">{{ loadedRunEntry.summary }}</div>
+                            <div class="small text-muted" style="font-size: 0.75em;" v-if="loadedRunEntry?.sequence_name">Sequence: {{ loadedRunEntry.sequence_name }}</div>
                             <div class="small text-muted" style="font-size: 0.75em;">{{ dataCount }} Points</div>
+                            <button class="btn btn-outline-secondary btn-sm w-100 mt-2" @click="exportLoadedSequence"
+                                :disabled="isExportingSequence || !loadedRunEntry?.has_sequence_file">
+                                <span v-if="isExportingSequence" class="spinner-border spinner-border-sm me-1"></span>
+                                <i v-else class="bi bi-download me-1"></i>{{ isExportingSequence ? 'Exporting...' : 'Export Sequence' }}
+                            </button>
+                            <div class="small text-muted mt-2" style="font-size: 0.72em;" v-if="loadedRunEntry && !loadedRunEntry.has_sequence_file">
+                                No archived sequence file saved for this run.
+                            </div>
                         </div>
 
                         <div v-if="errorMsg" class="mt-3 alert alert-danger small p-2 mb-0 text-center">
@@ -836,7 +845,7 @@
                 return {
                     archiveTree: {}, selectedYear: '', selectedMonth: '', selectedDay: '', selectedRun: '',
                     isLoading: false, isLoadingAllan: false, isLoadingWaveforms: false, isSaving: false,
-                    loadedRunId: '', loadedRunEntry: null, errorMsg: '', dataCount: 0, selectedPointKey: '', selectedPointKeys: [], selectedPointLabel: '', selectedCount: 0,
+                    loadedRunId: '', loadedRunEntry: null, loadedRunRef: null, isExportingSequence: false, errorMsg: '', dataCount: 0, selectedPointKey: '', selectedPointKeys: [], selectedPointLabel: '', selectedCount: 0,
                     currentWaveforms: [],
                     selectedAllanWindow: null,
                     loadedPoints: [], currentCalculatedPoints: [], originalSettings: {}, loadedConfig: {}, currentScanDimensions: 1,
@@ -2001,6 +2010,90 @@
                     link.click();
                     document.body.removeChild(link);
                 },
+                async downloadBlobContent(blobContent, suggestedName, options = {}) {
+                    const description = options.description || 'File';
+                    const mimeType = options.mimeType || blobContent?.type || 'application/octet-stream';
+                    const extension = String(options.extension || '').trim();
+                    if (window.showSaveFilePicker) {
+                        const normalizedExtension = extension ? (extension.startsWith('.') ? extension : `.${extension}`) : '';
+                        const accept = normalizedExtension ? { [mimeType]: [normalizedExtension] } : { [mimeType]: [] };
+                        window.showSaveFilePicker({
+                            suggestedName,
+                            types: [{ description, accept }]
+                        }).then(async handle => {
+                            const writable = await handle.createWritable();
+                            await writable.write(blobContent);
+                            await writable.close();
+                        }).catch(err => { });
+                        return;
+                    }
+                    const objectUrl = URL.createObjectURL(blobContent);
+                    const link = document.createElement("a");
+                    link.setAttribute("href", objectUrl);
+                    link.setAttribute("download", suggestedName);
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    URL.revokeObjectURL(objectUrl);
+                },
+                getFilenameFromDisposition(dispositionValue) {
+                    const disposition = String(dispositionValue || '');
+                    const utfMatch = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+                    if (utfMatch && utfMatch[1]) {
+                        try {
+                            return decodeURIComponent(utfMatch[1]);
+                        } catch (error) {
+                            return utfMatch[1];
+                        }
+                    }
+                    const plainMatch = disposition.match(/filename="([^"]+)"|filename=([^;]+)/i);
+                    const rawName = plainMatch ? String(plainMatch[1] || plainMatch[2] || '').trim() : '';
+                    return rawName.replace(/^["']+|["']+$/g, '');
+                },
+                async getBlobErrorDetail(blobValue, fallback = 'Unknown error') {
+                    if (!(blobValue instanceof Blob)) return fallback;
+                    try {
+                        const rawText = await blobValue.text();
+                        if (!rawText) return fallback;
+                        try {
+                            const payload = JSON.parse(rawText);
+                            const detail = String(payload?.detail || payload?.message || '').trim();
+                            return detail || rawText.trim() || fallback;
+                        } catch (error) {
+                            return rawText.trim() || fallback;
+                        }
+                    } catch (error) {
+                        return fallback;
+                    }
+                },
+                async exportLoadedSequence() {
+                    const ref = this.loadedRunRef;
+                    if (!ref?.run_id || !this.loadedRunEntry?.has_sequence_file) return;
+                    this.isExportingSequence = true;
+                    this.errorMsg = '';
+                    try {
+                        const res = await axios.get(`/archive/sequence/${ref.year}/${ref.month}/${ref.day}/${ref.run_id}`, {
+                            responseType: 'blob'
+                        });
+                        const blob = res.data instanceof Blob ? res.data : new Blob([res.data], { type: 'text/plain;charset=utf-8;' });
+                        const headerName = this.getFilenameFromDisposition(res.headers?.['content-disposition']);
+                        const fallbackSequence = String(this.loadedRunEntry?.sequence_name || 'sequence').replace(/\.mot$/i, '');
+                        const fallbackName = `${this.sanitizeFilenamePart(ref.run_id || 'run', 'run')}_${this.sanitizeFilenamePart(fallbackSequence, 'sequence')}.mot`;
+                        const suggestedName = headerName || fallbackName;
+                        await this.downloadBlobContent(blob, suggestedName, {
+                            description: 'Sequence File',
+                            mimeType: 'text/plain',
+                            extension: '.mot',
+                        });
+                    } catch (e) {
+                        const detail = e.response?.data instanceof Blob
+                            ? await this.getBlobErrorDetail(e.response.data, e.message || 'Unknown error')
+                            : (e.response?.data?.detail || e.message || 'Unknown error');
+                        this.errorMsg = 'Sequence export failed: ' + detail;
+                    } finally {
+                        this.isExportingSequence = false;
+                    }
+                },
                 getWaveformChannelSamples(waveform, channel) {
                     const timeAxis = Array.isArray(waveform?.time_axis) ? waveform.time_axis : [];
                     const rawSeries = Array.isArray(waveform?.[`raw_${channel}`]) ? waveform[`raw_${channel}`] : [];
@@ -2139,7 +2232,7 @@
                 getDays() { return (this.selectedYear && this.selectedMonth) ? Object.keys(this.archiveTree[this.selectedYear][this.selectedMonth] || {}).sort() : []; },
                 normalizeRunEntry(entry) {
                     if (typeof entry === 'string') {
-                        return { id: entry, run_id: entry, run_label: '', display_name: entry, summary: '' };
+                        return { id: entry, run_id: entry, run_label: '', display_name: entry, summary: '', sequence_name: '', has_sequence_file: false };
                     }
                     const runId = String(entry?.id || entry?.run_id || '').trim();
                     const runLabel = String(entry?.run_label || '').trim();
@@ -2150,6 +2243,7 @@
                         display_name: String(entry?.display_name || (runLabel ? `${runId} | ${runLabel}` : runId) || runId),
                         summary: String(entry?.summary || '').trim(),
                         sequence_name: String(entry?.sequence_name || '').trim(),
+                        has_sequence_file: Boolean(entry?.has_sequence_file),
                     };
                 },
                 getRuns() {
@@ -2218,6 +2312,12 @@
                         this.savedDataCount = Number.isFinite(res.data.total_points) ? res.data.total_points : this.loadedPoints.length;
                         this.dataCount = this.savedDataCount;
                         this.loadedRunId = `${this.selectedDay}/${this.selectedRun}`;
+                        this.loadedRunRef = {
+                            year: this.selectedYear,
+                            month: this.selectedMonth,
+                            day: this.selectedDay,
+                            run_id: this.selectedRun,
+                        };
                         this.loadedRunEntry = this.normalizeRunEntry(res.data.run_entry || this.getSelectedRunEntry() || this.selectedRun);
                         this.displayMode = 'saved';
                         if (!this.canUseAllanMode() && this.plotMode === 'allan') {

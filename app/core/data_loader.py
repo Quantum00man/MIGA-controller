@@ -49,6 +49,7 @@ class DataLoader:
         run_label = self._clean_run_label(config_data.get("run_label"))
         display_name = f"{run_id} | {run_label}" if run_label else run_id
         scan_dimensions = self._resolve_scan_dimensions(config_data)
+        sequence_path = run_dir / "sequence.mot"
         return {
             "id": run_id,
             "run_id": run_id,
@@ -56,6 +57,7 @@ class DataLoader:
             "display_name": display_name,
             "summary": self._get_run_summary(config_data),
             "sequence_name": str(config_data.get("sequence_name") or "").strip(),
+            "has_sequence_file": sequence_path.exists(),
             "scan_dimensions": scan_dimensions,
             "randomize": bool(config_data.get("randomize", False)),
             "mode": str(config_data.get("mode") or "standard").strip().lower() or "standard",
@@ -64,6 +66,23 @@ class DataLoader:
     def get_run_entry(self, year: str, month: str, day: str, run_id: str) -> Dict[str, Any]:
         run_dir = self._get_run_dir(year, month, day, run_id)
         return self._build_run_entry(run_dir)
+
+    def _get_sequence_download_name(self, run_id: str, config_data: Optional[Dict[str, Any]] = None) -> str:
+        raw_name = Path(str((config_data or {}).get("sequence_name") or "").strip()).name
+        if not raw_name:
+            raw_name = "sequence.mot"
+        if not raw_name.lower().endswith('.mot'):
+            raw_name = f"{raw_name}.mot"
+        prefix = f"{run_id}_"
+        return raw_name if raw_name.startswith(prefix) else f"{prefix}{raw_name}"
+
+    def get_archived_sequence_file(self, year: str, month: str, day: str, run_id: str) -> Tuple[Path, str]:
+        run_dir = self._get_run_dir(year, month, day, run_id)
+        sequence_path = run_dir / "sequence.mot"
+        if not sequence_path.exists():
+            raise FileNotFoundError(f"Sequence file not found for run {run_id}")
+        config_data = self._load_config_data(run_dir)
+        return sequence_path, self._get_sequence_download_name(run_id, config_data)
 
     def get_archive_tree(self) -> Dict[str, Any]:
         tree = {}

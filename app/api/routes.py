@@ -6,6 +6,7 @@ from copy import deepcopy
 
 import numpy as np
 from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Dict, Any, List
 from app.analysis import fitting
@@ -330,6 +331,16 @@ async def load_archived_run(year: str, month: str, day: str, run_id: str):
     try: return data_loader.load_run(year, month, day, run_id)
     except FileNotFoundError: raise HTTPException(404, "Run not found")
     except Exception as e: raise HTTPException(500, str(e))
+
+@router.get("/archive/sequence/{year}/{month}/{day}/{run_id}")
+async def download_archived_sequence(year: str, month: str, day: str, run_id: str):
+    try:
+        sequence_path, download_name = data_loader.get_archived_sequence_file(year, month, day, run_id)
+        return FileResponse(path=sequence_path, media_type="text/plain", filename=download_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
 
 @router.get("/archive/waveform/{year}/{month}/{day}/{run_id}/{step_index}")
 async def load_archived_waveform(year: str, month: str, day: str, run_id: str, step_index: int):
