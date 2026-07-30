@@ -8,4 +8,5 @@ scikit-learn==1.9.0; python_version >= "3.11"
 requests
 pydantic
 python-multipart
-ax-platform==1.3.1
+ax-platform==1.2.1; python_version < "3.11"
+ax-platform==1.3.1; python_version >= "3.11"
