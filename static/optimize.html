@@ -530,6 +530,18 @@
                                         <th>{{ key }}</th>
                                         <td>{{ formatMetric(value) }}</td>
                                     </tr>
+                                    <tr v-if="Object.keys(bestParameters).length">
+                                        <th>{{ objectiveMetricLabel }}</th>
+                                        <td>{{ formatMetric(bestMetricMean) }}</td>
+                                    </tr>
+                                    <tr v-if="Object.keys(bestParameters).length">
+                                        <th>{{ objectiveMetricLabel }} Std</th>
+                                        <td>{{ formatMetric(bestMetricStd) }}</td>
+                                    </tr>
+                                    <tr v-if="Object.keys(bestParameters).length">
+                                        <th>Data Source</th>
+                                        <td>{{ config.objective_source.toUpperCase() }}</td>
+                                    </tr>
                                 </tbody>
                             </table>
                         </div>
