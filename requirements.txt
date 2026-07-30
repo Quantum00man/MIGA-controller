@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+numpy
+scipy
+requests
+pydantic
+python-multipart
+ax-platform

@@ -53,6 +53,8 @@ class ExperimentManager:
         self.acq_thread: Optional[threading.Thread] = None
         self.proc_thread: Optional[threading.Thread] = None
         self.on_data_ready: Optional[Callable[[Dict[str, Any]], None]] = None
+        self._activity_lock = threading.Lock()
+        self._active_mode: Optional[str] = None
 
     def _default_tmot_args(self) -> str:
         return config.TMOT_EXTRA_ARGS_WIN if config.IS_WINDOWS else config.TMOT_EXTRA_ARGS_LINUX
@@ -611,83 +613,125 @@ class ExperimentManager:
         self._save_settings_to_disk()
         print(f">>> System Settings Updated: {self.settings}")
     
-    def get_analysis_config(self) -> Dict[str, Any]: return self.settings
-    def update_analysis_config(self, new_config: Dict[str, Any]): self.update_settings(new_config)
+
+    def get_analysis_config(self) -> Dict[str, Any]:
+        return self.settings
+
+    def update_analysis_config(self, new_config: Dict[str, Any]):
+        self.update_settings(new_config)
+
     def set_simulation_mode(self, enabled: bool):
         config.USE_SIMULATION = enabled
         print(f">>> System Mode Switched: {'SIMULATION' if enabled else 'REAL HARDWARE'}")
 
-    def start_scan(self, scan_config: Dict[str, Any]) -> Dict[str, str]:
-        if not hasattr(self, 'status'): self.status = ExperimentStatus()
-        if self.status.is_running: return {"status": "error", "message": "Experiment already running"}
+    def get_active_mode(self) -> Optional[str]:
+        with self._activity_lock:
+            return self._active_mode
 
-        # ========================================================
-        # [关键修复]：在开始前，强制重新读取配置文件并应用到驱动
-        # ========================================================
+    def acquire_run_slot(self, mode: str) -> Tuple[bool, str]:
+        requested_mode = str(mode or '').strip().lower() or 'unknown'
+        with self._activity_lock:
+            if self._active_mode:
+                if self._active_mode == requested_mode:
+                    return False, f"{requested_mode.title()} already running"
+                return False, f"System busy with {self._active_mode}"
+            self._active_mode = requested_mode
+        return True, ''
+
+    def release_run_slot(self, mode: Optional[str] = None):
+        requested_mode = str(mode or '').strip().lower() or None
+        with self._activity_lock:
+            if requested_mode is None or self._active_mode == requested_mode:
+                self._active_mode = None
+
+    def refresh_runtime_settings_from_disk(self):
         try:
-            print("[Manager] Auto-configuring driver before scan...")
-            
-            # 1. 重新从硬盘加载最新配置
-            # 这一步确保即使重启程序没有点Save，也能读到上次保存的配置
+            print("[Manager] Auto-configuring driver before run...")
             current_settings = self._load_initial_settings()
-
-            # 2. 更新内存中的 settings
             self.settings.update(current_settings)
-
-            # 3. 强制把磁盘中的网络设置重新应用到驱动
             self._apply_runtime_settings()
             print("[Manager] Runtime driver settings restored from disk.")
+        except Exception as exc:
+            print(f"[Manager Error] Failed to auto-configure driver: {exc}")
 
-        except Exception as e:
-            print(f"[Manager Error] Failed to auto-configure driver: {e}")
-            # 不阻断流程，万一配置失败也尝试继续跑
-        # ========================================================
-
-        try: parameters = self._generate_parameters(scan_config)
-        except Exception as e: return {"status": "error", "message": f"Param generation failed: {str(e)}"}
-
+    def get_fit_model_bundle(self) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         fit_models = self.settings.get('fit_models') or fitting.get_default_fit_models()
-        selected_fit_model = fitting.get_fit_model_by_key(fit_models, self.settings.get('fit_model_key', 'gaussian'))
+        selected_fit_model = fitting.get_fit_model_by_key(
+            fit_models,
+            self.settings.get('fit_model_key', 'gaussian'),
+        )
         fit_model_error = fitting.validate_fit_model_definition(selected_fit_model)
         if fit_model_error:
-            return {"status": "error", "message": f"System fit model invalid: {fit_model_error}"}
+            raise ValueError(f"System fit model invalid: {fit_model_error}")
+        return fit_models, selected_fit_model
 
-        self.stop_flag = False
-        self.status = ExperimentStatus(is_running=True, total_steps=len(parameters), message="Starting...")
-        
-        try:
-            scan_config['_system_settings_snapshot'] = self.settings
-            self.data_manager.init_run(scan_config)
-        except Exception as e: return {"status": "error", "message": f"Data Init Failed: {str(e)}"}
-
-        fit_config = {
-            'center_up': float(scan_config.get('fit_center_up', 0)),
-            'width_up': float(scan_config.get('fit_width_up', 0)),
-            'center_dw': float(scan_config.get('fit_center_dw', 0)),
-            'width_dw': float(scan_config.get('fit_width_dw', 0)),
+    def build_fit_config(self, config_payload: Dict[str, Any]) -> Dict[str, Any]:
+        fit_models, selected_fit_model = self.get_fit_model_bundle()
+        return {
+            'center_up': float(config_payload.get('fit_center_up', 0) or 0),
+            'width_up': float(config_payload.get('fit_width_up', 0) or 0),
+            'center_dw': float(config_payload.get('fit_center_dw', 0) or 0),
+            'width_dw': float(config_payload.get('fit_width_dw', 0) or 0),
             'model_key': self.settings.get('fit_model_key', selected_fit_model['key']),
             'models': fit_models,
         }
 
-        with self.data_queue.mutex: self.data_queue.queue.clear()
+    def start_scan(self, scan_config: Dict[str, Any]) -> Dict[str, str]:
+        if not hasattr(self, 'status'):
+            self.status = ExperimentStatus()
+
+        acquired, busy_message = self.acquire_run_slot('scan')
+        if not acquired:
+            return {'status': 'error', 'message': busy_message}
+
+        self.refresh_runtime_settings_from_disk()
+
+        try:
+            parameters = self._generate_parameters(scan_config)
+        except Exception as exc:
+            self.release_run_slot('scan')
+            return {'status': 'error', 'message': f'Param generation failed: {str(exc)}'}
+
+        try:
+            fit_config = self.build_fit_config(scan_config)
+        except Exception as exc:
+            self.release_run_slot('scan')
+            return {'status': 'error', 'message': str(exc)}
+
+        self.stop_flag = False
+        self.status = ExperimentStatus(is_running=True, total_steps=len(parameters), message='Starting...')
+
+        try:
+            scan_config['_system_settings_snapshot'] = self.settings
+            self.data_manager.init_run(scan_config)
+        except Exception as exc:
+            self.status = ExperimentStatus()
+            self.release_run_slot('scan')
+            return {'status': 'error', 'message': f'Data Init Failed: {str(exc)}'}
+
+        with self.data_queue.mutex:
+            self.data_queue.queue.clear()
 
         self.proc_thread = threading.Thread(target=self._processing_loop, args=(fit_config,))
         self.proc_thread.daemon = True
         self.proc_thread.start()
 
-        #self.acq_thread = threading.Thread(target=self._acquisition_loop, args=(parameters,))
         self.acq_thread = threading.Thread(target=self._acquisition_loop, args=(parameters, scan_config))
         self.acq_thread.daemon = True
         self.acq_thread.start()
 
-        return {"status": "success", "message": "Scan started (Parallel)"}
+        return {'status': 'success', 'message': 'Scan started (Parallel)'}
 
     def stop_scan(self) -> Dict[str, str]:
-        if self.status.is_running:
-            self.stop_flag = True
-            self.status.message = "Stopping..."
-            return {"status": "success", "message": "Stop signal sent"}
-        return {"status": "warning", "message": "No experiment running"}
+        active_mode = self.get_active_mode()
+        if active_mode != 'scan' or not self.status.is_running:
+            if active_mode == 'optimization':
+                return {'status': 'warning', 'message': 'Optimization is running. Use the optimization stop control.'}
+            return {'status': 'warning', 'message': 'No experiment running'}
+
+        self.stop_flag = True
+        self.status.message = 'Stopping...'
+        return {'status': 'success', 'message': 'Stop signal sent'}
 
     def _resolve_scan_dimensions(self, config: Dict[str, Any]) -> int:
         legacy_dims = 1
@@ -1122,297 +1166,422 @@ class ExperimentManager:
             traceback.print_exc()
             return 0.0
 
-    # --- THREAD 1: ACQUISITION (PRODUCER) ---
-    def _acquisition_loop(self, parameter_list: List[Any], scan_config: Dict[str, Any]): # [修改] 增加 scan_config
-        print(f"--- Acquisition Started: {len(parameter_list)} points ---")
-        S = self.settings
-        total_steps = len(parameter_list)
-        mode = scan_config.get('mode', 'standard') # [新增] 获取当前扫描模式
-        scan_dimensions = self._resolve_scan_dimensions(scan_config)
 
-        for idx, param_set in enumerate(parameter_list):
-            if self.stop_flag: break
+    def _normalize_parameter_list(self, param_set: Any) -> List[Any]:
+        if isinstance(param_set, list):
+            return list(param_set)
+        if isinstance(param_set, tuple):
+            return list(param_set)
+        return [param_set]
 
-            if not isinstance(param_set, list): params_to_write = [param_set]
-            else: params_to_write = param_set
-            
-            # === [NEW] 拦截 Bragg Rabi 模式，生成脉冲代码 ===
-            if mode == 'bragg_rabi':
-                fwhm_val = params_to_write[0]
-                pulse_code, comp_time = generate_bragg_pulse(
-                    fwhm=fwhm_val,
-                    shape=scan_config.get('bragg_shape', 'blackman'),
-                    base_timing=int(scan_config.get('bragg_base_timing', 331119))
-                )
-                # 这两个值会依次替换模板中的 <PARAMETER0> 和 <PARAMETER1>
-                actual_params_to_write = [pulse_code, comp_time]
-            else:
-                actual_params_to_write = params_to_write
-            # ===============================================
-            
-            tpl = config.SEQUENCE_TEMPLATE_PATH_WIN if config.USE_SIMULATION else S['template_path']
-            # [修改] 使用 actual_params_to_write 写入硬件序列
-            self.seq_editor.generate_sequence(tpl, config.SEQUENCE_OUTPUT_PATH, actual_params_to_write)
-            
-            cmot_bin = config.CMOT_BINARY_PATH_WIN if config.USE_SIMULATION else S['cmot_path']
+    def _prepare_sequence_parameters(self, params_to_write: List[Any], execution_config: Dict[str, Any]) -> List[Any]:
+        mode = execution_config.get('mode', 'standard')
+        if mode == 'bragg_rabi':
+            fwhm_val = params_to_write[0]
+            pulse_code, comp_time = generate_bragg_pulse(
+                fwhm=fwhm_val,
+                shape=execution_config.get('bragg_shape', 'blackman'),
+                base_timing=int(execution_config.get('bragg_base_timing', 331119)),
+            )
+            return [pulse_code, comp_time]
+        return params_to_write
+
+    def execute_single_measurement(
+        self,
+        param_set: Any,
+        execution_config: Dict[str, Any],
+        *,
+        idx: int,
+        total_steps: int,
+        scan_dimensions: int,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        params_to_write = self._normalize_parameter_list(param_set)
+        actual_params_to_write = self._prepare_sequence_parameters(params_to_write, execution_config)
+        metadata = dict(metadata or {})
+
+        try:
+            template_path = config.SEQUENCE_TEMPLATE_PATH_WIN if config.USE_SIMULATION else self.settings['template_path']
+            self.seq_editor.generate_sequence(template_path, config.SEQUENCE_OUTPUT_PATH, actual_params_to_write)
+
+            cmot_bin = config.CMOT_BINARY_PATH_WIN if config.USE_SIMULATION else self.settings['cmot_path']
             self.driver.compile_vcd(config.SEQUENCE_OUTPUT_PATH, config.VCD_OUTPUT_PATH, binary_path=cmot_bin)
-            
-            # [MODIFIED] Use new robust calculator
-            if config.USE_SIMULATION: 
-                start_delay = 0.78 
+
+            if config.USE_SIMULATION:
+                start_delay = 0.78
             else:
                 start_delay = self._calculate_delay_from_vcd(
-                    config.VCD_OUTPUT_PATH, 
-                    str(S['chan_launch']), 
-                    str(S['chan_trigger'])
+                    config.VCD_OUTPUT_PATH,
+                    str(self.settings['chan_launch']),
+                    str(self.settings['chan_trigger']),
                 )
 
-            tmot_bin = config.TMOT_BINARY_PATH_WIN if config.USE_SIMULATION else S['tmot_path']
-            ext_trigger_enabled = bool(scan_config.get('ext_trigger', False))
-            tmot_args = "" if config.USE_SIMULATION else ("-e" if ext_trigger_enabled else "")
+            tmot_bin = config.TMOT_BINARY_PATH_WIN if config.USE_SIMULATION else self.settings['tmot_path']
+            ext_trigger_enabled = bool(execution_config.get('ext_trigger', False))
+            tmot_args = '' if config.USE_SIMULATION else ('-e' if ext_trigger_enabled else '')
             print(f"[TMOT] Effective settings: path={tmot_bin!r}, ext_trigger={ext_trigger_enabled}, args={tmot_args!r}")
             success = self.driver.run_sequence(
                 config.SEQUENCE_OUTPUT_PATH,
                 binary_path=tmot_bin,
-                extra_args=tmot_args
+                extra_args=tmot_args,
             )
-            
             if not success:
-                print(f"[Acq] Failed at step {idx+1}")
-                continue
+                return {
+                    'idx': idx,
+                    'total': total_steps,
+                    'params': params_to_write,
+                    'scan_dimensions': scan_dimensions,
+                    'start_delay': start_delay,
+                    'volt_up': [],
+                    'volt_dw': [],
+                    'timestamp': time.time(),
+                    'metadata': metadata,
+                    'error': 'Sequence execution failed',
+                }
 
-            t_trig, volt_up_raw = self.rp_driver_red.acquire_channel("ch1")
-            _, volt_dw_raw = self.rp_driver_red.acquire_channel("ch2")
-
-            job = {
-                'idx': idx, 'total': total_steps, 'params': params_to_write,
+            _, volt_up_raw = self.rp_driver_red.acquire_channel('ch1')
+            _, volt_dw_raw = self.rp_driver_red.acquire_channel('ch2')
+            return {
+                'idx': idx,
+                'total': total_steps,
+                'params': params_to_write,
                 'scan_dimensions': scan_dimensions,
-                'start_delay': start_delay, 'volt_up': volt_up_raw, 'volt_dw': volt_dw_raw,
-                'timestamp': time.time()
+                'start_delay': start_delay,
+                'volt_up': volt_up_raw,
+                'volt_dw': volt_dw_raw,
+                'timestamp': time.time(),
+                'metadata': metadata,
             }
+        except Exception as exc:
+            print(f"[Acq Error] Step {idx + 1}: {traceback.format_exc()}")
+            return {
+                'idx': idx,
+                'total': total_steps,
+                'params': params_to_write,
+                'scan_dimensions': scan_dimensions,
+                'start_delay': 0.0,
+                'volt_up': [],
+                'volt_dw': [],
+                'timestamp': time.time(),
+                'metadata': metadata,
+                'error': str(exc),
+            }
+
+    def _build_error_payload(
+        self,
+        job: Dict[str, Any],
+        message: str,
+        *,
+        stream_type: str,
+        extra_payload: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        params = job.get('params') or []
+        payload = {
+            'stream_type': stream_type,
+            'parameter': params[0] if params else None,
+            'all_parameters': params,
+            'scan_dimensions': int(job.get('scan_dimensions', 1) or 1),
+            'error': message,
+            'current_step': int(job.get('idx', 0)) + 1,
+            'total_steps': int(job.get('total', 1) or 1),
+        }
+        payload.update(job.get('metadata') or {})
+        if extra_payload:
+            payload.update(extra_payload)
+        return payload
+
+    def process_measurement_job(
+        self,
+        job: Dict[str, Any],
+        fit_config: Dict[str, Any],
+        *,
+        data_manager: Optional[DataManager] = None,
+        save_step_index: Optional[int] = None,
+        stream_type: str = 'scan_point',
+        extra_payload: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[Optional[ScanResult], Dict[str, Any]]:
+        settings = self.settings
+        storage_step = 1
+        selected_fit_model = fitting.get_fit_model_by_key(
+            fit_config.get('models'),
+            fit_config.get('model_key'),
+        )
+
+        idx = int(job.get('idx', 0))
+        total = int(job.get('total', 1) or 1)
+        params = job.get('params') or []
+        scan_dimensions = int(job.get('scan_dimensions', 1) or 1)
+        primary_param = params[0] if params else None
+        start_delay = float(job.get('start_delay', 0.0) or 0.0)
+        volt_up_raw = job.get('volt_up') or []
+        volt_dw_raw = job.get('volt_dw') or []
+
+        if job.get('error'):
+            return None, self._build_error_payload(job, str(job['error']), stream_type=stream_type, extra_payload=extra_payload)
+
+        if not volt_up_raw or not volt_dw_raw:
+            return None, self._build_error_payload(job, 'No Data', stream_type=stream_type, extra_payload=extra_payload)
+
+        try:
+            if len(volt_up_raw) > 300:
+                offset_up = np.mean(volt_up_raw[-200:])
+                offset_dw = np.mean(volt_dw_raw[-200:])
+            else:
+                offset_up = 0.0
+                offset_dw = 0.0
+
+            val_up_clean = np.array(volt_up_raw) - offset_up
+            val_dw_clean = np.array(volt_dw_raw) - offset_dw
+
+            voltage_limit = float(settings.get('voltage_limit', 9.5))
+            max_amp_up = np.max(np.abs(val_up_clean))
+            max_amp_dw = np.max(np.abs(val_dw_clean))
+            if max_amp_up > voltage_limit or max_amp_dw > voltage_limit:
+                msg = f"Signal Amplitude > {voltage_limit}V (UP={max_amp_up:.2f}V, DW={max_amp_dw:.2f}V)"
+                print(f"[Filter] Rejected (Step {idx + 1}): {msg}")
+                return None, self._build_error_payload(job, msg, stream_type=stream_type, extra_payload=extra_payload)
+
+            gain_up = float(settings.get('gain_up', 1.0)) or 1.0
+            gain_dw = float(settings.get('gain_dw', 1.0)) or 1.0
+            volt_up = val_up_clean / gain_up
+            volt_dw = val_dw_clean / gain_dw
+
+            if config.USE_SIMULATION:
+                time_axis = np.linspace(0, 0.1, len(volt_up))
+            else:
+                decimation = int(settings.get('decimation', 8192))
+                dt = 8e-9 * decimation
+                time_axis = np.array([i * dt for i in range(len(volt_up))])
+
+            tof_axis = time_axis + start_delay
+
+            def get_fit_data(time_values, voltage_values, center_ms, width_ms):
+                if width_ms > 0:
+                    cen_s = center_ms * 1e-3
+                    wid_s = width_ms * 1e-3
+                    start = cen_s - wid_s / 2
+                    end = cen_s + wid_s / 2
+                    mask = (time_values >= start) & (time_values <= end)
+                    if np.any(mask):
+                        return time_values[mask], voltage_values[mask], (start, end)
+                return time_values, voltage_values, None
+
+            fit_t_up, fit_v_up, win_up = get_fit_data(tof_axis, volt_up, fit_config.get('center_up', 0), fit_config.get('width_up', 0))
+            fit_t_dw, fit_v_dw, win_dw = get_fit_data(tof_axis, volt_dw, fit_config.get('center_dw', 0), fit_config.get('width_dw', 0))
+            fit_result_up = fitting.perform_configured_fit(selected_fit_model, fit_t_up, fit_v_up, eval_x=tof_axis)
+            fit_result_dw = fitting.perform_configured_fit(selected_fit_model, fit_t_dw, fit_v_dw, eval_x=tof_axis)
+            fit_curve_up = fit_result_up.fit_curve if fit_result_up is not None else np.zeros_like(tof_axis)
+            fit_curve_dw = fit_result_dw.fit_curve if fit_result_dw is not None else np.zeros_like(tof_axis)
+            area_method = str(settings.get('atom_area_method', 'legacy')).strip().lower()
+            baseline_points = int(settings.get('atom_area_baseline_points', 2))
+
+            amp_up = fit_result_up.amplitude if fit_result_up is not None else 0
+            sig_up = fit_result_up.width if fit_result_up is not None else 0
+            cen_up = fit_result_up.center if fit_result_up is not None else 0
+            amp_dw = fit_result_dw.amplitude if fit_result_dw is not None else 0
+            sig_dw = fit_result_dw.width if fit_result_dw is not None else 0
+            cen_dw = fit_result_dw.center if fit_result_dw is not None else 0
+            amp_up_nf = np.max(fit_v_up) if len(fit_v_up) > 0 else 0
+            amp_dw_nf = np.max(fit_v_dw) if len(fit_v_dw) > 0 else 0
+            sig_up_nf = fitting.calc_sigma(fit_v_up, fit_t_up) or 0
+            sig_dw_nf = fitting.calc_sigma(fit_v_dw, fit_t_dw) or 0
+            cen_up_nf = fit_t_up[np.argmax(fit_v_up)] if len(fit_v_up) > 0 else 0
+            cen_dw_nf = fit_t_dw[np.argmax(fit_v_dw)] if len(fit_v_dw) > 0 else 0
+
+            if area_method == 'edge_line':
+                area_up_nf = fitting.calculate_area_with_edge_baseline(fit_t_up, fit_v_up, baseline_points)
+                area_dw_nf = fitting.calculate_area_with_edge_baseline(fit_t_dw, fit_v_dw, baseline_points)
+                area_up = fitting.calculate_area_with_edge_baseline(fit_t_up, fit_result_up.fit_window_curve, baseline_points) if fit_result_up is not None else 0
+                area_dw = fitting.calculate_area_with_edge_baseline(fit_t_dw, fit_result_dw.fit_window_curve, baseline_points) if fit_result_dw is not None else 0
+            else:
+                area_up_nf = abs(np.trapz(fit_v_up, fit_t_up)) if len(fit_v_up) > 1 else 0
+                area_dw_nf = abs(np.trapz(fit_v_dw, fit_t_dw)) if len(fit_v_dw) > 1 else 0
+                area_up = fit_result_up.area if fit_result_up is not None else 0
+                area_dw = fit_result_dw.area if fit_result_dw is not None else 0
+
+            n_f2, n_f1 = physics.calculate_atom_numbers(
+                area_up,
+                area_dw,
+                max_vol_up=amp_up,
+                max_vol_dw=amp_dw,
+                alpha=settings['alpha'],
+                beta=settings['beta'],
+                R=settings['R'],
+                K=settings['K'],
+                max_low=settings['max_low'],
+            )
+            n_f2_nf, n_f1_nf = physics.calculate_atom_numbers(
+                area_up_nf,
+                area_dw_nf,
+                max_vol_up=amp_up_nf,
+                max_vol_dw=amp_dw_nf,
+                alpha=settings['alpha'],
+                beta=settings['beta'],
+                R=settings['R'],
+                K=settings['K'],
+                max_low=settings['max_low'],
+            )
+
+            launch_velocity = float(settings['launch_velocity'])
+            t_flight_up = cen_up
+            t_flight_dw = cen_dw
+            t_flight_up_nf = cen_up_nf
+            t_flight_dw_nf = cen_dw_nf
+            temp_up = physics.calculate_temperature(sig_up, t_flight_up, launch_velocity, is_sigma_in_ms=False)
+            temp_dw = physics.calculate_temperature(sig_dw, t_flight_dw, launch_velocity, is_sigma_in_ms=False)
+            temp_up_nf = physics.calculate_temperature(sig_up_nf, t_flight_up_nf, launch_velocity, is_sigma_in_ms=False)
+            temp_dw_nf = physics.calculate_temperature(sig_dw_nf, t_flight_dw_nf, launch_velocity, is_sigma_in_ms=False)
+            prob_up, prob_dw = physics.calculate_probabilities(n_f2, n_f1)
+            prob_up_nf, prob_dw_nf = physics.calculate_probabilities(n_f2_nf, n_f1_nf)
+            i_n1, i_n2, i_p1, i_p2 = physics.calculate_interferometer_output(
+                n_f1,
+                n_f2,
+                settings.get('intf_alpha', 0.35),
+                settings.get('intf_beta', 0.076),
+                settings.get('intf_gamma', 0.25),
+            )
+            i_n1_nf, i_n2_nf, i_p1_nf, i_p2_nf = physics.calculate_interferometer_output(
+                n_f1_nf,
+                n_f2_nf,
+                settings.get('intf_alpha', 0.35),
+                settings.get('intf_beta', 0.076),
+                settings.get('intf_gamma', 0.25),
+            )
+
+            manager_for_save = data_manager or self.data_manager
+            volt_up_store = volt_up[::storage_step]
+            volt_dw_store = volt_dw[::storage_step]
+            fit_up_store = fit_curve_up[::storage_step]
+            fit_dw_store = fit_curve_dw[::storage_step]
+            time_axis_store = tof_axis[::storage_step]
+            run_id = manager_for_save.current_run_id_str if manager_for_save else ''
+            result = ScanResult(
+                parameter=primary_param if primary_param is not None else 0.0,
+                timestamp=job['timestamp'],
+                scan_dimensions=scan_dimensions,
+                current_step=idx + 1,
+                total_steps=total,
+                detected_delay=start_delay,
+                run_id=run_id,
+                raw_data_up=volt_up_store,
+                raw_data_dw=volt_dw_store,
+                fit_data_up=fit_up_store,
+                fit_data_dw=fit_dw_store,
+                time_axis=time_axis_store,
+                all_parameters=params,
+                window_up=win_up,
+                window_dw=win_dw,
+                atom_number_up=n_f2,
+                atom_number_dw=n_f1,
+                amplitude_up=amp_up,
+                amplitude_dw=amp_dw,
+                sigma_up=sig_up * 1000.0,
+                sigma_dw=sig_dw * 1000.0,
+                temperature_up=temp_up,
+                temperature_dw=temp_dw,
+                arrival_time_up=t_flight_up,
+                arrival_time_dw=t_flight_dw,
+                transition_probability_up=prob_up,
+                transition_probability_dw=prob_dw,
+                atom_number_up_nofit=n_f2_nf,
+                atom_number_dw_nofit=n_f1_nf,
+                amplitude_up_nofit=amp_up_nf,
+                amplitude_dw_nofit=amp_dw_nf,
+                sigma_up_nofit=sig_up_nf * 1000.0,
+                sigma_dw_nofit=sig_dw_nf * 1000.0,
+                temperature_up_nofit=temp_up_nf,
+                temperature_dw_nofit=temp_dw_nf,
+                arrival_time_up_nofit=t_flight_up_nf,
+                arrival_time_dw_nofit=t_flight_dw_nf,
+                transition_probability_up_nofit=prob_up_nf,
+                transition_probability_dw_nofit=prob_dw_nf,
+                intf_n1=i_n1,
+                intf_n2=i_n2,
+                intf_p1=i_p1,
+                intf_p2=i_p2,
+                intf_n1_nofit=i_n1_nf,
+                intf_n2_nofit=i_n2_nf,
+                intf_p1_nofit=i_p1_nf,
+                intf_p2_nofit=i_p2_nf,
+            )
+            if manager_for_save is not None:
+                manager_for_save.save_point(result, save_step_index or (idx + 1))
+
+            step_size = max(1, len(tof_axis) // 2000)
+            frontend_data = asdict(result)
+            frontend_data['stream_type'] = stream_type
+            frontend_data['raw_data_up'] = volt_up[::step_size].tolist()
+            frontend_data['raw_data_dw'] = volt_dw[::step_size].tolist()
+            frontend_data['fit_data_up'] = fit_curve_up[::step_size].tolist()
+            frontend_data['fit_data_dw'] = fit_curve_dw[::step_size].tolist()
+            frontend_data['time_axis'] = tof_axis[::step_size].tolist()
+            frontend_data.update(job.get('metadata') or {})
+            if extra_payload:
+                frontend_data.update(extra_payload)
+            return result, frontend_data
+        except Exception:
+            print(f"Processing Error step {idx + 1}: {traceback.format_exc()}")
+            return None, self._build_error_payload(job, 'Processing error', stream_type=stream_type, extra_payload=extra_payload)
+
+    # --- THREAD 1: ACQUISITION (PRODUCER) ---
+    def _acquisition_loop(self, parameter_list: List[Any], scan_config: Dict[str, Any]):
+        print(f"--- Acquisition Started: {len(parameter_list)} points ---")
+        total_steps = len(parameter_list)
+        scan_dimensions = self._resolve_scan_dimensions(scan_config)
+
+        for idx, param_set in enumerate(parameter_list):
+            if self.stop_flag:
+                break
+            job = self.execute_single_measurement(
+                param_set,
+                scan_config,
+                idx=idx,
+                total_steps=total_steps,
+                scan_dimensions=scan_dimensions,
+            )
             self.data_queue.put(job)
-            if config.USE_SIMULATION: time.sleep(0.1)
-        
+            if config.USE_SIMULATION:
+                time.sleep(0.1)
+
         self.data_queue.put(None)
         print("--- Acquisition Finished ---")
 
     # --- THREAD 2: PROCESSING (CONSUMER) ---
     def _processing_loop(self, fit_config: Dict[str, Any]):
         print("--- Processing Thread Started ---")
-        S = self.settings
-        STORAGE_STEP = 1 
         selected_fit_model = fitting.get_fit_model_by_key(
             fit_config.get('models'),
             fit_config.get('model_key'),
         )
         print(f"[Fit] Using model: {selected_fit_model['label']} ({selected_fit_model['key']})")
-        
-        while True:
-            try: job = self.data_queue.get(timeout=5)
-            except queue.Empty:
-                if self.stop_flag: break
-                continue
-            if job is None: break 
 
-            idx = job['idx']; total = job['total']; params = job['params']
-            scan_dimensions = int(job.get('scan_dimensions', 1))
-            primary_param = params[0]; start_delay = job['start_delay']
-            volt_up_raw = job['volt_up']; volt_dw_raw = job['volt_dw']
-            
-            self.status.current_step = idx + 1
-            self.status.total_steps = total
-            self.status.message = f"Processing: {params} (Queue: {self.data_queue.qsize()})"
+        try:
+            while True:
+                try:
+                    job = self.data_queue.get(timeout=5)
+                except queue.Empty:
+                    if self.stop_flag:
+                        break
+                    continue
+                if job is None:
+                    break
 
-            if not volt_up_raw or not volt_dw_raw:
-                 if self.on_data_ready:
-                     self.on_data_ready({
-                         'parameter': primary_param,
-                         'all_parameters': params,
-                         'scan_dimensions': scan_dimensions,
-                         'error': 'No Data',
-                         'current_step': idx + 1,
-                         'total_steps': total
-                     })
-                 continue
+                params = job.get('params') or []
+                self.status.current_step = int(job.get('idx', 0)) + 1
+                self.status.total_steps = int(job.get('total', 1) or 1)
+                self.status.message = f"Processing: {params} (Queue: {self.data_queue.qsize()})"
 
-            try:
-                # ==========================================================
-                # 1. 先计算 Offset (基线)
-                # ==========================================================
-                if len(volt_up_raw) > 300: 
-                    offset_up = np.mean(volt_up_raw[-200:])
-                    offset_dw = np.mean(volt_dw_raw[-200:])
-                else: 
-                    offset_up = 0.0; offset_dw = 0.0
-
-                # ==========================================================
-                # 2. 计算“净电压” (Raw - Offset)
-                #    注意：此时还没有除以 Gain，是真实的物理电压波动
-                # ==========================================================
-                val_up_clean = np.array(volt_up_raw) - offset_up
-                val_dw_clean = np.array(volt_dw_raw) - offset_dw
-
-                # ==========================================================
-                # 3. 执行 Voltage Limit 检查 (基于净电压)
-                # ==========================================================
-                # 获取阈值 (默认为 9.5V)
-                v_limit = float(S.get('voltage_limit', 9.5))
-                
-                # 计算最大波动幅度 (取绝对值)
-                max_amp_up = np.max(np.abs(val_up_clean))
-                max_amp_dw = np.max(np.abs(val_dw_clean))
-
-                if max_amp_up > v_limit or max_amp_dw > v_limit:
-                    msg = f"Signal Amplitude > {v_limit}V (UP={max_amp_up:.2f}V, DW={max_amp_dw:.2f}V)"
-                    print(f"[Filter] Rejected (Step {idx+1}): {msg}")
-                    
-                    if self.on_data_ready:
-                        self.on_data_ready({
-                            'parameter': primary_param,
-                            'all_parameters': params,
-                            'scan_dimensions': scan_dimensions,
-                            'error': msg,
-                            'current_step': idx+1,
-                            'total_steps': total
-                        })
-                    continue # 关键：跳过后续处理，丢弃这组数据
-
-                # ==========================================================
-                # 4. 应用 Gain (增益)
-                # ==========================================================
-                g_up = float(S.get('gain_up', 1.0)); g_dw = float(S.get('gain_dw', 1.0))
-                if g_up == 0: g_up = 1.0
-                if g_dw == 0: g_dw = 1.0
-                
-                # 使用刚才算好的 clean 数据除以 gain，得到最终物理量
-                volt_up = val_up_clean / g_up
-                volt_dw = val_dw_clean / g_dw
-
-                # ==========================================================
-                # 5. 后续常规拟合流程 (保持不变)
-                # ==========================================================
-                if config.USE_SIMULATION:
-                    time_axis = np.linspace(0, 0.1, len(volt_up))
-                else:
-                    deci = int(S.get('decimation', 8192))
-                    dt = 8e-9 * deci
-                    time_axis = np.array([i * dt for i in range(len(volt_up))])
-                
-                tof_axis = time_axis + start_delay
-
-                def get_fit_data(t, v, center_ms, width_ms):
-                    if width_ms > 0:
-                        cen_s = center_ms * 1e-3; wid_s = width_ms * 1e-3
-                        start = cen_s - wid_s/2; end = cen_s + wid_s/2
-                        mask = (t >= start) & (t <= end)
-                        if np.any(mask): return t[mask], v[mask], (start, end)
-                    return t, v, None
-
-                fit_t_up, fit_v_up, win_up = get_fit_data(tof_axis, volt_up, fit_config.get('center_up', 0), fit_config.get('width_up', 0))
-                fit_t_dw, fit_v_dw, win_dw = get_fit_data(tof_axis, volt_dw, fit_config.get('center_dw', 0), fit_config.get('width_dw', 0))
-                fit_result_up = fitting.perform_configured_fit(selected_fit_model, fit_t_up, fit_v_up, eval_x=tof_axis)
-                fit_result_dw = fitting.perform_configured_fit(selected_fit_model, fit_t_dw, fit_v_dw, eval_x=tof_axis)
-                fit_curve_up = fit_result_up.fit_curve if fit_result_up is not None else np.zeros_like(tof_axis)
-                fit_curve_dw = fit_result_dw.fit_curve if fit_result_dw is not None else np.zeros_like(tof_axis)
-                area_method = str(S.get('atom_area_method', 'legacy')).strip().lower()
-                baseline_points = int(S.get('atom_area_baseline_points', 2))
-
-                amp_up = fit_result_up.amplitude if fit_result_up is not None else 0
-                sig_up = fit_result_up.width if fit_result_up is not None else 0
-                cen_up = fit_result_up.center if fit_result_up is not None else 0
-                amp_dw = fit_result_dw.amplitude if fit_result_dw is not None else 0
-                sig_dw = fit_result_dw.width if fit_result_dw is not None else 0
-                cen_dw = fit_result_dw.center if fit_result_dw is not None else 0
-                amp_up_nf = np.max(fit_v_up) if len(fit_v_up) > 0 else 0; amp_dw_nf = np.max(fit_v_dw) if len(fit_v_dw) > 0 else 0
-                sig_up_nf = fitting.calc_sigma(fit_v_up, fit_t_up) or 0; sig_dw_nf = fitting.calc_sigma(fit_v_dw, fit_t_dw) or 0
-                cen_up_nf = fit_t_up[np.argmax(fit_v_up)] if len(fit_v_up)>0 else 0; cen_dw_nf = fit_t_dw[np.argmax(fit_v_dw)] if len(fit_v_dw)>0 else 0
-                if area_method == 'edge_line':
-                    area_up_nf = fitting.calculate_area_with_edge_baseline(fit_t_up, fit_v_up, baseline_points)
-                    area_dw_nf = fitting.calculate_area_with_edge_baseline(fit_t_dw, fit_v_dw, baseline_points)
-                    area_up = fitting.calculate_area_with_edge_baseline(fit_t_up, fit_result_up.fit_window_curve, baseline_points) if fit_result_up is not None else 0
-                    area_dw = fitting.calculate_area_with_edge_baseline(fit_t_dw, fit_result_dw.fit_window_curve, baseline_points) if fit_result_dw is not None else 0
-                else:
-                    area_up_nf = abs(np.trapz(fit_v_up, fit_t_up)) if len(fit_v_up)>1 else 0
-                    area_dw_nf = abs(np.trapz(fit_v_dw, fit_t_dw)) if len(fit_v_dw)>1 else 0
-                    area_up = fit_result_up.area if fit_result_up is not None else 0
-                    area_dw = fit_result_dw.area if fit_result_dw is not None else 0
-
-                n_f2, n_f1 = physics.calculate_atom_numbers(area_up, area_dw, max_vol_up=amp_up, max_vol_dw=amp_dw, alpha=S['alpha'], beta=S['beta'], R=S['R'], K=S['K'], max_low=S['max_low'])
-                n_f2_nf, n_f1_nf = physics.calculate_atom_numbers(area_up_nf, area_dw_nf, max_vol_up=amp_up_nf, max_vol_dw=amp_dw_nf, alpha=S['alpha'], beta=S['beta'], R=S['R'], K=S['K'], max_low=S['max_low'])
-
-                v_launch = float(S['launch_velocity'])
-                
-                t_flight_up = cen_up; t_flight_dw = cen_dw
-                t_flight_up_nf = cen_up_nf; t_flight_dw_nf = cen_dw_nf
-                
-                temp_up = physics.calculate_temperature(sig_up, t_flight_up, v_launch, is_sigma_in_ms=False)
-                temp_dw = physics.calculate_temperature(sig_dw, t_flight_dw, v_launch, is_sigma_in_ms=False)
-                temp_up_nf = physics.calculate_temperature(sig_up_nf, t_flight_up_nf, v_launch, is_sigma_in_ms=False)
-                temp_dw_nf = physics.calculate_temperature(sig_dw_nf, t_flight_dw_nf, v_launch, is_sigma_in_ms=False)
-
-                prob_up, prob_dw = physics.calculate_probabilities(n_f2, n_f1)
-                prob_up_nf, prob_dw_nf = physics.calculate_probabilities(n_f2_nf, n_f1_nf)
-                # ============================================================
-                # [New] Calculate Interferometer Output (Using Dynamic Settings)
-                # ============================================================
-                
-                # Fit Data
-                i_n1, i_n2, i_p1, i_p2 = physics.calculate_interferometer_output(
-                    n_f1, n_f2, 
-                    S.get('intf_alpha', 0.35), 
-                    S.get('intf_beta', 0.076), 
-                    S.get('intf_gamma', 0.25)
+                _, payload = self.process_measurement_job(
+                    job,
+                    fit_config,
+                    data_manager=self.data_manager,
+                    stream_type='scan_point',
                 )
-
-                
-                # [DEBUG] 添加这行打印
-                print(f"[DEBUG] Raw Atoms: F2={n_f2}, F1={n_f1} | Intf Result: P1={i_p1}, P2={i_p2}")
-                
-                # NoFit Data
-                i_n1_nf, i_n2_nf, i_p1_nf, i_p2_nf = physics.calculate_interferometer_output(
-                    n_f1_nf, n_f2_nf, 
-                    S.get('intf_alpha', 0.35), 
-                    S.get('intf_beta', 0.076), 
-                    S.get('intf_gamma', 0.25)
-                )
-
-                volt_up_store = volt_up[::STORAGE_STEP]; volt_dw_store = volt_dw[::STORAGE_STEP]
-                fit_up_store = fit_curve_up[::STORAGE_STEP]; fit_dw_store = fit_curve_dw[::STORAGE_STEP]
-                time_axis_store = tof_axis[::STORAGE_STEP]
-
-                result = ScanResult(
-                    parameter=primary_param, timestamp=job['timestamp'], scan_dimensions=scan_dimensions,
-                    current_step=idx + 1, total_steps=total,
-                    detected_delay=start_delay,
-                    run_id=self.data_manager.current_run_id_str,
-                    raw_data_up=volt_up_store, raw_data_dw=volt_dw_store,
-                    fit_data_up=fit_up_store, fit_data_dw=fit_dw_store,
-                    time_axis=time_axis_store, 
-                    all_parameters=params, window_up=win_up, window_dw=win_dw,
-                    atom_number_up=n_f2, atom_number_dw=n_f1, amplitude_up=amp_up, amplitude_dw=amp_dw,
-                    sigma_up=sig_up * 1000.0, sigma_dw=sig_dw * 1000.0,
-                    temperature_up=temp_up, temperature_dw=temp_dw, arrival_time_up=t_flight_up, arrival_time_dw=t_flight_dw,
-                    transition_probability_up=prob_up, transition_probability_dw=prob_dw,
-                    atom_number_up_nofit=n_f2_nf, atom_number_dw_nofit=n_f1_nf, amplitude_up_nofit=amp_up_nf, amplitude_dw_nofit=amp_dw_nf,
-                    sigma_up_nofit=sig_up_nf * 1000.0, sigma_dw_nofit=sig_dw_nf * 1000.0,
-                    temperature_up_nofit=temp_up_nf, temperature_dw_nofit=temp_dw_nf,
-                    arrival_time_up_nofit=t_flight_up_nf, arrival_time_dw_nofit=t_flight_dw_nf,
-                    transition_probability_up_nofit=prob_up_nf, transition_probability_dw_nofit=prob_dw_nf,
-                    intf_n1=i_n1, intf_n2=i_n2, intf_p1=i_p1, intf_p2=i_p2,
-                    intf_n1_nofit=i_n1_nf, intf_n2_nofit=i_n2_nf, intf_p1_nofit=i_p1_nf, intf_p2_nofit=i_p2_nf
-                )
-                self.data_manager.save_point(result, idx + 1)
                 if self.on_data_ready:
-                    step_size = max(1, len(tof_axis) // 2000)
-                    frontend_data = asdict(result)
-                    frontend_data['raw_data_up'] = volt_up[::step_size].tolist(); frontend_data['raw_data_dw'] = volt_dw[::step_size].tolist()
-                    frontend_data['fit_data_up'] = fit_curve_up[::step_size].tolist(); frontend_data['fit_data_dw'] = fit_curve_dw[::step_size].tolist()
-                    frontend_data['time_axis'] = tof_axis[::step_size].tolist()
-                    self.on_data_ready(frontend_data)
-            
-            except Exception as e: 
-                print(f"Processing Error step {idx+1}: {traceback.format_exc()}")
-
-        self.data_manager.close_run()
-        self.status.is_running = False; self.status.message = "Done"
-        print("--- Processing Finished ---")
+                    self.on_data_ready(payload)
+        finally:
+            self.data_manager.close_run()
+            self.status.is_running = False
+            self.status.message = 'Stopped' if self.stop_flag else 'Done'
+            self.release_run_slot('scan')
+            print("--- Processing Finished ---")

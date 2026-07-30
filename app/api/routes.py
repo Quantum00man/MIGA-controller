@@ -13,6 +13,7 @@ from app.analysis import fitting
 from app.core.experiment_manager import ExperimentManager
 from app.core.data_loader import DataLoader
 from app.core.data_manager import DataManager
+from app.core.optimization_manager import OBJECTIVE_METRICS, OptimizationManager
 from app.models.schemas import (
     AnalysisSettings,
     ArchiveAllanRequest,
@@ -23,6 +24,7 @@ from app.models.schemas import (
     ExperimentResponse,
     FitModelDefinition,
     IndexUiStateRequest,
+    OptimizationConfig,
     ReAnalysisRequest,
     ScanConfig,
     SystemSettings,
@@ -33,6 +35,7 @@ import config
 
 router = APIRouter()
 manager = ExperimentManager()
+optimization_manager = OptimizationManager(manager)
 data_loader = DataLoader()
 
 
@@ -161,6 +164,44 @@ async def start_experiment(config: ScanConfig):
 async def stop_experiment():
     result = manager.stop_scan()
     return ExperimentResponse(status=result["status"], message=result["message"])
+
+
+@router.get("/optimization/objective-metrics", response_model=ExperimentResponse)
+async def get_optimization_objective_metrics():
+    return ExperimentResponse(status="success", message="Objective metrics loaded", data={"metrics": OBJECTIVE_METRICS})
+
+
+@router.post("/optimization/start", response_model=ExperimentResponse)
+async def start_optimization(config: OptimizationConfig):
+    result = optimization_manager.start_optimization(config.dict())
+    if result["status"] == "error":
+        raise HTTPException(400, result["message"])
+    return ExperimentResponse(status=result["status"], message=result["message"], data=result.get("data"))
+
+
+@router.post("/optimization/stop", response_model=ExperimentResponse)
+async def stop_optimization():
+    result = optimization_manager.stop_optimization()
+    return ExperimentResponse(status=result["status"], message=result["message"], data=result.get("data"))
+
+
+@router.get("/optimization/status", response_model=ExperimentResponse)
+async def get_optimization_status():
+    return ExperimentResponse(status="success", message="Optimization status loaded", data=optimization_manager.get_status())
+
+
+@router.get("/optimization/download/{kind}")
+async def download_optimization_artifact(kind: str):
+    try:
+        artifact_path, download_name = optimization_manager.get_export_file(kind)
+        media_type = "application/json" if kind == "optimization_report" else "text/plain"
+        if kind == "optimization_history":
+            media_type = "text/csv"
+        return FileResponse(path=artifact_path, media_type=media_type, filename=download_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
 
 
 @router.get("/index/state", response_model=ExperimentResponse)

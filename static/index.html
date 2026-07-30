@@ -2966,6 +2966,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     }, 500);
                 },
                 handleData(data) {
+                    if (data?.stream_type && data.stream_type !== 'scan_point') return;
                     this.currentStep = data.current_step || 0;
                     const total = data.total_steps || 1;
                     this.progressPercent = total > 0 ? Math.round((this.currentStep / total) * 100) : 0;

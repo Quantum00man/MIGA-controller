@@ -16,6 +16,7 @@ class FitModelDefinition(BaseModel):
     roles: Dict[str, Optional[str]] = Field(default_factory=dict)
     area_mode: str = Field("window_integral")
 
+
 class ScanConfig(BaseModel):
     """Full-Feature Scan Configuration."""
     scan_dimensions: int = Field(1)
@@ -56,6 +57,7 @@ class ScanConfig(BaseModel):
         if value == "":
             return None
         return value
+
     fit_center_up: float = Field(0)
     fit_width_up: float = Field(0)
     fit_center_dw: float = Field(0)
@@ -65,9 +67,71 @@ class ScanConfig(BaseModel):
     intf_alpha: float = 0.35
     intf_beta: float = 0.07636
     intf_gamma: float = 0.25
-    # Bragg Rabi Scan Parameters
     bragg_shape: str = Field("blackman")
     bragg_base_timing: int = Field(331119)
+
+
+class OptimizationVariableConfig(BaseModel):
+    index: int = Field(0, ge=0)
+    lower: float = Field(0)
+    upper: float = Field(1)
+    step: float = Field(1, gt=0)
+    parameter_type: str = Field("float")
+    initial_guess: Optional[float] = Field(None)
+
+    @validator("parameter_type")
+    def normalize_parameter_type(cls, value):
+        normalized = str(value or "float").strip().lower()
+        if normalized not in {"float", "int"}:
+            raise ValueError("parameter_type must be 'float' or 'int'")
+        return normalized
+
+
+class OptimizationConfig(BaseModel):
+    run_label: str = Field("")
+    sequence_name: str = Field("")
+    ext_trigger: bool = Field(False)
+    average_count: int = Field(1, ge=1)
+    max_trials: int = Field(30, ge=1)
+    initial_random_trials: int = Field(5, ge=0)
+    objective_metric_key: str = Field("atom_number_up")
+    objective_source: str = Field("fit")
+    objective_mode: str = Field("maximize")
+    target_value: Optional[float] = Field(None)
+    target_tolerance: float = Field(0.0, ge=0.0)
+    plateau_tolerance: float = Field(0.0, ge=0.0)
+    plateau_window: int = Field(5, ge=1)
+    variables: List[OptimizationVariableConfig] = Field(default_factory=list)
+    fit_center_up: float = Field(0)
+    fit_width_up: float = Field(0)
+    fit_center_dw: float = Field(0)
+    fit_width_dw: float = Field(0)
+
+    @validator("objective_source")
+    def normalize_objective_source(cls, value):
+        normalized = str(value or "fit").strip().lower()
+        if normalized not in {"fit", "nofit"}:
+            raise ValueError("objective_source must be 'fit' or 'nofit'")
+        return normalized
+
+    @validator("objective_mode")
+    def normalize_objective_mode(cls, value):
+        normalized = str(value or "maximize").strip().lower()
+        if normalized not in {"maximize", "minimize", "target"}:
+            raise ValueError("objective_mode must be maximize, minimize, or target")
+        return normalized
+
+    @validator("variables")
+    def validate_variables(cls, value):
+        if not value:
+            raise ValueError("At least one optimization variable is required")
+        seen = set()
+        for item in value:
+            if item.index in seen:
+                raise ValueError(f"Duplicate PARAMETER index: {item.index}")
+            seen.add(item.index)
+        return sorted(value, key=lambda item: item.index)
+
 
 class AnalysisSettings(BaseModel):
     alpha: float
@@ -83,7 +147,6 @@ class AnalysisSettings(BaseModel):
     gain_dw: float
     max_low: float = 0.01
     voltage_limit: float = 0.015
-    # [NEW]
     decimation: int = 64
     intf_alpha: float = 0.35
     intf_beta: float = 0.07636
@@ -117,7 +180,6 @@ class SystemSettings(BaseModel):
     gain_up: float
     gain_dw: float
     max_low: float = 0.01
-    # [NEW]
     decimation: int = 64
     link_total_time: float
     tmot_path: str
@@ -136,7 +198,6 @@ class SystemSettings(BaseModel):
     update_branch: str = Field("main")
 
 
-
 class SystemUpdateRequest(BaseModel):
     repo_url: Optional[str] = Field(None)
     branch: Optional[str] = Field(None)
@@ -146,6 +207,7 @@ class ExperimentResponse(BaseModel):
     status: str
     message: str
     data: Optional[Dict[str, Any]] = None
+
 
 class ReAnalysisRequest(BaseModel):
     year: str

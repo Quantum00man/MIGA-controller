@@ -1,0 +1,1141 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>MIGA Optimization Console</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.1/font/bootstrap-icons.css">
+    <style>
+        :root {
+            --sidebar-width: 390px;
+            --header-height: 82px;
+        }
+
+        body {
+            background-color: #f4f6f9;
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            overflow-x: hidden;
+        }
+
+        .navbar-fixed {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            min-height: var(--header-height);
+            z-index: 1030;
+            background: #24384b;
+            color: white;
+            padding: 12px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 18px;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.14);
+        }
+
+        .run-header-panel {
+            flex: 1 1 720px;
+            max-width: 920px;
+            min-width: 0;
+        }
+
+        .run-progress-meta {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            font-size: 0.78rem;
+            color: rgba(255, 255, 255, 0.76);
+        }
+
+        .run-progress-title {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .run-progress-stats {
+            flex-shrink: 0;
+            color: #f8fafc;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+
+        .run-progress-track {
+            width: 100%;
+            height: 8px;
+            background-color: #415364;
+            border-radius: 999px;
+            overflow: hidden;
+        }
+
+        .run-progress-fill {
+            height: 100%;
+            border-radius: inherit;
+            transition: width 0.2s ease;
+            background: linear-gradient(90deg, #63b3ed 0%, #2563eb 100%);
+        }
+
+        .sidebar {
+            position: fixed;
+            top: var(--header-height);
+            bottom: 0;
+            left: 0;
+            width: var(--sidebar-width);
+            overflow-y: auto;
+            padding: 20px 20px 28px;
+            background: #ffffff;
+            border-right: 1px solid #dee2e6;
+            z-index: 100;
+        }
+
+        .main-content {
+            margin-left: var(--sidebar-width);
+            margin-top: var(--header-height);
+            padding: 24px 24px 28px;
+        }
+
+        .card {
+            border: none;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+            margin-bottom: 18px;
+            border-radius: 10px;
+        }
+
+        .card-header {
+            background-color: #fff;
+            border-bottom: 1px solid #eef2f6;
+            font-weight: 600;
+            padding: 12px 18px;
+            color: #405261;
+        }
+
+        .section-label {
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 1.1px;
+            color: #adb5bd;
+            font-weight: 800;
+            margin: 18px 0 10px;
+            display: block;
+        }
+
+        .status-badge {
+            padding: 6px 15px;
+            border-radius: 30px;
+            font-size: 0.83rem;
+            font-weight: 700;
+            letter-spacing: 0.45px;
+            text-transform: uppercase;
+        }
+
+        .status-badge.idle {
+            background-color: #e9ecef;
+            color: #6c757d;
+            border: 1px solid #ced4da;
+        }
+
+        .status-badge.running {
+            background-color: #d1e7dd;
+            color: #0f5132;
+            border: 1px solid #a3cfbb;
+        }
+
+        .metric-card {
+            border: 1px solid #e6edf3;
+            border-radius: 10px;
+            padding: 14px 16px;
+            background: linear-gradient(180deg, #ffffff 0%, #f9fbfd 100%);
+            height: 100%;
+        }
+
+        .metric-label {
+            font-size: 0.75rem;
+            color: #83919f;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            font-weight: 700;
+            margin-bottom: 6px;
+        }
+
+        .metric-value {
+            font-size: 1.35rem;
+            font-weight: 700;
+            color: #1f2933;
+        }
+
+        .metric-subtext {
+            font-size: 0.78rem;
+            color: #6b7280;
+            margin-top: 6px;
+        }
+
+        .param-row {
+            border: 1px solid #e8edf3;
+            border-radius: 10px;
+            padding: 12px;
+            background: #fafcfe;
+            margin-bottom: 12px;
+        }
+
+        .param-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.78rem;
+            font-weight: 700;
+            color: #0d47a1;
+            background: #e7f0ff;
+            border: 1px solid #cfe0ff;
+            padding: 4px 10px;
+            border-radius: 999px;
+        }
+
+        .mini-table {
+            width: 100%;
+            font-size: 0.88rem;
+        }
+
+        .mini-table td,
+        .mini-table th {
+            padding: 6px 8px;
+            border-bottom: 1px solid #edf2f7;
+        }
+
+        .mini-table tr:last-child td,
+        .mini-table tr:last-child th {
+            border-bottom: none;
+        }
+
+        #log-area {
+            height: 250px;
+            overflow-y: auto;
+            background: #1e1e1e;
+            color: #00ff9d;
+            font-family: 'Consolas', monospace;
+            font-size: 0.8rem;
+            padding: 14px;
+            border-radius: 0 0 10px 10px;
+        }
+
+        .plot-panel {
+            min-height: 320px;
+        }
+
+        .download-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 8px;
+        }
+
+        .nav-link-lite {
+            color: rgba(255, 255, 255, 0.88);
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        .nav-link-lite:hover {
+            color: white;
+            text-decoration: underline;
+        }
+
+        @media (max-width: 1200px) {
+            .sidebar {
+                position: static;
+                width: 100%;
+                border-right: none;
+                border-bottom: 1px solid #dee2e6;
+            }
+
+            .main-content {
+                margin-left: 0;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .navbar-fixed {
+                position: static;
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .sidebar {
+                top: 0;
+            }
+
+            .main-content {
+                margin-top: 0;
+                padding: 16px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div id="app">
+        <header class="navbar-fixed">
+            <div class="d-flex align-items-center gap-3 flex-shrink-0">
+                <div>
+                    <div class="fw-bold fs-5"><i class="bi bi-bullseye me-2"></i>MIGA Optimization Console</div>
+                    <div class="small text-white-50">Bayesian optimization for sequence placeholders and online cold-atom metrics</div>
+                </div>
+            </div>
+
+            <div class="run-header-panel">
+                <div class="run-progress-meta mb-2">
+                    <span class="run-progress-title">{{ getProgressTitle() }}</span>
+                    <span class="run-progress-stats">{{ completedTrials }}/{{ config.max_trials }} trials · {{ formatPercent(progressPercent) }}</span>
+                </div>
+                <div class="run-progress-track">
+                    <div class="run-progress-fill" :style="{ width: progressPercent + '%' }"></div>
+                </div>
+                <div class="run-progress-meta mt-2">
+                    <span>Run {{ currentRunId || '...' }} · {{ objectiveMetricLabel }}</span>
+                    <span>{{ statusMessage }}</span>
+                </div>
+            </div>
+
+            <div class="d-flex align-items-center gap-3 flex-shrink-0">
+                <span :class="['status-badge', isRunning ? 'running' : 'idle']">{{ isRunning ? 'Running' : 'Idle' }}</span>
+                <a class="nav-link-lite" href="/index.html">Scan Console</a>
+            </div>
+        </header>
+
+        <aside class="sidebar">
+            <span class="section-label">Sequence</span>
+            <div class="card p-3">
+                <div class="mb-3">
+                    <label class="form-label small text-muted mb-1">Current Sequence</label>
+                    <input type="text" class="form-control bg-white" readonly :value="currentSequenceName">
+                </div>
+                <div class="d-grid gap-2">
+                    <button class="btn btn-outline-primary" @click="openSequenceFileDialog" :disabled="isRunning">
+                        <i class="bi bi-folder2-open me-1"></i>Load Sequence File
+                    </button>
+                    <button class="btn btn-outline-secondary" @click="reloadSequenceFile" :disabled="isRunning || !canReloadSequenceFile()">
+                        <i class="bi bi-arrow-repeat me-1"></i>{{ isReloadingSequence ? 'Reloading...' : 'Reload Sequence' }}
+                    </button>
+                    <input type="file" ref="seqInput" class="d-none" accept=".mot" @change="selectSequence">
+                </div>
+                <div class="form-text mt-2">Uses the same upload path and sequence snapshot logic as the main scan console.</div>
+            </div>
+
+            <span class="section-label">Objective</span>
+            <div class="card p-3">
+                <div class="mb-3">
+                    <label class="form-label small text-muted mb-1">Metric</label>
+                    <select class="form-select" v-model="config.objective_metric_key" :disabled="isRunning">
+                        <option v-for="(label, key) in metricsMap" :key="key" :value="key">{{ label }}</option>
+                    </select>
+                </div>
+                <div class="row g-2 mb-3">
+                    <div class="col-6">
+                        <label class="form-label small text-muted mb-1">Data Source</label>
+                        <select class="form-select" v-model="config.objective_source" :disabled="isRunning">
+                            <option value="fit">Fit</option>
+                            <option value="nofit">NoFit</option>
+                        </select>
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label small text-muted mb-1">Goal</label>
+                        <select class="form-select" v-model="config.objective_mode" :disabled="isRunning">
+                            <option value="maximize">Maximize</option>
+                            <option value="minimize">Minimize</option>
+                            <option value="target">Hit Target</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="row g-2 mb-3" v-if="config.objective_mode === 'target'">
+                    <div class="col-6">
+                        <label class="form-label small text-muted mb-1">Target Value</label>
+                        <input type="number" class="form-control" v-model.number="config.target_value" :disabled="isRunning">
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label small text-muted mb-1">Target Tolerance</label>
+                        <input type="number" class="form-control" v-model.number="config.target_tolerance" min="0" step="any" :disabled="isRunning">
+                    </div>
+                </div>
+                <div class="row g-2" v-else>
+                    <div class="col-6">
+                        <label class="form-label small text-muted mb-1">Plateau Tolerance</label>
+                        <input type="number" class="form-control" v-model.number="config.plateau_tolerance" min="0" step="any" :disabled="isRunning">
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label small text-muted mb-1">Plateau Window</label>
+                        <input type="number" class="form-control" v-model.number="config.plateau_window" min="1" step="1" :disabled="isRunning">
+                    </div>
+                </div>
+            </div>
+
+            <span class="section-label">Parameters</span>
+            <div class="card p-3">
+                <div class="param-row" v-for="(variable, index) in config.variables" :key="index">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <span class="param-chip"><i class="bi bi-sliders"></i>PARAMETER{{ index }}</span>
+                        <button class="btn btn-sm btn-outline-danger" @click="removeVariable(index)" :disabled="isRunning || config.variables.length === 1">
+                            <i class="bi bi-dash"></i>
+                        </button>
+                    </div>
+                    <div class="row g-2 mb-2">
+                        <div class="col-6">
+                            <label class="form-label small text-muted mb-1">Type</label>
+                            <select class="form-select form-select-sm" v-model="variable.parameter_type" :disabled="isRunning">
+                                <option value="float">float</option>
+                                <option value="int">int</option>
+                            </select>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small text-muted mb-1">Initial Guess</label>
+                            <input type="number" class="form-control form-control-sm" v-model.number="variable.initial_guess" step="any" :disabled="isRunning">
+                        </div>
+                    </div>
+                    <div class="row g-2">
+                        <div class="col-4">
+                            <label class="form-label small text-muted mb-1">Min</label>
+                            <input type="number" class="form-control form-control-sm" v-model.number="variable.lower" step="any" :disabled="isRunning">
+                        </div>
+                        <div class="col-4">
+                            <label class="form-label small text-muted mb-1">Max</label>
+                            <input type="number" class="form-control form-control-sm" v-model.number="variable.upper" step="any" :disabled="isRunning">
+                        </div>
+                        <div class="col-4">
+                            <label class="form-label small text-muted mb-1">Step</label>
+                            <input type="number" class="form-control form-control-sm" v-model.number="variable.step" min="0.000001" step="any" :disabled="isRunning">
+                        </div>
+                    </div>
+                </div>
+                <button class="btn btn-outline-primary w-100" @click="addVariable" :disabled="isRunning">
+                    <i class="bi bi-plus-lg me-1"></i>Add PARAMETER
+                </button>
+                <div class="form-text mt-2">The optimizer will only suggest grid values allowed by each parameter's step size.</div>
+            </div>
+
+            <span class="section-label">Execution</span>
+            <div class="card p-3">
+                <div class="row g-2 mb-3">
+                    <div class="col-6">
+                        <label class="form-label small text-muted mb-1">Average Number</label>
+                        <input type="number" class="form-control" v-model.number="config.average_count" min="1" step="1" :disabled="isRunning">
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label small text-muted mb-1">Max Trials</label>
+                        <input type="number" class="form-control" v-model.number="config.max_trials" min="1" step="1" :disabled="isRunning">
+                    </div>
+                </div>
+                <div class="row g-2 mb-3">
+                    <div class="col-6">
+                        <label class="form-label small text-muted mb-1">Initial Random Trials</label>
+                        <input type="number" class="form-control" v-model.number="config.initial_random_trials" min="0" step="1" :disabled="isRunning">
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label small text-muted mb-1">Run Label</label>
+                        <input type="text" class="form-control" v-model="config.run_label" :disabled="isRunning" placeholder="e.g. Raman BO / MOT optimize">
+                    </div>
+                </div>
+                <div class="form-check mb-3">
+                    <input class="form-check-input" type="checkbox" v-model="config.ext_trigger" id="extTriggerOptimization" :disabled="isRunning">
+                    <label class="form-check-label" for="extTriggerOptimization">Ext Trigger</label>
+                </div>
+                <div class="row g-2 mb-3">
+                    <div class="col-6">
+                        <label class="form-label small text-muted mb-1">Fit Center UP (ms)</label>
+                        <input type="number" class="form-control form-control-sm" v-model.number="config.fit_center_up" step="any" :disabled="isRunning">
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label small text-muted mb-1">Fit Width UP (ms)</label>
+                        <input type="number" class="form-control form-control-sm" v-model.number="config.fit_width_up" step="any" :disabled="isRunning">
+                    </div>
+                </div>
+                <div class="row g-2 mb-4">
+                    <div class="col-6">
+                        <label class="form-label small text-muted mb-1">Fit Center DW (ms)</label>
+                        <input type="number" class="form-control form-control-sm" v-model.number="config.fit_center_dw" step="any" :disabled="isRunning">
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label small text-muted mb-1">Fit Width DW (ms)</label>
+                        <input type="number" class="form-control form-control-sm" v-model.number="config.fit_width_dw" step="any" :disabled="isRunning">
+                    </div>
+                </div>
+                <div class="d-grid gap-2">
+                    <button class="btn btn-success py-2 fw-bold" @click="startOptimization" :disabled="isRunning">
+                        <i class="bi bi-play-fill me-1"></i>Start Optimization
+                    </button>
+                    <button class="btn btn-danger py-2 fw-bold" @click="stopOptimization" :disabled="!isRunning">
+                        <i class="bi bi-stop-fill me-1"></i>Stop Optimization
+                    </button>
+                </div>
+            </div>
+
+            <span class="section-label">Exports</span>
+            <div class="card p-3">
+                <div class="download-grid">
+                    <a class="btn btn-outline-secondary" :class="{ disabled: !exportUrls.best_sequence }" :href="exportUrls.best_sequence || '#'"><i class="bi bi-download me-1"></i>Best Sequence</a>
+                    <a class="btn btn-outline-secondary" :class="{ disabled: !exportUrls.optimization_history }" :href="exportUrls.optimization_history || '#'"><i class="bi bi-download me-1"></i>History CSV</a>
+                    <a class="btn btn-outline-secondary" :class="{ disabled: !exportUrls.optimization_report }" :href="exportUrls.optimization_report || '#'"><i class="bi bi-download me-1"></i>Report JSON</a>
+                </div>
+                <div class="form-text mt-2">Files are generated when the optimization finishes or is stopped after completed trials exist.</div>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <div class="row g-3 mb-3">
+                <div class="col-xl-3 col-md-6">
+                    <div class="metric-card">
+                        <div class="metric-label">Current Trial</div>
+                        <div class="metric-value">{{ currentTrialLabel }}</div>
+                        <div class="metric-subtext">{{ currentShotLabel }}</div>
+                    </div>
+                </div>
+                <div class="col-xl-3 col-md-6">
+                    <div class="metric-card">
+                        <div class="metric-label">Latest Metric</div>
+                        <div class="metric-value">{{ formatMetric(lastMetricMean) }}</div>
+                        <div class="metric-subtext">std {{ formatMetric(lastMetricStd) }}</div>
+                    </div>
+                </div>
+                <div class="col-xl-3 col-md-6">
+                    <div class="metric-card">
+                        <div class="metric-label">Best Metric</div>
+                        <div class="metric-value">{{ formatMetric(bestMetricMean) }}</div>
+                        <div class="metric-subtext">trial {{ bestTrialIndex || '-' }}</div>
+                    </div>
+                </div>
+                <div class="col-xl-3 col-md-6">
+                    <div class="metric-card">
+                        <div class="metric-label">Stop Rule</div>
+                        <div class="metric-value">{{ getStopRuleSummary() }}</div>
+                        <div class="metric-subtext">{{ stopReason || 'running' }}</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <div><i class="bi bi-graph-up-arrow me-2 text-primary"></i>Optimization Status</div>
+                    <div class="small text-muted">Objective: {{ objectiveMetricLabel }} · {{ config.objective_source.toUpperCase() }} · {{ config.objective_mode }}</div>
+                </div>
+                <div class="card-body">
+                    <div id="historyPlot" class="plot-panel"></div>
+                    <div class="row g-3 mt-2">
+                        <div class="col-lg-4">
+                            <h6 class="mb-2">Best Parameters</h6>
+                            <table class="mini-table">
+                                <tbody>
+                                    <tr v-if="!Object.keys(bestParameters).length"><td class="text-muted">No completed trials yet.</td></tr>
+                                    <tr v-for="(value, key) in orderedBestParameters" :key="key">
+                                        <th>{{ key }}</th>
+                                        <td>{{ formatMetric(value) }}</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="col-lg-4">
+                            <h6 class="mb-2">Current Parameters</h6>
+                            <table class="mini-table">
+                                <tbody>
+                                    <tr v-if="!Object.keys(currentParameters).length"><td class="text-muted">Waiting for next trial.</td></tr>
+                                    <tr v-for="(value, key) in orderedCurrentParameters" :key="key">
+                                        <th>{{ key }}</th>
+                                        <td>{{ formatMetric(value) }}</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="col-lg-4">
+                            <h6 class="mb-2">Recent Trials</h6>
+                            <table class="mini-table">
+                                <thead>
+                                    <tr>
+                                        <th>Trial</th>
+                                        <th>Mean</th>
+                                        <th>Score</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr v-if="!recentTrials.length"><td colspan="3" class="text-muted">No trial summaries yet.</td></tr>
+                                    <tr v-for="entry in recentTrials" :key="entry.trial_index">
+                                        <td>{{ entry.trial_index }}</td>
+                                        <td>{{ formatMetric(entry.metric_mean) }}</td>
+                                        <td>{{ formatMetric(entry.score) }}</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row g-4">
+                <div class="col-lg-7">
+                    <div class="card h-100">
+                        <div class="card-header"><i class="bi bi-activity me-2 text-danger"></i>Real-time TOF</div>
+                        <div class="card-body p-0">
+                            <div id="waveformPlotUp" style="height: 300px;"></div>
+                            <div id="waveformPlotDw" style="height: 300px;"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-lg-5">
+                    <div class="card h-100">
+                        <div class="card-header bg-dark text-white border-0"><i class="bi bi-terminal-fill me-2"></i>Optimization Log</div>
+                        <div id="log-area">
+                            <div v-for="(log, index) in logs" :key="index"><span class="text-secondary opacity-50 me-2">></span>{{ log }}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/vue@3.2.31/dist/vue.global.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <script src="https://cdn.plot.ly/plotly-2.12.1.min.js"></script>
+    <script>
+        const { createApp } = Vue;
+
+        createApp({
+            data() {
+                return {
+                    metricsMap: {
+                        atom_number_up: 'Atom Number UP',
+                        atom_number_dw: 'Atom Number DOWN',
+                        amplitude_up: 'Max Voltage UP',
+                        amplitude_dw: 'Max Voltage DOWN',
+                        temperature_up: 'Temperature UP',
+                        temperature_dw: 'Temperature DOWN',
+                        arrival_time_up: 'Arrival Time UP',
+                        arrival_time_dw: 'Arrival Time DOWN',
+                        transition_probability_up: 'Transition Probability UP',
+                        transition_probability_dw: 'Transition Probability DOWN',
+                        intf_n1: 'Interferometer N1',
+                        intf_n2: 'Interferometer N2',
+                        intf_p1: 'Interferometer P1',
+                        intf_p2: 'Interferometer P2',
+                    },
+                    config: {
+                        run_label: '',
+                        sequence_name: 'Default (seq0.mot)',
+                        ext_trigger: false,
+                        average_count: 3,
+                        max_trials: 20,
+                        initial_random_trials: 5,
+                        objective_metric_key: 'atom_number_up',
+                        objective_source: 'fit',
+                        objective_mode: 'maximize',
+                        target_value: 0,
+                        target_tolerance: 0.01,
+                        plateau_tolerance: 0.01,
+                        plateau_window: 5,
+                        fit_center_up: 0,
+                        fit_width_up: 0,
+                        fit_center_dw: 0,
+                        fit_width_dw: 0,
+                        variables: [],
+                    },
+                    ws: null,
+                    isRunning: false,
+                    statusMessage: 'IDLE',
+                    currentRunId: '...',
+                    currentSequenceName: 'Default (seq0.mot)',
+                    currentTrial: 0,
+                    completedTrials: 0,
+                    bestTrialIndex: null,
+                    progressPercent: 0,
+                    lastMetricMean: null,
+                    lastMetricStd: null,
+                    bestMetricMean: null,
+                    bestMetricStd: null,
+                    stopReason: null,
+                    currentParameters: {},
+                    bestParameters: {},
+                    exportUrls: {},
+                    logs: [],
+                    history: [],
+                    currentShotLabel: 'No shot received yet',
+                    seqFile: null,
+                    seqFileHandle: null,
+                    isExternalSequenceFile: false,
+                    isReloadingSequence: false,
+                    statusPollTimer: null,
+                    resizeTimer: null,
+                    historyLayout: {},
+                    waveformLayoutUp: {},
+                    waveformLayoutDw: {},
+                }
+            },
+            computed: {
+                objectiveMetricLabel() {
+                    return this.metricsMap[this.config.objective_metric_key] || 'Objective';
+                },
+                orderedBestParameters() {
+                    return this.sortParameterMap(this.bestParameters);
+                },
+                orderedCurrentParameters() {
+                    return this.sortParameterMap(this.currentParameters);
+                },
+                currentTrialLabel() {
+                    if (!this.completedTrials && !this.isRunning) return '0 / ' + this.config.max_trials;
+                    return `${Math.max(this.currentTrial, this.completedTrials)} / ${this.config.max_trials}`;
+                },
+                recentTrials() {
+                    return [...this.history].slice(-5).reverse();
+                },
+            },
+            watch: {
+                config: {
+                    handler() {
+                        this.normalizeVariables();
+                        this.saveState();
+                        this.renderHistoryPlot();
+                    },
+                    deep: true,
+                },
+                currentSequenceName() { this.saveState(); },
+            },
+            mounted() {
+                this.loadState();
+                this.ensureVariableDefaults();
+                this.initPlots();
+                this.fetchObjectiveMetrics();
+                this.fetchStatus();
+                this.connectWebSocket();
+                this.statusPollTimer = setInterval(() => this.fetchStatus(), 2000);
+                window.addEventListener('resize', this.handleResize);
+                this.addLog('Optimization console ready.');
+            },
+            beforeUnmount() {
+                if (this.statusPollTimer) clearInterval(this.statusPollTimer);
+                if (this.ws) this.ws.close();
+                window.removeEventListener('resize', this.handleResize);
+            },
+            methods: {
+                defaultVariable(index) {
+                    return { index, lower: 0, upper: 10, step: 1, parameter_type: 'float', initial_guess: 0 };
+                },
+                ensureVariableDefaults() {
+                    if (!Array.isArray(this.config.variables) || !this.config.variables.length) {
+                        this.config.variables = [this.defaultVariable(0)];
+                    }
+                    this.normalizeVariables();
+                },
+                normalizeVariables() {
+                    this.config.variables = (this.config.variables || []).map((variable, index) => ({
+                        index,
+                        lower: Number(variable.lower ?? 0),
+                        upper: Number(variable.upper ?? 10),
+                        step: Number(variable.step ?? 1),
+                        parameter_type: variable.parameter_type === 'int' ? 'int' : 'float',
+                        initial_guess: variable.initial_guess === '' || variable.initial_guess === null || variable.initial_guess === undefined ? null : Number(variable.initial_guess),
+                    }));
+                },
+                addVariable() {
+                    this.config.variables.push(this.defaultVariable(this.config.variables.length));
+                },
+                removeVariable(index) {
+                    if (this.config.variables.length <= 1) return;
+                    this.config.variables.splice(index, 1);
+                    this.normalizeVariables();
+                },
+                saveState() {
+                    localStorage.setItem('miga_optimization_state', JSON.stringify({
+                        config: this.config,
+                        currentSequenceName: this.currentSequenceName,
+                    }));
+                },
+                loadState() {
+                    const raw = localStorage.getItem('miga_optimization_state');
+                    if (!raw) return;
+                    try {
+                        const parsed = JSON.parse(raw);
+                        if (parsed.config) {
+                            this.config = { ...this.config, ...parsed.config };
+                        }
+                        if (parsed.currentSequenceName) {
+                            this.currentSequenceName = parsed.currentSequenceName;
+                            this.config.sequence_name = parsed.currentSequenceName;
+                        }
+                    } catch (error) {
+                        console.error('Load state failed', error);
+                    }
+                },
+                async fetchObjectiveMetrics() {
+                    try {
+                        const res = await axios.get('/optimization/objective-metrics');
+                        this.metricsMap = res.data?.data?.metrics || {};
+                    } catch (error) {
+                        this.metricsMap = {
+                            atom_number_up: 'Atom Number UP',
+                            atom_number_dw: 'Atom Number DOWN',
+                            amplitude_up: 'Max Voltage UP',
+                            amplitude_dw: 'Max Voltage DOWN',
+                            temperature_up: 'Temperature UP',
+                            temperature_dw: 'Temperature DOWN',
+                            arrival_time_up: 'Arrival Time UP',
+                            arrival_time_dw: 'Arrival Time DOWN',
+                            transition_probability_up: 'Transition Probability UP',
+                            transition_probability_dw: 'Transition Probability DOWN',
+                            intf_n1: 'Interferometer N1',
+                            intf_n2: 'Interferometer N2',
+                            intf_p1: 'Interferometer P1',
+                            intf_p2: 'Interferometer P2',
+                        };
+                        this.addLog('Metric catalog fallback enabled.');
+                    }
+                },
+                async ensureRealHardwareMode() {
+                    await axios.post('/system/mode', { simulation: false });
+                },
+                canReloadSequenceFile() {
+                    return this.isExternalSequenceFile && Boolean(this.seqFileHandle || this.seqFile);
+                },
+                async openSequenceFileDialog() {
+                    if (this.isRunning) return;
+                    if (window.showOpenFilePicker) {
+                        try {
+                            const [handle] = await window.showOpenFilePicker({
+                                multiple: false,
+                                types: [{
+                                    description: 'MOT Sequence File',
+                                    accept: { 'text/plain': ['.mot'], 'application/octet-stream': ['.mot'] },
+                                }],
+                            });
+                            if (!handle) return;
+                            await this.loadSequenceFromHandle(handle);
+                            return;
+                        } catch (error) {
+                            if (error?.name === 'AbortError') return;
+                            this.addLog('Native file picker unavailable, falling back to browser input.');
+                        }
+                    }
+                    this.$refs.seqInput.click();
+                },
+                async loadSequenceFromHandle(handle) {
+                    const file = await handle.getFile();
+                    this.seqFileHandle = handle;
+                    this.seqFile = file;
+                    this.isExternalSequenceFile = true;
+                    await this.uploadSequenceFile();
+                },
+                async reloadSequenceFile() {
+                    if (this.isRunning || !this.canReloadSequenceFile()) return;
+                    if (!this.seqFileHandle || typeof this.seqFileHandle.getFile !== 'function') {
+                        this.$refs.seqInput.click();
+                        return;
+                    }
+                    this.isReloadingSequence = true;
+                    try {
+                        await this.loadSequenceFromHandle(this.seqFileHandle);
+                        this.addLog('Sequence reloaded from disk.');
+                    } catch (error) {
+                        this.addLog('Sequence reload failed: ' + (error?.message || error));
+                    } finally {
+                        this.isReloadingSequence = false;
+                    }
+                },
+                async selectSequence(event) {
+                    const file = event.target.files[0];
+                    if (!file) return;
+                    this.seqFileHandle = null;
+                    this.seqFile = file;
+                    this.isExternalSequenceFile = true;
+                    await this.uploadSequenceFile();
+                    event.target.value = '';
+                },
+                async uploadSequenceFile() {
+                    if (!this.seqFile) return true;
+                    const formData = new FormData();
+                    formData.append('file', this.seqFile);
+                    try {
+                        this.addLog(`Uploading ${this.seqFile.name}...`);
+                        const res = await axios.post('/experiment/sequence', formData, {
+                            headers: { 'Content-Type': 'multipart/form-data' },
+                        });
+                        this.currentSequenceName = res.data.filename;
+                        this.config.sequence_name = res.data.filename;
+                        this.addLog('Sequence uploaded successfully.');
+                        return true;
+                    } catch (error) {
+                        this.addLog('Sequence upload failed: ' + this.formatRequestError(error));
+                        return false;
+                    }
+                },
+                buildStartPayload() {
+                    this.normalizeVariables();
+                    return {
+                        ...JSON.parse(JSON.stringify(this.config)),
+                        sequence_name: this.currentSequenceName,
+                    };
+                },
+                async startOptimization() {
+                    if (this.isRunning) return;
+                    try {
+                        await this.ensureRealHardwareMode();
+                    } catch (error) {
+                        this.addLog('REAL HW mode setup failed: ' + this.formatRequestError(error));
+                        return;
+                    }
+                    const uploadSuccess = await this.uploadSequenceFile();
+                    if (!uploadSuccess) return;
+                    this.history = [];
+                    this.progressPercent = 0;
+                    this.completedTrials = 0;
+                    this.currentTrial = 0;
+                    this.bestTrialIndex = null;
+                    this.bestParameters = {};
+                    this.currentParameters = {};
+                    this.exportUrls = {};
+                    try {
+                        const payload = this.buildStartPayload();
+                        const res = await axios.post('/optimization/start', payload);
+                        if (res.data.status === 'success') {
+                            this.applyStatus(res.data.data || {});
+                            this.isRunning = true;
+                            this.statusMessage = 'RUNNING';
+                            this.addLog('Optimization started.');
+                        }
+                    } catch (error) {
+                        this.addLog('Optimization start failed: ' + this.formatRequestError(error));
+                    }
+                },
+                async stopOptimization() {
+                    try {
+                        const res = await axios.post('/optimization/stop');
+                        this.addLog(res.data.message || 'Stop signal sent.');
+                    } catch (error) {
+                        this.addLog('Stop failed: ' + this.formatRequestError(error));
+                    }
+                },
+                async fetchStatus() {
+                    try {
+                        const res = await axios.get('/optimization/status');
+                        this.applyStatus(res.data?.data || {});
+                    } catch (error) {
+                    }
+                },
+                applyStatus(status) {
+                    this.isRunning = Boolean(status?.is_running);
+                    this.statusMessage = String(status?.message || 'IDLE');
+                    this.currentRunId = status?.run_id || this.currentRunId;
+                    this.currentTrial = Number(status?.current_trial || 0);
+                    this.completedTrials = Number(status?.completed_trials || 0);
+                    this.bestTrialIndex = status?.best_trial_index ?? this.bestTrialIndex;
+                    this.lastMetricMean = status?.latest_trial?.metric_mean ?? this.lastMetricMean;
+                    this.lastMetricStd = status?.latest_trial?.metric_std ?? this.lastMetricStd;
+                    this.bestMetricMean = status?.best_metric_mean ?? this.bestMetricMean;
+                    this.bestMetricStd = status?.best_metric_std ?? this.bestMetricStd;
+                    this.stopReason = status?.stop_reason ?? this.stopReason;
+                    this.currentParameters = status?.current_parameters || this.currentParameters || {};
+                    this.bestParameters = status?.best_parameters || this.bestParameters || {};
+                    this.exportUrls = status?.export_urls || this.exportUrls || {};
+                    if (Array.isArray(status?.history)) {
+                        this.history = status.history.map((entry) => this.normalizeHistoryEntry(entry));
+                        this.renderHistoryPlot();
+                    }
+                    const maxTrials = Math.max(1, Number(this.config.max_trials || status?.max_trials || 1));
+                    this.progressPercent = Math.min(100, Math.round((this.completedTrials / maxTrials) * 100));
+                },
+                connectWebSocket() {
+                    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                    const wsUrl = `${protocol}//${window.location.host}/ws`;
+                    this.ws = new WebSocket(wsUrl);
+                    this.ws.onopen = () => this.addLog('WebSocket connected.');
+                    this.ws.onclose = () => setTimeout(() => this.connectWebSocket(), 3000);
+                    this.ws.onmessage = (event) => this.handleData(JSON.parse(event.data));
+                },
+                handleData(data) {
+                    if (!data || !data.stream_type) return;
+                    if (data.stream_type === 'optimization_shot') {
+                        this.currentTrial = Number(data.trial_index || this.currentTrial || 0);
+                        this.currentParameters = data.parameter_map || this.currentParameters;
+                        this.currentShotLabel = `Trial ${data.trial_index || '-'} · repeat ${data.repeat_index || '-'} / ${data.average_count || '-'}`;
+                        if (data.time_axis && data.raw_data_up && data.raw_data_dw && data.fit_data_up && data.fit_data_dw) {
+                            this.renderWaveforms(data);
+                            let message = `Trial ${data.trial_index} repeat ${data.repeat_index}/${data.average_count}`;
+                            if (data.detected_delay !== undefined && data.detected_delay !== null) {
+                                message += ` | Δt=${(Number(data.detected_delay) * 1000).toFixed(2)}ms`;
+                            }
+                            this.addLog(message);
+                        } else if (data.error) {
+                            this.addLog(`Shot failed: ${data.error}`);
+                        }
+                        return;
+                    }
+                    if (data.stream_type === 'optimization_trial') {
+                        const entry = this.normalizeHistoryEntry(data.evaluation || {});
+                        this.upsertHistory(entry);
+                        this.currentTrial = Number(data.trial_index || this.currentTrial || 0);
+                        this.completedTrials = this.history.length;
+                        this.currentParameters = entry.parameters || this.currentParameters;
+                        this.bestParameters = data.best_parameters || this.bestParameters;
+                        this.bestMetricMean = data.best_metric_mean ?? this.bestMetricMean;
+                        this.lastMetricMean = entry.metric_mean;
+                        this.lastMetricStd = entry.metric_std;
+                        this.progressPercent = Math.min(100, Math.round((this.completedTrials / Math.max(1, Number(this.config.max_trials || 1))) * 100));
+                        this.renderHistoryPlot();
+                        this.addLog(`Trial ${entry.trial_index} complete | mean=${this.formatMetric(entry.metric_mean)} | score=${this.formatMetric(entry.score)}`);
+                        return;
+                    }
+                    if (data.stream_type === 'optimization_complete') {
+                        this.applyStatus(data.status || {});
+                        this.renderHistoryPlot();
+                        this.addLog(`Optimization finished: ${data.status?.stop_reason || data.status?.message || 'done'}`);
+                    }
+                },
+                normalizeHistoryEntry(entry) {
+                    return {
+                        trial_index: Number(entry.trial_index || 0),
+                        metric_mean: Number(entry.metric_mean || 0),
+                        metric_std: Number(entry.metric_std || 0),
+                        metric_sem: Number(entry.metric_sem || 0),
+                        score: Number(entry.score || 0),
+                        best_score_so_far: Number(entry.best_score_so_far || entry.score || 0),
+                        best_metric_mean_so_far: Number(entry.best_metric_mean_so_far || entry.metric_mean || 0),
+                        parameters: entry.parameters || {},
+                        shot_records: Array.isArray(entry.shot_records) ? entry.shot_records : [],
+                    };
+                },
+                upsertHistory(entry) {
+                    const existingIndex = this.history.findIndex((item) => item.trial_index === entry.trial_index);
+                    if (existingIndex >= 0) {
+                        this.history.splice(existingIndex, 1, entry);
+                    } else {
+                        this.history.push(entry);
+                    }
+                    this.history.sort((a, b) => a.trial_index - b.trial_index);
+                },
+                initPlots() {
+                    const commonLayout = {
+                        font: { family: 'Segoe UI, Arial, sans-serif', size: 12 },
+                        margin: { l: 60, r: 20 },
+                        paper_bgcolor: 'rgba(0,0,0,0)',
+                        plot_bgcolor: 'rgba(0,0,0,0)',
+                        xaxis: { showline: true, mirror: true, ticks: 'inside', linecolor: '#333', gridcolor: '#dde5ee', zeroline: false },
+                        yaxis: { showline: true, mirror: true, ticks: 'inside', linecolor: '#333', gridcolor: '#dde5ee', zeroline: false },
+                        hoverlabel: { bgcolor: 'white' },
+                        showlegend: true,
+                        legend: { x: 1, y: 1, xanchor: 'right', bgcolor: 'rgba(255,255,255,0.85)', bordercolor: '#d0d7de', borderwidth: 1 },
+                    };
+                    this.historyLayout = {
+                        ...commonLayout,
+                        margin: { t: 30, b: 50, l: 70, r: 30 },
+                        title: { text: 'Objective Mean per Trial', x: 0.03, font: { size: 13 } },
+                        xaxis: { ...commonLayout.xaxis, title: 'Trial Index' },
+                        yaxis: { ...commonLayout.yaxis, title: this.objectiveMetricLabel || 'Objective' },
+                    };
+                    this.waveformLayoutUp = { ...commonLayout, margin: { t: 25, b: 5, l: 50, r: 10 }, yaxis: { ...commonLayout.yaxis, title: 'UP (V)' }, xaxis: { ...commonLayout.xaxis, visible: false }, title: { text: 'UP Signal', font: { size: 10 }, x: 0.05, y: 0.85 }, paper_bgcolor: 'white', plot_bgcolor: 'white' };
+                    this.waveformLayoutDw = { ...commonLayout, margin: { t: 5, b: 30, l: 50, r: 10 }, yaxis: { ...commonLayout.yaxis, title: 'DW (V)' }, xaxis: { ...commonLayout.xaxis, title: 'Time (ms)' }, title: { text: 'DOWN Signal', font: { size: 10 }, x: 0.05, y: 0.85 }, paper_bgcolor: 'white', plot_bgcolor: 'white' };
+                    Plotly.newPlot('historyPlot', [], this.historyLayout);
+                    Plotly.newPlot('waveformPlotUp', [], this.waveformLayoutUp);
+                    Plotly.newPlot('waveformPlotDw', [], this.waveformLayoutDw);
+                },
+                renderHistoryPlot() {
+                    const trials = this.history.map((entry) => entry.trial_index);
+                    const metricMeans = this.history.map((entry) => entry.metric_mean);
+                    const bestSoFar = this.history.map((entry) => entry.best_metric_mean_so_far);
+                    const traces = [];
+                    if (trials.length) {
+                        traces.push({
+                            x: trials,
+                            y: metricMeans,
+                            type: 'scatter',
+                            mode: 'lines+markers',
+                            line: { color: '#1d4ed8', width: 2 },
+                            marker: { size: 7, color: '#1d4ed8' },
+                            name: 'Trial mean',
+                        });
+                        traces.push({
+                            x: trials,
+                            y: bestSoFar,
+                            type: 'scatter',
+                            mode: 'lines',
+                            line: { color: '#d97706', width: 2, dash: 'dash' },
+                            name: 'Best so far',
+                        });
+                        if (this.config.objective_mode === 'target' && Number.isFinite(Number(this.config.target_value))) {
+                            traces.push({
+                                x: trials,
+                                y: trials.map(() => Number(this.config.target_value)),
+                                type: 'scatter',
+                                mode: 'lines',
+                                line: { color: '#059669', width: 1.5, dash: 'dot' },
+                                name: 'Target',
+                            });
+                        }
+                    }
+                    this.historyLayout = {
+                        ...this.historyLayout,
+                        yaxis: { ...this.historyLayout.yaxis, title: this.objectiveMetricLabel },
+                    };
+                    Plotly.react('historyPlot', traces, this.historyLayout);
+                },
+                renderWaveforms(data) {
+                    const timeMs = data.time_axis.map((value) => Number(value) * 1000);
+                    const traceUpRaw = { x: timeMs, y: data.raw_data_up, type: 'scatter', mode: 'markers', marker: { color: 'black', size: 2, opacity: 0.3 }, name: 'Raw', showlegend: false };
+                    const traceUpFit = { x: timeMs, y: data.fit_data_up, type: 'scatter', mode: 'lines', line: { color: '#d62728', width: 2 }, name: 'Fit' };
+                    const traceDwRaw = { x: timeMs, y: data.raw_data_dw, type: 'scatter', mode: 'markers', marker: { color: 'black', size: 2, opacity: 0.3 }, name: 'Raw', showlegend: false };
+                    const traceDwFit = { x: timeMs, y: data.fit_data_dw, type: 'scatter', mode: 'lines', line: { color: '#1f77b4', width: 2 }, name: 'Fit' };
+                    const shapesUp = []; const shapesDw = [];
+                    if (data.window_up) shapesUp.push({ type: 'rect', xref: 'x', yref: 'paper', x0: data.window_up[0] * 1000, x1: data.window_up[1] * 1000, y0: 0, y1: 1, fillcolor: '#dc3545', opacity: 0.1, line: { width: 0 } });
+                    if (data.window_dw) shapesDw.push({ type: 'rect', xref: 'x', yref: 'paper', x0: data.window_dw[0] * 1000, x1: data.window_dw[1] * 1000, y0: 0, y1: 1, fillcolor: '#0d6efd', opacity: 0.1, line: { width: 0 } });
+                    this.waveformLayoutUp = { ...this.waveformLayoutUp, shapes: shapesUp };
+                    this.waveformLayoutDw = { ...this.waveformLayoutDw, shapes: shapesDw };
+                    Plotly.react('waveformPlotUp', [traceUpRaw, traceUpFit], this.waveformLayoutUp);
+                    Plotly.react('waveformPlotDw', [traceDwRaw, traceDwFit], this.waveformLayoutDw);
+                },
+                handleResize() {
+                    ['historyPlot', 'waveformPlotUp', 'waveformPlotDw'].forEach((plotId) => {
+                        const el = document.getElementById(plotId);
+                        if (el) Plotly.Plots.resize(el);
+                    });
+                },
+                addLog(msg) {
+                    const time = new Date().toLocaleTimeString('en-GB', { hour12: false });
+                    this.logs.unshift(`[${time}] ${msg}`);
+                    if (this.logs.length > 80) this.logs.pop();
+                },
+                sortParameterMap(map) {
+                    return Object.fromEntries(
+                        Object.entries(map || {}).sort((a, b) => Number(String(a[0]).replace('PARAMETER', '')) - Number(String(b[0]).replace('PARAMETER', '')))
+                    );
+                },
+                formatMetric(value) {
+                    if (value === null || value === undefined || Number.isNaN(Number(value))) return '-';
+                    const numeric = Number(value);
+                    if (!Number.isFinite(numeric)) return '-';
+                    if (Math.abs(numeric) >= 1000 || (Math.abs(numeric) > 0 && Math.abs(numeric) < 0.001)) {
+                        return numeric.toExponential(3);
+                    }
+                    return numeric.toFixed(6);
+                },
+                formatPercent(value) {
+                    const safeValue = Math.max(0, Math.min(100, Number(value) || 0));
+                    return `${Math.round(safeValue)}%`;
+                },
+                getStopRuleSummary() {
+                    if (this.config.objective_mode === 'target') {
+                        return `|x-target| <= ${this.formatMetric(this.config.target_tolerance)}`;
+                    }
+                    return `Δbest <= ${this.formatMetric(this.config.plateau_tolerance)} over ${this.config.plateau_window} trials`;
+                },
+                getProgressTitle() {
+                    if (this.isRunning) {
+                        return `Optimizing ${this.objectiveMetricLabel} with ${this.config.variables.length} parameter(s)`;
+                    }
+                    return `Ready to optimize ${this.objectiveMetricLabel}`;
+                },
+                formatRequestError(error) {
+                    const detail = error?.response?.data?.detail;
+                    if (typeof detail === 'string') return detail;
+                    if (Array.isArray(detail) && detail.length > 0) {
+                        return detail.map((item) => item?.msg || JSON.stringify(item)).join('; ');
+                    }
+                    return error?.message || 'Request failed';
+                },
+            },
+        }).mount('#app');
+    </script>
+</body>
+
+</html>
