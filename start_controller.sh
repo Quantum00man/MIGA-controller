@@ -23,12 +23,75 @@ ensure_state_dir() {
   mkdir -p "$STATE_DIR"
 }
 
+python_version_tag() {
+  python3 - <<'PY'
+import sys
+print(f"{sys.version_info.major}.{sys.version_info.minor}")
+PY
+}
+
+venv_package_hint() {
+  local version_tag
+  version_tag="$(python_version_tag 2>/dev/null || echo 3)"
+  echo "python${version_tag}-venv"
+}
+
+print_venv_setup_help() {
+  local version_pkg
+  version_pkg="$(venv_package_hint)"
+  echo "[launcher] Failed to bootstrap the project virtual environment." >&2
+  echo "[launcher] Your system Python is missing ensurepip, so venv cannot install pip by itself." >&2
+  if command -v apt-get >/dev/null 2>&1; then
+    echo "[launcher] On Debian/Ubuntu install one of these packages and rerun the launcher:" >&2
+    echo "[launcher]   sudo apt-get update" >&2
+    echo "[launcher]   sudo apt-get install -y python3-venv" >&2
+    echo "[launcher]   sudo apt-get install -y ${version_pkg}" >&2
+  else
+    echo "[launcher] Install your distribution's Python venv package, then rerun ./launch_code or ./start_controller.sh --check-only" >&2
+  fi
+}
+
+reset_venv() {
+  if [ -d "$VENV_DIR" ]; then
+    log "Removing incomplete virtual environment at $VENV_DIR"
+    rm -rf "$VENV_DIR"
+  fi
+}
+
+venv_has_working_pip() {
+  [ -x "$PYTHON_BIN" ] && "$PYTHON_BIN" -m pip --version >/dev/null 2>&1
+}
+
 ensure_venv() {
-  if [ -x "$PYTHON_BIN" ]; then
+  if venv_has_working_pip; then
     return
   fi
+
+  if [ -d "$VENV_DIR" ]; then
+    log "Detected incomplete virtual environment at $VENV_DIR"
+    reset_venv
+  fi
+
   log "Creating project virtual environment at $VENV_DIR"
-  python3 -m venv "$VENV_DIR"
+  if ! python3 -m venv "$VENV_DIR"; then
+    reset_venv
+    print_venv_setup_help
+    return 1
+  fi
+
+  if ! venv_has_working_pip; then
+    if ! "$PYTHON_BIN" -m ensurepip --upgrade >/dev/null 2>&1; then
+      reset_venv
+      print_venv_setup_help
+      return 1
+    fi
+  fi
+
+  if ! venv_has_working_pip; then
+    reset_venv
+    print_venv_setup_help
+    return 1
+  fi
 }
 
 check_requirements() {
