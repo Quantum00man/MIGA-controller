@@ -9,3 +9,5 @@ __pycache__/
 
 # Experiment data
 Data_log/
+.venv/
+.launcher_state/

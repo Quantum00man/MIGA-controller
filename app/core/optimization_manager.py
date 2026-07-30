@@ -165,7 +165,10 @@ class OptimizationManager:
             from ax.api.client import Client  # noqa: F401
             from ax.api.configs import ChoiceParameterConfig  # noqa: F401
         except Exception as exc:
-            raise RuntimeError(f'ax-platform is not available: {exc}')
+            raise RuntimeError(
+                'ax-platform is not available. Start the server with ./start_controller.sh so the project virtual environment is used instead of a system or sudo-only Python. '
+                f'Original import error: {exc}'
+            )
 
     def _emit(self, payload: Dict[str, Any]):
         callback = self.experiment_manager.on_data_ready

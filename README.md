@@ -26,14 +26,29 @@ cd MIGA-controller
 ```
 
 
-Install the required Python dependencies:
+Launch the GUI launcher:
 ```bash
-pip install fastapi uvicorn numpy scipy requests pydantic python-multipart
+./launch_code
 ```
 
-Start the backend server:
+If no graphical desktop is available, `launch_code` falls back to the terminal launcher.
+
+The GUI launcher can:
+```text
+1. Create `.venv/` if it does not exist.
+2. Check and repair the packages listed in `requirements.txt`.
+3. Validate the Ax runtime import path before starting the backend.
+4. Start or stop the controller while keeping the original `0.0.0.0:8000 --reload` behavior.
+5. Show tmot / cmot path status and the live server log.
+```
+
+Terminal fallback remains available:
 ```bash
-sudo uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+./start_controller.sh
+./start_controller.sh --check-only
+./start_controller.sh --status
+./start_controller.sh --start-detached
+./start_controller.sh --stop
 ```
 
 ---
