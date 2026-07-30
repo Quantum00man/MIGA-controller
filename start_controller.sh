@@ -99,26 +99,36 @@ check_requirements() {
 import importlib.metadata as md
 import pathlib
 import sys
+from pip._vendor.packaging.markers import default_environment
+from pip._vendor.packaging.requirements import Requirement
 
 requirements_path = pathlib.Path(sys.argv[1])
 missing = []
 mismatched = []
+environment = default_environment()
 
 for raw_line in requirements_path.read_text(encoding='utf-8').splitlines():
     line = raw_line.strip()
     if not line or line.startswith('#') or line.startswith('-'):
         continue
-    name = line
+
+    requirement = Requirement(line)
+    if requirement.marker and not requirement.marker.evaluate(environment):
+        continue
+
+    name = requirement.name
     expected = None
-    if '==' in line:
-        name, expected = line.split('==', 1)
-        name = name.strip()
-        expected = expected.strip()
+    for specifier in requirement.specifier:
+        if specifier.operator == '==':
+            expected = specifier.version
+            break
+
     try:
         installed = md.version(name)
     except md.PackageNotFoundError:
         missing.append(name)
         continue
+
     if expected and installed != expected:
         mismatched.append(f"{name}: installed {installed}, expected {expected}")
 
@@ -138,7 +148,6 @@ except Exception as exc:
     raise SystemExit(1)
 PY
 }
-
 install_requirements() {
   log "Installing or updating Python packages in $VENV_DIR"
   "$PYTHON_BIN" -m pip install --upgrade pip
