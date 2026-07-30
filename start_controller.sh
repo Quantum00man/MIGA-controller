@@ -142,9 +142,10 @@ if missing or mismatched:
 try:
     import numpy as np  # noqa: F401
     import sklearn  # noqa: F401
+    import websockets  # noqa: F401
     from ax.api.client import Client  # noqa: F401
 except Exception as exc:
-    print(f'Ax runtime check failed: {exc}')
+    print(f'Runtime dependency check failed: {exc}')
     raise SystemExit(1)
 PY
 }
