@@ -4,6 +4,7 @@ import json
 import math
 import threading
 import time
+import traceback
 from pathlib import Path
 from statistics import mean, pstdev
 from typing import Any, Dict, List, Optional, Tuple
@@ -373,14 +374,34 @@ class OptimizationManager:
         return client
 
     def _complete_ax_trial(self, client: Any, trial_index: int, evaluation: Dict[str, Any]):
-        raw_data = {
-            'optimization_score': (evaluation['score'], evaluation['metric_sem']),
-            'measured_value': (evaluation['metric_mean'], evaluation['metric_sem']),
-        }
-        try:
-            client.complete_trial(trial_index=trial_index, raw_data=raw_data)
-        except TypeError:
-            client.complete_trial(trial_index=trial_index, raw_data={'optimization_score': evaluation['score']})
+        payload_candidates = [
+            {
+                'optimization_score': (evaluation['score'], evaluation['metric_sem']),
+                'measured_value': (evaluation['metric_mean'], evaluation['metric_sem']),
+            },
+            {
+                'optimization_score': evaluation['score'],
+                'measured_value': evaluation['metric_mean'],
+            },
+            {
+                'optimization_score': (evaluation['score'], evaluation['metric_sem']),
+            },
+            {
+                'optimization_score': evaluation['score'],
+            },
+        ]
+        last_error = None
+        for raw_data in payload_candidates:
+            try:
+                client.complete_trial(trial_index=trial_index, raw_data=raw_data)
+                return
+            except Exception as exc:
+                last_error = exc
+                print(
+                    f"[Optimization Ax] complete_trial fallback failed for trial {trial_index} "
+                    f"with payload keys {list(raw_data.keys())}: {exc}"
+                )
+        raise RuntimeError(f"Ax complete_trial failed for trial {trial_index}: {last_error}")
 
     def _write_history_csv(self, run_dir: Path, history: List[Dict[str, Any]]) -> Path:
         path = run_dir / 'optimization_history.csv'
@@ -483,6 +504,7 @@ class OptimizationManager:
             if all_have_initial_guess:
                 trial_counter += 1
                 attached_trial_index = client.attach_trial(parameters=initial_guess_parameters, arm_name='initial_guess')
+                print(f"[Optimization] Attached initial guess as Ax trial {attached_trial_index}: {initial_guess_parameters}")
                 evaluation, global_shot_index = self._evaluate_trial(
                     data_manager,
                     fit_config,
@@ -529,6 +551,7 @@ class OptimizationManager:
                     stop_reason = 'no_more_candidates'
                     break
                 ax_trial_index, trial_parameters = next(iter(generated.items()))
+                print(f"[Optimization] Evaluating Ax trial {ax_trial_index}: {trial_parameters}")
                 trial_counter += 1
                 evaluation, global_shot_index = self._evaluate_trial(
                     data_manager,
@@ -628,6 +651,7 @@ class OptimizationManager:
             self._emit({'stream_type': 'optimization_complete', 'status': self.get_status()})
         except Exception as exc:
             error_message = str(exc)
+            print(f"[Optimization Error] {traceback.format_exc()}")
             with self._status_lock:
                 self._status.update({
                     'is_running': False,

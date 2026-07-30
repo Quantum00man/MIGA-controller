@@ -295,6 +295,7 @@
                     <span>Run {{ currentRunId || '...' }} · {{ objectiveMetricLabel }}</span>
                     <span>{{ statusMessage }}</span>
                 </div>
+                <div v-if="statusError" class="small text-warning mt-2">{{ statusError }}</div>
             </div>
 
             <div class="d-flex align-items-center gap-3 flex-shrink-0">
@@ -649,6 +650,8 @@
                     bestMetricMean: null,
                     bestMetricStd: null,
                     stopReason: null,
+                    statusError: '',
+                    lastLoggedStatusError: '',
                     currentParameters: {},
                     bestParameters: {},
                     exportUrls: {},
@@ -927,12 +930,20 @@
                     this.bestMetricMean = status?.best_metric_mean ?? this.bestMetricMean;
                     this.bestMetricStd = status?.best_metric_std ?? this.bestMetricStd;
                     this.stopReason = status?.stop_reason ?? this.stopReason;
+                    this.statusError = status?.error ? String(status.error) : '';
                     this.currentParameters = status?.current_parameters || this.currentParameters || {};
                     this.bestParameters = status?.best_parameters || this.bestParameters || {};
                     this.exportUrls = status?.export_urls || this.exportUrls || {};
                     if (Array.isArray(status?.history)) {
                         this.history = status.history.map((entry) => this.normalizeHistoryEntry(entry));
                         this.renderHistoryPlot();
+                    }
+                    if (this.statusError && this.statusError !== this.lastLoggedStatusError) {
+                        this.addLog(`Optimization error: ${this.statusError}`);
+                        this.lastLoggedStatusError = this.statusError;
+                    }
+                    if (!this.statusError && !this.isRunning) {
+                        this.lastLoggedStatusError = '';
                     }
                     const maxTrials = Math.max(1, Number(this.config.max_trials || status?.max_trials || 1));
                     this.progressPercent = Math.min(100, Math.round((this.completedTrials / maxTrials) * 100));
@@ -981,7 +992,8 @@
                     if (data.stream_type === 'optimization_complete') {
                         this.applyStatus(data.status || {});
                         this.renderHistoryPlot();
-                        this.addLog(`Optimization finished: ${data.status?.stop_reason || data.status?.message || 'done'}`);
+                        const finishReason = data.status?.error || data.status?.stop_reason || data.status?.message || 'done';
+                        this.addLog(`Optimization finished: ${finishReason}`);
                     }
                 },
                 normalizeHistoryEntry(entry) {
