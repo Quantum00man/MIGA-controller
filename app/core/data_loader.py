@@ -195,6 +195,8 @@ class DataLoader:
             "intf_n2_nofit": self._parse_float(row.get("NF_Intf_N2")),
             "intf_p1_nofit": self._parse_float(row.get("NF_Intf_P1")),
             "intf_p2_nofit": self._parse_float(row.get("NF_Intf_P2")),
+            "tail_mean_up_raw": self._parse_float(row.get("TailMean_UP")),
+            "tail_mean_dw_raw": self._parse_float(row.get("TailMean_DW")),
         }
 
     def _read_results_csv(self, run_dir: Path, max_points: Optional[int] = MAX_DISPLAY_POINTS) -> List[Dict[str, Any]]:
@@ -264,6 +266,7 @@ class DataLoader:
             "arrival": ("arrival_time_up", "arrival_time_dw"),
             "prob": ("transition_probability_up", "transition_probability_dw"),
             "intf_p": ("intf_p1", "intf_p2"),
+            "tail": ("tail_mean_up_raw", "tail_mean_dw_raw"),
             "nf_atoms": ("atom_number_up_nofit", "atom_number_dw_nofit"),
             "nf_temp": ("temperature_up_nofit", "temperature_dw_nofit"),
             "nf_sigma": ("sigma_up_nofit", "sigma_dw_nofit"),
@@ -271,6 +274,7 @@ class DataLoader:
             "nf_arrival": ("arrival_time_up_nofit", "arrival_time_dw_nofit"),
             "nf_prob": ("transition_probability_up_nofit", "transition_probability_dw_nofit"),
             "nf_intf_p": ("intf_p1_nofit", "intf_p2_nofit"),
+            "nf_tail": ("tail_mean_up_raw", "tail_mean_dw_raw"),
         }
 
         grouped: Dict[str, Dict[str, Any]] = {}
@@ -301,8 +305,10 @@ class DataLoader:
             group = grouped[key]
             row: Dict[str, Any] = {"key": key, "params": list(group["params"]), "x": group["x"]}
             for metric in metric_fields:
-                mean_up, std_up = self._calc_stats(group["values"][metric]["up"])
-                mean_dw, std_dw = self._calc_stats(group["values"][metric]["dw"])
+                up_values = group["values"][metric]["up"]
+                dw_values = group["values"][metric]["dw"]
+                mean_up, std_up = self._calc_stats(up_values) if up_values else (None, None)
+                mean_dw, std_dw = self._calc_stats(dw_values) if dw_values else (None, None)
                 row[f"{metric}_up"] = mean_up
                 row[f"{metric}_up_std"] = std_up
                 row[f"{metric}_dw"] = mean_dw
@@ -371,6 +377,10 @@ class DataLoader:
             "intf": {
                 "fit": {"up": ("intf_p1",), "dw": ("intf_p2",)},
                 "raw": {"up": ("intf_p1_nofit",), "dw": ("intf_p2_nofit",)},
+            },
+            "tail": {
+                "fit": {"up": ("tail_mean_up_raw",), "dw": ("tail_mean_dw_raw",)},
+                "raw": {"up": ("tail_mean_up_raw",), "dw": ("tail_mean_dw_raw",)},
             },
         }
 

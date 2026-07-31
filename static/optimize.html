@@ -286,7 +286,7 @@
             <div class="run-header-panel">
                 <div class="run-progress-meta mb-2">
                     <span class="run-progress-title">{{ getProgressTitle() }}</span>
-                    <span class="run-progress-stats">{{ completedTrials }}/{{ config.max_trials }} trials · {{ formatPercent(progressPercent) }}</span>
+                    <span class="run-progress-stats">{{ completedTrials }}/{{ displayMaxTrials }} trials · {{ formatPercent(progressPercent) }}</span>
                 </div>
                 <div class="run-progress-track">
                     <div class="run-progress-fill" :style="{ width: progressPercent + '%' }"></div>
@@ -657,6 +657,7 @@
                     completedTrials: 0,
                     bestTrialIndex: null,
                     progressPercent: 0,
+                    statusMaxTrials: 0,
                     lastMetricMean: null,
                     lastMetricStd: null,
                     bestMetricMean: null,
@@ -675,6 +676,8 @@
                     isExternalSequenceFile: false,
                     isReloadingSequence: false,
                     statusPollTimer: null,
+                    saveStateTimer: null,
+                    historyPlotTimer: null,
                     resizeTimer: null,
                     historyLayout: {},
                     waveformLayoutUp: {},
@@ -691,9 +694,18 @@
                 orderedCurrentParameters() {
                     return this.sortParameterMap(this.currentParameters);
                 },
+                displayMaxTrials() {
+                    if (this.isRunning) {
+                        return Math.max(1, Number(this.statusMaxTrials || this.config.max_trials || 1));
+                    }
+                    if (this.completedTrials > 0 || this.history.length > 0) {
+                        return Math.max(1, Number(this.statusMaxTrials || 1));
+                    }
+                    return Math.max(1, Number(this.config.max_trials || 1));
+                },
                 currentTrialLabel() {
-                    if (!this.completedTrials && !this.isRunning) return '0 / ' + this.config.max_trials;
-                    return `${Math.max(this.currentTrial, this.completedTrials)} / ${this.config.max_trials}`;
+                    if (!this.completedTrials && !this.isRunning) return '0 / ' + this.displayMaxTrials;
+                    return `${Math.max(this.currentTrial, this.completedTrials)} / ${this.displayMaxTrials}`;
                 },
                 recentTrials() {
                     return [...this.history].slice(-5).reverse();
@@ -702,13 +714,14 @@
             watch: {
                 config: {
                     handler() {
-                        this.normalizeVariables();
-                        this.saveState();
-                        this.renderHistoryPlot();
+                        this.scheduleSaveState();
                     },
                     deep: true,
                 },
-                currentSequenceName() { this.saveState(); },
+                currentSequenceName() { this.scheduleSaveState(); },
+                'config.objective_mode'() { this.scheduleHistoryPlotRender(); },
+                'config.target_value'() { this.scheduleHistoryPlotRender(); },
+                'config.objective_metric_key'() { this.scheduleHistoryPlotRender(); },
             },
             mounted() {
                 this.loadState();
@@ -723,6 +736,8 @@
             },
             beforeUnmount() {
                 if (this.statusPollTimer) clearInterval(this.statusPollTimer);
+                if (this.saveStateTimer) clearTimeout(this.saveStateTimer);
+                if (this.historyPlotTimer) clearTimeout(this.historyPlotTimer);
                 if (this.ws) this.ws.close();
                 window.removeEventListener('resize', this.handleResize);
             },
@@ -759,6 +774,18 @@
                         config: this.config,
                         currentSequenceName: this.currentSequenceName,
                     }));
+                },
+                scheduleSaveState() {
+                    if (this.saveStateTimer) clearTimeout(this.saveStateTimer);
+                    this.saveStateTimer = setTimeout(() => {
+                        this.saveState();
+                    }, 120);
+                },
+                scheduleHistoryPlotRender() {
+                    if (this.historyPlotTimer) clearTimeout(this.historyPlotTimer);
+                    this.historyPlotTimer = setTimeout(() => {
+                        this.renderHistoryPlot();
+                    }, 80);
                 },
                 loadState() {
                     const raw = localStorage.getItem('miga_optimization_state');
@@ -902,6 +929,9 @@
                     this.bestParameters = {};
                     this.currentParameters = {};
                     this.exportUrls = {};
+                    this.statusError = '';
+                    this.stopReason = null;
+                    this.statusMaxTrials = Math.max(1, Number(this.config.max_trials || 1));
                     try {
                         const payload = this.buildStartPayload();
                         const res = await axios.post('/optimization/start', payload);
@@ -936,6 +966,7 @@
                     this.currentRunId = status?.run_id || this.currentRunId;
                     this.currentTrial = Number(status?.current_trial || 0);
                     this.completedTrials = Number(status?.completed_trials || 0);
+                    this.statusMaxTrials = Math.max(1, Number(status?.max_trials || this.statusMaxTrials || this.config.max_trials || 1));
                     this.bestTrialIndex = status?.best_trial_index ?? this.bestTrialIndex;
                     this.lastMetricMean = status?.latest_trial?.metric_mean ?? this.lastMetricMean;
                     this.lastMetricStd = status?.latest_trial?.metric_std ?? this.lastMetricStd;
@@ -957,8 +988,7 @@
                     if (!this.statusError && !this.isRunning) {
                         this.lastLoggedStatusError = '';
                     }
-                    const maxTrials = Math.max(1, Number(this.config.max_trials || status?.max_trials || 1));
-                    this.progressPercent = Math.min(100, Math.round((this.completedTrials / maxTrials) * 100));
+                    this.progressPercent = Math.min(100, Math.round((this.completedTrials / this.displayMaxTrials) * 100));
                 },
                 connectWebSocket() {
                     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -989,6 +1019,7 @@
                     if (data.stream_type === 'optimization_trial') {
                         const entry = this.normalizeHistoryEntry(data.evaluation || {});
                         this.upsertHistory(entry);
+                        this.statusMaxTrials = Math.max(1, Number(data.max_trials || this.statusMaxTrials || this.config.max_trials || 1));
                         this.currentTrial = Number(data.trial_index || this.currentTrial || 0);
                         this.completedTrials = this.history.length;
                         this.currentParameters = entry.parameters || this.currentParameters;
@@ -996,7 +1027,7 @@
                         this.bestMetricMean = data.best_metric_mean ?? this.bestMetricMean;
                         this.lastMetricMean = entry.metric_mean;
                         this.lastMetricStd = entry.metric_std;
-                        this.progressPercent = Math.min(100, Math.round((this.completedTrials / Math.max(1, Number(this.config.max_trials || 1))) * 100));
+                        this.progressPercent = Math.min(100, Math.round((this.completedTrials / this.displayMaxTrials) * 100));
                         this.renderHistoryPlot();
                         this.addLog(`Trial ${entry.trial_index} complete | mean=${this.formatMetric(entry.metric_mean)} | score=${this.formatMetric(entry.score)}`);
                         return;

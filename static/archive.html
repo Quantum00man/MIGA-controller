@@ -878,7 +878,7 @@
                     isScanFitLoading: false, isSavingScanFitModel: false, scanFitError: '', scanFitResult: null, scanFitSaveMsg: '',
                     showDisplayMenu: false, showTofFitCurve: true, showTofRawCurve: true, showScanFitCurve: true,
                     showRawData: true, maximizedView: null, currentTab: 'atoms', plotMode: 'series', allanOrder: 1, allanScaleMode: 'absolute', allanXAxisMode: 'linear', allanP0AvailableMin: null, allanP0AvailableMax: null, allanP0Min: null, allanP0Max: null, allanP0MinInput: '', allanP0MaxInput: '', plotRevision: 0,
-                    tabs: [{ id: 'atoms', label: 'Atom Number' }, { id: 'amp', label: 'Max Voltage' }, { id: 'sigma', label: 'Width (ms)' }, { id: 'temp', label: 'Temperature' }, { id: 'arrival', label: 'Arrival Time' }, { id: 'prob', label: 'Transition Prob.' }, { id: 'intf', label: 'Interferometer' }],
+                    tabs: [{ id: 'atoms', label: 'Atom Number' }, { id: 'amp', label: 'Max Voltage' }, { id: 'tail', label: 'Tail Mean' }, { id: 'sigma', label: 'Width (ms)' }, { id: 'temp', label: 'Temperature' }, { id: 'arrival', label: 'Arrival Time' }, { id: 'prob', label: 'Transition Prob.' }, { id: 'intf', label: 'Interferometer' }],
                     historyMap: {}, layoutResBase: {}, layoutResUp: {}, layoutResDw: {}, layoutResTot: {}, layoutOscUp: {}, layoutOscDw: {},
                     heatmapColorscale: [[0, '#c62828'], [0.5, '#fff3bf'], [1, '#1565c0']],
                     dim3DisplayMode: 'slice', sliceAxis: 2, sliceIndex: 0, sliceValuesCache: []
@@ -2159,6 +2159,7 @@
                         vals_temp_up: [], vals_temp_dw: [],
                         vals_sigma_up: [], vals_sigma_dw: [],
                         vals_amp_up: [], vals_amp_dw: [],
+                        vals_tail_up: [], vals_tail_dw: [],
                         vals_arrival_up: [], vals_arrival_dw: [],
                         vals_prob_up: [], vals_prob_dw: [],
                         vals_intf_p_up: [], vals_intf_p_dw: [],
@@ -2166,6 +2167,7 @@
                         vals_nf_temp_up: [], vals_nf_temp_dw: [],
                         vals_nf_sigma_up: [], vals_nf_sigma_dw: [],
                         vals_nf_amp_up: [], vals_nf_amp_dw: [],
+                        vals_nf_tail_up: [], vals_nf_tail_dw: [],
                         vals_nf_arrival_up: [], vals_nf_arrival_dw: [],
                         vals_nf_prob_up: [], vals_nf_prob_dw: [],
                         vals_nf_intf_p_up: [], vals_nf_intf_p_dw: []
@@ -2458,11 +2460,19 @@
                         if (data[`${k}_dw`] != null) item[`vals_${m}_dw`].push(data[`${k}_dw`]);
                         if (data[`${k}_up_nofit`] != null) item[`vals_nf_${m}_up`].push(data[`${k}_up_nofit`]);
                         if (data[`${k}_dw_nofit`] != null) item[`vals_nf_${m}_dw`].push(data[`${k}_dw_nofit`]);
-                        if (data.intf_p1 != null) item.vals_intf_p_up.push(data.intf_p1);
-                        if (data.intf_p2 != null) item.vals_intf_p_dw.push(data.intf_p2);
-                        if (data.intf_p1_nofit != null) item.vals_nf_intf_p_up.push(data.intf_p1_nofit);
-                        if (data.intf_p2_nofit != null) item.vals_nf_intf_p_dw.push(data.intf_p2_nofit);
                     });
+                    if (data.tail_mean_up_raw != null) {
+                        item.vals_tail_up.push(data.tail_mean_up_raw);
+                        item.vals_nf_tail_up.push(data.tail_mean_up_raw);
+                    }
+                    if (data.tail_mean_dw_raw != null) {
+                        item.vals_tail_dw.push(data.tail_mean_dw_raw);
+                        item.vals_nf_tail_dw.push(data.tail_mean_dw_raw);
+                    }
+                    if (data.intf_p1 != null) item.vals_intf_p_up.push(data.intf_p1);
+                    if (data.intf_p2 != null) item.vals_intf_p_dw.push(data.intf_p2);
+                    if (data.intf_p1_nofit != null) item.vals_nf_intf_p_up.push(data.intf_p1_nofit);
+                    if (data.intf_p2_nofit != null) item.vals_nf_intf_p_dw.push(data.intf_p2_nofit);
                 },
 
                 initPlots() {
@@ -2612,7 +2622,7 @@
                 },
 
                 calcStats(arr) {
-                    if (!arr || arr.length === 0) return { mean: 0, std: 0 };
+                    if (!arr || arr.length === 0) return { mean: null, std: null };
                     const n = arr.length; const sum = arr.reduce((a, b) => a + b, 0); const mean = sum / n;
                     if (n < 2) return { mean, std: 0 };
                     const sumSq = arr.reduce((a, b) => a + Math.pow(b - mean, 2), 0);
@@ -2628,7 +2638,7 @@
                         const item = this.historyMap[key];
                         const params = this.getGroupParams(item);
                         const stats = { key, params, x: Number(params[0] ?? 0) };
-                        ['atoms', 'temp', 'sigma', 'amp', 'arrival', 'prob', 'intf_p','nf_atoms', 'nf_temp', 'nf_sigma', 'nf_amp', 'nf_arrival', 'nf_prob', 'nf_intf_p'].forEach(m => {
+                        ['atoms', 'temp', 'sigma', 'amp', 'tail', 'arrival', 'prob', 'intf_p','nf_atoms', 'nf_temp', 'nf_sigma', 'nf_amp', 'nf_tail', 'nf_arrival', 'nf_prob', 'nf_intf_p'].forEach(m => {
                             const sUp = this.calcStats(item[`vals_${m}_up`]); const sDw = this.calcStats(item[`vals_${m}_dw`]);
                             stats[`${m}_up`] = sUp.mean; stats[`${m}_up_std`] = sUp.std; stats[`${m}_dw`] = sDw.mean; stats[`${m}_dw_std`] = sDw.std;
                         });
@@ -2648,6 +2658,9 @@
                     switch (tabId) {
                         case 'amp':
                             fitPrefix = 'amp'; rawPrefix = 'nf_amp'; label = 'Max Voltage (V)';
+                            break;
+                        case 'tail':
+                            fitPrefix = 'tail'; rawPrefix = 'nf_tail'; label = 'Tail Mean (V)';
                             break;
                         case 'sigma':
                             fitPrefix = 'sigma'; rawPrefix = 'nf_sigma'; label = 'Width (ms)';
@@ -3165,7 +3178,7 @@
                     const scanDimensions = this.getActiveScanDimensions();
 
                     // 1. Define standard physical metrics
-                    const metrics = ['atoms', 'amp', 'sigma', 'temp', 'arrival', 'prob'];
+                    const metrics = ['atoms', 'amp', 'tail', 'sigma', 'temp', 'arrival', 'prob'];
 
                     // 2. Build CSV Header
                     let header = Array.from({ length: scanDimensions }, (_, index) => `P${index}`).join(',');

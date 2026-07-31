@@ -33,6 +33,10 @@ class ScanResult:
     window_dw: Optional[Tuple[float, float]] = None
     all_parameters: Optional[List[float]] = None
 
+    # Mean of the last 200 raw TOF samples before offset removal.
+    tail_mean_up_raw: Optional[float] = None
+    tail_mean_dw_raw: Optional[float] = None
+
     # Metrics (FIT)
     atom_number_up: Optional[float] = None
     atom_number_dw: Optional[float] = None

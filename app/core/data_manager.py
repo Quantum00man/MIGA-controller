@@ -10,6 +10,19 @@ from typing import Dict, Any, List
 import config
 from app.core.structures import ScanResult
 
+
+RESULTS_CSV_HEADER = [
+    "Step", "Timestamp", "Parameter_P0", "All_Parameters",
+    "Atom_UP", "Atom_DW", "Temp_UP", "Temp_DW", "Sigma_UP", "Sigma_DW",
+    "Center_UP", "Center_DW", "Amp_UP", "Amp_DW", "Prob_UP_F2", "Prob_DW_F1",
+    "Intf_N1", "Intf_N2", "Intf_P1", "Intf_P2",
+    "NF_Atom_UP", "NF_Atom_DW", "NF_Temp_UP", "NF_Temp_DW", "NF_Sigma_UP", "NF_Sigma_DW",
+    "NF_Center_UP", "NF_Center_DW", "NF_Amp_UP", "NF_Amp_DW", "NF_Prob_UP", "NF_Prob_DW",
+    "NF_Intf_N1", "NF_Intf_N2", "NF_Intf_P1", "NF_Intf_P2",
+    "TailMean_UP", "TailMean_DW",
+]
+
+
 class DataManager:
     def __init__(self):
         self.current_run_dir: Path = None
@@ -88,13 +101,7 @@ class DataManager:
     def _init_csv(self, path: Path):
         self.csv_handle = open(path, 'w', newline='')
         self.csv_writer = csv.writer(self.csv_handle)
-        # Expanded Header
-        header = [
-            "Step", "Timestamp", "Parameter_P0", "All_Parameters",
-            "Atom_UP", "Atom_DW", "Temp_UP", "Temp_DW", "Sigma_UP", "Sigma_DW", "Center_UP", "Center_DW", "Amp_UP", "Amp_DW", "Prob_UP_F2", "Prob_DW_F1","Intf_N1", "Intf_N2", "Intf_P1", "Intf_P2",
-            "NF_Atom_UP", "NF_Atom_DW", "NF_Temp_UP", "NF_Temp_DW", "NF_Sigma_UP", "NF_Sigma_DW", "NF_Center_UP", "NF_Center_DW", "NF_Amp_UP", "NF_Amp_DW", "NF_Prob_UP", "NF_Prob_DW","NF_Intf_N1", "NF_Intf_N2", "NF_Intf_P1", "NF_Intf_P2"
-        ]
-        self.csv_writer.writerow(header)
+        self.csv_writer.writerow(RESULTS_CSV_HEADER)
         self.csv_handle.flush()
 
     def save_point(self, result: ScanResult, step_index: int):
@@ -136,6 +143,7 @@ class DataManager:
             f(result.amplitude_up_nofit), f(result.amplitude_dw_nofit),
             f(result.transition_probability_up_nofit,2), f(result.transition_probability_dw_nofit,2),
             f(result.intf_n1_nofit), f(result.intf_n2_nofit), f(result.intf_p1_nofit, 2), f(result.intf_p2_nofit, 2),
+            f(result.tail_mean_up_raw), f(result.tail_mean_dw_raw),
         ]
         self.csv_writer.writerow(row)
         self.csv_handle.flush()
@@ -164,14 +172,7 @@ class DataManager:
         
         with open(csv_path, 'w', newline='') as f:
             writer = csv.writer(f)
-            header = [
-                "Step", "Timestamp", "Parameter_P0", "All_Parameters",
-                "Atom_UP", "Atom_DW", "Temp_UP", "Temp_DW", "Sigma_UP", "Sigma_DW", "Center_UP", "Center_DW", "Amp_UP", "Amp_DW", "Prob_UP_F2", "Prob_DW_F1",
-                "Intf_N1", "Intf_N2", "Intf_P1", "Intf_P2", 
-                "NF_Atom_UP", "NF_Atom_DW", "NF_Temp_UP", "NF_Temp_DW", "NF_Sigma_UP", "NF_Sigma_DW", "NF_Center_UP", "NF_Center_DW", "NF_Amp_UP", "NF_Amp_DW", "NF_Prob_UP", "NF_Prob_DW",
-                "NF_Intf_N1", "NF_Intf_N2", "NF_Intf_P1", "NF_Intf_P2"
-            ]
-            writer.writerow(header)
+            writer.writerow(RESULTS_CSV_HEADER)
             
             for pt in new_data:
                 def f(key, prec=8): val = pt.get(key); return f"{val:.{prec}f}" if val is not None else ""
@@ -187,6 +188,7 @@ class DataManager:
                     f('sigma_up_nofit',6), f('sigma_dw_nofit',6), f('arrival_time_up_nofit',6), f('arrival_time_dw_nofit',6),
                     f('amplitude_up_nofit'), f('amplitude_dw_nofit'), f('transition_probability_up_nofit',2), f('transition_probability_dw_nofit',2),
                     f('intf_n1_nofit'), f('intf_n2_nofit'), f('intf_p1_nofit', 2), f('intf_p2_nofit', 2),
+                    f('tail_mean_up_raw'), f('tail_mean_dw_raw'),
                 ]
                 writer.writerow(row)
         

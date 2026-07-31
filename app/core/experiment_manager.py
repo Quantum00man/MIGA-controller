@@ -1324,12 +1324,14 @@ class ExperimentManager:
 
         try:
             if len(volt_up_raw) > 300:
-                offset_up = np.mean(volt_up_raw[-200:])
-                offset_dw = np.mean(volt_dw_raw[-200:])
+                offset_up = float(np.mean(volt_up_raw[-200:]))
+                offset_dw = float(np.mean(volt_dw_raw[-200:]))
             else:
                 offset_up = 0.0
                 offset_dw = 0.0
 
+            tail_mean_up_raw = float(offset_up)
+            tail_mean_dw_raw = float(offset_dw)
             val_up_clean = np.array(volt_up_raw) - offset_up
             val_dw_clean = np.array(volt_dw_raw) - offset_dw
 
@@ -1469,6 +1471,8 @@ class ExperimentManager:
                 fit_data_dw=fit_dw_store,
                 time_axis=time_axis_store,
                 all_parameters=params,
+                tail_mean_up_raw=tail_mean_up_raw,
+                tail_mean_dw_raw=tail_mean_dw_raw,
                 window_up=win_up,
                 window_dw=win_dw,
                 atom_number_up=n_f2,
