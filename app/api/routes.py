@@ -141,11 +141,27 @@ def _load_index_ui_state_record() -> Dict[str, Any]:
     }
 
 
+def _is_active_schedule_runtime(state: Dict[str, Any]) -> bool:
+    runtime = state.get("scheduleRuntime") if isinstance(state, dict) else None
+    return isinstance(runtime, dict) and bool(runtime.get("active"))
+
+
 def _save_index_ui_state_record(state: Dict[str, Any], source_id: str | None = None) -> Dict[str, Any]:
+    existing = _load_index_ui_state_record()
+    sanitized_state = _sanitize_index_ui_state(state)
+    normalized_source_id = str(source_id or "").strip() or None
+    existing_state = existing.get("state") if isinstance(existing.get("state"), dict) else _default_index_ui_state()
+    existing_source_id = existing.get("source_id")
+
+    if _is_active_schedule_runtime(existing_state) and existing_source_id and existing_source_id != normalized_source_id:
+        for key in ("runMode", "scheduleSettings", "scheduledTasks", "scheduleRuntime", "statusMessage"):
+            sanitized_state[key] = deepcopy(existing_state.get(key))
+        normalized_source_id = existing_source_id
+
     record = {
-        "state": _sanitize_index_ui_state(state),
+        "state": sanitized_state,
         "updated_at_ms": int(time.time() * 1000),
-        "source_id": str(source_id or "").strip() or None,
+        "source_id": normalized_source_id,
     }
     path = config.INDEX_UI_STATE_PATH
     path.parent.mkdir(parents=True, exist_ok=True)

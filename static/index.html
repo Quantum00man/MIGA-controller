@@ -1034,6 +1034,8 @@
                     lastSharedStateUpdatedAtMs: 0,
                     lastLocalUiStateEditAtMs: 0,
                     sharedStateApplyCooldownMs: 3000,
+                    sharedStateBootstrapComplete: false,
+                    sharedStateSyncPendingBeforeBootstrap: false,
                     runMode: 'live',
                     scheduleSettings: { singlePointDurationSec: 1.615, timingMode: 'sequential', sequentialGapSec: 60 },
                     scheduledTasks: [],
@@ -1057,7 +1059,7 @@
                     maximizedView: null,
                     currentTab: 'atoms',
                     currentScanDimensions: 1,
-                    tabs: [{ id: 'atoms', label: 'Atom Number' }, { id: 'amp', label: 'Max Voltage' }, { id: 'sigma', label: 'Width (ms)' }, { id: 'temp', label: 'Temperature' }, { id: 'arrival', label: 'Arrival Time' }, { id: 'prob', label: 'Transition Prob.' }, { id: 'intf', label: 'Interferometer' }],
+                    tabs: [{ id: 'atoms', label: 'Atom Number' }, { id: 'amp', label: 'Max Voltage' }, { id: 'tail', label: 'Tail Mean' }, { id: 'sigma', label: 'Width (ms)' }, { id: 'temp', label: 'Temperature' }, { id: 'arrival', label: 'Arrival Time' }, { id: 'prob', label: 'Transition Prob.' }, { id: 'intf', label: 'Interferometer' }],
                     historyMap: {},
                     layoutResBase: {}, layoutResUp: {}, layoutResDw: {}, layoutOscUp: {}, layoutOscDw: {},
                     isPlotting: false,
@@ -1118,7 +1120,14 @@
                 this.connectWebSocket();
                 this.ensureRealHardwareMode().catch(() => { });
                 this.fetchStatus();
-                this.fetchSharedIndexState(true).catch(() => { });
+                this.fetchSharedIndexState(true)
+                    .catch(() => ({ shouldSyncLocal: true }))
+                    .then((result) => {
+                        this.sharedStateBootstrapComplete = true;
+                        const shouldSyncLocal = Boolean(result?.shouldSyncLocal) || this.sharedStateSyncPendingBeforeBootstrap;
+                        this.sharedStateSyncPendingBeforeBootstrap = false;
+                        if (shouldSyncLocal) this.queueSharedStateSync();
+                    });
                 this.windowResizeHandler = () => this.handleWindowResize();
                 window.addEventListener('resize', this.windowResizeHandler);
                 this.statusPollTimer = setInterval(() => this.fetchStatus(), 2000);
@@ -1213,6 +1222,10 @@
                 },
                 queueSharedStateSync() {
                     if (this.isApplyingSharedState) return;
+                    if (!this.sharedStateBootstrapComplete) {
+                        this.sharedStateSyncPendingBeforeBootstrap = true;
+                        return;
+                    }
                     if (this.sharedStateSyncTimer) {
                         clearTimeout(this.sharedStateSyncTimer);
                     }
@@ -1288,25 +1301,23 @@
                         const sourceId = String(payload.source_id || '').trim();
                         const state = payload.state && typeof payload.state === 'object' ? payload.state : {};
                         if (updatedAtMs <= 0) {
-                            if (initialLoad) this.queueSharedStateSync();
-                            return;
+                            return { shouldSyncLocal: initialLoad };
                         }
                         if (sourceId === this.sharedStateClientId) {
                             this.lastSharedStateUpdatedAtMs = updatedAtMs;
-                            return;
+                            return { shouldSyncLocal: false };
                         }
                         if (updatedAtMs > this.lastSharedStateUpdatedAtMs) {
                             if (this.shouldDeferSharedStateApply()) {
                                 this.queueSharedStateSync();
-                                return;
+                                return { shouldSyncLocal: false };
                             }
                             this.lastSharedStateUpdatedAtMs = updatedAtMs;
                             this.applySharedIndexState(state);
                         }
+                        return { shouldSyncLocal: false };
                     } catch (error) {
-                        if (initialLoad) {
-                            this.queueSharedStateSync();
-                        }
+                        return { shouldSyncLocal: initialLoad };
                     }
                 },
                 isNaN(val) { return Number.isNaN(val); },
@@ -2536,6 +2547,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                         sum_temp_up: 0, sum_temp_dw: 0,
                         sum_sigma_up: 0, sum_sigma_dw: 0,
                         sum_amp_up: 0, sum_amp_dw: 0,
+                        sum_tail_up: 0, sum_tail_dw: 0,
                         sum_arrival_up: 0, sum_arrival_dw: 0,
                         sum_prob_up: 0, sum_prob_dw: 0,
                         sum_intf_p_up: 0, sum_intf_p_dw: 0,
@@ -2543,6 +2555,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                         sum_nf_temp_up: 0, sum_nf_temp_dw: 0,
                         sum_nf_sigma_up: 0, sum_nf_sigma_dw: 0,
                         sum_nf_amp_up: 0, sum_nf_amp_dw: 0,
+                        sum_nf_tail_up: 0, sum_nf_tail_dw: 0,
                         sum_nf_arrival_up: 0, sum_nf_arrival_dw: 0,
                         sum_nf_prob_up: 0, sum_nf_prob_dw: 0,
                         sum_nf_intf_p_up: 0, sum_nf_intf_p_dw: 0
@@ -2564,6 +2577,11 @@ finishScheduledRun(finalStatus = 'IDLE') {
                             label = "Max Voltage (V)";
                             fitUp = 'amp_up'; fitDw = 'amp_dw';
                             rawUp = 'nf_amp_up'; rawDw = 'nf_amp_dw';
+                            break;
+                        case 'tail':
+                            label = "Tail Mean (V)";
+                            fitUp = 'tail_up'; fitDw = 'tail_dw';
+                            rawUp = 'nf_tail_up'; rawDw = 'nf_tail_dw';
                             break;
                         case 'sigma':
                             label = "Width (ms)";
@@ -2611,6 +2629,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                             temp_up: avg(item.sum_temp_up), temp_dw: avg(item.sum_temp_dw),
                             sigma_up: avg(item.sum_sigma_up), sigma_dw: avg(item.sum_sigma_dw),
                             amp_up: avg(item.sum_amp_up), amp_dw: avg(item.sum_amp_dw),
+                            tail_up: avg(item.sum_tail_up), tail_dw: avg(item.sum_tail_dw),
                             arrival_up: avg(item.sum_arrival_up), arrival_dw: avg(item.sum_arrival_dw),
                             prob_up: avg(item.sum_prob_up), prob_dw: avg(item.sum_prob_dw),
                             intf_p_up: avg(item.sum_intf_p_up), intf_p_dw: avg(item.sum_intf_p_dw),
@@ -2618,6 +2637,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                             nf_temp_up: avg(item.sum_nf_temp_up), nf_temp_dw: avg(item.sum_nf_temp_dw),
                             nf_sigma_up: avg(item.sum_nf_sigma_up), nf_sigma_dw: avg(item.sum_nf_sigma_dw),
                             nf_amp_up: avg(item.sum_nf_amp_up), nf_amp_dw: avg(item.sum_nf_amp_dw),
+                            nf_tail_up: avg(item.sum_nf_tail_up), nf_tail_dw: avg(item.sum_nf_tail_dw),
                             nf_arrival_up: avg(item.sum_nf_arrival_up), nf_arrival_dw: avg(item.sum_nf_arrival_dw),
                             nf_prob_up: avg(item.sum_nf_prob_up), nf_prob_dw: avg(item.sum_nf_prob_dw),
                             nf_intf_p_up: avg(item.sum_nf_intf_p_up), nf_intf_p_dw: avg(item.sum_nf_intf_p_dw)
@@ -3025,6 +3045,10 @@ finishScheduledRun(finalStatus = 'IDLE') {
                                 item[`sum_nf_${metric}_up`] += (data[`${k}_up_nofit`] || 0);
                                 item[`sum_nf_${metric}_dw`] += (data[`${k}_dw_nofit`] || 0);
                             });
+                            item.sum_tail_up += (data.tail_mean_up_raw || 0);
+                            item.sum_tail_dw += (data.tail_mean_dw_raw || 0);
+                            item.sum_nf_tail_up += (data.tail_mean_up_raw || 0);
+                            item.sum_nf_tail_dw += (data.tail_mean_dw_raw || 0);
                             item.sum_intf_p_up += (data.intf_p1 || 0);
                             item.sum_intf_p_dw += (data.intf_p2 || 0);
 
