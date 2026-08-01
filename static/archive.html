@@ -3,6 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>MIGA Data Archive</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.1/font/bootstrap-icons.css">
@@ -11,6 +12,18 @@
             background-color: #f4f6f9;
             padding: 20px;
             font-family: 'Segoe UI', Roboto, sans-serif;
+        }
+
+        button,
+        .btn,
+        select,
+        input,
+        .nav-link {
+            touch-action: manipulation;
+        }
+
+        .mobile-archive-note {
+            display: none;
         }
 
         .card {
@@ -263,6 +276,183 @@
                 border-top: 1px solid #eee;
             }
         }
+
+        /* iPad portrait and smaller tablets: preserve every tool, but give the
+           plots the full screen width and arrange controls in a compact grid. */
+        @media (min-width: 768px) and (max-width: 1024px) {
+            body {
+                padding: 16px;
+            }
+
+            .archive-sidebar,
+            .archive-main {
+                width: 100%;
+            }
+
+            .archive-sidebar {
+                display: grid !important;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                align-items: start;
+            }
+
+            .analysis-header,
+            .waveform-header {
+                align-items: flex-start !important;
+                flex-wrap: wrap;
+                gap: 10px;
+            }
+
+            .analysis-header-controls,
+            .waveform-header-controls {
+                width: 100%;
+                flex-wrap: wrap;
+            }
+
+            .analysis-header-controls .nav-pills {
+                width: 100%;
+                margin-left: 0 !important;
+                flex-wrap: nowrap;
+                overflow-x: auto;
+                padding-bottom: 3px;
+            }
+        }
+
+        /* Phone layout: core archive selection + readable 1D results. */
+        @media (max-width: 767.98px) {
+            body {
+                padding: max(10px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right))
+                    max(14px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+            }
+
+            .archive-page-header {
+                align-items: flex-start !important;
+                gap: 10px;
+                margin-bottom: 14px !important;
+            }
+
+            .archive-page-header h4 {
+                font-size: 1.05rem;
+            }
+
+            .archive-page-subtitle,
+            .btn-back span {
+                display: none;
+            }
+
+            .btn-back {
+                min-width: 44px;
+                min-height: 44px;
+                justify-content: center;
+                padding: 0 !important;
+            }
+
+            .archive-layout {
+                --bs-gutter-x: 0;
+                --bs-gutter-y: 12px;
+            }
+
+            .archive-sidebar,
+            .archive-main {
+                width: 100%;
+            }
+
+            .archive-sidebar > .card:not(:first-child) {
+                display: none;
+            }
+
+            .mobile-archive-note {
+                display: block;
+                font-size: 0.75rem;
+            }
+
+            .card-header {
+                padding: 10px;
+            }
+
+            .analysis-header,
+            .waveform-header {
+                display: block !important;
+            }
+
+            .analysis-header > div:first-child,
+            .waveform-header > div:first-child {
+                margin-bottom: 8px;
+            }
+
+            .analysis-header-controls,
+            .waveform-header-controls {
+                width: 100%;
+                gap: 6px !important;
+                flex-wrap: wrap;
+            }
+
+            .analysis-header-controls .nav-pills {
+                order: 20;
+                width: 100%;
+                margin: 2px 0 0 !important;
+                flex-wrap: nowrap;
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+                scrollbar-width: none;
+            }
+
+            .analysis-header-controls .nav-pills::-webkit-scrollbar {
+                display: none;
+            }
+
+            .analysis-header-controls .nav-link {
+                white-space: nowrap;
+                min-height: 40px;
+                display: flex;
+                align-items: center;
+            }
+
+            .archive-display-menu {
+                margin-left: 0 !important;
+            }
+
+            .archive-display-panel {
+                position: fixed;
+                top: auto;
+                left: 8px;
+                right: 8px;
+                bottom: max(8px, env(safe-area-inset-bottom));
+                width: auto;
+                z-index: 2100;
+            }
+
+            .analysis-tools {
+                padding: 8px;
+                overflow-x: auto;
+            }
+
+            .slice-toolbar {
+                flex-wrap: nowrap;
+                width: max-content;
+                min-width: 100%;
+            }
+
+            .scan-fit-param-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .card.maximized {
+                height: 100dvh;
+            }
+
+            .js-plotly-plot .plotly .modebar {
+                transform: scale(.88) translateX(-57%);
+                transform-origin: top center;
+            }
+
+            .waveform-header-controls .badge,
+            .waveform-header-controls .small {
+                max-width: 100%;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+        }
     </style>
 </head>
 
@@ -270,20 +460,20 @@
 
     <div id="app" class="container-fluid">
 
-        <div class="d-flex justify-content-between align-items-center mb-4">
+        <div class="archive-page-header d-flex justify-content-between align-items-center mb-4">
             <div>
                 <h4 class="fw-bold text-dark mb-0 d-flex align-items-center">
                     <i class="bi bi-folder2-open me-3 text-primary"></i>Data Archive
                 </h4>
-                <div class="text-muted small ms-1">Historical Data Browser & Re-Analysis Tool</div>
+                <div class="archive-page-subtitle text-muted small ms-1">Historical Data Browser & Re-Analysis Tool</div>
             </div>
             <a href="/" class="btn btn-white border btn-back shadow-sm text-decoration-none text-dark bg-white px-3">
-                <i class="bi bi-arrow-left"></i> Back to Lab
+                <i class="bi bi-arrow-left"></i><span>Back to Lab</span>
             </a>
         </div>
 
-        <div class="row g-4">
-            <div class="col-md-3 col-xxl-2 d-flex flex-column gap-3">
+        <div class="archive-layout row g-4">
+            <div class="archive-sidebar col-md-3 col-xxl-2 d-flex flex-column gap-3">
 
                 <div class="card">
                     <div class="card-header"><i class="bi bi-hdd-stack me-2"></i>Run Selection</div>
@@ -609,13 +799,16 @@
 
             </div>
 
-            <div class="col-md-9 col-xxl-10">
+            <div class="archive-main col-md-9 col-xxl-10">
+                <div class="mobile-archive-note alert alert-info py-2 mb-2">
+                    Phone view is optimized for ordinary 1D scan results. Use an iPad or desktop for full fitting, Allan and multidimensional controls.
+                </div>
                 <div class="card mb-4 border-0 shadow-sm" :class="{'maximized': maximizedView === 'analysis'}">
-                    <div class="card-header bg-white d-flex justify-content-between align-items-center py-2">
+                    <div class="analysis-header card-header bg-white d-flex justify-content-between align-items-center py-2">
                         <div class="d-flex align-items-center text-primary"><i
                                 class="bi bi-graph-up-arrow fs-5 me-2"></i><span class="fw-bold">Analysis Results</span>
                         </div>
-                        <div class="d-flex align-items-center gap-2">
+                        <div class="analysis-header-controls d-flex align-items-center gap-2">
                             <button class="btn btn-sm btn-link btn-max p-0 text-decoration-none me-2"
                                 @click="toggleMaximize('analysis')" title="Maximize/Restore"><i class="bi"
                                     :class="maximizedView === 'analysis' ? 'bi-fullscreen-exit' : 'bi-fullscreen'"></i></button>
@@ -798,10 +991,10 @@
                 </div>
 
                 <div class="card border-0 shadow-sm" :class="{'maximized': maximizedView === 'scope'}">
-                    <div class="card-header bg-light py-2 d-flex justify-content-between align-items-center">
+                    <div class="waveform-header card-header bg-light py-2 d-flex justify-content-between align-items-center">
                         <div class="d-flex align-items-center"><i class="bi bi-activity me-2 text-danger"></i><span
                                 class="fw-bold">Selected Waveform</span></div>
-                        <div class="d-flex align-items-center gap-3">
+                        <div class="waveform-header-controls d-flex align-items-center gap-3">
                             <button class="btn btn-outline-success btn-sm"
                                 @click="exportWaveformCSV"
                                 :disabled="isLoadingWaveforms || !currentWaveforms.length">
@@ -1743,16 +1936,17 @@
                     return this.getActiveScanDimensions() === 1 && this.currentTab === 'atoms';
                 },
                 getAnalysisPlotHeight(panel = 'up') {
+                    const isPhone = window.matchMedia && window.matchMedia('(max-width: 767.98px)').matches;
                     if (this.isThreeDimensionalView()) {
-                        if (this.maximizedView === 'analysis') return 'calc(100vh - 120px)';
+                        if (this.maximizedView === 'analysis') return 'calc(100dvh - 120px)';
                         return '520px';
                     }
                     if (this.showTotalPlot()) {
-                        if (this.maximizedView === 'analysis') return 'calc(33vh - 20px)';
-                        return '350px';
+                        if (this.maximizedView === 'analysis') return 'calc(33dvh - 20px)';
+                        return isPhone ? '290px' : '350px';
                     }
-                    if (this.maximizedView === 'analysis') return 'calc(50vh - 30px)';
-                    return '350px';
+                    if (this.maximizedView === 'analysis') return 'calc(50dvh - 30px)';
+                    return isPhone ? '320px' : '350px';
                 },
                 getGroupParams(source, scanDimensions = this.getActiveScanDimensions()) {
                     const rawParams = Array.isArray(source?.params) && source.params.length
