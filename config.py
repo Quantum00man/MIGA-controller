@@ -14,6 +14,7 @@ DATA_BASE_DIR = BASE_DIR / "Data_log"
 SETTINGS_FILE_PATH = BASE_DIR / "user_settings.json"
 USER_JSON_PATH = BASE_DIR / "user.json"
 INDEX_UI_STATE_PATH = BASE_DIR / "index_ui_state.json"
+SCHEDULE_STATE_PATH = BASE_DIR / "schedule_state.json"
 
 # --- Hardware Paths ---
 TMOT_BINARY_PATH_WIN = str(BASE_DIR / "mock_bin" / "tmot4_mock.exe")

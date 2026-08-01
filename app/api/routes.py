@@ -27,6 +27,7 @@ from app.models.schemas import (
     OptimizationConfig,
     ReAnalysisRequest,
     ScanConfig,
+    ScheduleRequest,
     SystemSettings,
     SystemUpdateRequest,
 )
@@ -36,6 +37,8 @@ import config
 router = APIRouter()
 manager = ExperimentManager()
 optimization_manager = OptimizationManager(manager)
+from app.core.schedule_manager import ScheduleManager
+schedule_manager = ScheduleManager(manager)
 data_loader = DataLoader()
 
 
@@ -180,6 +183,25 @@ async def start_experiment(config: ScanConfig):
 async def stop_experiment():
     result = manager.stop_scan()
     return ExperimentResponse(status=result["status"], message=result["message"])
+
+
+@router.post("/schedule/start", response_model=ExperimentResponse)
+async def start_schedule(req: ScheduleRequest):
+    try:
+        data = schedule_manager.start(req.dict())
+        return ExperimentResponse(status="success", message="Schedule accepted by server", data=data)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.post("/schedule/stop", response_model=ExperimentResponse)
+async def stop_schedule():
+    return ExperimentResponse(status="success", message="Schedule stop requested", data=schedule_manager.stop())
+
+
+@router.get("/schedule/status", response_model=ExperimentResponse)
+async def get_schedule_status():
+    return ExperimentResponse(status="success", message="Schedule status loaded", data=schedule_manager.get_status())
 
 
 @router.get("/optimization/objective-metrics", response_model=ExperimentResponse)

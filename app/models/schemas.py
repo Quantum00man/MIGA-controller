@@ -71,6 +71,12 @@ class ScanConfig(BaseModel):
     bragg_base_timing: int = Field(331119)
 
 
+class ScheduleRequest(BaseModel):
+    timingMode: str = Field("sequential")
+    sequentialGapSec: float = Field(0, ge=0)
+    tasks: List[Dict[str, Any]] = Field(default_factory=list)
+
+
 class OptimizationVariableConfig(BaseModel):
     index: int = Field(0, ge=0)
     lower: float = Field(0)
