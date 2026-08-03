@@ -772,7 +772,7 @@
                 <div class="card">
                     <div class="card-header"><i class="bi bi-hdd-stack me-2"></i>Run Selection</div>
                     <div class="card-body p-3">
-                        <button class="btn btn-primary w-100 mb-3 btn-sm fw-bold shadow-sm" @click="loadLatestRun">
+                        <button class="btn btn-success w-100 mb-3 btn-sm fw-bold shadow-sm" @click="loadLatestRun">
                             <i class="bi bi-lightning-charge-fill me-1"></i> Load Latest Run
                         </button>
 
@@ -1196,7 +1196,7 @@
                                 <span class="analysis-empty-state-icon" aria-hidden="true"><i class="bi bi-folder2-open"></i></span>
                                 <h2>No archive run loaded</h2>
                                 <p>Select a saved run from the archive, or load the latest run to begin analysis.</p>
-                                <button class="btn btn-primary fw-bold" @click="loadLatestRun">
+                                <button class="btn btn-success fw-bold" @click="loadLatestRun">
                                     <i class="bi bi-lightning-charge-fill me-1" aria-hidden="true"></i>Load Latest Run
                                 </button>
                             </div>
@@ -1544,14 +1544,19 @@
                     normalized.range_max = normalized.range_max === '' || normalized.range_max == null ? '' : Number(normalized.range_max);
                     return normalized;
                 },
-                handlePlotContextChange() {
+                async handlePlotContextChange() {
                     if (this.scanFit.active) {
                         this.scanFitResult = null;
                     }
                     this.showDisplayMenu = false;
                     this.plotRevision++;
-                    this.renderMainPlot();
-                    this.refreshScanFitIfActive(true);
+                    // Tab changes can reveal the Total plot and resize all three panels.
+                    // Wait for Vue to apply display/height changes before Plotly measures them.
+                    await this.$nextTick();
+                    await this.renderMainPlot();
+                    await this.$nextTick();
+                    this.resizeAnalysisPlots();
+                    await this.refreshScanFitIfActive(true);
                 },
                 async handleCurveVisibilityChange() {
                     this.plotRevision++;
@@ -3339,7 +3344,16 @@
                     return {
                         ...this.layoutResBase,
                         datarevision: this.plotRevision,
-                        uirevision: 'archive-analysis-results'
+                        // Reset Plotly's cached axis/hover state whenever the plot context changes.
+                        // This prevents geometry from a two-panel metric leaking into Atom Number's
+                        // three-panel layout when the user returns to the tab.
+                        uirevision: [
+                            'archive-analysis-results',
+                            this.getActiveScanDimensions(),
+                            this.currentTab,
+                            this.plotMode,
+                            this.showRawData ? 'raw' : 'fit'
+                        ].join(':')
                     };
                 },
                 build1DLayout(channel, metric) {
@@ -3589,8 +3603,10 @@
 
                     this.layoutResUp = layoutUp;
                     this.layoutResDw = layoutDw;
-                    Plotly.react('resultsPlotUp', tracesUp, this.layoutResUp);
-                    Plotly.react('resultsPlotDw', tracesDw, this.layoutResDw);
+                    const plotUpdates = [
+                        Plotly.react('resultsPlotUp', tracesUp, this.layoutResUp),
+                        Plotly.react('resultsPlotDw', tracesDw, this.layoutResDw)
+                    ];
 
                     if (this.showTotalPlot()) {
                         const yTot = yUp.map((value, index) => (value != null && yDw[index] != null) ? value + yDw[index] : null);
@@ -3615,10 +3631,11 @@
                         }
 
                         this.layoutResTot = this.buildTotalLayout();
-                        Plotly.react('resultsPlotTotal', tracesTot, this.layoutResTot);
+                        plotUpdates.push(Plotly.react('resultsPlotTotal', tracesTot, this.layoutResTot));
                     } else {
-                        Plotly.react('resultsPlotTotal', [], this.layoutResTot);
+                        plotUpdates.push(Plotly.react('resultsPlotTotal', [], this.layoutResTot));
                     }
+                    return Promise.all(plotUpdates);
                 },
                 renderAllanPlot(rows, metric) {
                     const allanData = this.currentAllanData;
@@ -4073,15 +4090,15 @@
 
                     if (scanDimensions === 1) {
                         if (this.plotMode === 'allan') {
-                            this.renderAllanPlot(rows, metric);
+                            return this.renderAllanPlot(rows, metric);
                         } else {
-                            this.render1DPlot(rows, metric);
+                            return this.render1DPlot(rows, metric);
                         }
                     } else if (scanDimensions === 2) {
-                        this.render2DHeatmap(rows, metric);
+                        return this.render2DHeatmap(rows, metric);
                     } else {
                         this.syncSliceState(rows);
-                        this.render3DPlot(rows, metric);
+                        return this.render3DPlot(rows, metric);
                     }
                 },
             }
