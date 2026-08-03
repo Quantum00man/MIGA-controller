@@ -108,6 +108,94 @@
             color: #0d6efd;
         }
 
+        .allan-statistics {
+            overflow: hidden;
+            border: 1px solid #dce6f1;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.82);
+        }
+
+        .allan-statistics-header {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 16px;
+            padding: 8px 11px;
+            border-bottom: 1px solid #e7edf4;
+        }
+
+        .allan-statistics-title {
+            color: #334155;
+            font-size: 0.76rem;
+            font-weight: 700;
+            letter-spacing: 0.02em;
+        }
+
+        .allan-statistics-note {
+            color: #718096;
+            font-size: 0.7rem;
+            text-align: right;
+        }
+
+        .allan-statistics-table {
+            width: 100%;
+            min-width: 620px;
+            border-collapse: collapse;
+            table-layout: fixed;
+        }
+
+        .allan-statistics-scroll {
+            max-width: 100%;
+            overflow-x: auto;
+            overscroll-behavior-inline: contain;
+        }
+
+        .allan-statistics-table th,
+        .allan-statistics-table td {
+            padding: 7px 11px;
+            border-bottom: 1px solid #edf2f7;
+            text-align: right;
+            vertical-align: middle;
+        }
+
+        .allan-statistics-table tr:last-child th,
+        .allan-statistics-table tr:last-child td {
+            border-bottom: 0;
+        }
+
+        .allan-statistics-table th {
+            width: 22%;
+            color: #475569;
+            font-size: 0.72rem;
+            font-weight: 600;
+            text-align: left;
+        }
+
+        .allan-statistic-label {
+            display: block;
+            margin-bottom: 1px;
+            color: #8492a6;
+            font-size: 0.62rem;
+            font-weight: 700;
+            letter-spacing: 0.055em;
+            text-transform: uppercase;
+        }
+
+        .allan-statistic-value {
+            color: #172033;
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+            font-size: 0.76rem;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .allan-statistic-count {
+            display: block;
+            margin-top: 1px;
+            color: #718096;
+            font-size: 0.68rem;
+            font-weight: 500;
+        }
+
         .btn-back {
             display: flex;
             align-items: center;
@@ -424,6 +512,21 @@
             .analysis-tools {
                 padding: 8px;
                 overflow-x: auto;
+            }
+
+            .allan-statistics {
+                width: 100%;
+                min-width: 100%;
+            }
+
+            .allan-statistics-header {
+                align-items: flex-start;
+                flex-direction: column;
+                gap: 2px;
+            }
+
+            .allan-statistics-note {
+                text-align: left;
             }
 
             .slice-toolbar {
@@ -964,6 +1067,37 @@
                                 Compute the full overlapping Allan deviation curve from the unsampled shot sequence.
                                 Relative mode plots Allan / |full-sequence mean|. P0 range is inclusive. The x-axis is Allan order n.
                             </div>
+                            <section v-if="showAllanToolbar()" class="allan-statistics mt-2" aria-labelledby="allan-statistics-title">
+                                <div class="allan-statistics-header">
+                                    <span id="allan-statistics-title" class="allan-statistics-title">Sequence Statistics</span>
+                                    <span class="allan-statistics-note">Mean, RMS and sample standard deviation from valid shots in the selected P0 range</span>
+                                </div>
+                                <div class="allan-statistics-scroll" v-if="getAllanStatisticsRows().length" tabindex="0">
+                                    <table class="allan-statistics-table">
+                                        <tbody>
+                                            <tr v-for="row in getAllanStatisticsRows()" :key="row.key">
+                                                <th scope="row">
+                                                    {{ row.label }}
+                                                    <span class="allan-statistic-count">{{ row.sampleCount }} valid shots</span>
+                                                </th>
+                                                <td>
+                                                    <span class="allan-statistic-label">Mean</span>
+                                                    <span class="allan-statistic-value">{{ formatMetricValue(row.mean) }}</span>
+                                                </td>
+                                                <td>
+                                                    <span class="allan-statistic-label">RMS</span>
+                                                    <span class="allan-statistic-value">{{ formatMetricValue(row.rms) }}</span>
+                                                </td>
+                                                <td>
+                                                    <span class="allan-statistic-label">Standard Deviation</span>
+                                                    <span class="allan-statistic-value">{{ formatMetricValue(row.standardDeviation) }}</span>
+                                                </td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <div v-else class="px-3 py-2 text-muted small">Statistics are unavailable for this selection.</div>
+                            </section>
                             <div class="slice-summary mt-1" v-else-if="is3DSliceMode()">
                                 Drag the slider to inspect one tomography slice at a time. Click any heatmap cell or
                                 extrema marker to open the matching TOF.
@@ -2885,6 +3019,29 @@
                     if ((abs > 0 && abs < 0.001) || abs >= 10000) return numeric.toExponential(3);
                     return numeric.toPrecision(4);
                 },
+                getAllanStatisticsRows() {
+                    if (!this.currentAllanData) return [];
+                    const metric = this.getMetricConfig();
+                    const sourceKey = this.showRawData ? 'raw' : 'fit';
+                    const metricSeries = this.currentAllanData?.metrics?.[this.currentTab]?.[sourceKey] || {};
+                    const channelDefs = [
+                        { key: 'up', label: metric.nameUp },
+                        { key: 'dw', label: metric.nameDw }
+                    ];
+                    if (this.showTotalPlot()) channelDefs.push({ key: 'total', label: 'TOTAL' });
+
+                    return channelDefs.map((channel) => {
+                        const series = metricSeries[channel.key] || {};
+                        const statistics = series.sequence_statistics || {};
+                        return {
+                            ...channel,
+                            mean: statistics.mean ?? series.mean_value,
+                            rms: statistics.rms,
+                            standardDeviation: statistics.standard_deviation,
+                            sampleCount: Number(statistics.sample_count ?? 0)
+                        };
+                    }).filter(row => row.sampleCount > 0);
+                },
                 computeAllanSeries(rows, field, order = this.allanOrder, valueGetter = null) {
                     const sourceRows = (Array.isArray(rows) ? rows : [])
                         .filter((row) => {
@@ -3549,7 +3706,10 @@
                                 label: channel.label,
                                 values: this.getAllanDisplayValues(series),
                                 validCounts: Array.isArray(series.valid_window_counts) ? series.valid_window_counts : [],
-                                meanValue: series.mean_value ?? ''
+                                meanValue: series.sequence_statistics?.mean ?? series.mean_value ?? '',
+                                rmsValue: series.sequence_statistics?.rms ?? '',
+                                standardDeviation: series.sequence_statistics?.standard_deviation ?? '',
+                                sampleCount: series.sequence_statistics?.sample_count ?? ''
                             };
                         });
 
@@ -3573,6 +3733,9 @@
                         channelDefs.forEach(channel => {
                             metadataRows.push([`${channel.key}_label`, seriesByChannel[channel.key].label]);
                             metadataRows.push([`${channel.key}_mean_value`, seriesByChannel[channel.key].meanValue]);
+                            metadataRows.push([`${channel.key}_rms_value`, seriesByChannel[channel.key].rmsValue]);
+                            metadataRows.push([`${channel.key}_standard_deviation`, seriesByChannel[channel.key].standardDeviation]);
+                            metadataRows.push([`${channel.key}_statistics_sample_count`, seriesByChannel[channel.key].sampleCount]);
                         });
 
                         const header = ['order'];

@@ -461,8 +461,21 @@ class DataLoader:
         values = np.asarray([self._extract_allan_value(point, field_names) for point in points], dtype=float)
         finite_values = values[np.isfinite(values)]
         mean_value = float(np.mean(finite_values)) if finite_values.size else None
+        rms_value = float(np.sqrt(np.mean(np.square(finite_values)))) if finite_values.size else None
+        standard_deviation = float(np.std(finite_values, ddof=1)) if finite_values.size > 1 else (0.0 if finite_values.size else None)
+        sequence_statistics = {
+            "mean": mean_value,
+            "rms": rms_value,
+            "standard_deviation": standard_deviation,
+            "sample_count": int(finite_values.size),
+        }
         if values.size == 0 or not orders:
-            return {"y": [], "valid_window_counts": [], "mean_value": mean_value}
+            return {
+                "y": [],
+                "valid_window_counts": [],
+                "mean_value": mean_value,
+                "sequence_statistics": sequence_statistics,
+            }
 
         valid = np.isfinite(values)
         safe_values = np.where(valid, values, 0.0)
@@ -496,6 +509,7 @@ class DataLoader:
             "y": sigma_values,
             "valid_window_counts": valid_window_counts,
             "mean_value": mean_value,
+            "sequence_statistics": sequence_statistics,
         }
 
     def _build_allan_payload(self, points: List[Dict[str, Any]], requested_order: int) -> Dict[str, Any]:
