@@ -8,10 +8,27 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.1/font/bootstrap-icons.css">
     <style>
+        :root {
+            --archive-bg: #f4f6f9;
+            --archive-surface: #ffffff;
+            --archive-surface-subtle: #f7f9fc;
+            --archive-border: #dbe3ec;
+            --archive-border-soft: #e8edf3;
+            --archive-text: #263244;
+            --archive-text-muted: #596579;
+            --archive-accent: #0d6efd;
+            --archive-accent-soft: #eaf2ff;
+            --archive-success: #198754;
+            --archive-danger: #dc3545;
+            --archive-radius: 8px;
+            --archive-shadow: 0 8px 24px rgba(37, 56, 88, 0.07);
+        }
+
         body {
-            background-color: #f4f6f9;
+            background-color: var(--archive-bg);
             padding: 20px;
             font-family: 'Segoe UI', Roboto, sans-serif;
+            color: var(--archive-text);
         }
 
         button,
@@ -28,19 +45,108 @@
 
         .card {
             border: none;
-            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
-            border-radius: 8px;
+            box-shadow: var(--archive-shadow);
+            border-radius: var(--archive-radius);
         }
 
         .card-header {
-            background-color: #fff;
-            border-bottom: 1px solid #eee;
+            background-color: var(--archive-surface);
+            border-bottom: 1px solid var(--archive-border-soft);
             font-weight: 700;
             padding: 12px 15px;
-            color: #495057;
+            color: var(--archive-text);
             font-size: 0.9rem;
             text-transform: uppercase;
             letter-spacing: 0.5px;
+        }
+
+        .analysis-header {
+            display: block;
+            padding: 0;
+            text-transform: none;
+            letter-spacing: normal;
+        }
+
+        .analysis-header-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            min-height: 58px;
+            padding: 9px 14px;
+        }
+
+        .analysis-header-title {
+            display: flex;
+            align-items: center;
+            flex: 0 0 auto;
+            color: var(--archive-accent);
+            font-size: 0.95rem;
+            font-weight: 700;
+        }
+
+        .analysis-header-actions {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            flex-wrap: wrap;
+            gap: 8px;
+            min-width: 0;
+        }
+
+        .analysis-metric-nav-wrap {
+            position: relative;
+            border-top: 1px solid var(--archive-border-soft);
+            background: var(--archive-surface-subtle);
+        }
+
+        .analysis-metric-nav {
+            display: flex;
+            flex-wrap: nowrap;
+            gap: 4px;
+            width: 100%;
+            margin: 0;
+            padding: 7px 10px 6px;
+            overflow-x: auto;
+            overscroll-behavior-inline: contain;
+            scrollbar-color: #aeb9c7 transparent;
+            scrollbar-width: thin;
+        }
+
+        .analysis-metric-nav::-webkit-scrollbar {
+            height: 5px;
+        }
+
+        .analysis-metric-nav::-webkit-scrollbar-thumb {
+            border-radius: 999px;
+            background: #aeb9c7;
+        }
+
+        .analysis-metric-nav .nav-item {
+            flex: 0 0 auto;
+        }
+
+        .analysis-metric-nav .nav-link {
+            min-height: 36px;
+            padding: 7px 12px;
+            border: 1px solid transparent;
+            border-radius: 6px;
+            color: var(--archive-text-muted);
+            font-size: 0.82rem;
+            font-weight: 650;
+            white-space: nowrap;
+        }
+
+        .analysis-metric-nav .nav-link:hover {
+            border-color: var(--archive-border);
+            background: var(--archive-surface);
+            color: var(--archive-text);
+        }
+
+        .analysis-metric-nav .nav-link.active {
+            border-color: var(--archive-accent);
+            background: var(--archive-accent);
+            color: #ffffff;
         }
 
         .nav-tabs .nav-link {
@@ -75,8 +181,8 @@
 
         .analysis-tools {
             padding: 10px 14px 12px;
-            border-bottom: 1px solid #eef2f7;
-            background: linear-gradient(180deg, #fbfcfe 0%, #f4f7fb 100%);
+            border-bottom: 1px solid var(--archive-border-soft);
+            background: var(--archive-surface-subtle);
         }
 
         .slice-toolbar {
@@ -227,15 +333,16 @@
             align-items: center;
             justify-content: center;
             font-weight: bold;
-            color: #0d6efd;
+            color: var(--archive-accent);
             backdrop-filter: blur(1px);
         }
 
         .form-label-small {
-            font-size: 0.75rem;
-            color: #adb5bd;
-            font-weight: 600;
-            margin-bottom: 2px;
+            font-size: 0.78rem;
+            color: var(--archive-text-muted);
+            font-weight: 700;
+            line-height: 1.35;
+            margin-bottom: 4px;
             display: block;
         }
 
@@ -247,8 +354,69 @@
 
         .form-select-sm:focus,
         .form-control-sm:focus {
-            border-color: #86b7fe;
-            box-shadow: none;
+            border-color: var(--archive-accent);
+            box-shadow: 0 0 0 0.2rem rgba(13, 110, 253, 0.16);
+        }
+
+        .btn-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 40px;
+            height: 40px;
+            flex: 0 0 40px;
+            padding: 0;
+            border: 1px solid var(--archive-border);
+            border-radius: 6px;
+            background: var(--archive-surface);
+            color: var(--archive-text-muted);
+        }
+
+        .btn-icon:hover,
+        .btn-icon:focus-visible {
+            border-color: var(--archive-accent);
+            color: var(--archive-accent);
+        }
+
+        .analysis-empty-state {
+            display: flex;
+            min-height: 390px;
+            padding: 48px 24px;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            background: var(--archive-surface);
+        }
+
+        .analysis-empty-state-content {
+            max-width: 430px;
+        }
+
+        .analysis-empty-state-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 52px;
+            height: 52px;
+            margin-bottom: 16px;
+            border-radius: 50%;
+            background: var(--archive-accent-soft);
+            color: var(--archive-accent);
+            font-size: 1.35rem;
+        }
+
+        .analysis-empty-state h2 {
+            margin-bottom: 8px;
+            color: var(--archive-text);
+            font-size: 1.1rem;
+            font-weight: 700;
+        }
+
+        .analysis-empty-state p {
+            margin: 0 auto 18px;
+            color: var(--archive-text-muted);
+            font-size: 0.9rem;
+            line-height: 1.55;
         }
 
         .card.maximized {
@@ -390,25 +558,25 @@
                 align-items: start;
             }
 
-            .analysis-header,
             .waveform-header {
                 align-items: flex-start !important;
                 flex-wrap: wrap;
                 gap: 10px;
             }
 
-            .analysis-header-controls,
             .waveform-header-controls {
                 width: 100%;
                 flex-wrap: wrap;
             }
 
-            .analysis-header-controls .nav-pills {
+            .analysis-header-top {
+                align-items: flex-start;
+                flex-wrap: wrap;
+            }
+
+            .analysis-header-actions {
                 width: 100%;
-                margin-left: 0 !important;
-                flex-wrap: nowrap;
-                overflow-x: auto;
-                padding-bottom: 3px;
+                justify-content: flex-start;
             }
         }
 
@@ -457,49 +625,60 @@
 
             .mobile-archive-note {
                 display: block;
-                font-size: 0.75rem;
+                font-size: 0.82rem;
+                line-height: 1.45;
             }
 
             .card-header {
                 padding: 10px;
             }
 
-            .analysis-header,
             .waveform-header {
                 display: block !important;
             }
 
-            .analysis-header > div:first-child,
             .waveform-header > div:first-child {
                 margin-bottom: 8px;
             }
 
-            .analysis-header-controls,
             .waveform-header-controls {
                 width: 100%;
                 gap: 6px !important;
                 flex-wrap: wrap;
             }
 
-            .analysis-header-controls .nav-pills {
-                order: 20;
-                width: 100%;
-                margin: 2px 0 0 !important;
-                flex-wrap: nowrap;
-                overflow-x: auto;
-                -webkit-overflow-scrolling: touch;
-                scrollbar-width: none;
+            .analysis-header-top {
+                display: block;
+                padding: 10px;
             }
 
-            .analysis-header-controls .nav-pills::-webkit-scrollbar {
-                display: none;
+            .analysis-header-title {
+                margin-bottom: 9px;
             }
 
-            .analysis-header-controls .nav-link {
-                white-space: nowrap;
+            .analysis-header-actions {
+                justify-content: flex-start;
+                gap: 7px;
+            }
+
+            .analysis-header-actions .btn,
+            .analysis-header-actions .archive-display-btn {
                 min-height: 40px;
-                display: flex;
-                align-items: center;
+            }
+
+            .analysis-metric-nav {
+                scroll-snap-type: inline proximity;
+                padding: 8px 10px 7px;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            .analysis-metric-nav .nav-item {
+                scroll-snap-align: start;
+            }
+
+            .analysis-metric-nav .nav-link {
+                min-height: 42px;
+                padding: 9px 13px;
             }
 
             .archive-display-menu {
@@ -519,6 +698,11 @@
             .analysis-tools {
                 padding: 8px;
                 overflow-x: auto;
+            }
+
+            .analysis-empty-state {
+                min-height: 320px;
+                padding: 38px 20px;
             }
 
             .allan-statistics {
@@ -588,7 +772,7 @@
                 <div class="card">
                     <div class="card-header"><i class="bi bi-hdd-stack me-2"></i>Run Selection</div>
                     <div class="card-body p-3">
-                        <button class="btn btn-success w-100 mb-3 btn-sm fw-bold shadow-sm" @click="loadLatestRun">
+                        <button class="btn btn-primary w-100 mb-3 btn-sm fw-bold shadow-sm" @click="loadLatestRun">
                             <i class="bi bi-lightning-charge-fill me-1"></i> Load Latest Run
                         </button>
 
@@ -596,22 +780,22 @@
 
                         <div class="row g-1 mb-2">
                             <div class="col-4">
-                                <label class="form-label-small">YEAR</label>
-                                <select class="form-select form-select-sm" v-model="selectedYear" @change="resetMonth">
+                                <label class="form-label-small" for="archive-year">YEAR</label>
+                                <select id="archive-year" class="form-select form-select-sm" v-model="selectedYear" @change="resetMonth">
                                     <option v-for="y in Object.keys(archiveTree).reverse()" :key="y" :value="y">{{ y }}
                                     </option>
                                 </select>
                             </div>
                             <div class="col-4">
-                                <label class="form-label-small">MONTH</label>
-                                <select class="form-select form-select-sm" v-model="selectedMonth" @change="resetDay"
+                                <label class="form-label-small" for="archive-month">MONTH</label>
+                                <select id="archive-month" class="form-select form-select-sm" v-model="selectedMonth" @change="resetDay"
                                     :disabled="!selectedYear">
                                     <option v-for="m in getMonths().reverse()" :key="m" :value="m">{{ m }}</option>
                                 </select>
                             </div>
                             <div class="col-4">
-                                <label class="form-label-small">DAY</label>
-                                <select class="form-select form-select-sm" v-model="selectedDay" @change="resetRun"
+                                <label class="form-label-small" for="archive-day">DAY</label>
+                                <select id="archive-day" class="form-select form-select-sm" v-model="selectedDay" @change="resetRun"
                                     :disabled="!selectedMonth">
                                     <option v-for="d in getDays().reverse()" :key="d" :value="d">{{ d }}</option>
                                 </select>
@@ -619,8 +803,8 @@
                         </div>
 
                         <div class="mb-3">
-                            <label class="form-label-small">RUN ID</label>
-                            <select class="form-select form-select-sm" v-model="selectedRun" :disabled="!selectedDay">
+                            <label class="form-label-small" for="archive-run-id">RUN ID</label>
+                            <select id="archive-run-id" class="form-select form-select-sm" v-model="selectedRun" :disabled="!selectedDay">
                                 <option value="" disabled>Select Run...</option>
                                 <option v-for="r in getRuns().slice().reverse()" :key="r.id" :value="r.id">{{ r.display_name }}</option>
                             </select>
@@ -629,7 +813,7 @@
                             {{ getSelectedRunEntry().summary }}
                         </div>
 
-                        <button class="btn btn-primary w-100 btn-sm fw-bold shadow-sm" @click="loadRun"
+                        <button class="btn btn-outline-primary w-100 btn-sm fw-bold" @click="loadRun"
                             :disabled="!selectedRun || isLoading">
                             <span v-if="isLoading" class="spinner-border spinner-border-sm me-1"></span>
                             {{ isLoading ? 'Loading...' : 'Load Data' }}
@@ -662,12 +846,13 @@
                 <div class="card border-primary shadow-sm" v-if="loadedPoints.length > 0">
                     <button type="button"
                         class="card-header collapsible-card-header bg-primary text-white border-0 d-flex justify-content-between align-items-center"
-                        @click="togglePanel('reanalysis')">
+                        @click="togglePanel('reanalysis')" aria-controls="reanalysis-panel"
+                        :aria-expanded="!isPanelCollapsed('reanalysis')">
                         <span><i class="bi bi-sliders me-2"></i>Re-Analysis</span>
                         <i class="bi collapse-arrow"
                             :class="isPanelCollapsed('reanalysis') ? 'bi-chevron-right' : 'bi-chevron-down'"></i>
                     </button>
-                    <div v-show="!isPanelCollapsed('reanalysis')" class="card-body p-3 bg-light">
+                    <div id="reanalysis-panel" v-show="!isPanelCollapsed('reanalysis')" class="card-body p-3 bg-light">
                         <div class="row g-2 mb-2">
                             <div class="col-6"><label class="form-label-small">GAIN UP</label><input type="number"
                                     class="form-control form-control-sm fw-bold text-danger"
@@ -773,12 +958,13 @@
                 <div class="card border-info shadow-sm" v-if="loadedPoints.length > 0">
                     <button type="button"
                         class="card-header collapsible-card-header bg-info text-white border-0 d-flex justify-content-between align-items-center"
-                        @click="togglePanel('scanFitting')">
+                        @click="togglePanel('scanFitting')" aria-controls="scan-fitting-panel"
+                        :aria-expanded="!isPanelCollapsed('scanFitting')">
                         <span><i class="bi bi-bezier2 me-2"></i>Fitting</span>
                         <i class="bi collapse-arrow"
                             :class="isPanelCollapsed('scanFitting') ? 'bi-chevron-right' : 'bi-chevron-down'"></i>
                     </button>
-                    <div v-show="!isPanelCollapsed('scanFitting')" class="card-body p-3 bg-light">
+                    <div id="scan-fitting-panel" v-show="!isPanelCollapsed('scanFitting')" class="card-body p-3 bg-light">
                         <div class="small text-muted mb-2">
                             Current metric <span class="fw-bold text-dark">{{ getMetricConfig().label }}</span>
                             <span class="badge bg-secondary ms-2">{{ showRawData ? 'NoFit source' : 'Fit source' }}</span>
@@ -911,79 +1097,88 @@
 
             <div class="archive-main col-md-9 col-xxl-10">
                 <div class="mobile-archive-note alert alert-info py-2 mb-2">
-                    Phone view is optimized for ordinary 1D scan results. Use an iPad or desktop for full fitting, Allan and multidimensional controls.
+                    Phone view supports run selection, 1D plots and Allan analysis. Re-analysis and fitting controls are available on iPad or desktop.
                 </div>
                 <div class="card mb-4 border-0 shadow-sm" :class="{'maximized': maximizedView === 'analysis'}">
-                    <div class="analysis-header card-header bg-white d-flex justify-content-between align-items-center py-2">
-                        <div class="d-flex align-items-center text-primary"><i
-                                class="bi bi-graph-up-arrow fs-5 me-2"></i><span class="fw-bold">Analysis Results</span>
-                        </div>
-                        <div class="analysis-header-controls d-flex align-items-center gap-2">
-                            <button class="btn btn-sm btn-link btn-max p-0 text-decoration-none me-2"
-                                @click="toggleMaximize('analysis')" title="Maximize/Restore"><i class="bi"
-                                    :class="maximizedView === 'analysis' ? 'bi-fullscreen-exit' : 'bi-fullscreen'"></i></button>
-                            <span class="badge" :class="displayMode === 'saved' ? 'bg-secondary' : 'bg-warning text-dark'">
-                                {{ displayMode === 'saved' ? 'Saved Results' : 'Recalculated' }}
-                            </span>
-                            <div class="btn-group btn-group-sm me-2">
-                                <button class="btn btn-outline-primary fw-bold" @click="exportCSV"
-                                    :disabled="!loadedRunId"><i class="bi bi-file-earmark-spreadsheet-fill"></i>
-                                    CSV</button>
-                                <button class="btn btn-outline-success fw-bold" @click="exportAllPlots"
-                                    :disabled="!loadedRunId"><i class="bi bi-camera-fill"></i> Plots</button>
+                    <div class="analysis-header card-header bg-white">
+                        <div class="analysis-header-top">
+                            <div class="analysis-header-title"><i
+                                    class="bi bi-graph-up-arrow fs-5 me-2"></i><span>Analysis Results</span>
                             </div>
-                            <div class="archive-display-menu ms-2" ref="displayMenuWrap">
-                                <button class="btn btn-outline-secondary btn-sm archive-display-btn"
-                                    @click.stop="toggleDisplayMenu">
-                                    <i class="bi bi-sliders2"></i>
-                                    <span class="fw-bold">Display</span>
-                                    <span class="badge bg-light text-dark border">{{ showRawData ? 'NoFit' : 'Fit' }}</span>
-                                    <i class="bi" :class="showDisplayMenu ? 'bi-chevron-up' : 'bi-chevron-down'"></i>
+                            <div class="analysis-header-actions">
+                                <button class="btn-icon" @click="toggleMaximize('analysis')"
+                                    :title="maximizedView === 'analysis' ? 'Restore analysis view' : 'Maximize analysis view'"
+                                    :aria-label="maximizedView === 'analysis' ? 'Restore analysis view' : 'Maximize analysis view'">
+                                    <i class="bi" aria-hidden="true"
+                                        :class="maximizedView === 'analysis' ? 'bi-fullscreen-exit' : 'bi-fullscreen'"></i>
                                 </button>
-                                <div v-show="showDisplayMenu" class="archive-display-panel" @click.stop>
-                                    <div class="archive-display-group">
-                                        <div class="form-label-small text-uppercase mb-2">Analysis Source</div>
-                                        <div class="btn-group btn-group-sm d-flex archive-display-source">
-                                            <button class="btn"
-                                                :class="showRawData ? 'btn-outline-primary' : 'btn-primary'"
-                                                @click="setAnalysisSource(false)">Fit</button>
-                                            <button class="btn"
-                                                :class="showRawData ? 'btn-primary' : 'btn-outline-primary'"
-                                                @click="setAnalysisSource(true)">NoFit</button>
+                                <span v-if="loadedRunId" class="badge" :class="displayMode === 'saved' ? 'bg-secondary' : 'bg-warning text-dark'">
+                                    {{ displayMode === 'saved' ? 'Saved Results' : 'Recalculated' }}
+                                </span>
+                                <div class="btn-group btn-group-sm">
+                                    <button class="btn btn-outline-primary fw-bold" @click="exportCSV"
+                                        :disabled="!loadedRunId"><i class="bi bi-file-earmark-spreadsheet-fill"></i>
+                                        CSV</button>
+                                    <button class="btn btn-outline-success fw-bold" @click="exportAllPlots"
+                                        :disabled="!loadedRunId"><i class="bi bi-camera-fill"></i> Plots</button>
+                                </div>
+                                <div v-if="loadedRunId" class="archive-display-menu" ref="displayMenuWrap">
+                                    <button class="btn btn-outline-secondary btn-sm archive-display-btn"
+                                        @click.stop="toggleDisplayMenu" aria-controls="archive-display-panel"
+                                        :aria-expanded="showDisplayMenu ? 'true' : 'false'">
+                                        <i class="bi bi-sliders2" aria-hidden="true"></i>
+                                        <span class="fw-bold">Display</span>
+                                        <span class="badge bg-light text-dark border">{{ showRawData ? 'NoFit' : 'Fit' }}</span>
+                                        <i class="bi" aria-hidden="true" :class="showDisplayMenu ? 'bi-chevron-up' : 'bi-chevron-down'"></i>
+                                    </button>
+                                    <div id="archive-display-panel" v-show="showDisplayMenu" class="archive-display-panel" @click.stop>
+                                        <div class="archive-display-group">
+                                            <div class="form-label-small text-uppercase mb-2">Analysis Source</div>
+                                            <div class="btn-group btn-group-sm d-flex archive-display-source" role="group" aria-label="Analysis source">
+                                                <button class="btn" :aria-pressed="!showRawData"
+                                                    :class="showRawData ? 'btn-outline-primary' : 'btn-primary'"
+                                                    @click="setAnalysisSource(false)">Fit</button>
+                                                <button class="btn" :aria-pressed="showRawData"
+                                                    :class="showRawData ? 'btn-primary' : 'btn-outline-primary'"
+                                                    @click="setAnalysisSource(true)">NoFit</button>
+                                            </div>
+                                            <div class="form-text mt-2">Affects scan-fit source and non-1D analysis views.</div>
                                         </div>
-                                        <div class="form-text mt-2">Affects scan-fit source and non-1D analysis views.</div>
-                                    </div>
-                                    <div class="archive-display-group">
-                                        <div class="form-label-small text-uppercase mb-2">Curve Visibility</div>
-                                        <div class="archive-display-switches">
-                                            <div class="form-check form-switch mb-0">
-                                                <input class="form-check-input" type="checkbox" id="showTofFitCurve" v-model="showTofFitCurve">
-                                                <label class="form-check-label small fw-bold text-muted" for="showTofFitCurve">TOF Fit</label>
-                                            </div>
-                                            <div class="form-check form-switch mb-0">
-                                                <input class="form-check-input" type="checkbox" id="showTofRawCurve" v-model="showTofRawCurve">
-                                                <label class="form-check-label small fw-bold text-muted" for="showTofRawCurve">TOF Raw</label>
-                                            </div>
-                                            <div class="form-check form-switch mb-0">
-                                                <input class="form-check-input" type="checkbox" id="showScanFitCurve" v-model="showScanFitCurve">
-                                                <label class="form-check-label small fw-bold text-muted" for="showScanFitCurve">Scan Fit Curve</label>
+                                        <div class="archive-display-group">
+                                            <div class="form-label-small text-uppercase mb-2">Curve Visibility</div>
+                                            <div class="archive-display-switches">
+                                                <div class="form-check form-switch mb-0">
+                                                    <input class="form-check-input" type="checkbox" id="showTofFitCurve" v-model="showTofFitCurve">
+                                                    <label class="form-check-label small fw-bold text-muted" for="showTofFitCurve">TOF Fit</label>
+                                                </div>
+                                                <div class="form-check form-switch mb-0">
+                                                    <input class="form-check-input" type="checkbox" id="showTofRawCurve" v-model="showTofRawCurve">
+                                                    <label class="form-check-label small fw-bold text-muted" for="showTofRawCurve">TOF Raw</label>
+                                                </div>
+                                                <div class="form-check form-switch mb-0">
+                                                    <input class="form-check-input" type="checkbox" id="showScanFitCurve" v-model="showScanFitCurve">
+                                                    <label class="form-check-label small fw-bold text-muted" for="showScanFitCurve">Scan Fit Curve</label>
+                                                </div>
                                             </div>
                                         </div>
                                     </div>
                                 </div>
+                                <div v-if="loadedRunId && canUseAllanMode()" class="btn-group btn-group-sm" role="group" aria-label="Analysis mode">
+                                    <button class="btn" :aria-pressed="plotMode === 'series'"
+                                        :class="plotMode === 'series' ? 'btn-dark' : 'btn-outline-dark'"
+                                        @click="setPlotMode('series')">Mean</button>
+                                    <button class="btn" :aria-pressed="plotMode === 'allan'"
+                                        :class="plotMode === 'allan' ? 'btn-dark' : 'btn-outline-dark'"
+                                        @click="setPlotMode('allan')">Allan</button>
+                                </div>
                             </div>
-                            <div v-if="canUseAllanMode()" class="btn-group btn-group-sm ms-2">
-                                <button class="btn"
-                                    :class="plotMode === 'series' ? 'btn-dark' : 'btn-outline-dark'"
-                                    @click="setPlotMode('series')">Mean</button>
-                                <button class="btn"
-                                    :class="plotMode === 'allan' ? 'btn-dark' : 'btn-outline-dark'"
-                                    @click="setPlotMode('allan')">Allan</button>
-                            </div>
-                            <ul class="nav nav-pills card-header-pills ms-3">
+                        </div>
+                        <div class="analysis-metric-nav-wrap">
+                            <ul class="nav analysis-metric-nav" role="tablist" aria-label="Analysis metric">
                                 <li class="nav-item" v-for="tab in tabs" :key="tab.id">
-                                    <a :class="['nav-link', 'btn-sm', 'py-1', currentTab === tab.id ? 'active' : 'text-muted']"
-                                        href="#" @click.prevent="currentTab = tab.id">{{ tab.label }}</a>
+                                    <button type="button" :class="['nav-link', currentTab === tab.id ? 'active' : '']"
+                                        role="tab" :aria-selected="currentTab === tab.id"
+                                        @click="currentTab = tab.id">{{ tab.label }}</button>
                                 </li>
                             </ul>
                         </div>
@@ -996,32 +1191,43 @@
                             </div>
                         </div>
 
-                        <div v-if="showAnalysisTools()" class="analysis-tools">
+                        <div v-if="!loadedRunId" class="analysis-empty-state" role="status">
+                            <div class="analysis-empty-state-content">
+                                <span class="analysis-empty-state-icon" aria-hidden="true"><i class="bi bi-folder2-open"></i></span>
+                                <h2>No archive run loaded</h2>
+                                <p>Select a saved run from the archive, or load the latest run to begin analysis.</p>
+                                <button class="btn btn-primary fw-bold" @click="loadLatestRun">
+                                    <i class="bi bi-lightning-charge-fill me-1" aria-hidden="true"></i>Load Latest Run
+                                </button>
+                            </div>
+                        </div>
+
+                        <div v-if="loadedRunId && showAnalysisTools()" class="analysis-tools">
                             <div v-if="showAllanToolbar()" class="slice-toolbar">
                                 <div class="d-flex align-items-center gap-2">
-                                    <label class="form-label-small mb-0">MAX N</label>
-                                    <input type="number" class="form-control form-control-sm" style="width: 92px;"
+                                    <label class="form-label-small mb-0" for="allan-max-order">MAX N</label>
+                                    <input id="allan-max-order" type="number" class="form-control form-control-sm" style="width: 92px;"
                                         v-model.number="allanOrder" min="1" :max="getMaxAllanOrder()"
                                         @change="handleAllanOrderChange">
                                 </div>
                                 <div class="d-flex align-items-center gap-2">
                                     <label class="form-label-small mb-0">SCALE</label>
-                                    <div class="btn-group btn-group-sm">
-                                        <button class="btn"
+                                    <div class="btn-group btn-group-sm" role="group" aria-label="Allan scale">
+                                        <button class="btn" :aria-pressed="allanScaleMode === 'absolute'"
                                             :class="allanScaleMode === 'absolute' ? 'btn-primary' : 'btn-outline-primary'"
                                             @click="setAllanScaleMode('absolute')">Absolute</button>
-                                        <button class="btn"
+                                        <button class="btn" :aria-pressed="allanScaleMode === 'relative'"
                                             :class="allanScaleMode === 'relative' ? 'btn-primary' : 'btn-outline-primary'"
                                             @click="setAllanScaleMode('relative')">Relative</button>
                                     </div>
                                 </div>
                                 <div class="d-flex align-items-center gap-2">
                                     <label class="form-label-small mb-0">X AXIS</label>
-                                    <div class="btn-group btn-group-sm">
-                                        <button class="btn"
+                                    <div class="btn-group btn-group-sm" role="group" aria-label="Allan x-axis scale">
+                                        <button class="btn" :aria-pressed="allanXAxisMode === 'linear'"
                                             :class="allanXAxisMode === 'linear' ? 'btn-dark' : 'btn-outline-dark'"
                                             @click="setAllanXAxisMode('linear')">Linear</button>
-                                        <button class="btn"
+                                        <button class="btn" :aria-pressed="allanXAxisMode === 'log'"
                                             :class="allanXAxisMode === 'log' ? 'btn-dark' : 'btn-outline-dark'"
                                             @click="setAllanXAxisMode('log')">Log</button>
                                     </div>
@@ -1029,9 +1235,11 @@
                                 <div class="d-flex align-items-center gap-2 flex-wrap">
                                     <label class="form-label-small mb-0">P0 RANGE</label>
                                     <input type="number" step="any" class="form-control form-control-sm" style="width: 118px;"
+                                        aria-label="P0 range minimum"
                                         v-model="allanP0MinInput" @keyup.enter="applyAllanP0Range">
                                     <span class="text-muted small">to</span>
                                     <input type="number" step="any" class="form-control form-control-sm" style="width: 118px;"
+                                        aria-label="P0 range maximum"
                                         v-model="allanP0MaxInput" @keyup.enter="applyAllanP0Range">
                                     <button class="btn btn-outline-secondary btn-sm" @click="applyAllanP0Range" :disabled="isLoadingAllan">Apply</button>
                                     <button class="btn btn-outline-secondary btn-sm" @click="resetAllanP0Range" :disabled="isLoadingAllan">Full Range</button>
@@ -1115,7 +1323,7 @@
                             </div>
                         </div>
 
-                        <div class="analysis-card-body" :class="{'analysis-3d-layout': isThreeDimensionalView()}">
+                        <div v-show="loadedRunId" class="analysis-card-body" :class="{'analysis-3d-layout': isThreeDimensionalView()}">
                             <div id="resultsPlotUp" class="analysis-plot-panel"
                                 :class="{'plot-split-container': !isThreeDimensionalView()}"
                                 :style="{height: getAnalysisPlotHeight('up')}">
@@ -1144,9 +1352,12 @@
                             <span v-if="getWaveformR2Summary()" class="badge bg-light text-dark border shadow-sm">
                                 {{ getWaveformR2Summary() }}
                             </span>
-                            <button class="btn btn-sm btn-link btn-max p-0 text-decoration-none"
-                                @click="toggleMaximize('scope')" title="Maximize/Restore"><i class="bi"
-                                    :class="maximizedView === 'scope' ? 'bi-fullscreen-exit' : 'bi-fullscreen'"></i></button>
+                            <button class="btn-icon" @click="toggleMaximize('scope')"
+                                :title="maximizedView === 'scope' ? 'Restore waveform view' : 'Maximize waveform view'"
+                                :aria-label="maximizedView === 'scope' ? 'Restore waveform view' : 'Maximize waveform view'">
+                                <i class="bi" aria-hidden="true"
+                                    :class="maximizedView === 'scope' ? 'bi-fullscreen-exit' : 'bi-fullscreen'"></i>
+                            </button>
                             <span v-if="selectedPointLabel" class="badge bg-warning text-dark border shadow-sm">{{
                                 selectedPointLabel }}</span>
                             <span v-else class="small text-muted fst-italic"><i class="bi bi-cursor me-1"></i>Click a
