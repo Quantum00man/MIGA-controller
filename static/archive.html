@@ -3786,10 +3786,11 @@
 
                         // Fill standard data
                         metrics.forEach(m => {
-                            line += `,${(row[`${m}_up`] || 0).toFixed(4)},${(row[`${m}_up_std`] || 0).toFixed(4)}`;
-                            line += `,${(row[`${m}_dw`] || 0).toFixed(4)},${(row[`${m}_dw_std`] || 0).toFixed(4)}`;
-                            line += `,${(row[`nf_${m}_up`] || 0).toFixed(4)},${(row[`nf_${m}_up_std`] || 0).toFixed(4)}`;
-                            line += `,${(row[`nf_${m}_dw`] || 0).toFixed(4)},${(row[`nf_${m}_dw_std`] || 0).toFixed(4)}`;
+                            const precision = m === 'arrival' ? 7 : 4;
+                            line += `,${(row[`${m}_up`] || 0).toFixed(precision)},${(row[`${m}_up_std`] || 0).toFixed(precision)}`;
+                            line += `,${(row[`${m}_dw`] || 0).toFixed(precision)},${(row[`${m}_dw_std`] || 0).toFixed(precision)}`;
+                            line += `,${(row[`nf_${m}_up`] || 0).toFixed(precision)},${(row[`nf_${m}_up_std`] || 0).toFixed(precision)}`;
+                            line += `,${(row[`nf_${m}_dw`] || 0).toFixed(precision)},${(row[`nf_${m}_dw_std`] || 0).toFixed(precision)}`;
                         });
 
                         // [NEW] Fill Interferometer data
