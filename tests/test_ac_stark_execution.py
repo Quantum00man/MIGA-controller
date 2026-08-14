@@ -113,5 +113,53 @@ class AcStarkExecutionPlanTests(unittest.TestCase):
         self.assertAlmostEqual(summary[0]["atom_number_up_difference_sem"], 8.0 ** 0.5)
 
 
+
+class AcStarkArchiveSummaryTests(unittest.TestCase):
+    def test_archive_parser_groups_ratio_sides_and_preserves_metadata(self):
+        from app.core.data_loader import DataLoader
+
+        loader = DataLoader()
+        rows = []
+        for side, parameter, values in (
+            ('left', 11, (8.0, 12.0)),
+            ('right', 22, (13.0, 17.0)),
+        ):
+            for index, value in enumerate(values):
+                rows.append(loader._row_to_point({
+                    'Step': str(len(rows)),
+                    'Parameter_P0': str(parameter),
+                    'All_Parameters': str(parameter),
+                    'Atom_UP': str(value),
+                    'NF_Atom_UP': str(value + 1.0),
+                    'Prob_UP_F2': str(value / 10.0),
+                    'NF_Prob_UP': str(value / 20.0),
+                    'AC_Stark_Ratio': '1.25',
+                    'AC_Stark_Side': side.upper(),
+                    'AC_Stark_DDS_Element': '11',
+                    'AC_Stark_Power_R1': '60',
+                    'AC_Stark_Power_R2': '48',
+                    'AC_Stark_Amplitude_R1': '321',
+                    'AC_Stark_Amplitude_R2': '287',
+                    'AC_Stark_Actual_Power_R1': '59.8',
+                    'AC_Stark_Actual_Power_R2': '48.2',
+                }))
+
+        summary = loader._build_ac_stark_summary(rows)
+
+        self.assertEqual(len(summary), 1)
+        item = summary[0]
+        self.assertEqual(item['ratio'], 1.25)
+        self.assertEqual(item['left_count'], 2)
+        self.assertEqual(item['right_count'], 2)
+        self.assertEqual(item['left_key'], '11.000000')
+        self.assertEqual(item['right_key'], '22.000000')
+        self.assertEqual(item['amplitude_r1'], 321)
+        self.assertAlmostEqual(item['atom_number_up_left_mean'], 10.0)
+        self.assertAlmostEqual(item['atom_number_up_right_mean'], 15.0)
+        self.assertAlmostEqual(item['atom_number_up_difference'], 5.0)
+        self.assertAlmostEqual(item['atom_number_up_difference_sem'], 8.0 ** 0.5)
+        self.assertAlmostEqual(item['atom_number_up_nofit_difference'], 5.0)
+        self.assertAlmostEqual(item['transition_probability_up_difference'], 0.5)
+
 if __name__ == "__main__":
     unittest.main()

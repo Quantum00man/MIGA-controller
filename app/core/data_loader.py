@@ -197,6 +197,15 @@ class DataLoader:
             "intf_p2_nofit": self._parse_float(row.get("NF_Intf_P2")),
             "tail_mean_up_raw": self._parse_float(row.get("TailMean_UP")),
             "tail_mean_dw_raw": self._parse_float(row.get("TailMean_DW")),
+            "ac_stark_ratio": self._parse_float(row.get("AC_Stark_Ratio")),
+            "ac_stark_side": str(row.get("AC_Stark_Side") or "").strip().lower(),
+            "ac_stark_dds_element": self._parse_int(row.get("AC_Stark_DDS_Element"), -1),
+            "ac_stark_power_r1": self._parse_float(row.get("AC_Stark_Power_R1")),
+            "ac_stark_power_r2": self._parse_float(row.get("AC_Stark_Power_R2")),
+            "ac_stark_amplitude_r1": self._parse_int(row.get("AC_Stark_Amplitude_R1"), -1),
+            "ac_stark_amplitude_r2": self._parse_int(row.get("AC_Stark_Amplitude_R2"), -1),
+            "ac_stark_actual_power_r1": self._parse_float(row.get("AC_Stark_Actual_Power_R1")),
+            "ac_stark_actual_power_r2": self._parse_float(row.get("AC_Stark_Actual_Power_R2")),
         }
 
     def _read_results_csv(self, run_dir: Path, max_points: Optional[int] = MAX_DISPLAY_POINTS) -> List[Dict[str, Any]]:
@@ -331,6 +340,63 @@ class DataLoader:
             item["stepIndices"] = self._sample_sequence(item["stepIndices"], MAX_WAVEFORM_PREVIEW_STEPS)
         return preview_map
 
+    def _build_ac_stark_summary(self, points: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        metrics = (
+            "atom_number_up", "atom_number_dw",
+            "transition_probability_up", "transition_probability_dw",
+            "atom_number_up_nofit", "atom_number_dw_nofit",
+            "transition_probability_up_nofit", "transition_probability_dw_nofit",
+        )
+        grouped: Dict[float, Dict[str, List[Dict[str, Any]]]] = {}
+        for point in points:
+            ratio = self._parse_float(point.get("ac_stark_ratio"))
+            side = str(point.get("ac_stark_side") or "").strip().lower()
+            if ratio is None or side not in {"left", "right"}:
+                continue
+            grouped.setdefault(round(ratio, 12), {"left": [], "right": []})[side].append(point)
+
+        summary: List[Dict[str, Any]] = []
+        for ratio in sorted(grouped):
+            sides = grouped[ratio]
+            representative = (sides["left"] or sides["right"])[0]
+            row: Dict[str, Any] = {
+                "ratio": float(ratio),
+                "dds_element": representative.get("ac_stark_dds_element"),
+                "requested_power_r1": representative.get("ac_stark_power_r1"),
+                "requested_power_r2": representative.get("ac_stark_power_r2"),
+                "amplitude_r1": representative.get("ac_stark_amplitude_r1"),
+                "amplitude_r2": representative.get("ac_stark_amplitude_r2"),
+                "actual_power_r1": representative.get("ac_stark_actual_power_r1"),
+                "actual_power_r2": representative.get("ac_stark_actual_power_r2"),
+                "left_count": len(sides["left"]),
+                "right_count": len(sides["right"]),
+                "left_key": self._make_group_key(self._get_group_params(sides["left"][0], 1)) if sides["left"] else None,
+                "right_key": self._make_group_key(self._get_group_params(sides["right"][0], 1)) if sides["right"] else None,
+            }
+            for metric in metrics:
+                side_stats: Dict[str, Tuple[Optional[float], Optional[float]]] = {}
+                for side in ("left", "right"):
+                    values = [
+                        float(point[metric]) for point in sides[side]
+                        if point.get(metric) is not None and math.isfinite(float(point[metric]))
+                    ]
+                    mean, std = self._calc_stats(values) if values else (None, None)
+                    sem = std / math.sqrt(len(values)) if values and std is not None else None
+                    row[f"{metric}_{side}_mean"] = mean
+                    row[f"{metric}_{side}_std"] = std
+                    row[f"{metric}_{side}_sem"] = sem
+                    side_stats[side] = (mean, sem)
+                left_mean, left_sem = side_stats["left"]
+                right_mean, right_sem = side_stats["right"]
+                has_pair = left_mean is not None and right_mean is not None
+                row[f"{metric}_difference"] = right_mean - left_mean if has_pair else None
+                row[f"{metric}_difference_sem"] = (
+                    math.sqrt((left_sem or 0.0) ** 2 + (right_sem or 0.0) ** 2)
+                    if has_pair else None
+                )
+            summary.append(row)
+        return summary
+
     def load_run(self, year: str, month: str, day: str, run_id: str) -> Dict[str, Any]:
         run_dir = self._get_run_dir(year, month, day, run_id)
         config_data = self._load_config_data(run_dir)
@@ -343,6 +409,7 @@ class DataLoader:
             "scan_dimensions": scan_dimensions,
             "data": sampled_points,
             "stats": self._build_stats_array(full_points, scan_dimensions=scan_dimensions),
+            "ac_stark_summary": self._build_ac_stark_summary(full_points),
             "preview_map": self._build_preview_map(full_points, scan_dimensions=scan_dimensions),
             "total_points": len(full_points),
         }
@@ -947,6 +1014,7 @@ class DataLoader:
             "settings": settings,
             "data": sampled_points,
             "stats": self._build_stats_array(recalculated_points, scan_dimensions=scan_dimensions),
+            "ac_stark_summary": self._build_ac_stark_summary(recalculated_points),
             "preview_map": self._build_preview_map(recalculated_points, scan_dimensions=scan_dimensions),
             "total_points": len(recalculated_points),
         }

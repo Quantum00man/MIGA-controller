@@ -843,7 +843,7 @@
                     </div>
                 </div>
 
-                <div class="card border-primary shadow-sm" v-if="loadedPoints.length > 0">
+                <div class="card border-primary shadow-sm" v-if="loadedPoints.length > 0 && !isAcStarkArchive()">
                     <button type="button"
                         class="card-header collapsible-card-header bg-primary text-white border-0 d-flex justify-content-between align-items-center"
                         @click="togglePanel('reanalysis')" aria-controls="reanalysis-panel"
@@ -955,7 +955,7 @@
                     </div>
                 </div>
 
-                <div class="card border-info shadow-sm" v-if="loadedPoints.length > 0">
+                <div class="card border-info shadow-sm" v-if="loadedPoints.length > 0 && !isAcStarkArchive()">
                     <button type="button"
                         class="card-header collapsible-card-header bg-info text-white border-0 d-flex justify-content-between align-items-center"
                         @click="togglePanel('scanFitting')" aria-controls="scan-fitting-panel"
@@ -1175,7 +1175,7 @@
                         </div>
                         <div class="analysis-metric-nav-wrap">
                             <ul class="nav analysis-metric-nav" role="tablist" aria-label="Analysis metric">
-                                <li class="nav-item" v-for="tab in tabs" :key="tab.id">
+                                <li class="nav-item" v-for="tab in getVisibleTabs()" :key="tab.id">
                                     <button type="button" :class="['nav-link', currentTab === tab.id ? 'active' : '']"
                                         role="tab" :aria-selected="currentTab === tab.id"
                                         @click="currentTab = tab.id">{{ tab.label }}</button>
@@ -1397,6 +1397,7 @@
                     displayMode: 'saved',
                     savedDataCount: 0, displayedStats: [], savedStats: [], recalculatedStats: [],
                     savedPreviewMap: {}, recalculatedPreviewMap: {},
+                    acStarkSummary: [], savedAcStarkSummary: [], recalculatedAcStarkSummary: [],
                     savedAllanCache: {}, recalculatedAllanCache: {}, currentAllanData: null,
                     defaultFitModels: [], defaultScanFitModels: [],
                     collapsedPanels: { reanalysis: true, scanFitting: true },
@@ -1707,11 +1708,19 @@
                 getActiveScanDimensions() {
                     return this.resolveScanDimensions(this.currentScanDimensions, this.loadedConfig);
                 },
+                isAcStarkArchive() {
+                    return String(this.loadedConfig?.mode || "").trim().toLowerCase() === "ac_stark";
+                },
+                getVisibleTabs() {
+                    return this.isAcStarkArchive()
+                        ? this.tabs.filter(tab => ["atoms", "prob"].includes(tab.id))
+                        : this.tabs;
+                },
                 show3DControls() {
                     return this.getActiveScanDimensions() === 3;
                 },
                 canUseAllanMode() {
-                    return this.getActiveScanDimensions() === 1 && !Boolean(this.loadedConfig?.randomize);
+                    return !this.isAcStarkArchive() && this.getActiveScanDimensions() === 1 && !Boolean(this.loadedConfig?.randomize);
                 },
                 normalizeAllanScaleMode(mode) {
                     return mode === 'relative' ? 'relative' : 'absolute';
@@ -1851,6 +1860,7 @@
                     return !this.getScanFitAvailabilityMessage();
                 },
                 getScanFitAvailabilityMessage() {
+                    if (this.isAcStarkArchive()) return "Scan fitting is not available for AC Stark centering data.";
                     if (!this.loadedPoints.length) return 'Load a run first.';
                     if (this.getActiveScanDimensions() !== 1) return 'Scan fitting only supports 1D scan results.';
                     if (this.plotMode !== 'series') return 'Switch to Mean mode to fit scan data.';
@@ -2290,7 +2300,7 @@
                     return `P${this.sliceAxis}=${sliceValue.toFixed(6)} · plane P${xAxis}-P${yAxis} · ${this.sliceValuesCache.length} slices`;
                 },
                 showTotalPlot() {
-                    return this.getActiveScanDimensions() === 1 && this.currentTab === 'atoms';
+                    return !this.isAcStarkArchive() && this.getActiveScanDimensions() === 1 && this.currentTab === 'atoms';
                 },
                 getAnalysisPlotHeight(panel = 'up') {
                     const isPhone = window.matchMedia && window.matchMedia('(max-width: 767.98px)').matches;
@@ -2318,11 +2328,13 @@
                     return Math.abs(Number(a ?? 0) - Number(b ?? 0)) <= epsilon;
                 },
                 extractHistoryKeys(customdata) {
-                    if (typeof customdata === 'string') return [customdata];
-                    if (Array.isArray(customdata)) {
-                        return [...new Set(customdata.filter(item => typeof item === 'string'))];
-                    }
-                    return [];
+                    const keys = [];
+                    const visit = (value) => {
+                        if (typeof value === "string") keys.push(value);
+                        else if (Array.isArray(value)) value.forEach(visit);
+                    };
+                    visit(customdata);
+                    return [...new Set(keys)];
                 },
                 resolveClickedParams(point) {
                     if (!point) return [];
@@ -2831,6 +2843,9 @@
                     this.historyMap = {};
                     this.currentCalculatedPoints = [];
                     this.displayedStats = [];
+                    this.acStarkSummary = [];
+                    this.savedAcStarkSummary = [];
+                    this.recalculatedAcStarkSummary = [];
                     this.selectedPointKey = '';
                     this.selectedPointKeys = [];
                     this.selectedPointLabel = '';
@@ -2855,12 +2870,15 @@
 
                         const snap = res.data.config?.['_system_settings_snapshot'] || {};
                         this.loadedConfig = res.data.config || {};
+                        if (this.isAcStarkArchive() && !["atoms", "prob"].includes(this.currentTab)) this.currentTab = "atoms";
                         this.currentScanDimensions = this.resolveScanDimensions(res.data.scan_dimensions, this.loadedConfig);
                         this.originalSettings = this.normalizeAnalysis(snap);
                         this.analysis = this.normalizeAnalysis({ ...this.analysis, ...snap });
 
                         this.loadedPoints = res.data.data;
                         this.savedStats = this.normalizeStatsRows(res.data.stats);
+                        this.savedAcStarkSummary = Array.isArray(res.data.ac_stark_summary) ? res.data.ac_stark_summary : [];
+                        this.acStarkSummary = this.savedAcStarkSummary;
                         this.savedPreviewMap = res.data.preview_map && typeof res.data.preview_map === 'object' ? res.data.preview_map : {};
                         this.savedDataCount = Number.isFinite(res.data.total_points) ? res.data.total_points : this.loadedPoints.length;
                         this.dataCount = this.savedDataCount;
@@ -2921,6 +2939,8 @@
 
                         this.currentScanDimensions = this.resolveScanDimensions(res.data.scan_dimensions, this.loadedConfig);
                         this.recalculatedStats = this.normalizeStatsRows(res.data.stats);
+                        this.recalculatedAcStarkSummary = Array.isArray(res.data.ac_stark_summary) ? res.data.ac_stark_summary : [];
+                        this.acStarkSummary = this.recalculatedAcStarkSummary;
                         this.recalculatedPreviewMap = res.data.preview_map && typeof res.data.preview_map === 'object' ? res.data.preview_map : {};
                         this.dataCount = Number.isFinite(res.data.total_points) ? res.data.total_points : res.data.data.length;
                         this.displayMode = 'recalculated';
@@ -2955,6 +2975,7 @@
                     this.dataCount = this.savedDataCount;
                     this.scanFitResult = null;
                     this.scanFitError = '';
+                    this.acStarkSummary = this.savedAcStarkSummary;
                     await this.applyDisplayedPoints(this.loadedPoints, this.savedStats, this.savedPreviewMap, false);
                     if (this.plotMode === 'allan') {
                         this.syncCurrentAllanData();
@@ -3069,7 +3090,9 @@
                             this.selectedPointLabel = this.buildSelectionLabel(item.params || this.getGroupParams(item));
                             this.selectedCount = item.count || indices.length;
                         } else {
-                            this.selectedPointLabel = this.buildAllanSelectionLabel(keys);
+                            this.selectedPointLabel = this.isAcStarkArchive()
+                                ? "ratio = " + Number(point.x).toFixed(6) + " | Left + Right"
+                                : this.buildAllanSelectionLabel(keys);
                             this.selectedCount = indices.length;
                         }
                         await this.loadWaveforms(indices);
@@ -4084,7 +4107,100 @@
                     });
                 },
 
+                getAcStarkMetricDefinition() {
+                    if (this.currentTab === 'prob') {
+                        return { base: 'transition_probability', label: 'Transition Probability (%)' };
+                    }
+                    return { base: 'atom_number', label: 'Atom Number' };
+                },
+                getAcStarkArchiveRows(channel) {
+                    const metric = this.getAcStarkMetricDefinition();
+                    const suffix = this.showRawData ? '_nofit' : '';
+                    const field = `${metric.base}_${channel}${suffix}`;
+                    const finiteOrNull = value => (value == null || value === "") ? null : (Number.isFinite(Number(value)) ? Number(value) : null);
+                    const finiteOrZero = value => finiteOrNull(value) ?? 0;
+                    return (Array.isArray(this.acStarkSummary) ? this.acStarkSummary : [])
+                        .slice()
+                        .sort((a, b) => Number(a.ratio) - Number(b.ratio))
+                        .map(row => ({
+                            ...row,
+                            left: finiteOrNull(row[`${field}_left_mean`]),
+                            leftSem: finiteOrZero(row[`${field}_left_sem`]),
+                            right: finiteOrNull(row[`${field}_right_mean`]),
+                            rightSem: finiteOrZero(row[`${field}_right_sem`]),
+                            difference: finiteOrNull(row[`${field}_difference`]),
+                            differenceSem: finiteOrZero(row[`${field}_difference_sem`]),
+                        }));
+                },
+                renderAcStarkArchivePlot() {
+                    const metric = this.getAcStarkMetricDefinition();
+                    const sourceLabel = this.showRawData ? 'NoFit' : 'Fit';
+                    const makePanel = (channel) => {
+                        const rows = this.getAcStarkArchiveRows(channel);
+                        const x = rows.map(row => Number(row.ratio));
+                        const metadata = (row, key, count) => [
+                            key, row.dds_element, row.amplitude_r1, row.amplitude_r2,
+                            row.requested_power_r1, row.requested_power_r2,
+                            row.actual_power_r1, row.actual_power_r2, count
+                        ];
+                        const leftCustom = rows.map(row => metadata(row, row.left_key, row.left_count));
+                        const rightCustom = rows.map(row => metadata(row, row.right_key, row.right_count));
+                        const differenceCustom = rows.map(row => metadata(row, [row.left_key, row.right_key], `${row.left_count}/${row.right_count}`));
+                        const commonHover = '<br>elem=%{customdata[1]}<br>A1=%{customdata[2]} A2=%{customdata[3]}<br>Requested P1=%{customdata[4]:.6g} P2=%{customdata[5]:.6g}<br>Actual P1=%{customdata[6]:.6g} P2=%{customdata[7]:.6g}<br>samples=%{customdata[8]}';
+                        const traces = [
+                            {
+                                x, y: rows.map(row => row.left), customdata: leftCustom,
+                                error_y: { type: 'data', array: rows.map(row => row.leftSem), visible: true },
+                                mode: 'lines+markers', name: 'Left half-point',
+                                line: { color: '#e67e22', width: 2 }, marker: { size: 8, symbol: 'circle' },
+                                hovertemplate: 'ratio=%{x:.6g}<br>Left=%{y:.6g}' + commonHover + '<extra></extra>'
+                            },
+                            {
+                                x, y: rows.map(row => row.right), customdata: rightCustom,
+                                error_y: { type: 'data', array: rows.map(row => row.rightSem), visible: true },
+                                mode: 'lines+markers', name: 'Right half-point',
+                                line: { color: '#198754', width: 2 }, marker: { size: 8, symbol: 'square' },
+                                hovertemplate: 'ratio=%{x:.6g}<br>Right=%{y:.6g}' + commonHover + '<extra></extra>'
+                            },
+                            {
+                                x, y: rows.map(row => row.difference), customdata: differenceCustom, yaxis: 'y2',
+                                error_y: { type: 'data', array: rows.map(row => row.differenceSem), visible: true },
+                                mode: 'lines+markers', name: 'Right − Left',
+                                line: { color: '#212529', width: 2.2, dash: 'dash' }, marker: { size: 8, symbol: 'diamond' },
+                                hovertemplate: 'ratio=%{x:.6g}<br>Right−Left=%{y:.6g}' + commonHover + '<extra></extra>'
+                            }
+                        ];
+                        const base = this.buildCommonAnalysisLayout();
+                        const isUp = channel === 'up';
+                        const layout = {
+                            ...base,
+                            margin: isUp ? { t: 42, b: 8, l: 72, r: 76 } : { t: 14, b: 48, l: 72, r: 76 },
+                            xaxis: { ...base.xaxis, title: isUp ? '' : 'R1:R2 Power Ratio', showticklabels: !isUp },
+                            yaxis: { ...base.yaxis, title: metric.label },
+                            yaxis2: {
+                                title: 'Right − Left', overlaying: 'y', side: 'right',
+                                showline: true, ticks: 'inside', linecolor: '#555', zeroline: true,
+                                zerolinecolor: '#6c757d', zerolinewidth: 1.4
+                            },
+                            title: { text: `${isUp ? 'UP' : 'DOWN'} | AC Stark Centering | ${sourceLabel}`, font: { size: 13 }, x: 0.05, y: 0.94 },
+                            legend: { ...base.legend, orientation: 'h', x: 0.5, xanchor: 'center', y: 1.13 },
+                            annotations: rows.length ? [] : [{ text: 'No AC Stark ratio/side data found', showarrow: false, xref: 'paper', yref: 'paper', x: 0.5, y: 0.5 }]
+                        };
+                        return { traces, layout };
+                    };
+                    const up = makePanel('up');
+                    const down = makePanel('dw');
+                    this.layoutResUp = up.layout;
+                    this.layoutResDw = down.layout;
+                    Plotly.react('resultsPlotUp', up.traces, up.layout);
+                    Plotly.react('resultsPlotDw', down.traces, down.layout);
+                    Plotly.react('resultsPlotTotal', [], this.layoutResTot);
+                },
                 renderMainPlot() {
+                    if (this.isAcStarkArchive()) {
+                        this.renderAcStarkArchivePlot();
+                        return;
+                    }
                     const rows = this.getStatsArray();
                     const metric = this.getMetricConfig();
                     const scanDimensions = this.getActiveScanDimensions();
