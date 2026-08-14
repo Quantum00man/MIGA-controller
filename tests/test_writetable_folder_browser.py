@@ -27,7 +27,7 @@ class WritetableFolderBrowserTests(unittest.TestCase):
             self.assertEqual(selected["current"], str(writer_folder.resolve()))
             self.assertEqual(selected["writetable_path"], str(writer.resolve()))
 
-    def test_rejects_navigation_outside_documents_root(self):
+    def test_rejects_navigation_outside_configured_root(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir) / "Documents"
             root.mkdir()

@@ -785,7 +785,7 @@
                     <div class="modal-header">
                         <div>
                             <h5 class="modal-title"><i class="bi bi-folder2-open me-2"></i>Select writetable.py Folder</h5>
-                            <div class="small text-muted mt-1">Browse folders under {{ pathBrowser.root || 'Documents' }}.</div>
+                            <div class="small text-muted mt-1">Browse folders from the filesystem root {{ pathBrowser.root || '/' }}.</div>
                         </div>
                         <button type="button" class="btn-close" aria-label="Close" @click="closeWritetableFolderPicker"></button>
                     </div>
@@ -795,7 +795,7 @@
                         <div class="d-flex gap-2 mb-3 flex-wrap">
                             <button type="button" class="btn btn-outline-secondary btn-sm"
                                 @click="loadWritetableFolder(pathBrowser.root)" :disabled="pathBrowser.busy">
-                                <i class="bi bi-house-door me-1"></i>Documents Root
+                                <i class="bi bi-device-hdd me-1"></i>Filesystem Root
                             </button>
                             <button type="button" class="btn btn-outline-secondary btn-sm"
                                 @click="loadWritetableFolder(pathBrowser.parent)"

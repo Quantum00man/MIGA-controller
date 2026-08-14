@@ -1,3 +1,4 @@
+import ipaddress
 import json
 import os
 import shutil
@@ -6,7 +7,7 @@ from copy import deepcopy
 from pathlib import Path
 
 import numpy as np
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, HTTPException, UploadFile, File, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Dict, Any, List
@@ -344,7 +345,7 @@ async def get_dds_table_status():
 
 
 def _writetable_folder_listing(requested_path: str = "", root_path: Path | None = None) -> Dict[str, Any]:
-    browser_root = Path(root_path or Path(config.BASE_DIR).parent).expanduser().resolve(strict=True)
+    browser_root = Path(root_path if root_path is not None else Path("/")).expanduser().resolve(strict=True)
     candidate = Path(str(requested_path or "")).expanduser()
     if not str(requested_path or "").strip():
         candidate = browser_root
@@ -392,7 +393,14 @@ def _writetable_folder_listing(requested_path: str = "", root_path: Path | None 
 
 
 @router.get("/system/writetable-folders")
-async def browse_writetable_folders(path: str = ""):
+async def browse_writetable_folders(request: Request, path: str = ""):
+    client_host = str(request.client.host if request.client else "")
+    try:
+        is_loopback = ipaddress.ip_address(client_host).is_loopback
+    except ValueError:
+        is_loopback = client_host.lower() == "localhost"
+    if not is_loopback:
+        raise HTTPException(403, "Filesystem folder selection is available from this computer only")
     try:
         return _writetable_folder_listing(path)
     except ValueError as exc:
