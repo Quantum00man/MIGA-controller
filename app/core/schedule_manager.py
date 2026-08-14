@@ -85,6 +85,8 @@ class ScheduleManager:
             if not isinstance(task, dict) or not isinstance(task.get("sequence_snapshot"), str):
                 raise ValueError(f"Task {index + 1} has no sequence snapshot")
             config_payload = ScanConfig(**(task.get("config") or {})).dict()
+            if config_payload.get("mode") == "ac_stark":
+                raise ValueError("AC Stark Centering is available in Live Mode only")
             normalized.append({
                 "id": str(task.get("id") or f"task_{index + 1}"),
                 "name": str(task.get("name") or f"Task {index + 1}"),

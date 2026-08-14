@@ -33,6 +33,17 @@ class ScanResult:
     window_dw: Optional[Tuple[float, float]] = None
     all_parameters: Optional[List[float]] = None
 
+    # AC Stark scan provenance. These stay empty for every other scan mode.
+    ac_stark_ratio: Optional[float] = None
+    ac_stark_side: Optional[str] = None
+    ac_stark_dds_element: Optional[int] = None
+    ac_stark_power_r1: Optional[float] = None
+    ac_stark_power_r2: Optional[float] = None
+    ac_stark_amplitude_r1: Optional[int] = None
+    ac_stark_amplitude_r2: Optional[int] = None
+    ac_stark_actual_power_r1: Optional[float] = None
+    ac_stark_actual_power_r2: Optional[float] = None
+
     # Mean of the last 200 raw TOF samples before offset removal.
     tail_mean_up_raw: Optional[float] = None
     tail_mean_dw_raw: Optional[float] = None

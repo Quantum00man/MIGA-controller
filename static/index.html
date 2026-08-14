@@ -685,7 +685,7 @@
                             v-model="runMode" :disabled="isRunning || isScheduleActive()">
                         <label class="btn btn-outline-secondary" for="runModeLive">Live Mode</label>
                         <input type="radio" class="btn-check" name="runMode" id="runModeScheduled" value="scheduled"
-                            v-model="runMode" :disabled="isRunning || isScheduleActive()">
+                            v-model="runMode" :disabled="isRunning || isScheduleActive() || config.mode === 'ac_stark'">
                         <label class="btn btn-outline-secondary" for="runModeScheduled">Scheduled Mode</label>
                     </div>
                     <div class="form-text mt-2" style="font-size: 0.72rem;">
@@ -710,6 +710,24 @@
                 <input type="file" ref="seqInput" style="display:none" accept=".mot" @change="selectSequence">
 
                 <div class="form-text mt-1" style="font-size: 0.7rem;">Selected file will overwrite current template.
+                </div>
+
+                <div v-if="config.mode === 'ac_stark'" class="mt-3 pt-3 border-top">
+                    <label class="form-label small text-muted fw-bold mb-1">DDS5 Base Table (.xml)</label>
+                    <div class="input-group input-group-sm">
+                        <span class="input-group-text bg-white text-muted"><i class="bi bi-cpu"></i></span>
+                        <input type="text" class="form-control bg-white" readonly
+                            :value="currentDdsXmlName || 'No DDS XML uploaded'">
+                        <button type="button" class="btn btn-primary" @click="$refs.ddsXmlInput.click()"
+                            :disabled="isRunning || isScheduleActive()" title="Load DDS XML table">
+                            <i class="bi bi-folder2-open"></i>
+                        </button>
+                    </div>
+                    <input type="file" ref="ddsXmlInput" style="display:none" accept=".xml,text/xml,application/xml"
+                        @change="selectDdsXml">
+                    <div class="form-text mt-1" style="font-size:0.7rem;">
+                        The scan appends ratio elements to this table, writes and verifies it, then restores this original table.
+                    </div>
                 </div>
             </div>
 
@@ -814,10 +832,10 @@
                             v-model.number="config.scan_dimensions">
                         <label class="btn btn-outline-secondary" for="scan1d">1D</label>
                         <input type="radio" class="btn-check" name="scanDimension" id="scan2d" :value="2"
-                            v-model.number="config.scan_dimensions">
+                            v-model.number="config.scan_dimensions" :disabled="config.mode === 'ac_stark'">
                         <label class="btn btn-outline-secondary" for="scan2d">2D</label>
                         <input type="radio" class="btn-check" name="scanDimension" id="scan3d" :value="3"
-                            v-model.number="config.scan_dimensions">
+                            v-model.number="config.scan_dimensions" :disabled="config.mode === 'ac_stark'">
                         <label class="btn btn-outline-secondary" for="scan3d">3D</label>
                     </div>
                     <div class="form-text mt-2" v-if="config.scan_dimensions > 1">
@@ -826,8 +844,8 @@
                     </div>
                 </div>
 
-                <span class="section-label">Parameter P0</span>
-                <div class="card p-3">
+                <span class="section-label" v-if="config.mode !== 'ac_stark'">Parameter P0</span>
+                <div class="card p-3" v-if="config.mode !== 'ac_stark'">
                     <div class="d-flex justify-content-between align-items-center mb-3">
                         <div class="btn-group btn-group-sm" role="group">
                             <input type="radio" class="btn-check" name="ptype" id="pfloat" value="float"
@@ -897,6 +915,7 @@
                             <option value="half">Half (P0/2)</option>
                             <option value="link">Link (Custom Formula)</option>
                             <option value="bragg_rabi">Bragg Rabi</option>
+                            <option value="ac_stark">AC Stark Centering</option>
                         </select>
                     </div>
                     <div v-if="['timing', 'rabi'].includes(config.mode)">
@@ -921,6 +940,49 @@
                         </div>
                         <button class="btn btn-sm btn-light w-100 text-muted border border-dashed" @click="addFormula">+
                             Add Parameter</button>
+                    </div>
+                    <div v-if="config.mode === 'ac_stark'" class="mt-1">
+                        <div class="alert alert-light border py-2 px-3 small mb-3">
+                            Live 1D scan only. PARAMETER0 selects the left/right half-height DDS1 value;
+                            PARAMETER1 selects the generated DDS5 ratio element.
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label small text-muted fw-bold mb-1">Raman Calibration Group</label>
+                            <select class="form-select form-select-sm" v-model="config.ac_stark_raman_group">
+                                <option value="up">Raman UP</option>
+                                <option value="down">Raman DOWN</option>
+                            </select>
+                        </div>
+                        <div class="row g-2 mb-3">
+                            <div class="col-6">
+                                <label class="form-label small text-muted mb-1">Left P0</label>
+                                <input type="number" class="form-control form-control-sm" step="1"
+                                    v-model.number="config.ac_stark_left_p0">
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label small text-muted mb-1">Right P0</label>
+                                <input type="number" class="form-control form-control-sm" step="1"
+                                    v-model.number="config.ac_stark_right_p0">
+                            </div>
+                        </div>
+                        <label class="form-label small text-muted fw-bold mb-1">R1:R2 Power Ratio</label>
+                        <div class="row g-2 mb-3">
+                            <div class="col-4"><label class="form-label small text-muted mb-1">Start</label>
+                                <input type="number" class="form-control form-control-sm" step="any" min="0"
+                                    v-model.number="config.ac_stark_ratio_start"></div>
+                            <div class="col-4"><label class="form-label small text-muted mb-1">Stop</label>
+                                <input type="number" class="form-control form-control-sm" step="any" min="0"
+                                    v-model.number="config.ac_stark_ratio_stop"></div>
+                            <div class="col-4"><label class="form-label small text-muted mb-1">Step</label>
+                                <input type="number" class="form-control form-control-sm" step="any" min="0"
+                                    v-model.number="config.ac_stark_ratio_step"></div>
+                        </div>
+                        <div>
+                            <label class="form-label small text-muted fw-bold mb-1">Constant Total Power</label>
+                            <input type="number" class="form-control form-control-sm" step="any" min="0"
+                                v-model.number="config.ac_stark_total_power">
+                            <div class="form-text" style="font-size:0.7rem;">Uses the same power unit as the four calibration curves in Settings.</div>
+                        </div>
                     </div>
                 </div>
                 <div class="card p-3" v-else>
@@ -1084,13 +1146,13 @@
                 <span class="section-label">Execution Control</span>
                 <div class="card p-3 mb-5 border-0 bg-transparent shadow-none ps-0 pe-0">
                     <div class="row g-2 align-items-center mb-3 px-1">
-                        <div class="col-6"><label class="form-label small text-muted mb-1">Averages</label><input
+                        <div class="col-6"><label class="form-label small text-muted mb-1">{{ config.mode === 'ac_stark' ? 'Averages per half-point' : 'Averages' }}</label><input
                                 type="number" class="form-control form-control-sm" v-model.number="config.averages"
                                 min="1"></div>
                         <div class="col-6">
                             <div class="d-flex align-items-center gap-3 mt-4 flex-wrap">
                                 <div class="form-check mb-0"><input class="form-check-input" type="checkbox"
-                                        v-model="config.randomize" id="randCheck"><label
+                                        v-model="config.randomize" id="randCheck" :disabled="config.mode === 'ac_stark'"><label
                                         class="form-check-label small" for="randCheck">Randomize</label></div>
                                 <div class="form-check mb-0"><input class="form-check-input" type="checkbox"
                                         v-model="config.ext_trigger" id="extTriggerCheck"><label
@@ -1142,14 +1204,14 @@
                             <input class="form-check-input" type="checkbox" id="showRaw" v-model="showRawData"
                                 style="cursor: pointer;">
                             <label class="form-check-label small fw-bold text-muted" for="showRaw"
-                                style="cursor: pointer;">{{ currentScanDimensions === 1 ? 'Show NoFit' : 'Use NoFit' }}</label>
+                                style="cursor: pointer;">{{ config.mode === 'ac_stark' ? 'Use NoFit' : (currentScanDimensions === 1 ? 'Show NoFit' : 'Use NoFit') }}</label>
                         </div>
 
                     </div>
                     </div>
                     <div class="analysis-metric-nav-wrap">
                         <ul class="nav analysis-metric-nav" role="tablist" aria-label="Analysis metric">
-                            <li class="nav-item" v-for="tab in tabs" :key="tab.id">
+                            <li class="nav-item" v-for="tab in getVisibleTabs()" :key="tab.id">
                                 <button type="button" :class="['nav-link', currentTab === tab.id ? 'active' : '']"
                                     role="tab" :aria-selected="currentTab === tab.id"
                                     @click="currentTab = tab.id">{{ tab.label }}</button>
@@ -1259,13 +1321,23 @@
                         link_formulas: ["(P0-151)/2+26", "100-P1"],
                         fit_center_up: 0, fit_width_up: 0, fit_center_dw: 0, fit_width_dw: 0,
                         bragg_shape: 'blackman',
-                        bragg_base_timing: 331119
+                        bragg_base_timing: 331119,
+                        ac_stark_raman_group: 'up',
+                        ac_stark_left_p0: 11,
+                        ac_stark_right_p0: 22,
+                        ac_stark_ratio_start: 0.5,
+                        ac_stark_ratio_stop: 2.0,
+                        ac_stark_ratio_step: 0.1,
+                        ac_stark_total_power: 100,
+                        ac_stark_dds_xml_name: ''
                     },
                     isRunning: false, isSimulation: false, statusMessage: "IDLE", currentStep: 0, plotRevision: 0, logs: [], ws: null,
                     progressPercent: 0,
                     currentSequenceName: "Default (seq0.mot)",
+                    currentDdsXmlName: "",
                     currentRunId: "...",
                     seqFile: null,
+                    ddsXmlFile: null,
                     seqFileHandle: null,
                     isExternalSequenceFile: false,
                     isReloadingSequence: false,
@@ -1333,6 +1405,19 @@
                         this.renderMainPlot();
                     }
                 },
+                'config.mode'(mode) {
+                    if (mode === 'ac_stark') {
+                        this.runMode = 'live';
+                        this.config.scan_dimensions = 1;
+                        this.config.dim2_enabled = false;
+                        this.config.dim3_enabled = false;
+                        this.config.randomize = false;
+                        if (!['atoms', 'prob'].includes(this.currentTab)) this.currentTab = 'atoms';
+                    }
+                    if (!this.isRunning) {
+                        this.resetHistory(1);
+                    }
+                },
                 runMode() { this.saveState(); this.requestPlotResize(); },
                 sidebarWidth(value) { this.applySidebarWidthCss(value); },
                 currentSequenceName() { this.saveState(); },
@@ -1373,6 +1458,7 @@
                 this.connectWebSocket();
                 this.ensureRealHardwareMode().catch(() => { });
                 this.fetchStatus();
+                this.fetchDdsXmlStatus();
                     // Editable scan/queue state is local to this browser. Only the
                     // server-owned execution status is shared between clients.
                     this.sharedStateBootstrapComplete = true;
@@ -1420,10 +1506,17 @@
                     try {
                         const res = await axios.get('/experiment/status');
                         const d = res.data.data || {};
+                        const serverMessage = String(res.data.message || '').trim();
                         this.currentRunId = d.run_id || "Loading...";
                         this.isRunning = Boolean(d.is_running);
                         if (!this.isRunning && !this.isScheduleActive()) {
-                            this.statusMessage = "IDLE";
+                            const isFailure = /failed|error/i.test(serverMessage);
+                            this.statusMessage = isFailure ? serverMessage : "IDLE";
+                            if (isFailure && !this.logs.some(item => String(item).includes(serverMessage))) {
+                                this.addLog(serverMessage);
+                            }
+                        } else if (this.isRunning && serverMessage) {
+                            this.statusMessage = serverMessage;
                         }
                         return d;
                     } catch (e) {
@@ -1462,6 +1555,7 @@
                     return {
                         runMode: this.runMode,
                         currentSequenceName: this.currentSequenceName,
+                        currentDdsXmlName: this.currentDdsXmlName,
                         config: this.cloneConfig(this.config),
                         scheduleSettings: this.cloneConfig(this.scheduleSettings),
                         scheduledTasks: this.cloneConfig(this.scheduledTasks),
@@ -1522,7 +1616,9 @@
                         this.runMode = state.runMode === 'scheduled' ? 'scheduled' : 'live';
                         this.config = { ...this.config, ...restoredConfig };
                         this.currentSequenceName = String(state.currentSequenceName || restoredConfig.sequence_name || this.currentSequenceName).trim() || this.currentSequenceName;
+                        this.currentDdsXmlName = String(state.currentDdsXmlName || restoredConfig.ac_stark_dds_xml_name || this.currentDdsXmlName).trim();
                         this.config.sequence_name = this.currentSequenceName;
+                        this.config.ac_stark_dds_xml_name = this.currentDdsXmlName;
                         this.config.scan_dimensions = Number(this.config.scan_dimensions || (this.config.dim3_enabled ? 3 : (this.config.dim2_enabled ? 2 : 1))) || 1;
                         this.config.dim2_enabled = this.config.scan_dimensions >= 2;
                         this.config.dim3_enabled = this.config.scan_dimensions >= 3;
@@ -1684,6 +1780,49 @@
                         return false; // 上传失败
                     }
                 },
+                async selectDdsXml(event) {
+                    const file = event.target.files[0];
+                    if (!file) return;
+                    try {
+                        this.ddsXmlFile = file;
+                        await this.uploadDdsXmlFile();
+                    } finally {
+                        event.target.value = '';
+                    }
+                },
+                async uploadDdsXmlFile() {
+                    if (!this.ddsXmlFile) return Boolean(this.currentDdsXmlName);
+                    const formData = new FormData();
+                    formData.append('file', this.ddsXmlFile);
+                    try {
+                        this.addLog(`Uploading DDS table ${this.ddsXmlFile.name}...`);
+                        const res = await axios.post('/experiment/dds-table', formData, {
+                            headers: { 'Content-Type': 'multipart/form-data' }
+                        });
+                        this.currentDdsXmlName = res.data.filename || this.ddsXmlFile.name;
+                        this.config.ac_stark_dds_xml_name = this.currentDdsXmlName;
+                        this.addLog(`DDS table uploaded: ${this.currentDdsXmlName} (${res.data.element_count || 0} elements).`);
+                        this.saveState();
+                        return true;
+                    } catch (error) {
+                        this.addLog('DDS XML upload failed: ' + this.formatRequestError(error));
+                        return false;
+                    }
+                },
+                async fetchDdsXmlStatus() {
+                    try {
+                        const res = await axios.get('/experiment/dds-table/status');
+                        if (res.data?.status === 'success') {
+                            this.currentDdsXmlName = String(res.data.filename || '').trim();
+                            this.config.ac_stark_dds_xml_name = this.currentDdsXmlName;
+                        } else if (!this.ddsXmlFile) {
+                            this.currentDdsXmlName = '';
+                            this.config.ac_stark_dds_xml_name = '';
+                        }
+                    } catch (error) {
+                        this.addLog('DDS XML status unavailable: ' + this.formatRequestError(error));
+                    }
+                },
                 saveState() {
                     const state = {
                         useList1: this.useList1,
@@ -1691,6 +1830,7 @@
                         useList3: this.useList3,
                         config: this.config,
                         currentSequenceName: this.currentSequenceName,
+                        currentDdsXmlName: this.currentDdsXmlName,
                         sidebarWidth: this.sidebarWidth,
                         runMode: this.runMode,
                         scheduleSettings: this.scheduleSettings,
@@ -1722,6 +1862,7 @@
                             );
                             this.config = { ...this.config, ...restoredConfig };
                             this.currentSequenceName = state.currentSequenceName || restoredConfig.sequence_name || this.currentSequenceName;
+                            this.currentDdsXmlName = state.currentDdsXmlName || restoredConfig.ac_stark_dds_xml_name || this.currentDdsXmlName;
                             if (!restoredConfig.scan_dimensions) {
                                 this.config.scan_dimensions = restoredConfig.dim3_enabled ? 3 : (restoredConfig.dim2_enabled ? 2 : 1);
                             }
@@ -2015,7 +2156,14 @@ isStatusActive() {
     return this.isRunning || this.isScheduleActive();
 },
 isStartDisabled() {
-    return this.isRunning || this.isScheduleActive() || (this.isScheduledMode() && !this.scheduledTasks.length);
+    const acStarkMissingXml = this.config.mode === 'ac_stark' && !String(this.currentDdsXmlName || '').trim();
+    const acStarkScheduled = this.config.mode === 'ac_stark' && this.isScheduledMode();
+    return this.isRunning || this.isScheduleActive() || acStarkMissingXml || acStarkScheduled || (this.isScheduledMode() && !this.scheduledTasks.length);
+},
+getVisibleTabs() {
+    return this.config.mode === 'ac_stark'
+        ? this.tabs.filter(tab => ['atoms', 'prob'].includes(tab.id))
+        : this.tabs;
 },
 isStopDisabled() {
     return !this.isRunning && !this.isScheduleActive();
@@ -2169,6 +2317,18 @@ estimateAxisPointCount(spec = {}) {
     return Math.max(count, 1);
 },
 estimateScanStepCount(configObj = this.config) {
+    if (String(configObj.mode || '') === 'ac_stark') {
+        const ratioCount = this.estimateAxisPointCount({
+            scan_type: 'range',
+            method: 'step_size',
+            start: configObj.ac_stark_ratio_start,
+            stop: configObj.ac_stark_ratio_stop,
+            step: configObj.ac_stark_ratio_step,
+            list: ''
+        });
+        const averages = Math.max(1, Math.round(Number(configObj.averages) || 1));
+        return ratioCount * 2 * averages;
+    }
     const scanDimensions = this.resolveScanDimensionsFromConfig(configObj);
     const specs = [
         {
@@ -2306,6 +2466,10 @@ async captureCurrentSequenceForTask() {
 },
 async addScheduledTaskFromCurrentSetup() {
     if (this.isScheduleActive()) return;
+    if (this.config.mode === 'ac_stark') {
+        this.addLog('AC Stark Centering is available in Live Mode only.');
+        return;
+    }
     try {
         const configSnapshot = this.prepareScanPayload(this.config, this.currentSequenceName);
         const sequenceInfo = await this.captureCurrentSequenceForTask();
@@ -2332,6 +2496,10 @@ async addScheduledTaskFromCurrentSetup() {
 },
 async updateSelectedScheduledTask() {
     if (this.isScheduleActive() || !this.selectedScheduledTaskId) return;
+    if (this.config.mode === 'ac_stark') {
+        this.addLog('AC Stark Centering cannot be added to a scheduled task.');
+        return;
+    }
     const task = this.getScheduledTaskById(this.selectedScheduledTaskId);
     if (!task) return;
     try {
@@ -2665,6 +2833,33 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     const scanDimensions = Math.max(1, Math.min(3, Number(payload.scan_dimensions || this.resolveScanDimensionsFromConfig(payload)) || 1));
                     payload.run_label = String(payload.run_label || '').trim();
                     payload.sequence_name = String(sequenceNameOverride || payload.sequence_name || this.currentSequenceName || 'sequence.mot').trim();
+                    if (payload.mode === 'ac_stark') {
+                        const numericFields = [
+                            'ac_stark_left_p0', 'ac_stark_right_p0',
+                            'ac_stark_ratio_start', 'ac_stark_ratio_stop',
+                            'ac_stark_ratio_step', 'ac_stark_total_power'
+                        ];
+                        numericFields.forEach((field) => {
+                            const value = Number(payload[field]);
+                            if (!Number.isFinite(value)) throw new Error(`${field} must be numeric.`);
+                            payload[field] = value;
+                        });
+                        payload.ac_stark_left_p0 = Math.round(payload.ac_stark_left_p0);
+                        payload.ac_stark_right_p0 = Math.round(payload.ac_stark_right_p0);
+                        if (payload.ac_stark_ratio_start <= 0 || payload.ac_stark_ratio_stop <= 0 || payload.ac_stark_ratio_step <= 0) {
+                            throw new Error('AC Stark ratio start, stop, and step must be positive.');
+                        }
+                        if (payload.ac_stark_total_power <= 0) {
+                            throw new Error('AC Stark total power must be positive.');
+                        }
+                        payload.ac_stark_raman_group = payload.ac_stark_raman_group === 'down' ? 'down' : 'up';
+                        payload.ac_stark_dds_xml_name = String(this.currentDdsXmlName || payload.ac_stark_dds_xml_name || '').trim();
+                        if (!payload.ac_stark_dds_xml_name) throw new Error('Upload a DDS XML table first.');
+                        payload.scan_dimensions = 1;
+                        payload.dim2_enabled = false;
+                        payload.dim3_enabled = false;
+                        payload.randomize = false;
+                    }
                     if (this.needsModeParam(payload.mode, scanDimensions)) {
                         const parsedModeParam = this.parseNumericInput(payload.mode_param);
                         if (!Number.isFinite(parsedModeParam)) {
@@ -3221,7 +3416,133 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     }
                     this.render3DScatter(points, metric);
                 },
+                getAcStarkStatistics(values) {
+                    const finite = (Array.isArray(values) ? values : []).map(Number).filter(Number.isFinite);
+                    if (!finite.length) return { count: 0, mean: null, sem: null };
+                    const mean = finite.reduce((sum, value) => sum + value, 0) / finite.length;
+                    if (finite.length < 2) return { count: finite.length, mean, sem: 0 };
+                    const variance = finite.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (finite.length - 1);
+                    return { count: finite.length, mean, sem: Math.sqrt(variance) / Math.sqrt(finite.length) };
+                },
+                recordAcStarkPoint(data) {
+                    const ratio = Number(data.ac_stark_ratio);
+                    const side = String(data.ac_stark_side || '').toLowerCase();
+                    if (!Number.isFinite(ratio) || !['left', 'right'].includes(side)) return;
+                    const key = ratio.toFixed(12);
+                    if (!this.acStarkHistoryMap[key]) {
+                        this.acStarkHistoryMap[key] = {
+                            ratio,
+                            ddsElement: Number(data.ac_stark_dds_element),
+                            amplitudeR1: Number(data.ac_stark_amplitude_r1),
+                            amplitudeR2: Number(data.ac_stark_amplitude_r2),
+                            powerR1: Number(data.ac_stark_power_r1),
+                            powerR2: Number(data.ac_stark_power_r2),
+                            left: {},
+                            right: {}
+                        };
+                    }
+                    const item = this.acStarkHistoryMap[key];
+                    const fields = [
+                        'atom_number_up', 'atom_number_dw',
+                        'transition_probability_up', 'transition_probability_dw',
+                        'atom_number_up_nofit', 'atom_number_dw_nofit',
+                        'transition_probability_up_nofit', 'transition_probability_dw_nofit'
+                    ];
+                    fields.forEach((field) => {
+                        const value = Number(data[field]);
+                        if (!Number.isFinite(value)) return;
+                        if (!Array.isArray(item[side][field])) item[side][field] = [];
+                        item[side][field].push(value);
+                    });
+                },
+                getAcStarkMetricDefinition() {
+                    if (this.currentTab === 'prob') {
+                        return { base: 'transition_probability', label: 'Transition Probability (%)' };
+                    }
+                    return { base: 'atom_number', label: 'Atom Number' };
+                },
+                getAcStarkPlotRows(channel) {
+                    const metric = this.getAcStarkMetricDefinition();
+                    const suffix = this.showRawData ? '_nofit' : '';
+                    const field = `${metric.base}_${channel}${suffix}`;
+                    return Object.values(this.acStarkHistoryMap)
+                        .sort((a, b) => a.ratio - b.ratio)
+                        .map((item) => {
+                            const left = this.getAcStarkStatistics(item.left[field]);
+                            const right = this.getAcStarkStatistics(item.right[field]);
+                            const hasDifference = left.mean !== null && right.mean !== null;
+                            return {
+                                ...item,
+                                left,
+                                right,
+                                difference: hasDifference ? right.mean - left.mean : null,
+                                differenceSem: hasDifference ? Math.sqrt((left.sem || 0) ** 2 + (right.sem || 0) ** 2) : null
+                            };
+                        });
+                },
+                renderAcStarkPlot() {
+                    const metric = this.getAcStarkMetricDefinition();
+                    const sourceLabel = this.showRawData ? 'NoFit' : 'Fit';
+                    const makePanel = (channel) => {
+                        const rows = this.getAcStarkPlotRows(channel);
+                        const x = rows.map(row => row.ratio);
+                        const custom = rows.map(row => [row.ddsElement, row.amplitudeR1, row.amplitudeR2, row.powerR1, row.powerR2]);
+                        const commonHover = '<br>elem=%{customdata[0]}<br>A1=%{customdata[1]} A2=%{customdata[2]}<br>P1=%{customdata[3]:.6g} P2=%{customdata[4]:.6g}';
+                        const traces = [
+                            {
+                                x, y: rows.map(row => row.left.mean), customdata: custom,
+                                error_y: { type: 'data', array: rows.map(row => row.left.sem || 0), visible: true },
+                                mode: 'lines+markers', name: 'Left half-point',
+                                line: { color: '#e67e22', width: 2 }, marker: { size: 8, symbol: 'circle' },
+                                hovertemplate: 'ratio=%{x:.6g}<br>Left=%{y:.6g}' + commonHover + '<extra></extra>'
+                            },
+                            {
+                                x, y: rows.map(row => row.right.mean), customdata: custom,
+                                error_y: { type: 'data', array: rows.map(row => row.right.sem || 0), visible: true },
+                                mode: 'lines+markers', name: 'Right half-point',
+                                line: { color: '#198754', width: 2 }, marker: { size: 8, symbol: 'square' },
+                                hovertemplate: 'ratio=%{x:.6g}<br>Right=%{y:.6g}' + commonHover + '<extra></extra>'
+                            },
+                            {
+                                x, y: rows.map(row => row.difference), customdata: custom, yaxis: 'y2',
+                                error_y: { type: 'data', array: rows.map(row => row.differenceSem || 0), visible: true },
+                                mode: 'lines+markers', name: 'Right − Left',
+                                line: { color: '#212529', width: 2.2, dash: 'dash' }, marker: { size: 8, symbol: 'diamond' },
+                                hovertemplate: 'ratio=%{x:.6g}<br>Right−Left=%{y:.6g}' + commonHover + '<extra></extra>'
+                            }
+                        ];
+                        const base = this.buildCommonAnalysisLayout();
+                        const isUp = channel === 'up';
+                        const layout = {
+                            ...base,
+                            margin: isUp ? { t: 42, b: 8, l: 72, r: 72 } : { t: 14, b: 48, l: 72, r: 72 },
+                            xaxis: { ...base.xaxis, title: isUp ? '' : 'R1:R2 Power Ratio', showticklabels: !isUp },
+                            yaxis: { ...base.yaxis, title: metric.label },
+                            yaxis2: {
+                                title: 'Right − Left', overlaying: 'y', side: 'right',
+                                showline: true, ticks: 'inside', linecolor: '#555', zeroline: true,
+                                zerolinecolor: '#6c757d', zerolinewidth: 1.4
+                            },
+                            title: {
+                                text: `${isUp ? 'UP' : 'DOWN'} | AC Stark Centering | ${sourceLabel}`,
+                                font: { size: 13 }, x: 0.05, y: 0.94
+                            },
+                            legend: { ...base.legend, orientation: 'h', x: 0.5, xanchor: 'center', y: 1.13 }
+                        };
+                        return { traces, layout };
+                    };
+                    const up = makePanel('up');
+                    const down = makePanel('dw');
+                    this.layoutResUp = up.layout;
+                    this.layoutResDw = down.layout;
+                    Plotly.react('resultsPlotUp', up.traces, up.layout);
+                    Plotly.react('resultsPlotDw', down.traces, down.layout);
+                },
                 renderMainPlot() {
+                    if (this.config.mode === 'ac_stark') {
+                        this.renderAcStarkPlot();
+                        return;
+                    }
                     const points = this.getAggregatedPoints();
                     const metric = this.getMetricConfig();
                     const scanDimensions = this.getActiveScanDimensions();
@@ -3268,9 +3589,12 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     }
                     const scanDimensions = Math.max(1, Math.min(3, Number(data.scan_dimensions || this.currentScanDimensions || this.getConfiguredScanDimensions()) || 1));
                     const scannedParams = this.getScannedParameters(data, scanDimensions);
+                    const isAcStarkPoint = Number.isFinite(Number(data.ac_stark_ratio)) && ['left', 'right'].includes(String(data.ac_stark_side || '').toLowerCase());
                     const isFinalImmediateStep = !this.isScheduleActive() && total > 0 && this.currentStep >= total;
                     this.currentScanDimensions = scanDimensions;
-                    this.statusMessage = `Scanning: ${this.formatScanParameters(scannedParams)}`;
+                    this.statusMessage = isAcStarkPoint
+                        ? `AC Stark: ratio=${Number(data.ac_stark_ratio).toFixed(6)} | ${String(data.ac_stark_side).toUpperCase()}`
+                        : `Scanning: ${this.formatScanParameters(scannedParams)}`;
 
                     if (!data.time_axis || !data.raw_data_up || !data.raw_data_dw || !data.fit_data_up || !data.fit_data_dw) {
                         if (data.error) {
@@ -3300,6 +3624,23 @@ finishScheduledRun(finalStatus = 'IDLE') {
                             Plotly.react('waveformPlotUp', [traceUpRaw, traceUpFit], this.layoutOscUp);
                             this.layoutOscDw.datarevision = this.currentStep; this.layoutOscDw.shapes = shapesDw;
                             Plotly.react('waveformPlotDw', [traceDwRaw, traceDwFit], this.layoutOscDw);
+
+                            if (isAcStarkPoint) {
+                                this.recordAcStarkPoint(data);
+                                this.plotRevision++;
+                                this.renderMainPlot();
+                                let acLog = `ratio=${Number(data.ac_stark_ratio).toFixed(6)} | ${String(data.ac_stark_side).toUpperCase()} P0=${Number(data.parameter).toFixed(0)} | DDS5[${data.ac_stark_dds_element}] | A1=${data.ac_stark_amplitude_r1}, A2=${data.ac_stark_amplitude_r2}`;
+                                if (data.detected_delay !== undefined && data.detected_delay !== null) {
+                                    acLog += ` | Δt=${(data.detected_delay * 1000).toFixed(2)}ms`;
+                                }
+                                this.addLog(acLog);
+                                if (isFinalImmediateStep) {
+                                    this.finalizeImmediateScanCompletion(total);
+                                } else if (this.isRunning) {
+                                    this.fetchStatus();
+                                }
+                                return;
+                            }
 
                             const key = this.getHistoryKey(scannedParams);
                             if (!this.historyMap[key]) {
@@ -3371,6 +3712,13 @@ finishScheduledRun(finalStatus = 'IDLE') {
             if (!uploadSuccess) {
                 this.addLog('Aborting start due to sequence upload failure.');
                 return;
+            }
+            if (this.config.mode === 'ac_stark') {
+                const ddsUploadSuccess = await this.uploadDdsXmlFile();
+                if (!ddsUploadSuccess) {
+                    this.addLog('Aborting start because no valid DDS XML table is available.');
+                    return;
+                }
             }
             this.resetHistory();
             this.currentStep = 0;
@@ -3479,6 +3827,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                 ? Math.max(1, Math.min(3, Math.round(targetDimensions)))
                 : this.getConfiguredScanDimensions();
             this.historyMap = {};
+            this.acStarkHistoryMap = {};
             this.initPlots();
         }
     }

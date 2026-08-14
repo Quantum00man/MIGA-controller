@@ -17,6 +17,7 @@ from dataclasses import asdict
 
 import config
 from app.drivers.hardware import SequenceEditor, ExperimentDriver, RedPitayaDriver
+from app.drivers import dds_table
 from app.drivers.vcd_parser import VCDParser
 from app.analysis import fitting, physics
 from app.models.schemas import ScanConfig
@@ -55,6 +56,7 @@ class ExperimentManager:
         self.on_data_ready: Optional[Callable[[Dict[str, Any]], None]] = None
         self._activity_lock = threading.Lock()
         self._active_mode: Optional[str] = None
+        self._scan_finalize_error: Optional[str] = None
 
     def _default_tmot_args(self) -> str:
         return config.TMOT_EXTRA_ARGS_WIN if config.IS_WINDOWS else config.TMOT_EXTRA_ARGS_LINUX
@@ -423,6 +425,11 @@ class ExperimentManager:
             "tmot_args": config.TMOT_EXTRA_ARGS_WIN if config.IS_WINDOWS else config.TMOT_EXTRA_ARGS_LINUX,
             "cmot_path": config.CMOT_BINARY_PATH_WIN if config.IS_WINDOWS else config.CMOT_BINARY_PATH_LINUX,
             "template_path": config.SEQUENCE_TEMPLATE_PATH_WIN if config.IS_WINDOWS else config.SEQUENCE_TEMPLATE_PATH_LINUX,
+            "dds_writetable_path": config.DDS_WRITETABLE_PATH_LINUX,
+            "raman_up_r1_calibration": dict(config.DEFAULT_RAMAN_POWER_CALIBRATION),
+            "raman_up_r2_calibration": dict(config.DEFAULT_RAMAN_POWER_CALIBRATION),
+            "raman_down_r1_calibration": dict(config.DEFAULT_RAMAN_POWER_CALIBRATION),
+            "raman_down_r2_calibration": dict(config.DEFAULT_RAMAN_POWER_CALIBRATION),
             
             # --- [关键修复] 显式添加这三个参数的默认值 ---
             "intf_alpha": 0.35,
@@ -676,6 +683,129 @@ class ExperimentManager:
             'models': fit_models,
         }
 
+    def _validate_ac_stark_sequence(self) -> None:
+        template_path = Path(
+            config.SEQUENCE_TEMPLATE_PATH_WIN
+            if config.USE_SIMULATION
+            else self.settings.get('template_path', config.SEQUENCE_TEMPLATE_PATH_LINUX)
+        )
+        if not template_path.is_file():
+            raise ValueError(f"Sequence template not found: {template_path}")
+        content = template_path.read_text(encoding="utf-8", errors="replace")
+        active_content = "\n".join(line.split("#", 1)[0] for line in content.splitlines())
+        missing = [
+            placeholder
+            for placeholder in ("<PARAMETER0>", "<PARAMETER1>")
+            if placeholder not in active_content
+        ]
+        if missing:
+            raise ValueError(
+                "AC Stark sequence must use " + " and ".join(missing) + " in executable lines"
+            )
+
+    def _build_ac_stark_execution(self, scan_config: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+        if self._resolve_scan_dimensions(scan_config) != 1:
+            raise ValueError("AC Stark Centering only supports a 1D live scan")
+        if scan_config.get('randomize'):
+            raise ValueError("AC Stark Centering does not support Randomize")
+        self._validate_ac_stark_sequence()
+
+        source_xml = Path(config.DDS_TABLE_UPLOAD_PATH)
+        if not source_xml.is_file():
+            raise ValueError("Upload a DDS .xml table before starting AC Stark Centering")
+        writer_path = Path(str(self.settings.get('dds_writetable_path') or '')).expanduser()
+        if not config.USE_SIMULATION and not writer_path.is_file():
+            raise ValueError(f"writetable.py not found: {writer_path}")
+
+        group = str(scan_config.get('ac_stark_raman_group') or 'up').strip().lower()
+        if group not in {'up', 'down'}:
+            raise ValueError("AC Stark Raman group must be UP or DOWN")
+        calibration_r1 = self.settings.get(f'raman_{group}_r1_calibration')
+        calibration_r2 = self.settings.get(f'raman_{group}_r2_calibration')
+        if not isinstance(calibration_r1, dict) or not isinstance(calibration_r2, dict):
+            raise ValueError(f"Raman {group.upper()} R1/R2 calibrations are missing in Settings")
+
+        ratios = dds_table.generate_ratio_values(
+            scan_config.get('ac_stark_ratio_start', 0.5),
+            scan_config.get('ac_stark_ratio_stop', 2.0),
+            scan_config.get('ac_stark_ratio_step', 0.1),
+        )
+        generated_xml = Path(config.BASE_DIR) / 'temp' / 'dds_ac_stark_scan.xml'
+        ratio_plans = dds_table.build_ac_stark_table(
+            source_xml,
+            generated_xml,
+            ratios,
+            float(scan_config.get('ac_stark_total_power', 0)),
+            calibration_r1,
+            calibration_r2,
+        )
+
+        left_p0 = int(scan_config.get('ac_stark_left_p0', 0))
+        right_p0 = int(scan_config.get('ac_stark_right_p0', 0))
+        base_points: List[Dict[str, Any]] = []
+        for plan in ratio_plans:
+            plan_data = plan.to_dict()
+            for side, p0_value in (('left', left_p0), ('right', right_p0)):
+                metadata = {
+                    'ac_stark_ratio': plan.ratio,
+                    'ac_stark_side': side,
+                    'ac_stark_dds_element': plan.element,
+                    'ac_stark_power_r1': plan.requested_power_r1,
+                    'ac_stark_power_r2': plan.requested_power_r2,
+                    'ac_stark_amplitude_r1': plan.amplitude_r1,
+                    'ac_stark_amplitude_r2': plan.amplitude_r2,
+                    'ac_stark_actual_power_r1': plan.actual_power_r1,
+                    'ac_stark_actual_power_r2': plan.actual_power_r2,
+                    'ac_stark_actual_ratio': plan.actual_ratio,
+                    'ac_stark_actual_total_power': plan.actual_total_power,
+                    'ac_stark_raman_group': group,
+                }
+                base_points.append({
+                    'sequence_parameters': [p0_value, plan.element],
+                    'metadata': metadata,
+                    'plan': plan_data,
+                })
+
+        parameters: List[Dict[str, Any]] = []
+        averages = max(1, int(scan_config.get('averages', 1)))
+        for repeat_index in range(averages):
+            for point in base_points:
+                copied_point = {
+                    **point,
+                    'sequence_parameters': list(point['sequence_parameters']),
+                    'metadata': {**point['metadata'], 'ac_stark_repeat_index': repeat_index + 1},
+                }
+                parameters.append(copied_point)
+
+        plan_dicts = [plan.to_dict() for plan in ratio_plans]
+        scan_config['scan_dimensions'] = 1
+        scan_config['dim2_enabled'] = False
+        scan_config['dim3_enabled'] = False
+        scan_config['randomize'] = False
+        scan_config['_ac_stark_ratio_plan'] = plan_dicts
+        return parameters, {
+            'original_xml': source_xml,
+            'generated_xml': generated_xml,
+            'writer_path': writer_path,
+            'ratio_plan': plan_dicts,
+        }
+
+    def _restore_ac_stark_dds(self, context: Optional[Dict[str, Any]]) -> Optional[str]:
+        if not context or config.USE_SIMULATION:
+            return None
+        try:
+            self.status.message = 'Restoring original DDS table...'
+            dds_table.write_and_verify_dds_table(
+                context['writer_path'],
+                context['original_xml'],
+            )
+            print("[AC Stark] Original DDS table restored and verified.")
+            return None
+        except Exception as exc:
+            message = f"DDS restore/verify failed: {exc}"
+            print(f"[AC Stark] {message}")
+            return message
+
     def start_scan(self, scan_config: Dict[str, Any]) -> Dict[str, str]:
         if not hasattr(self, 'status'):
             self.status = ExperimentStatus()
@@ -685,9 +815,12 @@ class ExperimentManager:
             return {'status': 'error', 'message': busy_message}
 
         self.refresh_runtime_settings_from_disk()
-
+        ac_stark_context: Optional[Dict[str, Any]] = None
         try:
-            parameters = self._generate_parameters(scan_config)
+            if scan_config.get('mode') == 'ac_stark':
+                parameters, ac_stark_context = self._build_ac_stark_execution(scan_config)
+            else:
+                parameters = self._generate_parameters(scan_config)
         except Exception as exc:
             self.release_run_slot('scan')
             return {'status': 'error', 'message': f'Param generation failed: {str(exc)}'}
@@ -699,24 +832,48 @@ class ExperimentManager:
             return {'status': 'error', 'message': str(exc)}
 
         self.stop_flag = False
+        self._scan_finalize_error = None
         self.status = ExperimentStatus(is_running=True, total_steps=len(parameters), message='Starting...')
 
         try:
             scan_config['_system_settings_snapshot'] = self.settings
             self.data_manager.init_run(scan_config)
+            if ac_stark_context:
+                archived = self.data_manager.archive_ac_stark_plan(
+                    Path(ac_stark_context['original_xml']),
+                    Path(ac_stark_context['generated_xml']),
+                    ac_stark_context['ratio_plan'],
+                )
+                ac_stark_context['original_xml'] = Path(archived['original_xml'])
+                ac_stark_context['generated_xml'] = Path(archived['generated_xml'])
+                if not config.USE_SIMULATION:
+                    self.status.message = 'Writing and verifying AC Stark DDS table...'
+                    dds_table.write_and_verify_dds_table(
+                        ac_stark_context['writer_path'],
+                        ac_stark_context['generated_xml'],
+                    )
+                    print("[AC Stark] Generated DDS scan table written and verified.")
         except Exception as exc:
-            self.status = ExperimentStatus()
+            restore_error = self._restore_ac_stark_dds(ac_stark_context)
+            self.data_manager.close_run()
+            self.status = ExperimentStatus(message=restore_error or 'IDLE')
             self.release_run_slot('scan')
-            return {'status': 'error', 'message': f'Data Init Failed: {str(exc)}'}
+            message = f'AC Stark preparation failed: {exc}' if ac_stark_context else f'Data Init Failed: {exc}'
+            if restore_error:
+                message += f'; {restore_error}'
+            return {'status': 'error', 'message': message}
 
         with self.data_queue.mutex:
             self.data_queue.queue.clear()
 
-        self.proc_thread = threading.Thread(target=self._processing_loop, args=(fit_config,))
+        self.proc_thread = threading.Thread(target=self._processing_loop, args=(fit_config, scan_config))
         self.proc_thread.daemon = True
         self.proc_thread.start()
 
-        self.acq_thread = threading.Thread(target=self._acquisition_loop, args=(parameters, scan_config))
+        self.acq_thread = threading.Thread(
+            target=self._acquisition_loop,
+            args=(parameters, scan_config, ac_stark_context),
+        )
         self.acq_thread.daemon = True
         self.acq_thread.start()
 
@@ -1310,6 +1467,7 @@ class ExperimentManager:
         idx = int(job.get('idx', 0))
         total = int(job.get('total', 1) or 1)
         params = job.get('params') or []
+        metadata = job.get('metadata') or {}
         scan_dimensions = int(job.get('scan_dimensions', 1) or 1)
         primary_param = params[0] if params else None
         start_delay = float(job.get('start_delay', 0.0) or 0.0)
@@ -1471,6 +1629,15 @@ class ExperimentManager:
                 fit_data_dw=fit_dw_store,
                 time_axis=time_axis_store,
                 all_parameters=params,
+                ac_stark_ratio=metadata.get('ac_stark_ratio'),
+                ac_stark_side=metadata.get('ac_stark_side'),
+                ac_stark_dds_element=metadata.get('ac_stark_dds_element'),
+                ac_stark_power_r1=metadata.get('ac_stark_power_r1'),
+                ac_stark_power_r2=metadata.get('ac_stark_power_r2'),
+                ac_stark_amplitude_r1=metadata.get('ac_stark_amplitude_r1'),
+                ac_stark_amplitude_r2=metadata.get('ac_stark_amplitude_r2'),
+                ac_stark_actual_power_r1=metadata.get('ac_stark_actual_power_r1'),
+                ac_stark_actual_power_r2=metadata.get('ac_stark_actual_power_r2'),
                 tail_mean_up_raw=tail_mean_up_raw,
                 tail_mean_dw_raw=tail_mean_dw_raw,
                 window_up=win_up,
@@ -1528,44 +1695,128 @@ class ExperimentManager:
             return None, self._build_error_payload(job, 'Processing error', stream_type=stream_type, extra_payload=extra_payload)
 
     # --- THREAD 1: ACQUISITION (PRODUCER) ---
-    def _acquisition_loop(self, parameter_list: List[Any], scan_config: Dict[str, Any]):
+    def _acquisition_loop(
+        self,
+        parameter_list: List[Any],
+        scan_config: Dict[str, Any],
+        ac_stark_context: Optional[Dict[str, Any]] = None,
+    ):
         print(f"--- Acquisition Started: {len(parameter_list)} points ---")
         total_steps = len(parameter_list)
         scan_dimensions = self._resolve_scan_dimensions(scan_config)
 
-        for idx, param_set in enumerate(parameter_list):
-            if self.stop_flag:
-                break
-            job = self.execute_single_measurement(
-                param_set,
-                scan_config,
-                idx=idx,
-                total_steps=total_steps,
-                scan_dimensions=scan_dimensions,
-            )
-            self.data_queue.put(job)
-            if config.USE_SIMULATION:
-                time.sleep(0.1)
+        try:
+            for idx, param_set in enumerate(parameter_list):
+                if self.stop_flag:
+                    break
+                metadata: Optional[Dict[str, Any]] = None
+                sequence_parameters = param_set
+                if isinstance(param_set, dict) and 'sequence_parameters' in param_set:
+                    sequence_parameters = param_set['sequence_parameters']
+                    metadata = param_set.get('metadata') or {}
+                job = self.execute_single_measurement(
+                    sequence_parameters,
+                    scan_config,
+                    idx=idx,
+                    total_steps=total_steps,
+                    scan_dimensions=scan_dimensions,
+                    metadata=metadata,
+                )
+                self.data_queue.put(job)
+                if config.USE_SIMULATION:
+                    time.sleep(0.1)
+        except Exception as exc:
+            self._scan_finalize_error = f"Acquisition loop failed: {exc}"
+            print(f"[Acq Error] {traceback.format_exc()}")
+        finally:
+            restore_error = self._restore_ac_stark_dds(ac_stark_context)
+            if restore_error:
+                self._scan_finalize_error = restore_error
+            self.data_queue.put(None)
+            print("--- Acquisition Finished ---")
 
-        self.data_queue.put(None)
-        print("--- Acquisition Finished ---")
+    def _build_ac_stark_summary(self, results: List[ScanResult]) -> List[Dict[str, Any]]:
+        metrics = (
+            'atom_number_up',
+            'atom_number_dw',
+            'transition_probability_up',
+            'transition_probability_dw',
+            'atom_number_up_nofit',
+            'atom_number_dw_nofit',
+            'transition_probability_up_nofit',
+            'transition_probability_dw_nofit',
+        )
+        grouped: Dict[float, Dict[str, List[ScanResult]]] = {}
+        for result in results:
+            if result.ac_stark_ratio is None or result.ac_stark_side not in {'left', 'right'}:
+                continue
+            key = round(float(result.ac_stark_ratio), 12)
+            grouped.setdefault(key, {'left': [], 'right': []})[result.ac_stark_side].append(result)
+
+        summary: List[Dict[str, Any]] = []
+        for ratio in sorted(grouped):
+            sides = grouped[ratio]
+            representative = (sides['left'] or sides['right'])[0]
+            row: Dict[str, Any] = {
+                'ratio': float(ratio),
+                'dds_element': representative.ac_stark_dds_element,
+                'requested_power_r1': representative.ac_stark_power_r1,
+                'requested_power_r2': representative.ac_stark_power_r2,
+                'amplitude_r1': representative.ac_stark_amplitude_r1,
+                'amplitude_r2': representative.ac_stark_amplitude_r2,
+                'actual_power_r1': representative.ac_stark_actual_power_r1,
+                'actual_power_r2': representative.ac_stark_actual_power_r2,
+                'left_count': len(sides['left']),
+                'right_count': len(sides['right']),
+            }
+            for metric in metrics:
+                statistics_by_side: Dict[str, Tuple[Optional[float], Optional[float], Optional[float]]] = {}
+                for side in ('left', 'right'):
+                    values = [
+                        float(value)
+                        for value in (getattr(item, metric, None) for item in sides[side])
+                        if value is not None and math.isfinite(float(value))
+                    ]
+                    if values:
+                        mean = float(np.mean(values))
+                        std = float(np.std(values, ddof=1)) if len(values) > 1 else 0.0
+                        sem = std / math.sqrt(len(values)) if values else 0.0
+                    else:
+                        mean = std = sem = None
+                    statistics_by_side[side] = (mean, std, sem)
+                    row[f'{metric}_{side}_mean'] = mean
+                    row[f'{metric}_{side}_std'] = std
+                    row[f'{metric}_{side}_sem'] = sem
+                left_mean, _, left_sem = statistics_by_side['left']
+                right_mean, _, right_sem = statistics_by_side['right']
+                row[f'{metric}_difference'] = (
+                    right_mean - left_mean
+                    if left_mean is not None and right_mean is not None
+                    else None
+                )
+                row[f'{metric}_difference_sem'] = (
+                    math.sqrt((left_sem or 0.0) ** 2 + (right_sem or 0.0) ** 2)
+                    if left_mean is not None and right_mean is not None
+                    else None
+                )
+            summary.append(row)
+        return summary
 
     # --- THREAD 2: PROCESSING (CONSUMER) ---
-    def _processing_loop(self, fit_config: Dict[str, Any]):
+    def _processing_loop(self, fit_config: Dict[str, Any], scan_config: Optional[Dict[str, Any]] = None):
         print("--- Processing Thread Started ---")
         selected_fit_model = fitting.get_fit_model_by_key(
             fit_config.get('models'),
             fit_config.get('model_key'),
         )
         print(f"[Fit] Using model: {selected_fit_model['label']} ({selected_fit_model['key']})")
+        ac_stark_results: List[ScanResult] = []
 
         try:
             while True:
                 try:
                     job = self.data_queue.get(timeout=5)
                 except queue.Empty:
-                    if self.stop_flag:
-                        break
                     continue
                 if job is None:
                     break
@@ -1575,17 +1826,30 @@ class ExperimentManager:
                 self.status.total_steps = int(job.get('total', 1) or 1)
                 self.status.message = f"Processing: {params} (Queue: {self.data_queue.qsize()})"
 
-                _, payload = self.process_measurement_job(
+                result, payload = self.process_measurement_job(
                     job,
                     fit_config,
                     data_manager=self.data_manager,
                     stream_type='scan_point',
                 )
+                if result is not None and result.ac_stark_ratio is not None:
+                    ac_stark_results.append(result)
                 if self.on_data_ready:
                     self.on_data_ready(payload)
         finally:
+            if ac_stark_results:
+                try:
+                    self.data_manager.save_ac_stark_summary(
+                        self._build_ac_stark_summary(ac_stark_results)
+                    )
+                except Exception as exc:
+                    self._scan_finalize_error = f"AC Stark summary save failed: {exc}"
+                    print(f"[AC Stark] {self._scan_finalize_error}")
             self.data_manager.close_run()
             self.status.is_running = False
-            self.status.message = 'Stopped' if self.stop_flag else 'Done'
+            if self._scan_finalize_error:
+                self.status.message = self._scan_finalize_error
+            else:
+                self.status.message = 'Stopped' if self.stop_flag else 'Done'
             self.release_run_slot('scan')
             print("--- Processing Finished ---")

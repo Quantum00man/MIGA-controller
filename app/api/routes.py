@@ -3,6 +3,7 @@ import os
 import shutil
 import time
 from copy import deepcopy
+from pathlib import Path
 
 import numpy as np
 from fastapi import APIRouter, HTTPException, UploadFile, File
@@ -14,6 +15,7 @@ from app.core.experiment_manager import ExperimentManager
 from app.core.data_loader import DataLoader
 from app.core.data_manager import DataManager
 from app.core.optimization_manager import OBJECTIVE_METRICS, OptimizationManager
+from app.drivers.dds_table import DdsTableError, validate_dds_table
 from app.models.schemas import (
     AnalysisSettings,
     ArchiveAllanRequest,
@@ -46,6 +48,7 @@ def _default_index_ui_state() -> Dict[str, Any]:
     return {
         "runMode": "live",
         "currentSequenceName": "Default (seq0.mot)",
+        "currentDdsXmlName": "",
         "config": ScanConfig().dict(),
         "scheduleSettings": {
             "singlePointDurationSec": 1.615,
@@ -81,6 +84,7 @@ def _sanitize_index_ui_state(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     current_sequence_name = str(payload.get("currentSequenceName") or defaults["currentSequenceName"]).strip()
     sanitized["currentSequenceName"] = current_sequence_name or defaults["currentSequenceName"]
+    sanitized["currentDdsXmlName"] = str(payload.get("currentDdsXmlName") or "").strip()
 
     config_payload = payload.get("config") if isinstance(payload.get("config"), dict) else {}
     allowed_config_keys = set(defaults["config"].keys())
@@ -286,6 +290,114 @@ async def upload_sequence(file: UploadFile = File(...)):
         return {"status": "success", "message": f"Sequence loaded: {file.filename}", "filename": file.filename}
     except Exception as e:
         raise HTTPException(500, f"Failed to upload sequence: {str(e)}")
+
+@router.post("/experiment/dds-table")
+async def upload_dds_table(file: UploadFile = File(...)):
+    filename = str(file.filename or "").strip()
+    if Path(filename).suffix.lower() != ".xml":
+        raise HTTPException(400, "DDS table must be an .xml file")
+
+    target_path = Path(config.DDS_TABLE_UPLOAD_PATH)
+    metadata_path = Path(config.DDS_TABLE_UPLOAD_META_PATH)
+    temporary_path = target_path.with_suffix(target_path.suffix + ".upload")
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with open(temporary_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        table_info = validate_dds_table(temporary_path)
+        os.replace(temporary_path, target_path)
+        with open(metadata_path, "w", encoding="utf-8") as handle:
+            json.dump({"filename": filename, **table_info}, handle, ensure_ascii=False, indent=2)
+        return {
+            "status": "success",
+            "message": f"DDS table loaded: {filename}",
+            "filename": filename,
+            **table_info,
+        }
+    except DdsTableError as exc:
+        if temporary_path.exists():
+            temporary_path.unlink()
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        if temporary_path.exists():
+            temporary_path.unlink()
+        raise HTTPException(500, f"Failed to upload DDS table: {exc}")
+
+
+@router.get("/experiment/dds-table/status")
+async def get_dds_table_status():
+    target_path = Path(config.DDS_TABLE_UPLOAD_PATH)
+    if not target_path.exists():
+        return {"status": "empty", "filename": ""}
+    metadata = {}
+    try:
+        with open(config.DDS_TABLE_UPLOAD_META_PATH, "r", encoding="utf-8") as handle:
+            metadata = json.load(handle)
+    except Exception:
+        metadata = {}
+    try:
+        table_info = validate_dds_table(target_path)
+    except DdsTableError as exc:
+        raise HTTPException(400, str(exc))
+    return {"status": "success", "filename": str(metadata.get("filename") or target_path.name), **table_info}
+
+
+
+def _writetable_folder_listing(requested_path: str = "", root_path: Path | None = None) -> Dict[str, Any]:
+    browser_root = Path(root_path or Path(config.BASE_DIR).parent).expanduser().resolve(strict=True)
+    candidate = Path(str(requested_path or "")).expanduser()
+    if not str(requested_path or "").strip():
+        candidate = browser_root
+    elif not candidate.is_absolute():
+        candidate = browser_root / candidate
+
+    try:
+        current = candidate.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise ValueError("Selected folder does not exist") from exc
+    if current.is_file():
+        current = current.parent
+    if not current.is_dir():
+        raise ValueError("Selected path is not a folder")
+    try:
+        current.relative_to(browser_root)
+    except ValueError as exc:
+        raise ValueError("Folder selection must stay inside " + str(browser_root)) from exc
+
+    directories = []
+    try:
+        children = sorted(current.iterdir(), key=lambda item: item.name.casefold())
+    except OSError as exc:
+        raise ValueError("Cannot read folder: " + str(current)) from exc
+    for child in children:
+        if child.name.startswith("."):
+            continue
+        try:
+            resolved_child = child.resolve(strict=True)
+            resolved_child.relative_to(browser_root)
+        except (OSError, RuntimeError, ValueError):
+            continue
+        if resolved_child.is_dir():
+            directories.append({"name": child.name, "path": str(resolved_child)})
+
+    writer_path = current / "writetable.py"
+    return {
+        "root": str(browser_root),
+        "current": str(current),
+        "parent": str(current.parent) if current != browser_root else "",
+        "directories": directories,
+        "contains_writetable": writer_path.is_file(),
+        "writetable_path": str(writer_path),
+    }
+
+
+@router.get("/system/writetable-folders")
+async def browse_writetable_folders(path: str = ""):
+    try:
+        return _writetable_folder_listing(path)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
 
 @router.get("/experiment/sequence/template")
 async def get_sequence_template_snapshot():

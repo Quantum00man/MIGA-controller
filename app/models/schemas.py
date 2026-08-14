@@ -69,6 +69,46 @@ class ScanConfig(BaseModel):
     intf_gamma: float = 0.25
     bragg_shape: str = Field("blackman")
     bragg_base_timing: int = Field(331119)
+    ac_stark_raman_group: str = Field("up")
+    ac_stark_left_p0: int = Field(11)
+    ac_stark_right_p0: int = Field(22)
+    ac_stark_ratio_start: float = Field(0.5)
+    ac_stark_ratio_stop: float = Field(2.0)
+    ac_stark_ratio_step: float = Field(0.1)
+    ac_stark_total_power: float = Field(100.0)
+    ac_stark_dds_xml_name: str = Field("")
+
+    @validator("ac_stark_raman_group")
+    def normalize_ac_stark_raman_group(cls, value):
+        normalized = str(value or "up").strip().lower()
+        if normalized not in {"up", "down"}:
+            raise ValueError("AC Stark Raman group must be 'up' or 'down'")
+        return normalized
+
+
+class RamanPowerCalibration(BaseModel):
+    """Generalized-logistic DDS amplitude to optical-power calibration."""
+
+    lower_asymptote: float = Field(-6.30426)
+    upper_asymptote: float = Field(151.029)
+    growth_rate: float = Field(0.015975)
+    midpoint: float = Field(198.203)
+    shape: float = Field(1.29924)
+    amplitude_min: int = Field(0, ge=0, le=1023)
+    amplitude_max: int = Field(1023, ge=0, le=1023)
+
+    @validator("growth_rate", "shape")
+    def validate_positive_curve_parameter(cls, value):
+        if value <= 0:
+            raise ValueError("Calibration growth rate and shape must be positive")
+        return value
+
+    @validator("amplitude_max")
+    def validate_amplitude_range(cls, value, values):
+        minimum = int(values.get("amplitude_min", 0))
+        if value < minimum:
+            raise ValueError("Calibration amplitude_max must be >= amplitude_min")
+        return value
 
 
 class ScheduleRequest(BaseModel):
@@ -202,6 +242,11 @@ class SystemSettings(BaseModel):
     fit_models: List[FitModelDefinition] = Field(default_factory=list)
     update_repo_url: str = Field("")
     update_branch: str = Field("main")
+    dds_writetable_path: str = Field("")
+    raman_up_r1_calibration: RamanPowerCalibration = Field(default_factory=RamanPowerCalibration)
+    raman_up_r2_calibration: RamanPowerCalibration = Field(default_factory=RamanPowerCalibration)
+    raman_down_r1_calibration: RamanPowerCalibration = Field(default_factory=RamanPowerCalibration)
+    raman_down_r2_calibration: RamanPowerCalibration = Field(default_factory=RamanPowerCalibration)
 
 
 class SystemUpdateRequest(BaseModel):

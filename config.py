@@ -15,6 +15,8 @@ SETTINGS_FILE_PATH = BASE_DIR / "user_settings.json"
 USER_JSON_PATH = BASE_DIR / "user.json"
 INDEX_UI_STATE_PATH = BASE_DIR / "index_ui_state.json"
 SCHEDULE_STATE_PATH = BASE_DIR / "schedule_state.json"
+DDS_TABLE_UPLOAD_PATH = BASE_DIR / "temp" / "dds_uploaded.xml"
+DDS_TABLE_UPLOAD_META_PATH = BASE_DIR / "temp" / "dds_uploaded.json"
 
 # --- Hardware Paths ---
 TMOT_BINARY_PATH_WIN = str(BASE_DIR / "mock_bin" / "tmot4_mock.exe")
@@ -27,6 +29,7 @@ TMOT_BINARY_PATH_LINUX = str(MOT_BASE_DIR / "tmot4")
 # External trigger mode. Clear this string if your tmot4 should run without `-e`.
 TMOT_EXTRA_ARGS_LINUX = "-e"
 CMOT_BINARY_PATH_LINUX = str(MOT_BASE_DIR / "cmot4")
+DDS_WRITETABLE_PATH_LINUX = str(BASE_DIR.parent / "PREPARE FOR THE AC STARK" / "writetable.py")
 
 SEQUENCE_TEMPLATE_PATH_WIN = str(BASE_DIR / "temp" / "seq0.mot")
 SEQUENCE_TEMPLATE_PATH_LINUX = "./temp/seq0.mot"
@@ -63,4 +66,15 @@ DEFAULT_ANALYSIS_SETTINGS = {
     "atom_area_baseline_points": 2,
     # [CRITICAL FIX] Default Decimation set to 8192 to match 1500pts -> ~100ms
     "decimation": 8192 
+}
+
+# --- Raman DDS amplitude-to-power calibration ---
+DEFAULT_RAMAN_POWER_CALIBRATION = {
+    "lower_asymptote": -6.30426,
+    "upper_asymptote": 151.029,
+    "growth_rate": 0.015975,
+    "midpoint": 198.203,
+    "shape": 1.29924,
+    "amplitude_min": 0,
+    "amplitude_max": 1023,
 }

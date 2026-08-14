@@ -20,6 +20,10 @@ RESULTS_CSV_HEADER = [
     "NF_Center_UP", "NF_Center_DW", "NF_Amp_UP", "NF_Amp_DW", "NF_Prob_UP", "NF_Prob_DW",
     "NF_Intf_N1", "NF_Intf_N2", "NF_Intf_P1", "NF_Intf_P2",
     "TailMean_UP", "TailMean_DW",
+    "AC_Stark_Ratio", "AC_Stark_Side", "AC_Stark_DDS_Element",
+    "AC_Stark_Power_R1", "AC_Stark_Power_R2",
+    "AC_Stark_Amplitude_R1", "AC_Stark_Amplitude_R2",
+    "AC_Stark_Actual_Power_R1", "AC_Stark_Actual_Power_R2",
 ]
 
 
@@ -98,6 +102,49 @@ class DataManager:
         self._init_csv(self.csv_file)
         
         print(f"[DataManager] Run initialized at: {self.current_run_dir}")
+
+    def archive_ac_stark_plan(
+        self,
+        original_xml_path: Path,
+        generated_xml_path: Path,
+        ratio_plan: List[Dict[str, Any]],
+    ) -> Dict[str, str]:
+        if not self.current_run_dir:
+            raise RuntimeError("Run directory is not initialized")
+        original_target = self.current_run_dir / "dds_original.xml"
+        generated_target = self.current_run_dir / "dds_ac_stark_scan.xml"
+        plan_json = self.current_run_dir / "ac_stark_ratio_plan.json"
+        plan_csv = self.current_run_dir / "ac_stark_ratio_plan.csv"
+        shutil.copy2(original_xml_path, original_target)
+        shutil.copy2(generated_xml_path, generated_target)
+        with open(plan_json, "w", encoding="utf-8") as handle:
+            json.dump(ratio_plan, handle, ensure_ascii=False, indent=2)
+        fieldnames = list(ratio_plan[0].keys()) if ratio_plan else []
+        with open(plan_csv, "w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fieldnames)
+            if fieldnames:
+                writer.writeheader()
+                writer.writerows(ratio_plan)
+        return {
+            "original_xml": str(original_target),
+            "generated_xml": str(generated_target),
+            "ratio_plan_json": str(plan_json),
+            "ratio_plan_csv": str(plan_csv),
+        }
+
+    def save_ac_stark_summary(self, summary_rows: List[Dict[str, Any]]) -> None:
+        if not self.current_run_dir or not summary_rows:
+            return
+        json_path = self.current_run_dir / "ac_stark_summary.json"
+        csv_path = self.current_run_dir / "ac_stark_summary.csv"
+        with open(json_path, "w", encoding="utf-8") as handle:
+            json.dump(summary_rows, handle, ensure_ascii=False, indent=2)
+        fieldnames = list(summary_rows[0].keys())
+        with open(csv_path, "w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(summary_rows)
+
     def _init_csv(self, path: Path):
         self.csv_handle = open(path, 'w', newline='')
         self.csv_writer = csv.writer(self.csv_handle)
@@ -120,7 +167,16 @@ class DataManager:
             time_axis=result.time_axis if result.time_axis is not None else [],
             time_stamp=result.timestamp,
             params=result.all_parameters,
-            window_up=w_up, window_dw=w_dw
+            window_up=w_up, window_dw=w_dw,
+            ac_stark_ratio=result.ac_stark_ratio if result.ac_stark_ratio is not None else np.nan,
+            ac_stark_side=result.ac_stark_side or "",
+            ac_stark_dds_element=result.ac_stark_dds_element if result.ac_stark_dds_element is not None else -1,
+            ac_stark_power_r1=result.ac_stark_power_r1 if result.ac_stark_power_r1 is not None else np.nan,
+            ac_stark_power_r2=result.ac_stark_power_r2 if result.ac_stark_power_r2 is not None else np.nan,
+            ac_stark_amplitude_r1=result.ac_stark_amplitude_r1 if result.ac_stark_amplitude_r1 is not None else -1,
+            ac_stark_amplitude_r2=result.ac_stark_amplitude_r2 if result.ac_stark_amplitude_r2 is not None else -1,
+            ac_stark_actual_power_r1=result.ac_stark_actual_power_r1 if result.ac_stark_actual_power_r1 is not None else np.nan,
+            ac_stark_actual_power_r2=result.ac_stark_actual_power_r2 if result.ac_stark_actual_power_r2 is not None else np.nan,
         )
 
     def _write_csv_row(self, result: ScanResult, step_index: int):
@@ -144,6 +200,11 @@ class DataManager:
             f(result.transition_probability_up_nofit,2), f(result.transition_probability_dw_nofit,2),
             f(result.intf_n1_nofit), f(result.intf_n2_nofit), f(result.intf_p1_nofit, 2), f(result.intf_p2_nofit, 2),
             f(result.tail_mean_up_raw), f(result.tail_mean_dw_raw),
+            f(result.ac_stark_ratio), result.ac_stark_side or "", result.ac_stark_dds_element if result.ac_stark_dds_element is not None else "",
+            f(result.ac_stark_power_r1), f(result.ac_stark_power_r2),
+            result.ac_stark_amplitude_r1 if result.ac_stark_amplitude_r1 is not None else "",
+            result.ac_stark_amplitude_r2 if result.ac_stark_amplitude_r2 is not None else "",
+            f(result.ac_stark_actual_power_r1), f(result.ac_stark_actual_power_r2),
         ]
         self.csv_writer.writerow(row)
         self.csv_handle.flush()
@@ -189,6 +250,11 @@ class DataManager:
                     f('amplitude_up_nofit'), f('amplitude_dw_nofit'), f('transition_probability_up_nofit',2), f('transition_probability_dw_nofit',2),
                     f('intf_n1_nofit'), f('intf_n2_nofit'), f('intf_p1_nofit', 2), f('intf_p2_nofit', 2),
                     f('tail_mean_up_raw'), f('tail_mean_dw_raw'),
+                    f('ac_stark_ratio'), str(pt.get('ac_stark_side') or ''),
+                    pt.get('ac_stark_dds_element', ''),
+                    f('ac_stark_power_r1'), f('ac_stark_power_r2'),
+                    pt.get('ac_stark_amplitude_r1', ''), pt.get('ac_stark_amplitude_r2', ''),
+                    f('ac_stark_actual_power_r1'), f('ac_stark_actual_power_r2'),
                 ]
                 writer.writerow(row)
         

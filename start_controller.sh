@@ -14,6 +14,7 @@ PORT="${MIGA_PORT:-8000}"
 RELOAD="${MIGA_RELOAD:-1}"
 MODE="foreground"
 UVICORN_EXTRA_ARGS=()
+DEPENDENCIES_CHANGED=0
 
 log() {
   echo "[launcher] $*"
@@ -140,6 +141,9 @@ if missing or mismatched:
     raise SystemExit(1)
 
 try:
+    import gmpy2  # noqa: F401
+    import usb  # noqa: F401
+    from lxml import etree  # noqa: F401
     import numpy as np  # noqa: F401
     import sklearn  # noqa: F401
     import websockets  # noqa: F401
@@ -157,6 +161,7 @@ install_requirements() {
     "$PYTHON_BIN" -m pip install --index-url https://download.pytorch.org/whl/cpu torch
   fi
   "$PYTHON_BIN" -m pip install -r "$REQUIREMENTS_FILE"
+  DEPENDENCIES_CHANGED=1
 }
 
 run_preflight() {
@@ -195,6 +200,23 @@ server_running() {
   return 1
 }
 
+server_healthy() {
+  "$PYTHON_BIN" - "$PORT" <<'PY'
+import sys
+import urllib.request
+
+port = int(sys.argv[1])
+try:
+    with urllib.request.urlopen(
+        f"http://127.0.0.1:{port}/experiment/status",
+        timeout=2.0,
+    ) as response:
+        raise SystemExit(0 if response.status == 200 else 1)
+except Exception:
+    raise SystemExit(1)
+PY
+}
+
 load_runtime_metadata() {
   if [ -f "$META_FILE" ]; then
     # shellcheck disable=SC1090
@@ -214,7 +236,7 @@ EOF
 build_uvicorn_cmd() {
   UVICORN_CMD=("$PYTHON_BIN" -m uvicorn main:app --host "$HOST" --port "$PORT")
   if [ "$RELOAD" != "0" ]; then
-    UVICORN_CMD+=(--reload)
+    UVICORN_CMD+=(--reload --reload-dir "$ROOT_DIR/app")
   fi
   UVICORN_CMD+=("${UVICORN_EXTRA_ARGS[@]}")
 }
@@ -243,11 +265,26 @@ start_detached() {
     exec sudo env MIGA_HOST="$HOST" MIGA_PORT="$PORT" MIGA_RELOAD="$RELOAD" /bin/bash "$0" --start-detached "${UVICORN_EXTRA_ARGS[@]}"
   fi
 
+  local requested_host="$HOST"
+  local requested_port="$PORT"
+  local requested_reload="$RELOAD"
   run_preflight
   if server_running; then
-    log "Controller already running (pid=$(read_pid))"
-    print_status
-    return 0
+    if [ "$DEPENDENCIES_CHANGED" = "0" ] && server_healthy; then
+      log "Controller already running and healthy (pid=$(read_pid))"
+      print_status
+      return 0
+    fi
+
+    if [ "$DEPENDENCIES_CHANGED" != "0" ]; then
+      log "Dependencies changed; restarting the existing controller"
+    else
+      log "Existing controller is unresponsive; restarting it"
+    fi
+    stop_server
+    HOST="$requested_host"
+    PORT="$requested_port"
+    RELOAD="$requested_reload"
   fi
 
   build_uvicorn_cmd

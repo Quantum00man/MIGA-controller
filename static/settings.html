@@ -427,6 +427,79 @@
                     </div>
                 </div>
 
+                <div v-if="tab==='raman'">
+                    <div class="bg-light p-3 mb-4 rounded border">
+                        <h6 class="fw-bold text-primary"><i class="bi bi-lightning-charge me-2"></i>AC Stark DDS Control</h6>
+                        <div class="form-text">
+                            Each curve uses P(A) = P_low + (P_high − P_low) / [1 + exp(−k(A − V))]^n.
+                            AC Stark scans invert the selected Raman UP or DOWN R1/R2 curves while keeping total power constant.
+                        </div>
+                    </div>
+                    <div class="mb-4">
+                        <label class="form-label fw-bold">Local writetable.py Path</label>
+                        <div class="input-group">
+                            <input type="text" class="form-control font-monospace" v-model="s.dds_writetable_path"
+                                placeholder="Select the folder containing writetable.py" readonly>
+                            <button type="button" class="btn btn-primary" @click="openWritetableFolderPicker">
+                                <i class="bi bi-folder2-open me-1"></i>Select Folder
+                            </button>
+                        </div>
+                        <div class="form-text">Choose the containing folder; the controller will select its <code>writetable.py</code> and call <code>-w</code>, followed by <code>-v</code>.</div>
+                    </div>
+                    <div v-for="group in ['up', 'down']" :key="group" class="mb-4">
+                        <div class="d-flex align-items-center justify-content-between mb-2">
+                            <h6 class="text-muted fw-bold text-uppercase mb-0">Raman {{ group.toUpperCase() }}</h6>
+                            <span class="badge bg-light text-dark border">Independent R1 / R2</span>
+                        </div>
+                        <div class="row g-3">
+                            <div class="col-xl-6" v-for="entry in getRamanCalibrationEntries(group)" :key="entry.key">
+                                <div class="card border shadow-sm h-100">
+                                    <div class="card-body">
+                                        <h6 class="fw-bold text-primary mb-3">{{ entry.label }}</h6>
+                                        <div class="row g-2">
+                                            <div class="col-6">
+                                                <label class="form-label small text-muted">P low</label>
+                                                <input type="number" step="any" class="form-control form-control-sm"
+                                                    v-model.number="s[entry.key].lower_asymptote">
+                                            </div>
+                                            <div class="col-6">
+                                                <label class="form-label small text-muted">P high</label>
+                                                <input type="number" step="any" class="form-control form-control-sm"
+                                                    v-model.number="s[entry.key].upper_asymptote">
+                                            </div>
+                                            <div class="col-4">
+                                                <label class="form-label small text-muted">k</label>
+                                                <input type="number" step="any" min="0" class="form-control form-control-sm"
+                                                    v-model.number="s[entry.key].growth_rate">
+                                            </div>
+                                            <div class="col-4">
+                                                <label class="form-label small text-muted">V</label>
+                                                <input type="number" step="any" class="form-control form-control-sm"
+                                                    v-model.number="s[entry.key].midpoint">
+                                            </div>
+                                            <div class="col-4">
+                                                <label class="form-label small text-muted">n</label>
+                                                <input type="number" step="any" min="0" class="form-control form-control-sm"
+                                                    v-model.number="s[entry.key].shape">
+                                            </div>
+                                            <div class="col-6">
+                                                <label class="form-label small text-muted">Amplitude min</label>
+                                                <input type="number" step="1" min="0" max="1023" class="form-control form-control-sm"
+                                                    v-model.number="s[entry.key].amplitude_min">
+                                            </div>
+                                            <div class="col-6">
+                                                <label class="form-label small text-muted">Amplitude max</label>
+                                                <input type="number" step="1" min="0" max="1023" class="form-control form-control-sm"
+                                                    v-model.number="s[entry.key].amplitude_max">
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <div v-if="tab==='fitting'">
                     <div class="row g-3">
                         <div class="col-12">
@@ -704,6 +777,68 @@
 
             </div>
         </div>
+
+        <div v-if="pathBrowser.open" class="modal d-block" tabindex="-1" role="dialog"
+            aria-modal="true" @click.self="closeWritetableFolderPicker">
+            <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+                <div class="modal-content border-0 shadow">
+                    <div class="modal-header">
+                        <div>
+                            <h5 class="modal-title"><i class="bi bi-folder2-open me-2"></i>Select writetable.py Folder</h5>
+                            <div class="small text-muted mt-1">Browse folders under {{ pathBrowser.root || 'Documents' }}.</div>
+                        </div>
+                        <button type="button" class="btn-close" aria-label="Close" @click="closeWritetableFolderPicker"></button>
+                    </div>
+                    <div class="modal-body">
+                        <label class="form-label small text-muted fw-bold">Current Folder</label>
+                        <input type="text" class="form-control font-monospace mb-3" :value="pathBrowser.current" readonly>
+                        <div class="d-flex gap-2 mb-3 flex-wrap">
+                            <button type="button" class="btn btn-outline-secondary btn-sm"
+                                @click="loadWritetableFolder(pathBrowser.root)" :disabled="pathBrowser.busy">
+                                <i class="bi bi-house-door me-1"></i>Documents Root
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm"
+                                @click="loadWritetableFolder(pathBrowser.parent)"
+                                :disabled="pathBrowser.busy || !pathBrowser.parent">
+                                <i class="bi bi-arrow-up me-1"></i>Parent Folder
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm"
+                                @click="loadWritetableFolder(pathBrowser.current)" :disabled="pathBrowser.busy">
+                                <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+                            </button>
+                        </div>
+                        <div v-if="pathBrowser.error" class="alert alert-danger py-2">{{ pathBrowser.error }}</div>
+                        <div v-if="pathBrowser.busy" class="text-center py-5 text-muted">
+                            <span class="spinner-border spinner-border-sm me-2"></span>Reading folders...
+                        </div>
+                        <div v-else class="list-group mb-3">
+                            <button v-for="directory in pathBrowser.directories" :key="directory.path" type="button"
+                                class="list-group-item list-group-item-action d-flex align-items-center"
+                                @click="loadWritetableFolder(directory.path)">
+                                <i class="bi bi-folder-fill text-warning me-2"></i>
+                                <span>{{ directory.name }}</span>
+                                <i class="bi bi-chevron-right ms-auto text-muted"></i>
+                            </button>
+                            <div v-if="!pathBrowser.directories.length" class="list-group-item text-muted text-center py-4">
+                                No subfolders in this directory.
+                            </div>
+                        </div>
+                        <div :class="['alert mb-0 py-2', pathBrowser.containsWritetable ? 'alert-success' : 'alert-warning']">
+                            <i :class="['bi me-2', pathBrowser.containsWritetable ? 'bi-check-circle-fill' : 'bi-exclamation-triangle-fill']"></i>
+                            {{ pathBrowser.containsWritetable ? 'writetable.py found in this folder.' : 'This folder does not contain writetable.py.' }}
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" @click="closeWritetableFolderPicker">Cancel</button>
+                        <button type="button" class="btn btn-primary" @click="selectWritetableFolder"
+                            :disabled="pathBrowser.busy || !pathBrowser.containsWritetable">
+                            Use This Folder
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div v-if="pathBrowser.open" class="modal-backdrop fade show"></div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/vue@3.2.31/dist/vue.global.js"></script>
@@ -716,6 +851,7 @@
                     tab: 'phys', s: {}, msg: '', isError: false, saving: false,
                     tabDefinitions: [
                         { id: 'phys', label: 'Physics & Gains', icon: 'bi-activity', description: 'Configure detector gains, signal filters and physical calibration constants.' },
+                        { id: 'raman', label: 'Raman AC Stark', icon: 'bi-lightning-charge', description: 'Configure DDS writer access and four independent Raman amplitude-to-power calibration curves.' },
                         { id: 'fitting', label: 'Fitting Models', icon: 'bi-bezier2', description: 'Manage atom-area calculation and the models used for time-of-flight fitting.' },
                         { id: 'net', label: 'Network', icon: 'bi-hdd-network', description: 'Select the acquisition platform and configure device connection limits.' },
                         { id: 'logic', label: 'Logic & Channels', icon: 'bi-diagram-3', description: 'Set launch, trigger and linked-mode channel timing.' },
@@ -729,7 +865,18 @@
                         { key: 'center', label: 'Center' },
                         { key: 'offset', label: 'Offset' }
                     ],
-                    basePath: ''
+                    basePath: '',
+                    pathBrowser: {
+                        open: false,
+                        busy: false,
+                        root: '',
+                        current: '',
+                        parent: '',
+                        directories: [],
+                        containsWritetable: false,
+                        writetablePath: '',
+                        error: ''
+                    }
                 }
             },
             computed: {
@@ -742,6 +889,42 @@
             methods: {
                 getActiveTabDefinition() {
                     return this.tabDefinitions.find(item => item.id === this.tab) || this.tabDefinitions[0];
+                },
+                async openWritetableFolderPicker() {
+                    this.pathBrowser.open = true;
+                    const requestedPath = String(this.s.dds_writetable_path || '').trim();
+                    const loaded = await this.loadWritetableFolder(requestedPath);
+                    if (!loaded && requestedPath) await this.loadWritetableFolder('');
+                },
+                closeWritetableFolderPicker() {
+                    this.pathBrowser.open = false;
+                },
+                async loadWritetableFolder(path = '') {
+                    this.pathBrowser.busy = true;
+                    this.pathBrowser.error = '';
+                    try {
+                        const res = await axios.get('/system/writetable-folders', { params: { path } });
+                        const data = res.data || {};
+                        this.pathBrowser.root = String(data.root || '');
+                        this.pathBrowser.current = String(data.current || '');
+                        this.pathBrowser.parent = String(data.parent || '');
+                        this.pathBrowser.directories = Array.isArray(data.directories) ? data.directories : [];
+                        this.pathBrowser.containsWritetable = Boolean(data.contains_writetable);
+                        this.pathBrowser.writetablePath = String(data.writetable_path || '');
+                        return true;
+                    } catch (error) {
+                        this.pathBrowser.error = error.response?.data?.detail || error.message || 'Cannot read folder.';
+                        return false;
+                    } finally {
+                        this.pathBrowser.busy = false;
+                    }
+                },
+                selectWritetableFolder() {
+                    if (!this.pathBrowser.containsWritetable || !this.pathBrowser.writetablePath) return;
+                    this.s.dds_writetable_path = this.pathBrowser.writetablePath;
+                    this.pathBrowser.open = false;
+                    this.isError = false;
+                    this.msg = 'writetable.py selected. Click Apply & Save to store the path.';
                 },
                 async fetchSettings() {
                     try {
@@ -868,6 +1051,24 @@
                     });
                     return normalized.length ? normalized : this.defaultFitModelFallback();
                 },
+                defaultRamanPowerCalibration() {
+                    return {
+                        lower_asymptote: -6.30426,
+                        upper_asymptote: 151.029,
+                        growth_rate: 0.015975,
+                        midpoint: 198.203,
+                        shape: 1.29924,
+                        amplitude_min: 0,
+                        amplitude_max: 1023
+                    };
+                },
+                getRamanCalibrationEntries(group) {
+                    const prefix = group === 'down' ? 'raman_down' : 'raman_up';
+                    return [
+                        { key: `${prefix}_r1_calibration`, label: `${group.toUpperCase()} / R1 (CH0)` },
+                        { key: `${prefix}_r2_calibration`, label: `${group.toUpperCase()} / R2 (CH1)` }
+                    ];
+                },
                 normalizeSettings(settings) {
                     const normalized = { ...(settings || {}) };
                     const rpIpRed = String(normalized.rp_ip_red || '').trim().toLowerCase();
@@ -890,6 +1091,15 @@
                     if (!normalized.fit_models.find(model => model.key === normalized.fit_model_key)) {
                         normalized.fit_model_key = normalized.fit_models[0].key;
                     }
+                    normalized.dds_writetable_path = String(normalized.dds_writetable_path || '').trim();
+                    ['up', 'down'].forEach((group) => {
+                        this.getRamanCalibrationEntries(group).forEach((entry) => {
+                            normalized[entry.key] = {
+                                ...this.defaultRamanPowerCalibration(),
+                                ...(normalized[entry.key] || {})
+                            };
+                        });
+                    });
                     normalized.update_repo_url = String(normalized.update_repo_url || '').trim();
                     normalized.update_branch = String(normalized.update_branch || 'main').trim() || 'main';
                     return normalized;
