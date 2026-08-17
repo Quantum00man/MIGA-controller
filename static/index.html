@@ -1616,7 +1616,9 @@
                             scheduleStartedAtMs: state.scheduleStartedAtMs ?? null,
                             completedTaskIds: Array.isArray(state.completedTaskIds) ? state.completedTaskIds : [],
                         };
-                        if (state.active || ['STOPPED', 'ERROR'].includes(state.statusMessage)) {
+                        const isTerminalScheduleStatus = ['STOPPED', 'ERROR'].includes(state.statusMessage);
+                        const shouldApplyTerminalStatus = !this.isRunning && this.isScheduledMode() && isTerminalScheduleStatus;
+                        if (state.active || shouldApplyTerminalStatus) {
                             this.statusMessage = state.statusMessage || this.statusMessage;
                         }
                         if (state.error) this.addLog('Server schedule error: ' + state.error);
