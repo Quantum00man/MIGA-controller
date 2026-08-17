@@ -358,8 +358,93 @@
                                 class="form-control" v-model.number="s.beta" step="0.0001"></div>
                         <div class="col-md-3"><label class="form-label">Ratio (R)</label><input type="number"
                                 class="form-control" v-model.number="s.R" step="0.01"></div>
-                        <div class="col-md-3"><label class="form-label">Coeff (K)</label><input type="number"
-                                class="form-control" v-model.number="s.K"></div>
+                        <div class="col-md-3">
+                            <label class="form-label">Coeff (K)</label>
+                            <div class="input-group">
+                                <input type="text" class="form-control font-monospace fw-bold bg-light"
+                                    :value="formatK(s.K)" readonly>
+                                <span class="input-group-text text-success" title="Calculated automatically">Auto</span>
+                            </div>
+                        </div>
+
+                        <div class="col-12">
+                            <div class="card border-success-subtle bg-success bg-opacity-10">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+                                        <div>
+                                            <h6 class="fw-bold text-uppercase mb-1">Detection K Calculator</h6>
+                                            <div class="small text-muted">
+                                                Inputs are converted to SI units. Detuning and linewidth are interpreted as angular frequencies:
+                                                δ = 2πδ<sub>MHz</sub> and Γ = 2πΓ<sub>MHz</sub>.
+                                            </div>
+                                        </div>
+                                        <div class="text-end">
+                                            <div class="small text-muted">Calculated K (atoms / V·s)</div>
+                                            <div class="fs-5 fw-bold font-monospace text-success">{{ formatK(calculatedK) }}</div>
+                                        </div>
+                                    </div>
+
+                                    <div class="bg-white border rounded p-2 px-3 mb-3 overflow-auto">
+                                        <code class="text-dark text-nowrap">
+                                            K = [v<sub>det</sub> λ / (e R<sub>TIA</sub> ρ h c η)]
+                                            × 2[1 + I/I<sub>sat</sub> + (2δ/Γ)²] / [Γ(I/I<sub>sat</sub>)]
+                                        </code>
+                                    </div>
+
+                                    <div class="row g-3">
+                                        <div class="col-md-4">
+                                            <label class="form-label small fw-bold">Detection velocity v<sub>det</sub> (m/s)</label>
+                                            <input type="number" min="0" step="any" class="form-control"
+                                                v-model.number="s.k_detection_velocity_m_s" @input="syncKFromParameters">
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label class="form-label small fw-bold">Wavelength λ (nm)</label>
+                                            <input type="number" min="0" step="any" class="form-control"
+                                                v-model.number="s.k_wavelength_nm" @input="syncKFromParameters">
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label class="form-label small fw-bold">Light-sheet height e (cm)</label>
+                                            <input type="number" min="0" step="any" class="form-control"
+                                                v-model.number="s.k_light_sheet_height_cm" @input="syncKFromParameters">
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label class="form-label small fw-bold">Transimpedance R<sub>TIA</sub> (MΩ)</label>
+                                            <input type="number" min="0" step="any" class="form-control"
+                                                v-model.number="s.k_transimpedance_gain_mohm" @input="syncKFromParameters">
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label class="form-label small fw-bold">Collection efficiency ρ</label>
+                                            <input type="number" min="0" step="any" class="form-control"
+                                                v-model.number="s.k_collection_efficiency" @input="syncKFromParameters">
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label class="form-label small fw-bold">PD responsivity η (A/W)</label>
+                                            <input type="number" min="0" step="any" class="form-control"
+                                                v-model.number="s.k_photodiode_responsivity_a_w" @input="syncKFromParameters">
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label class="form-label small fw-bold">Saturation ratio I/I<sub>sat</sub></label>
+                                            <input type="number" min="0" step="any" class="form-control"
+                                                v-model.number="s.k_saturation_ratio" @input="syncKFromParameters">
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label class="form-label small fw-bold">Detection detuning δ/2π (MHz)</label>
+                                            <input type="number" step="any" class="form-control"
+                                                v-model.number="s.k_detuning_mhz" @input="syncKFromParameters">
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label class="form-label small fw-bold">Natural linewidth Γ/2π (MHz)</label>
+                                            <input type="number" min="0" step="any" class="form-control"
+                                                v-model.number="s.k_natural_linewidth_mhz" @input="syncKFromParameters">
+                                        </div>
+                                    </div>
+                                    <div class="small text-muted mt-3">
+                                        Fixed constants: h = 6.62607015×10⁻³⁴ J·s; c = 299792458 m/s.
+                                        The calculated value is applied to both fitted and no-fit atom-number results after saving.
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
 
                         <div class="col-md-4"><label class="form-label">Z_UP (m)</label><input type="number"
                                 class="form-control" v-model.number="s.z_up" step="0.001"></div>
@@ -883,6 +968,9 @@
                 selectedFitModel() {
                     const models = this.s.fit_models || [];
                     return models.find(model => model.key === this.s.fit_model_key) || models[0] || null;
+                },
+                calculatedK() {
+                    return this.calculateKFromSettings(this.s);
                 }
             },
             mounted() { this.fetchSettings(); },
@@ -1051,6 +1139,53 @@
                     });
                     return normalized.length ? normalized : this.defaultFitModelFallback();
                 },
+                defaultKCalibration() {
+                    return {
+                        k_detection_velocity_m_s: 3.58,
+                        k_wavelength_nm: 780.0,
+                        k_light_sheet_height_cm: 1.0,
+                        k_transimpedance_gain_mohm: 10.0,
+                        k_collection_efficiency: 0.02,
+                        k_photodiode_responsivity_a_w: 0.5,
+                        k_saturation_ratio: 1.5,
+                        k_detuning_mhz: 0.0,
+                        k_natural_linewidth_mhz: 6.02
+                    };
+                },
+                calculateKFromSettings(settings) {
+                    const p = settings || {};
+                    const vDet = Number(p.k_detection_velocity_m_s);
+                    const wavelength = Number(p.k_wavelength_nm) * 1e-9;
+                    const sheetHeight = Number(p.k_light_sheet_height_cm) * 1e-2;
+                    const transimpedance = Number(p.k_transimpedance_gain_mohm) * 1e6;
+                    const collection = Number(p.k_collection_efficiency);
+                    const responsivity = Number(p.k_photodiode_responsivity_a_w);
+                    const saturation = Number(p.k_saturation_ratio);
+                    const detuning = 2 * Math.PI * Number(p.k_detuning_mhz) * 1e6;
+                    const linewidth = 2 * Math.PI * Number(p.k_natural_linewidth_mhz) * 1e6;
+                    const positiveValues = [
+                        vDet, wavelength, sheetHeight, transimpedance,
+                        collection, responsivity, saturation, linewidth
+                    ];
+                    if (positiveValues.some(value => !Number.isFinite(value) || value <= 0) || !Number.isFinite(detuning)) {
+                        return Number.NaN;
+                    }
+                    const h = 6.62607015e-34;
+                    const c = 299792458;
+                    const opticalFactor = vDet * wavelength
+                        / (sheetHeight * transimpedance * collection * h * c * responsivity);
+                    const scatteringFactor = 2 * (1 + saturation + (2 * detuning / linewidth) ** 2)
+                        / (linewidth * saturation);
+                    return opticalFactor * scatteringFactor;
+                },
+                syncKFromParameters() {
+                    const value = this.calculateKFromSettings(this.s);
+                    if (Number.isFinite(value) && value > 0) this.s.K = value;
+                },
+                formatK(value) {
+                    const numeric = Number(value);
+                    return Number.isFinite(numeric) && numeric > 0 ? numeric.toExponential(6) : '—';
+                },
                 defaultRamanPowerCalibration() {
                     return {
                         lower_asymptote: -6.30426,
@@ -1071,6 +1206,18 @@
                 },
                 normalizeSettings(settings) {
                     const normalized = { ...(settings || {}) };
+                    const kDefaults = this.defaultKCalibration();
+                    Object.entries(kDefaults).forEach(([key, fallback]) => {
+                        const value = Number(normalized[key]);
+                        const isDetuning = key === 'k_detuning_mhz';
+                        normalized[key] = Number.isFinite(value) && (isDetuning || value > 0)
+                            ? value
+                            : fallback;
+                    });
+                    const calculatedK = this.calculateKFromSettings(normalized);
+                    if (Number.isFinite(calculatedK) && calculatedK > 0) {
+                        normalized.K = calculatedK;
+                    }
                     const rpIpRed = String(normalized.rp_ip_red || '').trim().toLowerCase();
                     if (normalized.hardware_platform !== 'daq' && normalized.hardware_platform !== 'redpitaya') {
                         normalized.hardware_platform = (rpIpRed.startsWith('127.0.0.1') || rpIpRed.startsWith('localhost') || rpIpRed.includes(':'))

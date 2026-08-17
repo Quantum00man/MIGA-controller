@@ -457,7 +457,7 @@ class ExperimentManager:
         base_settings.setdefault("fit_model_key", "gaussian")
         base_settings.setdefault("fit_models", fitting.get_default_fit_models())
 
-        return self._normalize_atom_area_settings(
+        normalized = self._normalize_atom_area_settings(
             self._normalize_fit_settings(
                 self._normalize_update_settings(
                     self._normalize_hardware_settings(self._normalize_tmot_settings(base_settings))
@@ -465,6 +465,8 @@ class ExperimentManager:
                 strict=False
             )
         )
+
+        return self._normalize_k_calibration_settings(normalized)
 
     def _save_settings_to_disk(self):
         try:
@@ -604,17 +606,50 @@ class ExperimentManager:
         settings["atom_area_baseline_points"] = max(1, baseline_points)
         return settings
 
+    def _normalize_k_calibration_settings(self, settings: Dict[str, Any]) -> Dict[str, Any]:
+        defaults = config.DEFAULT_ANALYSIS_SETTINGS
+        keys = (
+            "k_detection_velocity_m_s",
+            "k_wavelength_nm",
+            "k_light_sheet_height_cm",
+            "k_transimpedance_gain_mohm",
+            "k_collection_efficiency",
+            "k_photodiode_responsivity_a_w",
+            "k_saturation_ratio",
+            "k_detuning_mhz",
+            "k_natural_linewidth_mhz",
+        )
+        for key in keys:
+            try:
+                value = float(settings.get(key, defaults[key]))
+            except (TypeError, ValueError):
+                value = float(defaults[key])
+            settings[key] = value
+
+        settings["K"] = physics.calculate_atom_conversion_factor(
+            detection_velocity=settings["k_detection_velocity_m_s"],
+            wavelength=settings["k_wavelength_nm"] * 1e-9,
+            light_sheet_height=settings["k_light_sheet_height_cm"] * 1e-2,
+            transimpedance_gain=settings["k_transimpedance_gain_mohm"] * 1e6,
+            collection_efficiency=settings["k_collection_efficiency"],
+            photodiode_responsivity=settings["k_photodiode_responsivity_a_w"],
+            saturation_ratio=settings["k_saturation_ratio"],
+            detuning_angular=2.0 * math.pi * settings["k_detuning_mhz"] * 1e6,
+            natural_linewidth_angular=2.0 * math.pi * settings["k_natural_linewidth_mhz"] * 1e6,
+        )
+        return settings
+
     def update_settings(self, new_settings: Dict[str, Any]):
         if new_settings.get('tmot_args') is None:
             new_settings['tmot_args'] = self.settings.get('tmot_args', self._default_tmot_args())
-        new_settings = self._normalize_atom_area_settings(
+        new_settings = self._normalize_k_calibration_settings(self._normalize_atom_area_settings(
             self._normalize_fit_settings(
                 self._normalize_update_settings(
                     self._normalize_hardware_settings(self._normalize_tmot_settings(new_settings))
                 ),
                 strict=True
             )
-        )
+        ))
         self.settings.update(new_settings)
         self._apply_runtime_settings()
         self._save_settings_to_disk()

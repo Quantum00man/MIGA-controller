@@ -184,6 +184,15 @@ class AnalysisSettings(BaseModel):
     beta: float
     R: float
     K: float
+    k_detection_velocity_m_s: float = Field(3.58, gt=0)
+    k_wavelength_nm: float = Field(780.0, gt=0)
+    k_light_sheet_height_cm: float = Field(1.0, gt=0)
+    k_transimpedance_gain_mohm: float = Field(10.0, gt=0)
+    k_collection_efficiency: float = Field(0.02, gt=0)
+    k_photodiode_responsivity_a_w: float = Field(0.5, gt=0)
+    k_saturation_ratio: float = Field(1.5, gt=0)
+    k_detuning_mhz: float = Field(0.0)
+    k_natural_linewidth_mhz: float = Field(6.02, gt=0)
     z_up: float
     z_dw: float
     launch_velocity: float
@@ -217,6 +226,15 @@ class SystemSettings(BaseModel):
     beta: float
     R: float
     K: float
+    k_detection_velocity_m_s: float = Field(3.58, gt=0)
+    k_wavelength_nm: float = Field(780.0, gt=0)
+    k_light_sheet_height_cm: float = Field(1.0, gt=0)
+    k_transimpedance_gain_mohm: float = Field(10.0, gt=0)
+    k_collection_efficiency: float = Field(0.02, gt=0)
+    k_photodiode_responsivity_a_w: float = Field(0.5, gt=0)
+    k_saturation_ratio: float = Field(1.5, gt=0)
+    k_detuning_mhz: float = Field(0.0)
+    k_natural_linewidth_mhz: float = Field(6.02, gt=0)
     z_up: float
     z_dw: float
     g_const: float

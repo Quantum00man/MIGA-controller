@@ -6,6 +6,56 @@ G = 9.81
 M_RB87 = 1.443e-25    
 LAMBDA = 780.241e-9   
 KB = 1.38e-23         
+PLANCK_CONSTANT = 6.62607015e-34
+SPEED_OF_LIGHT = 299792458.0
+
+
+def calculate_atom_conversion_factor(
+    detection_velocity: float,
+    wavelength: float,
+    light_sheet_height: float,
+    transimpedance_gain: float,
+    collection_efficiency: float,
+    photodiode_responsivity: float,
+    saturation_ratio: float,
+    detuning_angular: float,
+    natural_linewidth_angular: float,
+) -> float:
+    """Calculate the atom-number conversion factor K using SI units.
+
+    Detuning and linewidth are angular frequencies in rad/s. The returned
+    factor converts a detector area in V*s to atom number.
+    """
+    positive_values = {
+        "detection_velocity": detection_velocity,
+        "wavelength": wavelength,
+        "light_sheet_height": light_sheet_height,
+        "transimpedance_gain": transimpedance_gain,
+        "collection_efficiency": collection_efficiency,
+        "photodiode_responsivity": photodiode_responsivity,
+        "saturation_ratio": saturation_ratio,
+        "natural_linewidth_angular": natural_linewidth_angular,
+    }
+    invalid = [name for name, value in positive_values.items() if not np.isfinite(value) or value <= 0]
+    if invalid:
+        raise ValueError(f"K calibration values must be positive and finite: {', '.join(invalid)}")
+    if not np.isfinite(detuning_angular):
+        raise ValueError("K calibration detuning must be finite")
+
+    optical_factor = (
+        detection_velocity * wavelength
+        / (
+            light_sheet_height * transimpedance_gain * collection_efficiency
+            * PLANCK_CONSTANT * SPEED_OF_LIGHT * photodiode_responsivity
+        )
+    )
+    scattering_factor = (
+        2.0
+        * (1.0 + saturation_ratio + (2.0 * detuning_angular / natural_linewidth_angular) ** 2)
+        / (natural_linewidth_angular * saturation_ratio)
+    )
+    return float(optical_factor * scattering_factor)
+
 
 def calc_arrival_time(v_launch: float, z_target: float, direction_sign: int = 1) -> Optional[float]:
     discriminant = v_launch**2 - 2 * G * z_target
