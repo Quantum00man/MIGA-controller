@@ -44,6 +44,12 @@ class ScanResult:
     ac_stark_actual_power_r1: Optional[float] = None
     ac_stark_actual_power_r2: Optional[float] = None
 
+    # ABBA digital lock-in provenance. Positions are 1-based within each block.
+    lock_in_block_index: Optional[int] = None
+    lock_in_position: Optional[int] = None
+    lock_in_state: Optional[str] = None
+    lock_in_reference: Optional[int] = None
+
     # Mean of the last 200 raw TOF samples before offset removal.
     tail_mean_up_raw: Optional[float] = None
     tail_mean_dw_raw: Optional[float] = None

@@ -24,6 +24,7 @@ RESULTS_CSV_HEADER = [
     "AC_Stark_Power_R1", "AC_Stark_Power_R2",
     "AC_Stark_Amplitude_R1", "AC_Stark_Amplitude_R2",
     "AC_Stark_Actual_Power_R1", "AC_Stark_Actual_Power_R2",
+    "LockIn_Block", "LockIn_Position", "LockIn_State", "LockIn_Reference",
 ]
 
 
@@ -145,6 +146,19 @@ class DataManager:
             writer.writeheader()
             writer.writerows(summary_rows)
 
+    def save_lock_in_analysis(self, analysis: Dict[str, Any]) -> None:
+        if not self.current_run_dir:
+            return
+        with open(self.current_run_dir / "lock_in_analysis.json", "w", encoding="utf-8") as handle:
+            json.dump(analysis, handle, ensure_ascii=False, indent=2)
+        rows = analysis.get("blocks") if isinstance(analysis, dict) else None
+        if not isinstance(rows, list) or not rows:
+            return
+        with open(self.current_run_dir / "lock_in_blocks.csv", "w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=list(rows[0].keys()))
+            writer.writeheader()
+            writer.writerows(rows)
+
     def _init_csv(self, path: Path):
         self.csv_handle = open(path, 'w', newline='')
         self.csv_writer = csv.writer(self.csv_handle)
@@ -177,6 +191,10 @@ class DataManager:
             ac_stark_amplitude_r2=result.ac_stark_amplitude_r2 if result.ac_stark_amplitude_r2 is not None else -1,
             ac_stark_actual_power_r1=result.ac_stark_actual_power_r1 if result.ac_stark_actual_power_r1 is not None else np.nan,
             ac_stark_actual_power_r2=result.ac_stark_actual_power_r2 if result.ac_stark_actual_power_r2 is not None else np.nan,
+            lock_in_block_index=result.lock_in_block_index if result.lock_in_block_index is not None else -1,
+            lock_in_position=result.lock_in_position if result.lock_in_position is not None else -1,
+            lock_in_state=result.lock_in_state or "",
+            lock_in_reference=result.lock_in_reference if result.lock_in_reference is not None else 0,
         )
 
     def _write_csv_row(self, result: ScanResult, step_index: int):
@@ -205,6 +223,10 @@ class DataManager:
             result.ac_stark_amplitude_r1 if result.ac_stark_amplitude_r1 is not None else "",
             result.ac_stark_amplitude_r2 if result.ac_stark_amplitude_r2 is not None else "",
             f(result.ac_stark_actual_power_r1), f(result.ac_stark_actual_power_r2),
+            result.lock_in_block_index if result.lock_in_block_index is not None else "",
+            result.lock_in_position if result.lock_in_position is not None else "",
+            result.lock_in_state or "",
+            result.lock_in_reference if result.lock_in_reference is not None else "",
         ]
         self.csv_writer.writerow(row)
         self.csv_handle.flush()
@@ -255,6 +277,8 @@ class DataManager:
                     f('ac_stark_power_r1'), f('ac_stark_power_r2'),
                     pt.get('ac_stark_amplitude_r1', ''), pt.get('ac_stark_amplitude_r2', ''),
                     f('ac_stark_actual_power_r1'), f('ac_stark_actual_power_r2'),
+                    pt.get('lock_in_block_index', ''), pt.get('lock_in_position', ''),
+                    str(pt.get('lock_in_state') or ''), pt.get('lock_in_reference', ''),
                 ]
                 writer.writerow(row)
         

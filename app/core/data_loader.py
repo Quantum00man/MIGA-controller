@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from app.analysis import fitting, physics
+from app.analysis.lock_in import build_lock_in_analysis
 import config
 
 
@@ -206,6 +207,10 @@ class DataLoader:
             "ac_stark_amplitude_r2": self._parse_int(row.get("AC_Stark_Amplitude_R2"), -1),
             "ac_stark_actual_power_r1": self._parse_float(row.get("AC_Stark_Actual_Power_R1")),
             "ac_stark_actual_power_r2": self._parse_float(row.get("AC_Stark_Actual_Power_R2")),
+            "lock_in_block_index": self._parse_int(row.get("LockIn_Block"), -1),
+            "lock_in_position": self._parse_int(row.get("LockIn_Position"), -1),
+            "lock_in_state": str(row.get("LockIn_State") or "").strip().lower(),
+            "lock_in_reference": self._parse_int(row.get("LockIn_Reference"), 0),
         }
 
     def _read_results_csv(self, run_dir: Path, max_points: Optional[int] = MAX_DISPLAY_POINTS) -> List[Dict[str, Any]]:
@@ -403,6 +408,9 @@ class DataLoader:
         scan_dimensions = self._resolve_scan_dimensions(config_data)
         full_points = self._read_results_csv(run_dir, max_points=None)
         sampled_points = self._sample_sequence(full_points, MAX_DISPLAY_POINTS)
+        is_lock_in = str(config_data.get("mode") or "").strip().lower() == "lock_in"
+        expected_lock_in_blocks = self._parse_int(config_data.get("averages"), 0) if is_lock_in else 0
+        lock_in_analysis = build_lock_in_analysis(full_points, expected_blocks=expected_lock_in_blocks) if is_lock_in else {}
         return {
             "config": config_data,
             "run_entry": self._build_run_entry(run_dir),
@@ -410,6 +418,7 @@ class DataLoader:
             "data": sampled_points,
             "stats": self._build_stats_array(full_points, scan_dimensions=scan_dimensions),
             "ac_stark_summary": self._build_ac_stark_summary(full_points),
+            "lock_in_analysis": lock_in_analysis,
             "preview_map": self._build_preview_map(full_points, scan_dimensions=scan_dimensions),
             "total_points": len(full_points),
         }
@@ -1007,6 +1016,9 @@ class DataLoader:
                 recalculated_points.append(result)
 
         sampled_points = self._sample_sequence(recalculated_points, max_points)
+        is_lock_in = str(config_data.get("mode") or "").strip().lower() == "lock_in"
+        expected_lock_in_blocks = self._parse_int(config_data.get("averages"), 0) if is_lock_in else 0
+        lock_in_analysis = build_lock_in_analysis(recalculated_points, expected_blocks=expected_lock_in_blocks) if is_lock_in else {}
 
         return {
             "config": config_data,
@@ -1015,6 +1027,7 @@ class DataLoader:
             "data": sampled_points,
             "stats": self._build_stats_array(recalculated_points, scan_dimensions=scan_dimensions),
             "ac_stark_summary": self._build_ac_stark_summary(recalculated_points),
+            "lock_in_analysis": lock_in_analysis,
             "preview_map": self._build_preview_map(recalculated_points, scan_dimensions=scan_dimensions),
             "total_points": len(recalculated_points),
         }

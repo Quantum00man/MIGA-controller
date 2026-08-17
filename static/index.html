@@ -832,10 +832,10 @@
                             v-model.number="config.scan_dimensions">
                         <label class="btn btn-outline-secondary" for="scan1d">1D</label>
                         <input type="radio" class="btn-check" name="scanDimension" id="scan2d" :value="2"
-                            v-model.number="config.scan_dimensions" :disabled="config.mode === 'ac_stark'">
+                            v-model.number="config.scan_dimensions" :disabled="['ac_stark', 'lock_in'].includes(config.mode)">
                         <label class="btn btn-outline-secondary" for="scan2d">2D</label>
                         <input type="radio" class="btn-check" name="scanDimension" id="scan3d" :value="3"
-                            v-model.number="config.scan_dimensions" :disabled="config.mode === 'ac_stark'">
+                            v-model.number="config.scan_dimensions" :disabled="['ac_stark', 'lock_in'].includes(config.mode)">
                         <label class="btn btn-outline-secondary" for="scan3d">3D</label>
                     </div>
                     <div class="form-text mt-2" v-if="config.scan_dimensions > 1">
@@ -844,8 +844,8 @@
                     </div>
                 </div>
 
-                <span class="section-label" v-if="config.mode !== 'ac_stark'">Parameter P0</span>
-                <div class="card p-3" v-if="config.mode !== 'ac_stark'">
+                <span class="section-label" v-if="!['ac_stark', 'lock_in'].includes(config.mode)">Parameter P0</span>
+                <div class="card p-3" v-if="!['ac_stark', 'lock_in'].includes(config.mode)">
                     <div class="d-flex justify-content-between align-items-center mb-3">
                         <div class="btn-group btn-group-sm" role="group">
                             <input type="radio" class="btn-check" name="ptype" id="pfloat" value="float"
@@ -915,6 +915,7 @@
                             <option value="half">Half (P0/2)</option>
                             <option value="link">Link (Custom Formula)</option>
                             <option value="bragg_rabi">Bragg Rabi</option>
+                            <option value="lock_in">Lock-in Measurement</option>
                             <option value="ac_stark">AC Stark Centering</option>
                         </select>
                     </div>
@@ -940,6 +941,31 @@
                         </div>
                         <button class="btn btn-sm btn-light w-100 text-muted border border-dashed" @click="addFormula">+
                             Add Parameter</button>
+                    </div>
+                    <div v-if="config.mode === 'lock_in'" class="mt-1">
+                        <div class="alert alert-light border py-2 px-3 small mb-3">
+                            Runs PARAMETER0 as A, B, B, A with reference +1, -1, -1, +1. Randomization is disabled.
+                        </div>
+                        <div class="btn-group btn-group-sm w-100 mb-3" role="group" aria-label="Lock-in PARAMETER0 type">
+                            <input type="radio" class="btn-check" name="lockInPtype" id="lockInFloat" value="float"
+                                v-model="config.param_type">
+                            <label class="btn btn-outline-secondary" for="lockInFloat">Float</label>
+                            <input type="radio" class="btn-check" name="lockInPtype" id="lockInInt" value="int"
+                                v-model="config.param_type">
+                            <label class="btn btn-outline-secondary" for="lockInInt">Int</label>
+                        </div>
+                        <div class="row g-2">
+                            <div class="col-6">
+                                <label class="form-label small text-muted mb-1">A value</label>
+                                <input type="number" class="form-control form-control-sm"
+                                    :step="config.param_type === 'int' ? 1 : 'any'" v-model.number="config.lock_in_a_value">
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label small text-muted mb-1">B value</label>
+                                <input type="number" class="form-control form-control-sm"
+                                    :step="config.param_type === 'int' ? 1 : 'any'" v-model.number="config.lock_in_b_value">
+                            </div>
+                        </div>
                     </div>
                     <div v-if="config.mode === 'ac_stark'" class="mt-1">
                         <div class="alert alert-light border py-2 px-3 small mb-3">
@@ -1146,13 +1172,13 @@
                 <span class="section-label">Execution Control</span>
                 <div class="card p-3 mb-5 border-0 bg-transparent shadow-none ps-0 pe-0">
                     <div class="row g-2 align-items-center mb-3 px-1">
-                        <div class="col-6"><label class="form-label small text-muted mb-1">{{ config.mode === 'ac_stark' ? 'Averages per half-point' : 'Averages' }}</label><input
+                        <div class="col-6"><label class="form-label small text-muted mb-1">{{ config.mode === 'ac_stark' ? 'Averages per half-point' : (config.mode === 'lock_in' ? 'ABBA blocks' : 'Averages') }}</label><input
                                 type="number" class="form-control form-control-sm" v-model.number="config.averages"
                                 min="1"></div>
                         <div class="col-6">
                             <div class="d-flex align-items-center gap-3 mt-4 flex-wrap">
                                 <div class="form-check mb-0"><input class="form-check-input" type="checkbox"
-                                        v-model="config.randomize" id="randCheck" :disabled="config.mode === 'ac_stark'"><label
+                                        v-model="config.randomize" id="randCheck" :disabled="['ac_stark', 'lock_in'].includes(config.mode)"><label
                                         class="form-check-label small" for="randCheck">Randomize</label></div>
                                 <div class="form-check mb-0"><input class="form-check-input" type="checkbox"
                                         v-model="config.ext_trigger" id="extTriggerCheck"><label
@@ -1204,7 +1230,7 @@
                             <input class="form-check-input" type="checkbox" id="showRaw" v-model="showRawData"
                                 style="cursor: pointer;">
                             <label class="form-check-label small fw-bold text-muted" for="showRaw"
-                                style="cursor: pointer;">{{ config.mode === 'ac_stark' ? 'Use NoFit' : (currentScanDimensions === 1 ? 'Show NoFit' : 'Use NoFit') }}</label>
+                                style="cursor: pointer;">{{ ['ac_stark', 'lock_in'].includes(config.mode) ? 'Use NoFit' : (currentScanDimensions === 1 ? 'Show NoFit' : 'Use NoFit') }}</label>
                         </div>
 
                     </div>
@@ -1329,7 +1355,9 @@
                         ac_stark_ratio_stop: 2.0,
                         ac_stark_ratio_step: 0.1,
                         ac_stark_total_power: 100,
-                        ac_stark_dds_xml_name: ''
+                        ac_stark_dds_xml_name: '',
+                        lock_in_a_value: 1,
+                        lock_in_b_value: 0.5
                     },
                     isRunning: false, isSimulation: false, statusMessage: "IDLE", currentStep: 0, plotRevision: 0, logs: [], ws: null,
                     progressPercent: 0,
@@ -1386,6 +1414,7 @@
                     currentScanDimensions: 1,
                     tabs: [{ id: 'atoms', label: 'Atom Number' }, { id: 'amp', label: 'Max Voltage' }, { id: 'tail', label: 'Tail Mean' }, { id: 'sigma', label: 'Width (ms)' }, { id: 'temp', label: 'Temperature' }, { id: 'arrival', label: 'Arrival Time' }, { id: 'prob', label: 'Transition Prob.' }, { id: 'intf', label: 'Interferometer' }],
                     historyMap: {},
+                    lockInHistoryMap: {},
                     layoutResBase: {}, layoutResUp: {}, layoutResDw: {}, layoutOscUp: {}, layoutOscDw: {},
                     isPlotting: false,
                     heatmapColorscale: [[0, '#c62828'], [0.5, '#fff3bf'], [1, '#1565c0']],
@@ -1406,13 +1435,15 @@
                     }
                 },
                 'config.mode'(mode) {
-                    if (mode === 'ac_stark') {
-                        this.runMode = 'live';
+                    if (['ac_stark', 'lock_in'].includes(mode)) {
                         this.config.scan_dimensions = 1;
                         this.config.dim2_enabled = false;
                         this.config.dim3_enabled = false;
                         this.config.randomize = false;
-                        if (!['atoms', 'prob'].includes(this.currentTab)) this.currentTab = 'atoms';
+                        if (mode === 'ac_stark') {
+                            this.runMode = 'live';
+                            if (!['atoms', 'prob'].includes(this.currentTab)) this.currentTab = 'atoms';
+                        }
                     }
                     if (!this.isRunning) {
                         this.resetHistory(1);
@@ -2317,6 +2348,9 @@ estimateAxisPointCount(spec = {}) {
     return Math.max(count, 1);
 },
 estimateScanStepCount(configObj = this.config) {
+    if (String(configObj.mode || '') === 'lock_in') {
+        return Math.max(1, Math.round(Number(configObj.averages) || 1)) * 4;
+    }
     if (String(configObj.mode || '') === 'ac_stark') {
         const ratioCount = this.estimateAxisPointCount({
             scan_type: 'range',
@@ -2397,11 +2431,16 @@ getScheduledTaskModeLabel(task) {
         rabi: '1D rabi scan',
         half: '1D half scan',
         link: '1D linked scan',
-        bragg_rabi: '1D Bragg Rabi scan'
+        bragg_rabi: '1D Bragg Rabi scan',
+        lock_in: 'Lock-in Measurement'
     };
     return modeMap[String(configObj.mode || 'standard')] || '1D scan';
 },
 getScheduledTaskAxisLabel(configObj = {}) {
+    if (String(configObj.mode || '') === 'lock_in') {
+        const blocks = Math.max(1, Math.round(Number(configObj.averages) || 1));
+        return `P0: ${configObj.lock_in_a_value}, ${configObj.lock_in_b_value}, ${configObj.lock_in_b_value}, ${configObj.lock_in_a_value} | blocks:${blocks}`;
+    }
     const scanDimensions = this.resolveScanDimensionsFromConfig(configObj);
     const axisLabels = [];
     try {
@@ -2855,6 +2894,17 @@ finishScheduledRun(finalStatus = 'IDLE') {
                         payload.ac_stark_raman_group = payload.ac_stark_raman_group === 'down' ? 'down' : 'up';
                         payload.ac_stark_dds_xml_name = String(this.currentDdsXmlName || payload.ac_stark_dds_xml_name || '').trim();
                         if (!payload.ac_stark_dds_xml_name) throw new Error('Upload a DDS XML table first.');
+                        payload.scan_dimensions = 1;
+                        payload.dim2_enabled = false;
+                        payload.dim3_enabled = false;
+                        payload.randomize = false;
+                    }
+                    if (payload.mode === 'lock_in') {
+                        ['lock_in_a_value', 'lock_in_b_value'].forEach((field) => {
+                            const value = Number(payload[field]);
+                            if (!Number.isFinite(value)) throw new Error(`${field} must be numeric.`);
+                            payload[field] = payload.param_type === 'int' ? Math.round(value) : value;
+                        });
                         payload.scan_dimensions = 1;
                         payload.dim2_enabled = false;
                         payload.dim3_enabled = false;
@@ -3424,6 +3474,126 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     const variance = finite.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (finite.length - 1);
                     return { count: finite.length, mean, sem: Math.sqrt(variance) / Math.sqrt(finite.length) };
                 },
+                getLockInBackendField(channel) {
+                    const noFit = this.showRawData;
+                    const suffix = noFit ? '_nofit' : '';
+                    const channelSuffix = channel === 'up' ? 'up' : 'dw';
+                    switch (this.currentTab) {
+                        case 'amp': return `amplitude_${channelSuffix}${suffix}`;
+                        case 'tail': return `tail_mean_${channelSuffix}_raw`;
+                        case 'sigma': return `sigma_${channelSuffix}${suffix}`;
+                        case 'temp': return `temperature_${channelSuffix}${suffix}`;
+                        case 'arrival': return `arrival_time_${channelSuffix}${suffix}`;
+                        case 'prob': return `transition_probability_${channelSuffix}${suffix}`;
+                        case 'intf':
+                            return `${channel === 'up' ? 'intf_p1' : 'intf_p2'}${suffix}`;
+                        default: return `atom_number_${channelSuffix}${suffix}`;
+                    }
+                },
+                recordLockInPoint(data) {
+                    const blockIndex = Number(data.lock_in_block_index);
+                    const position = Number(data.lock_in_position);
+                    const state = String(data.lock_in_state || '').toLowerCase();
+                    const reference = Number(data.lock_in_reference);
+                    if (!Number.isInteger(blockIndex) || blockIndex < 1 || ![1, 2, 3, 4].includes(position)) return;
+                    const key = String(blockIndex);
+                    if (!this.lockInHistoryMap[key]) this.lockInHistoryMap[key] = { blockIndex, shots: {} };
+                    this.lockInHistoryMap[key].shots[position] = { ...data, state, reference };
+                },
+                getLockInPlotRows(channel) {
+                    const field = this.getLockInBackendField(channel);
+                    const rows = Object.values(this.lockInHistoryMap)
+                        .sort((a, b) => a.blockIndex - b.blockIndex)
+                        .map((block) => {
+                            const shots = [1, 2, 3, 4].map(position => block.shots[position]);
+                            if (shots.some(shot => !shot)) return null;
+                            const states = shots.map(shot => shot.state).join('');
+                            const refs = shots.map(shot => Number(shot.reference));
+                            const values = shots.map(shot => Number(shot[field]));
+                            if (states !== 'abba' || refs.join(',') !== '1,-1,-1,1' || !values.every(Number.isFinite)) return null;
+                            const [s1, s2, s3, s4] = values;
+                            const sA = (s1 + s4) / 2;
+                            const sB = (s2 + s3) / 2;
+                            const x = (s1 - s2 - s3 + s4) / 4;
+                            const rDenominator = sA + sB;
+                            return {
+                                blockIndex: block.blockIndex,
+                                sA,
+                                sB,
+                                x,
+                                r: rDenominator !== 0 ? (sA - sB) / rDenominator : null
+                            };
+                        })
+                        .filter(Boolean);
+                    let runningSum = 0;
+                    return rows.map((row, index) => {
+                        runningSum += row.x;
+                        return { ...row, runningMean: runningSum / (index + 1) };
+                    });
+                },
+                getLockInSummary(channel) {
+                    const rows = this.getLockInPlotRows(channel);
+                    const xStats = this.getAcStarkStatistics(rows.map(row => row.x));
+                    const rStats = this.getAcStarkStatistics(rows.map(row => row.r).filter(Number.isFinite));
+                    return { rows, xStats, rStats };
+                },
+                formatLockInNumber(value) {
+                    const numeric = Number(value);
+                    if (!Number.isFinite(numeric)) return 'n/a';
+                    const abs = Math.abs(numeric);
+                    return (abs >= 10000 || (abs > 0 && abs < 0.001)) ? numeric.toExponential(3) : numeric.toPrecision(5);
+                },
+                renderLockInPlot() {
+                    const metric = this.getMetricConfig();
+                    const sourceLabel = this.showRawData ? 'NoFit' : 'Fit';
+                    const makePanel = (channel) => {
+                        const { rows, xStats, rStats } = this.getLockInSummary(channel);
+                        const x = rows.map(row => row.blockIndex);
+                        const traces = [
+                            {
+                                x, y: rows.map(row => row.sA), mode: 'lines+markers', name: 'S_A',
+                                line: { color: '#e67e22', width: 1.2 }, marker: { size: 6, symbol: 'circle-open' }
+                            },
+                            {
+                                x, y: rows.map(row => row.sB), mode: 'lines+markers', name: 'S_B',
+                                line: { color: '#198754', width: 1.2 }, marker: { size: 6, symbol: 'square-open' }
+                            },
+                            {
+                                x, y: rows.map(row => row.x), mode: 'lines+markers', name: 'X = mean(r_i S_i)',
+                                line: { color: channel === 'up' ? '#dc3545' : '#0d6efd', width: 2.6 }, marker: { size: 8 }
+                            },
+                            {
+                                x, y: rows.map(row => row.runningMean), mode: 'lines', name: 'Running mean X',
+                                line: { color: '#212529', width: 2, dash: 'dash' }
+                            },
+                            {
+                                x, y: rows.map(row => row.r), yaxis: 'y2', mode: 'lines+markers', name: 'R',
+                                line: { color: '#6c757d', width: 1.2, dash: 'dot' }, marker: { size: 5, symbol: 'diamond-open' }
+                            }
+                        ];
+                        const base = this.buildCommonAnalysisLayout();
+                        const isUp = channel === 'up';
+                        const summaryText = rows.length
+                            ? `mean(r_i S_i)=${this.formatLockInNumber(xStats.mean)} +/- ${this.formatLockInNumber(xStats.sem)} SEM | mean R=${this.formatLockInNumber(rStats.mean)} | n=${xStats.count}`
+                            : 'Waiting for a complete ABBA block';
+                        const layout = {
+                            ...base,
+                            margin: isUp ? { t: 54, b: 8, l: 72, r: 72 } : { t: 26, b: 48, l: 72, r: 72 },
+                            xaxis: { ...base.xaxis, title: isUp ? '' : 'ABBA block', showticklabels: !isUp, dtick: 1 },
+                            yaxis: { ...base.yaxis, title: metric.label },
+                            yaxis2: { title: 'R', overlaying: 'y', side: 'right', showgrid: false, zeroline: true },
+                            title: { text: `${isUp ? 'UP' : 'DOWN'} | Lock-in Measurement | ${sourceLabel}<br><span style="font-size:11px;color:#5b6472">${summaryText}</span>`, font: { size: 13 }, x: 0.05, y: 0.96 },
+                            legend: { ...base.legend, orientation: 'h', x: 0.5, xanchor: 'center', y: 1.18 }
+                        };
+                        return { traces, layout };
+                    };
+                    const up = makePanel('up');
+                    const down = makePanel('dw');
+                    this.layoutResUp = up.layout;
+                    this.layoutResDw = down.layout;
+                    Plotly.react('resultsPlotUp', up.traces, up.layout);
+                    Plotly.react('resultsPlotDw', down.traces, down.layout);
+                },
                 recordAcStarkPoint(data) {
                     const ratio = Number(data.ac_stark_ratio);
                     const side = String(data.ac_stark_side || '').toLowerCase();
@@ -3543,6 +3713,10 @@ finishScheduledRun(finalStatus = 'IDLE') {
                         this.renderAcStarkPlot();
                         return;
                     }
+                    if (this.config.mode === 'lock_in') {
+                        this.renderLockInPlot();
+                        return;
+                    }
                     const points = this.getAggregatedPoints();
                     const metric = this.getMetricConfig();
                     const scanDimensions = this.getActiveScanDimensions();
@@ -3590,11 +3764,14 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     const scanDimensions = Math.max(1, Math.min(3, Number(data.scan_dimensions || this.currentScanDimensions || this.getConfiguredScanDimensions()) || 1));
                     const scannedParams = this.getScannedParameters(data, scanDimensions);
                     const isAcStarkPoint = Number.isFinite(Number(data.ac_stark_ratio)) && ['left', 'right'].includes(String(data.ac_stark_side || '').toLowerCase());
+                    const isLockInPoint = Number.isInteger(Number(data.lock_in_block_index)) && Number(data.lock_in_block_index) > 0;
                     const isFinalImmediateStep = !this.isScheduleActive() && total > 0 && this.currentStep >= total;
                     this.currentScanDimensions = scanDimensions;
                     this.statusMessage = isAcStarkPoint
                         ? `AC Stark: ratio=${Number(data.ac_stark_ratio).toFixed(6)} | ${String(data.ac_stark_side).toUpperCase()}`
-                        : `Scanning: ${this.formatScanParameters(scannedParams)}`;
+                        : (isLockInPoint
+                            ? `Lock-in: block ${Number(data.lock_in_block_index)} | ${String(data.lock_in_state).toUpperCase()}${Number(data.lock_in_position)}`
+                            : `Scanning: ${this.formatScanParameters(scannedParams)}`);
 
                     if (!data.time_axis || !data.raw_data_up || !data.raw_data_dw || !data.fit_data_up || !data.fit_data_dw) {
                         if (data.error) {
@@ -3634,6 +3811,19 @@ finishScheduledRun(finalStatus = 'IDLE') {
                                     acLog += ` | Δt=${(data.detected_delay * 1000).toFixed(2)}ms`;
                                 }
                                 this.addLog(acLog);
+                                if (isFinalImmediateStep) {
+                                    this.finalizeImmediateScanCompletion(total);
+                                } else if (this.isRunning) {
+                                    this.fetchStatus();
+                                }
+                                return;
+                            }
+
+                            if (isLockInPoint) {
+                                this.recordLockInPoint(data);
+                                this.plotRevision++;
+                                this.renderMainPlot();
+                                this.addLog(`Lock-in block ${Number(data.lock_in_block_index)} | ${String(data.lock_in_state).toUpperCase()}${Number(data.lock_in_position)} | r=${Number(data.lock_in_reference) > 0 ? '+1' : '-1'} | P0=${Number(data.parameter).toPrecision(8)}`);
                                 if (isFinalImmediateStep) {
                                     this.finalizeImmediateScanCompletion(total);
                                 } else if (this.isRunning) {
@@ -3828,6 +4018,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                 : this.getConfiguredScanDimensions();
             this.historyMap = {};
             this.acStarkHistoryMap = {};
+            this.lockInHistoryMap = {};
             this.initPlots();
         }
     }

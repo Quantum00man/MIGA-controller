@@ -20,6 +20,7 @@ from app.drivers.hardware import SequenceEditor, ExperimentDriver, RedPitayaDriv
 from app.drivers import dds_table
 from app.drivers.vcd_parser import VCDParser
 from app.analysis import fitting, physics
+from app.analysis.lock_in import build_lock_in_analysis
 from app.models.schemas import ScanConfig
 from app.core.data_manager import DataManager
 from app.core.structures import ExperimentStatus, ScanResult
@@ -738,6 +739,64 @@ class ExperimentManager:
                 "AC Stark sequence must use " + " and ".join(missing) + " in executable lines"
             )
 
+    def _validate_lock_in_sequence(self) -> None:
+        template_path = Path(
+            config.SEQUENCE_TEMPLATE_PATH_WIN
+            if config.USE_SIMULATION
+            else self.settings.get('template_path', config.SEQUENCE_TEMPLATE_PATH_LINUX)
+        )
+        if not template_path.is_file():
+            raise ValueError(f"Sequence template not found: {template_path}")
+        content = template_path.read_text(encoding="utf-8", errors="replace")
+        active_content = "\n".join(line.split("#", 1)[0] for line in content.splitlines())
+        if "<PARAMETER0>" not in active_content:
+            raise ValueError("Lock-in Measurement sequence must use <PARAMETER0> in an executable line")
+
+    def _build_lock_in_execution(self, scan_config: Dict[str, Any]) -> List[Dict[str, Any]]:
+        if self._resolve_scan_dimensions(scan_config) != 1:
+            raise ValueError("Lock-in Measurement only supports a 1D scan")
+        if scan_config.get('randomize'):
+            raise ValueError("Lock-in Measurement does not support Randomize")
+        self._validate_lock_in_sequence()
+
+        target_type = str(scan_config.get('param_type') or 'float').strip().lower()
+        if target_type not in {'int', 'float'}:
+            raise ValueError("Lock-in PARAMETER0 type must be Int or Float")
+
+        def normalize(value: Any) -> Any:
+            try:
+                numeric = float(value)
+            except (TypeError, ValueError):
+                raise ValueError("Lock-in A and B values must be numeric")
+            if not math.isfinite(numeric):
+                raise ValueError("Lock-in A and B values must be finite")
+            return int(round(numeric)) if target_type == 'int' else round(numeric, 6)
+
+        a_value = normalize(scan_config.get('lock_in_a_value'))
+        b_value = normalize(scan_config.get('lock_in_b_value'))
+        block_count = max(1, int(scan_config.get('averages', 1)))
+        states = (('a', a_value, 1), ('b', b_value, -1), ('b', b_value, -1), ('a', a_value, 1))
+        parameters: List[Dict[str, Any]] = []
+        for block_index in range(1, block_count + 1):
+            for position, (state, value, reference) in enumerate(states, start=1):
+                parameters.append({
+                    'sequence_parameters': [value],
+                    'metadata': {
+                        'lock_in_block_index': block_index,
+                        'lock_in_position': position,
+                        'lock_in_state': state,
+                        'lock_in_reference': reference,
+                    },
+                })
+
+        scan_config['scan_dimensions'] = 1
+        scan_config['dim2_enabled'] = False
+        scan_config['dim3_enabled'] = False
+        scan_config['randomize'] = False
+        scan_config['lock_in_a_value'] = a_value
+        scan_config['lock_in_b_value'] = b_value
+        return parameters
+
     def _build_ac_stark_execution(self, scan_config: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         if self._resolve_scan_dimensions(scan_config) != 1:
             raise ValueError("AC Stark Centering only supports a 1D live scan")
@@ -854,6 +913,8 @@ class ExperimentManager:
         try:
             if scan_config.get('mode') == 'ac_stark':
                 parameters, ac_stark_context = self._build_ac_stark_execution(scan_config)
+            elif scan_config.get('mode') == 'lock_in':
+                parameters = self._build_lock_in_execution(scan_config)
             else:
                 parameters = self._generate_parameters(scan_config)
         except Exception as exc:
@@ -1673,6 +1734,10 @@ class ExperimentManager:
                 ac_stark_amplitude_r2=metadata.get('ac_stark_amplitude_r2'),
                 ac_stark_actual_power_r1=metadata.get('ac_stark_actual_power_r1'),
                 ac_stark_actual_power_r2=metadata.get('ac_stark_actual_power_r2'),
+                lock_in_block_index=metadata.get('lock_in_block_index'),
+                lock_in_position=metadata.get('lock_in_position'),
+                lock_in_state=metadata.get('lock_in_state'),
+                lock_in_reference=metadata.get('lock_in_reference'),
                 tail_mean_up_raw=tail_mean_up_raw,
                 tail_mean_dw_raw=tail_mean_dw_raw,
                 window_up=win_up,
@@ -1846,6 +1911,7 @@ class ExperimentManager:
         )
         print(f"[Fit] Using model: {selected_fit_model['label']} ({selected_fit_model['key']})")
         ac_stark_results: List[ScanResult] = []
+        lock_in_results: List[ScanResult] = []
 
         try:
             while True:
@@ -1869,6 +1935,8 @@ class ExperimentManager:
                 )
                 if result is not None and result.ac_stark_ratio is not None:
                     ac_stark_results.append(result)
+                if result is not None and result.lock_in_block_index is not None:
+                    lock_in_results.append(result)
                 if self.on_data_ready:
                     self.on_data_ready(payload)
         finally:
@@ -1880,6 +1948,16 @@ class ExperimentManager:
                 except Exception as exc:
                     self._scan_finalize_error = f"AC Stark summary save failed: {exc}"
                     print(f"[AC Stark] {self._scan_finalize_error}")
+            if scan_config and scan_config.get('mode') == 'lock_in':
+                try:
+                    analysis = build_lock_in_analysis(
+                        [asdict(result) for result in lock_in_results],
+                        expected_blocks=max(1, int(scan_config.get('averages', 1))),
+                    )
+                    self.data_manager.save_lock_in_analysis(analysis)
+                except Exception as exc:
+                    self._scan_finalize_error = f"Lock-in analysis save failed: {exc}"
+                    print(f"[Lock-in] {self._scan_finalize_error}")
             self.data_manager.close_run()
             self.status.is_running = False
             if self._scan_finalize_error:

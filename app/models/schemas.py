@@ -77,6 +77,8 @@ class ScanConfig(BaseModel):
     ac_stark_ratio_step: float = Field(0.1)
     ac_stark_total_power: float = Field(100.0)
     ac_stark_dds_xml_name: str = Field("")
+    lock_in_a_value: float = Field(1.0)
+    lock_in_b_value: float = Field(0.5)
 
     @validator("ac_stark_raman_group")
     def normalize_ac_stark_raman_group(cls, value):

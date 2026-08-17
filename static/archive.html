@@ -955,7 +955,7 @@
                     </div>
                 </div>
 
-                <div class="card border-info shadow-sm" v-if="loadedPoints.length > 0 && !isAcStarkArchive()">
+                <div class="card border-info shadow-sm" v-if="loadedPoints.length > 0 && !isAcStarkArchive() && !isLockInArchive()">
                     <button type="button"
                         class="card-header collapsible-card-header bg-info text-white border-0 d-flex justify-content-between align-items-center"
                         @click="togglePanel('scanFitting')" aria-controls="scan-fitting-panel"
@@ -1182,6 +1182,13 @@
                                 </li>
                             </ul>
                         </div>
+                        <div v-if="isLockInArchive() && loadedRunId" class="px-3 pb-3">
+                            <div class="alert alert-light border mb-0 py-2 small d-flex flex-wrap gap-3 justify-content-between">
+                                <span><strong>UP mean(r_i S_i):</strong> {{ formatLockInSummary('up') }}</span>
+                                <span><strong>DOWN mean(r_i S_i):</strong> {{ formatLockInSummary('dw') }}</span>
+                                <span class="text-muted">{{ Number(lockInAnalysis.complete_blocks || 0) }} complete / {{ Number(lockInAnalysis.expected_blocks || 0) }} expected blocks</span>
+                            </div>
+                        </div>
                     </div>
                     <div class="card-body p-0 position-relative">
                         <div v-if="isLoading || isLoadingAllan" class="loading-overlay">
@@ -1398,6 +1405,7 @@
                     savedDataCount: 0, displayedStats: [], savedStats: [], recalculatedStats: [],
                     savedPreviewMap: {}, recalculatedPreviewMap: {},
                     acStarkSummary: [], savedAcStarkSummary: [], recalculatedAcStarkSummary: [],
+                    lockInAnalysis: {}, savedLockInAnalysis: {}, recalculatedLockInAnalysis: {},
                     savedAllanCache: {}, recalculatedAllanCache: {}, currentAllanData: null,
                     defaultFitModels: [], defaultScanFitModels: [],
                     collapsedPanels: { reanalysis: true, scanFitting: true },
@@ -1711,6 +1719,9 @@
                 isAcStarkArchive() {
                     return String(this.loadedConfig?.mode || "").trim().toLowerCase() === "ac_stark";
                 },
+                isLockInArchive() {
+                    return String(this.loadedConfig?.mode || "").trim().toLowerCase() === "lock_in";
+                },
                 getVisibleTabs() {
                     return this.isAcStarkArchive()
                         ? this.tabs.filter(tab => ["atoms", "prob"].includes(tab.id))
@@ -1720,7 +1731,7 @@
                     return this.getActiveScanDimensions() === 3;
                 },
                 canUseAllanMode() {
-                    return !this.isAcStarkArchive() && this.getActiveScanDimensions() === 1 && !Boolean(this.loadedConfig?.randomize);
+                    return !this.isAcStarkArchive() && !this.isLockInArchive() && this.getActiveScanDimensions() === 1 && !Boolean(this.loadedConfig?.randomize);
                 },
                 normalizeAllanScaleMode(mode) {
                     return mode === 'relative' ? 'relative' : 'absolute';
@@ -2300,7 +2311,7 @@
                     return `P${this.sliceAxis}=${sliceValue.toFixed(6)} · plane P${xAxis}-P${yAxis} · ${this.sliceValuesCache.length} slices`;
                 },
                 showTotalPlot() {
-                    return !this.isAcStarkArchive() && this.getActiveScanDimensions() === 1 && this.currentTab === 'atoms';
+                    return !this.isAcStarkArchive() && !this.isLockInArchive() && this.getActiveScanDimensions() === 1 && this.currentTab === 'atoms';
                 },
                 getAnalysisPlotHeight(panel = 'up') {
                     const isPhone = window.matchMedia && window.matchMedia('(max-width: 767.98px)').matches;
@@ -2846,6 +2857,9 @@
                     this.acStarkSummary = [];
                     this.savedAcStarkSummary = [];
                     this.recalculatedAcStarkSummary = [];
+                    this.lockInAnalysis = {};
+                    this.savedLockInAnalysis = {};
+                    this.recalculatedLockInAnalysis = {};
                     this.selectedPointKey = '';
                     this.selectedPointKeys = [];
                     this.selectedPointLabel = '';
@@ -2879,6 +2893,8 @@
                         this.savedStats = this.normalizeStatsRows(res.data.stats);
                         this.savedAcStarkSummary = Array.isArray(res.data.ac_stark_summary) ? res.data.ac_stark_summary : [];
                         this.acStarkSummary = this.savedAcStarkSummary;
+                        this.savedLockInAnalysis = res.data.lock_in_analysis && typeof res.data.lock_in_analysis === 'object' ? res.data.lock_in_analysis : {};
+                        this.lockInAnalysis = this.savedLockInAnalysis;
                         this.savedPreviewMap = res.data.preview_map && typeof res.data.preview_map === 'object' ? res.data.preview_map : {};
                         this.savedDataCount = Number.isFinite(res.data.total_points) ? res.data.total_points : this.loadedPoints.length;
                         this.dataCount = this.savedDataCount;
@@ -2941,6 +2957,8 @@
                         this.recalculatedStats = this.normalizeStatsRows(res.data.stats);
                         this.recalculatedAcStarkSummary = Array.isArray(res.data.ac_stark_summary) ? res.data.ac_stark_summary : [];
                         this.acStarkSummary = this.recalculatedAcStarkSummary;
+                        this.recalculatedLockInAnalysis = res.data.lock_in_analysis && typeof res.data.lock_in_analysis === 'object' ? res.data.lock_in_analysis : {};
+                        this.lockInAnalysis = this.recalculatedLockInAnalysis;
                         this.recalculatedPreviewMap = res.data.preview_map && typeof res.data.preview_map === 'object' ? res.data.preview_map : {};
                         this.dataCount = Number.isFinite(res.data.total_points) ? res.data.total_points : res.data.data.length;
                         this.displayMode = 'recalculated';
@@ -2976,6 +2994,7 @@
                     this.scanFitResult = null;
                     this.scanFitError = '';
                     this.acStarkSummary = this.savedAcStarkSummary;
+                    this.lockInAnalysis = this.savedLockInAnalysis;
                     await this.applyDisplayedPoints(this.loadedPoints, this.savedStats, this.savedPreviewMap, false);
                     if (this.plotMode === 'allan') {
                         this.syncCurrentAllanData();
@@ -3782,6 +3801,10 @@
                 },
 
                 async exportCSV() {
+                    if (this.isLockInArchive()) {
+                        await this.exportLockInCSV();
+                        return;
+                    }
                     if (Object.keys(this.historyMap).length === 0) return;
                     const stats = this.getStatsArray();
                     const scanDimensions = this.getActiveScanDimensions();
@@ -3841,6 +3864,64 @@
                         const link = document.createElement("a"); link.setAttribute("href", url); link.setAttribute("download", `analysis_${this.selectedDay}_${this.selectedRun}.csv`);
                         document.body.appendChild(link); link.click(); document.body.removeChild(link);
                     }
+                },
+
+                async exportLockInCSV() {
+                    const analysis = this.lockInAnalysis && typeof this.lockInAnalysis === 'object'
+                        ? this.lockInAnalysis
+                        : {};
+                    const blocks = Array.isArray(analysis.blocks) ? analysis.blocks : [];
+                    const metricSummaries = analysis.metrics && typeof analysis.metrics === 'object'
+                        ? analysis.metrics
+                        : {};
+                    const metricFields = Object.keys(metricSummaries);
+                    if (!metricFields.length) {
+                        this.errorMsg = 'Lock-in export failed: no analysis data available.';
+                        return;
+                    }
+
+                    const header = [
+                        'metric', 'source', 'channel', 'block_index', 'shot_steps', 'A_value', 'B_value',
+                        'S1', 'S2', 'S3', 'S4', 'S_A', 'S_B', 'X_mean_riSi', 'R', 'E', 'E_norm',
+                        'X_overall_mean', 'X_overall_std', 'X_overall_SEM',
+                        'R_overall_mean', 'R_overall_std', 'R_overall_SEM',
+                        'E_overall_mean', 'E_overall_std', 'E_overall_SEM',
+                        'E_norm_overall_mean', 'E_norm_overall_std', 'E_norm_overall_SEM',
+                        'complete_blocks', 'expected_blocks', 'incomplete_blocks'
+                    ];
+                    const csvRows = [header.join(',')];
+                    const describeMetric = (field) => {
+                        const source = field.startsWith('tail_mean_') ? 'Raw' : (field.endsWith('_nofit') ? 'NoFit' : 'Fit');
+                        let channel = '';
+                        if (/_up(?:_raw|_nofit)?$/.test(field) || /^intf_(?:n1|p1)(?:_nofit)?$/.test(field)) channel = 'UP';
+                        if (/_dw(?:_raw|_nofit)?$/.test(field) || /^intf_(?:n2|p2)(?:_nofit)?$/.test(field)) channel = 'DOWN';
+                        return { source, channel };
+                    };
+                    metricFields.forEach((field) => {
+                        const summary = metricSummaries[field] || {};
+                        const descriptor = describeMetric(field);
+                        const sourceRows = blocks.length ? blocks : [{ block_index: '' }];
+                        sourceRows.forEach((block) => {
+                            const row = [
+                                field, descriptor.source, descriptor.channel,
+                                block.block_index,
+                                Array.isArray(block.shot_steps) ? block.shot_steps.join(';') : '',
+                                block.a_value, block.b_value,
+                                block[`${field}_s1`], block[`${field}_s2`], block[`${field}_s3`], block[`${field}_s4`],
+                                block[`${field}_s_a`], block[`${field}_s_b`], block[`${field}_x`],
+                                block[`${field}_r`], block[`${field}_e`], block[`${field}_e_norm`],
+                                summary.x_mean, summary.x_std, summary.x_sem,
+                                summary.r_mean, summary.r_std, summary.r_sem,
+                                summary.e_mean, summary.e_std, summary.e_sem,
+                                summary.e_norm_mean, summary.e_norm_std, summary.e_norm_sem,
+                                analysis.complete_blocks, analysis.expected_blocks, analysis.incomplete_blocks
+                            ];
+                            csvRows.push(row.map(this.csvCell).join(','));
+                        });
+                    });
+
+                    const suggestedName = `lock_in_analysis_${this.selectedDay}_${this.selectedRun}.csv`;
+                    await this.downloadCsvContent('\uFEFF' + csvRows.join('\n'), suggestedName);
                 },
 
                 csvCell(value) {
@@ -4107,6 +4188,89 @@
                     });
                 },
 
+                getLockInMetricField(channel) {
+                    const suffix = this.showRawData ? '_nofit' : '';
+                    const channelSuffix = channel === 'up' ? 'up' : 'dw';
+                    switch (this.currentTab) {
+                        case 'amp': return `amplitude_${channelSuffix}${suffix}`;
+                        case 'tail': return `tail_mean_${channelSuffix}_raw`;
+                        case 'sigma': return `sigma_${channelSuffix}${suffix}`;
+                        case 'temp': return `temperature_${channelSuffix}${suffix}`;
+                        case 'arrival': return `arrival_time_${channelSuffix}${suffix}`;
+                        case 'prob': return `transition_probability_${channelSuffix}${suffix}`;
+                        case 'intf': return `${channel === 'up' ? 'intf_p1' : 'intf_p2'}${suffix}`;
+                        default: return `atom_number_${channelSuffix}${suffix}`;
+                    }
+                },
+                getLockInArchiveMetric(channel) {
+                    const field = this.getLockInMetricField(channel);
+                    const blocks = Array.isArray(this.lockInAnalysis?.blocks) ? this.lockInAnalysis.blocks : [];
+                    const rows = blocks.map((row, index) => {
+                        const x = Number(row[`${field}_x`]);
+                        return {
+                            blockIndex: Number(row.block_index),
+                            sA: Number(row[`${field}_s_a`]),
+                            sB: Number(row[`${field}_s_b`]),
+                            x: Number.isFinite(x) ? x : null,
+                            r: row[`${field}_r`] == null ? null : Number(row[`${field}_r`]),
+                            runningMean: null,
+                            rowIndex: index
+                        };
+                    }).filter(row => Number.isFinite(row.blockIndex) && row.x !== null);
+                    let sum = 0;
+                    rows.forEach((row, index) => {
+                        sum += row.x;
+                        row.runningMean = sum / (index + 1);
+                    });
+                    const summary = this.lockInAnalysis?.metrics?.[field] || {};
+                    return { field, rows, summary };
+                },
+                formatLockInSummary(channel) {
+                    const { summary } = this.getLockInArchiveMetric(channel);
+                    const mean = this.formatMetricValue(summary.x_mean);
+                    const sem = this.formatMetricValue(summary.x_sem);
+                    const count = Number(summary.x_count || 0);
+                    return `${mean} +/- ${sem} SEM (n=${count})`;
+                },
+                renderLockInArchivePlot() {
+                    const metric = this.getMetricConfig();
+                    const sourceLabel = this.showRawData ? 'NoFit' : 'Fit';
+                    const makePanel = (channel) => {
+                        const { rows, summary } = this.getLockInArchiveMetric(channel);
+                        const x = rows.map(row => row.blockIndex);
+                        const traces = [
+                            { x, y: rows.map(row => row.sA), mode: 'lines+markers', name: 'S_A', line: { color: '#e67e22', width: 1.2 }, marker: { size: 6, symbol: 'circle-open' } },
+                            { x, y: rows.map(row => row.sB), mode: 'lines+markers', name: 'S_B', line: { color: '#198754', width: 1.2 }, marker: { size: 6, symbol: 'square-open' } },
+                            { x, y: rows.map(row => row.x), mode: 'lines+markers', name: 'X = mean(r_i S_i)', line: { color: channel === 'up' ? '#dc3545' : '#0d6efd', width: 2.6 }, marker: { size: 8 } },
+                            { x, y: rows.map(row => row.runningMean), mode: 'lines', name: 'Running mean X', line: { color: '#212529', width: 2, dash: 'dash' } },
+                            { x, y: rows.map(row => row.r), yaxis: 'y2', mode: 'lines+markers', name: 'R', line: { color: '#6c757d', width: 1.2, dash: 'dot' }, marker: { size: 5, symbol: 'diamond-open' } }
+                        ];
+                        const base = this.buildCommonAnalysisLayout();
+                        const isUp = channel === 'up';
+                        const incomplete = Number(this.lockInAnalysis?.incomplete_blocks || 0);
+                        const summaryText = rows.length
+                            ? `mean(r_i S_i)=${this.formatMetricValue(summary.x_mean)} +/- ${this.formatMetricValue(summary.x_sem)} SEM | mean R=${this.formatMetricValue(summary.r_mean)} | n=${Number(summary.x_count || 0)}${incomplete ? ` | incomplete=${incomplete}` : ''}`
+                            : 'No complete ABBA block found';
+                        const layout = {
+                            ...base,
+                            margin: isUp ? { t: 54, b: 8, l: 72, r: 72 } : { t: 26, b: 48, l: 72, r: 72 },
+                            xaxis: { ...base.xaxis, title: isUp ? '' : 'ABBA block', showticklabels: !isUp, dtick: 1 },
+                            yaxis: { ...base.yaxis, title: metric.label },
+                            yaxis2: { title: 'R', overlaying: 'y', side: 'right', showgrid: false, zeroline: true },
+                            title: { text: `${isUp ? 'UP' : 'DOWN'} | Lock-in Measurement | ${sourceLabel}<br><span style="font-size:11px;color:#5b6472">${summaryText}</span>`, font: { size: 13 }, x: 0.05, y: 0.96 },
+                            legend: { ...base.legend, orientation: 'h', x: 0.5, xanchor: 'center', y: 1.18 }
+                        };
+                        return { traces, layout };
+                    };
+                    const up = makePanel('up');
+                    const down = makePanel('dw');
+                    this.layoutResUp = up.layout;
+                    this.layoutResDw = down.layout;
+                    Plotly.react('resultsPlotUp', up.traces, up.layout);
+                    Plotly.react('resultsPlotDw', down.traces, down.layout);
+                    Plotly.react('resultsPlotTotal', [], this.layoutResTot);
+                },
+
                 getAcStarkMetricDefinition() {
                     if (this.currentTab === 'prob') {
                         return { base: 'transition_probability', label: 'Transition Probability (%)' };
@@ -4199,6 +4363,10 @@
                 renderMainPlot() {
                     if (this.isAcStarkArchive()) {
                         this.renderAcStarkArchivePlot();
+                        return;
+                    }
+                    if (this.isLockInArchive()) {
+                        this.renderLockInArchivePlot();
                         return;
                     }
                     const rows = this.getStatsArray();
