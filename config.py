@@ -88,3 +88,16 @@ DEFAULT_RAMAN_POWER_CALIBRATION = {
     "amplitude_min": 0,
     "amplitude_max": 1023,
 }
+
+# --- Bragg analog-voltage to normalized optical-power calibration ---
+# The selected linear voltage interval is renormalized to optical power 0..1.
+DEFAULT_BRAGG_POWER_CALIBRATION = {
+    "lower_asymptote": 0.0,
+    "upper_asymptote": 1.0,
+    "growth_rate": 1.0,
+    "midpoint": 0.0,
+    "shape": 1.0,
+    "linear_voltage_min": -0.5,
+    "linear_voltage_max": 0.5,
+    "off_threshold": 0.001,
+}

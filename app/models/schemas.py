@@ -113,6 +113,33 @@ class RamanPowerCalibration(BaseModel):
         return value
 
 
+class BraggPowerCalibration(BaseModel):
+    """Generalized-logistic voltage to normalized optical-power calibration."""
+
+    lower_asymptote: float = Field(0.0)
+    upper_asymptote: float = Field(1.0)
+    growth_rate: float = Field(1.0, gt=0)
+    midpoint: float = Field(0.0)
+    shape: float = Field(1.0, gt=0)
+    linear_voltage_min: float = Field(-0.5, ge=-3.0, le=3.0)
+    linear_voltage_max: float = Field(0.5, ge=-3.0, le=3.0)
+    off_threshold: float = Field(0.001, ge=0.0, lt=1.0)
+
+    @validator("upper_asymptote")
+    def validate_power_range(cls, value, values):
+        lower = float(values.get("lower_asymptote", 0.0))
+        if value <= lower:
+            raise ValueError("Bragg calibration upper_asymptote must exceed lower_asymptote")
+        return value
+
+    @validator("linear_voltage_max")
+    def validate_linear_voltage_range(cls, value, values):
+        minimum = float(values.get("linear_voltage_min", -0.5))
+        if value <= minimum:
+            raise ValueError("Bragg linear_voltage_max must exceed linear_voltage_min")
+        return value
+
+
 class ScheduleRequest(BaseModel):
     timingMode: str = Field("sequential")
     sequentialGapSec: float = Field(0, ge=0)
@@ -267,6 +294,7 @@ class SystemSettings(BaseModel):
     raman_up_r2_calibration: RamanPowerCalibration = Field(default_factory=RamanPowerCalibration)
     raman_down_r1_calibration: RamanPowerCalibration = Field(default_factory=RamanPowerCalibration)
     raman_down_r2_calibration: RamanPowerCalibration = Field(default_factory=RamanPowerCalibration)
+    bragg_power_calibration: BraggPowerCalibration = Field(default_factory=BraggPowerCalibration)
 
 
 class SystemUpdateRequest(BaseModel):

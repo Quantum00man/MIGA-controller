@@ -431,6 +431,7 @@ class ExperimentManager:
             "raman_up_r2_calibration": dict(config.DEFAULT_RAMAN_POWER_CALIBRATION),
             "raman_down_r1_calibration": dict(config.DEFAULT_RAMAN_POWER_CALIBRATION),
             "raman_down_r2_calibration": dict(config.DEFAULT_RAMAN_POWER_CALIBRATION),
+            "bragg_power_calibration": dict(config.DEFAULT_BRAGG_POWER_CALIBRATION),
             
             # --- [关键修复] 显式添加这三个参数的默认值 ---
             "intf_alpha": 0.35,
@@ -1435,6 +1436,7 @@ class ExperimentManager:
                 fwhm=fwhm_val,
                 shape=execution_config.get('bragg_shape', 'blackman'),
                 base_timing=int(execution_config.get('bragg_base_timing', 331119)),
+                calibration=self.settings.get('bragg_power_calibration'),
             )
             return [pulse_code, comp_time]
         return params_to_write

@@ -512,6 +512,55 @@
                     </div>
                 </div>
 
+                <div v-if="tab==='bragg'">
+                    <div class="bg-light p-3 mb-4 rounded border">
+                        <h6 class="fw-bold text-primary"><i class="bi bi-broadcast me-2"></i>Bragg Pulse Calibration</h6>
+                        <div class="form-text">
+                            P(V) = P_low + (P_high − P_low) / [1 + exp(−k(V − V0))]^n.
+                            The selected linear voltage interval is renormalized to optical power 0..1. Envelope values at or below the off threshold output −3.000 V.
+                        </div>
+                    </div>
+                    <div class="card border shadow-sm">
+                        <div class="card-body">
+                            <div class="row g-3">
+                                <div class="col-md-6">
+                                    <label class="form-label small text-muted">P low</label>
+                                    <input type="number" step="any" class="form-control" v-model.number="s.bragg_power_calibration.lower_asymptote">
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label small text-muted">P high</label>
+                                    <input type="number" step="any" class="form-control" v-model.number="s.bragg_power_calibration.upper_asymptote">
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label small text-muted">k</label>
+                                    <input type="number" step="any" min="0" class="form-control" v-model.number="s.bragg_power_calibration.growth_rate">
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label small text-muted">V0</label>
+                                    <input type="number" step="any" class="form-control" v-model.number="s.bragg_power_calibration.midpoint">
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label small text-muted">n</label>
+                                    <input type="number" step="any" min="0" class="form-control" v-model.number="s.bragg_power_calibration.shape">
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label small text-muted">Linear voltage min (V)</label>
+                                    <input type="number" step="0.001" min="-3" max="3" class="form-control" v-model.number="s.bragg_power_calibration.linear_voltage_min">
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label small text-muted">Linear voltage max (V)</label>
+                                    <input type="number" step="0.001" min="-3" max="3" class="form-control" v-model.number="s.bragg_power_calibration.linear_voltage_max">
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label small text-muted">Off threshold</label>
+                                    <input type="number" step="0.0001" min="0" max="0.9999" class="form-control" v-model.number="s.bragg_power_calibration.off_threshold">
+                                </div>
+                            </div>
+                            <div class="form-text mt-3">Output range: −3.000 to +3.000 V · resolution: 0.001 V · off voltage: −3.000 V · channel: 32.</div>
+                        </div>
+                    </div>
+                </div>
+
                 <div v-if="tab==='raman'">
                     <div class="bg-light p-3 mb-4 rounded border">
                         <h6 class="fw-bold text-primary"><i class="bi bi-lightning-charge me-2"></i>AC Stark DDS Control</h6>
@@ -937,6 +986,7 @@
                     tabDefinitions: [
                         { id: 'phys', label: 'Physics & Gains', icon: 'bi-activity', description: 'Configure detector gains, signal filters and physical calibration constants.' },
                         { id: 'raman', label: 'Raman AC Stark', icon: 'bi-lightning-charge', description: 'Configure DDS writer access and four independent Raman amplitude-to-power calibration curves.' },
+                        { id: 'bragg', label: 'Bragg Pulse', icon: 'bi-broadcast', description: 'Configure the channel-32 voltage-to-normalized-power curve and its linear operating interval.' },
                         { id: 'fitting', label: 'Fitting Models', icon: 'bi-bezier2', description: 'Manage atom-area calculation and the models used for time-of-flight fitting.' },
                         { id: 'net', label: 'Network', icon: 'bi-hdd-network', description: 'Select the acquisition platform and configure device connection limits.' },
                         { id: 'logic', label: 'Logic & Channels', icon: 'bi-diagram-3', description: 'Set launch, trigger and linked-mode channel timing.' },
@@ -1186,6 +1236,18 @@
                     const numeric = Number(value);
                     return Number.isFinite(numeric) && numeric > 0 ? numeric.toExponential(6) : '—';
                 },
+                defaultBraggPowerCalibration() {
+                    return {
+                        lower_asymptote: 0.0,
+                        upper_asymptote: 1.0,
+                        growth_rate: 1.0,
+                        midpoint: 0.0,
+                        shape: 1.0,
+                        linear_voltage_min: -0.5,
+                        linear_voltage_max: 0.5,
+                        off_threshold: 0.001
+                    };
+                },
                 defaultRamanPowerCalibration() {
                     return {
                         lower_asymptote: -6.30426,
@@ -1238,6 +1300,10 @@
                     if (!normalized.fit_models.find(model => model.key === normalized.fit_model_key)) {
                         normalized.fit_model_key = normalized.fit_models[0].key;
                     }
+                    normalized.bragg_power_calibration = {
+                        ...this.defaultBraggPowerCalibration(),
+                        ...(normalized.bragg_power_calibration || {})
+                    };
                     normalized.dds_writetable_path = String(normalized.dds_writetable_path || '').trim();
                     ['up', 'down'].forEach((group) => {
                         this.getRamanCalibrationEntries(group).forEach((entry) => {
