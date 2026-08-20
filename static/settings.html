@@ -178,6 +178,51 @@
             backdrop-filter: blur(8px);
         }
 
+        .bragg-plot-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 16px;
+            margin-top: 20px;
+        }
+
+        .bragg-plot-panel {
+            min-width: 0;
+            margin: 0;
+            padding: 16px 16px 10px;
+            border: 1px solid var(--settings-border);
+            border-radius: var(--settings-radius);
+            background: var(--settings-surface);
+        }
+
+        .bragg-plot-panel figcaption {
+            min-height: 54px;
+            margin-bottom: 4px;
+        }
+
+        .bragg-plot-panel h6 {
+            margin-bottom: 4px;
+            color: var(--settings-text);
+            font-size: 0.9rem;
+        }
+
+        .bragg-plot-panel p {
+            margin: 0;
+            color: var(--settings-text-muted);
+            font-size: 0.78rem;
+            line-height: 1.45;
+        }
+
+        .bragg-plot {
+            width: 100%;
+            min-height: 340px;
+        }
+
+        @media (max-width: 991.98px) {
+            .bragg-plot-grid {
+                grid-template-columns: minmax(0, 1fr);
+            }
+        }
+
         pre {
             max-width: 100%;
             overflow-x: auto;
@@ -556,9 +601,29 @@
                                     <input type="number" step="0.0001" min="0" max="0.9999" class="form-control" v-model.number="s.bragg_power_calibration.off_threshold">
                                 </div>
                             </div>
-                            <div class="form-text mt-3">Output range: −3.000 to +3.000 V · resolution: 0.001 V · off voltage: −3.000 V · channel: 32.</div>
+                            <div class="form-text mt-3">Output range: −3.000 to +3.000 V, resolution: 0.001 V, off voltage: −3.000 V, channel: 32.</div>
                         </div>
                     </div>
+                </div>
+
+                <div v-show="tab==='bragg'" class="bragg-plot-grid" aria-label="Bragg calibration plots">
+                    <figure class="bragg-plot-panel">
+                        <figcaption>
+                            <h6 class="fw-bold">Original calibration curve</h6>
+                            <p>Full voltage response with asymptotes, midpoint and the selected operating interval.</p>
+                        </figcaption>
+                        <div id="braggRawPlot" class="bragg-plot" role="img" aria-label="Original Bragg voltage to optical power calibration curve"></div>
+                    </figure>
+                    <figure class="bragg-plot-panel">
+                        <figcaption>
+                            <h6 class="fw-bold">Normalized pulse region</h6>
+                            <p>The selected voltage interval mapped to normalized optical power from 0 to 1.</p>
+                        </figcaption>
+                        <div id="braggNormalizedPlot" class="bragg-plot" role="img" aria-label="Normalized Bragg pulse operating curve"></div>
+                    </figure>
+                </div>
+                <div v-if="tab==='bragg' && braggPlotError" class="alert alert-danger mt-3 mb-0 py-2" role="alert">
+                    <i class="bi bi-exclamation-triangle-fill me-2" aria-hidden="true"></i>{{ braggPlotError }}
                 </div>
 
                 <div v-if="tab==='raman'">
@@ -977,12 +1042,14 @@
 
     <script src="https://cdn.jsdelivr.net/npm/vue@3.2.31/dist/vue.global.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <script src="https://cdn.plot.ly/plotly-2.12.1.min.js"></script>
     <script>
         const { createApp } = Vue;
         createApp({
             data() {
                 return {
                     tab: 'phys', s: {}, msg: '', isError: false, saving: false,
+                    braggPlotError: '',
                     tabDefinitions: [
                         { id: 'phys', label: 'Physics & Gains', icon: 'bi-activity', description: 'Configure detector gains, signal filters and physical calibration constants.' },
                         { id: 'raman', label: 'Raman AC Stark', icon: 'bi-lightning-charge', description: 'Configure DDS writer access and four independent Raman amplitude-to-power calibration curves.' },
@@ -1021,12 +1088,292 @@
                 },
                 calculatedK() {
                     return this.calculateKFromSettings(this.s);
+                },
+                braggCalibrationSignature() {
+                    return JSON.stringify(this.s.bragg_power_calibration || {});
+                }
+            },
+            watch: {
+                tab(value) {
+                    if (value === 'bragg') this.$nextTick(() => this.renderBraggPlots());
+                },
+                braggCalibrationSignature() {
+                    if (this.tab === 'bragg') this.$nextTick(() => this.renderBraggPlots());
                 }
             },
             mounted() { this.fetchSettings(); },
             methods: {
                 getActiveTabDefinition() {
                     return this.tabDefinitions.find(item => item.id === this.tab) || this.tabDefinitions[0];
+                },
+                formatBraggPlotNumber(value, digits = 4) {
+                    const numeric = Number(value);
+                    if (!Number.isFinite(numeric)) return 'invalid';
+                    if (Math.abs(numeric) >= 1000 || (Math.abs(numeric) > 0 && Math.abs(numeric) < 0.001)) {
+                        return numeric.toExponential(3);
+                    }
+                    return numeric.toFixed(digits).replace(/\.?0+$/, '');
+                },
+                braggPowerAtVoltage(voltage, calibration) {
+                    const exponent = -calibration.growthRate * (voltage - calibration.midpoint);
+                    const logDenominator = exponent > 0
+                        ? exponent + Math.log1p(Math.exp(-exponent))
+                        : Math.log1p(Math.exp(exponent));
+                    return calibration.lower
+                        + (calibration.upper - calibration.lower) * Math.exp(-calibration.shape * logDenominator);
+                },
+                buildBraggPlotModel() {
+                    const source = this.s.bragg_power_calibration || {};
+                    const calibration = {
+                        lower: Number(source.lower_asymptote),
+                        upper: Number(source.upper_asymptote),
+                        growthRate: Number(source.growth_rate),
+                        midpoint: Number(source.midpoint),
+                        shape: Number(source.shape),
+                        voltageMin: Number(source.linear_voltage_min),
+                        voltageMax: Number(source.linear_voltage_max),
+                        threshold: Number(source.off_threshold)
+                    };
+                    if (Object.values(calibration).some(value => !Number.isFinite(value))) {
+                        throw new Error('All Bragg calibration parameters must be finite numbers.');
+                    }
+                    if (calibration.upper <= calibration.lower) {
+                        throw new Error('P high must be greater than P low.');
+                    }
+                    if (calibration.growthRate <= 0 || calibration.shape <= 0) {
+                        throw new Error('k and n must be positive.');
+                    }
+                    if (calibration.voltageMin < -3 || calibration.voltageMax > 3 || calibration.voltageMin >= calibration.voltageMax) {
+                        throw new Error('The linear voltage interval must satisfy -3 <= min < max <= 3 V.');
+                    }
+                    if (calibration.threshold < 0 || calibration.threshold >= 1) {
+                        throw new Error('The off threshold must be in the interval [0, 1).');
+                    }
+
+                    const powerMin = this.braggPowerAtVoltage(calibration.voltageMin, calibration);
+                    const powerMax = this.braggPowerAtVoltage(calibration.voltageMax, calibration);
+                    const powerSpan = powerMax - powerMin;
+                    if (!Number.isFinite(powerSpan) || powerSpan <= 1e-14) {
+                        throw new Error('The selected interval does not provide an increasing, invertible power range.');
+                    }
+
+                    const rawVoltage = Array.from({ length: 601 }, (_, index) => -3 + index * 0.01);
+                    const rawPower = rawVoltage.map(voltage => this.braggPowerAtVoltage(voltage, calibration));
+                    const linearVoltage = Array.from(
+                        { length: 501 },
+                        (_, index) => calibration.voltageMin
+                            + (calibration.voltageMax - calibration.voltageMin) * index / 500
+                    );
+                    const normalizedPower = linearVoltage.map(voltage =>
+                        (this.braggPowerAtVoltage(voltage, calibration) - powerMin) / powerSpan
+                    );
+                    const thresholdPower = powerMin + calibration.threshold * powerSpan;
+                    const fraction = (thresholdPower - calibration.lower) / (calibration.upper - calibration.lower);
+                    const logarithmArgument = fraction ** (-1 / calibration.shape) - 1;
+                    const exactThresholdVoltage = calibration.threshold === 0
+                        ? calibration.voltageMin
+                        : calibration.midpoint - Math.log(logarithmArgument) / calibration.growthRate;
+                    const thresholdVoltage = exactThresholdVoltage;
+                    const inactiveVoltage = [calibration.voltageMin];
+                    const inactivePower = [0];
+                    const activeVoltage = [thresholdVoltage];
+                    const activePower = [calibration.threshold];
+                    linearVoltage.forEach((voltage, index) => {
+                        if (normalizedPower[index] <= calibration.threshold) {
+                            inactiveVoltage.push(voltage);
+                            inactivePower.push(normalizedPower[index]);
+                        } else {
+                            activeVoltage.push(voltage);
+                            activePower.push(normalizedPower[index]);
+                        }
+                    });
+                    return {
+                        calibration, powerMin, powerMax, rawVoltage, rawPower,
+                        linearVoltage, normalizedPower, thresholdVoltage,
+                        inactiveVoltage, inactivePower, activeVoltage, activePower
+                    };
+                },
+                renderBraggPlots() {
+                    if (this.tab !== 'bragg') return;
+                    const rawElement = document.getElementById('braggRawPlot');
+                    const normalizedElement = document.getElementById('braggNormalizedPlot');
+                    if (!rawElement || !normalizedElement) return;
+                    if (typeof Plotly === 'undefined') {
+                        this.braggPlotError = 'Plotly could not be loaded. Check the browser network connection and reload Settings.';
+                        return;
+                    }
+
+                    try {
+                        const model = this.buildBraggPlotModel();
+                        const c = model.calibration;
+                        const accent = '#0d6efd';
+                        const secondary = '#356f9f';
+                        const muted = '#8b98a9';
+                        const grid = '#e2e8f0';
+                        const commonAxis = {
+                            zeroline: false,
+                            gridcolor: grid,
+                            linecolor: '#b9c4d2',
+                            mirror: true,
+                            ticks: 'outside',
+                            tickfont: { size: 11, color: '#475569' },
+                            titlefont: { size: 12, color: '#334155' }
+                        };
+                        const commonLayout = {
+                            autosize: true,
+                            height: 340,
+                            margin: { l: 62, r: 28, t: 54, b: 58 },
+                            paper_bgcolor: 'rgba(0,0,0,0)',
+                            plot_bgcolor: '#f9fbfd',
+                            font: { family: 'Segoe UI, Roboto, Helvetica, Arial, sans-serif', color: '#263244' },
+                            hovermode: 'closest',
+                            showlegend: false
+                        };
+                        const plotConfig = {
+                            responsive: true,
+                            displaylogo: false,
+                            scrollZoom: false,
+                            modeBarButtonsToRemove: ['lasso2d', 'select2d', 'autoScale2d']
+                        };
+
+                        const rawTraces = [{
+                            x: model.rawVoltage,
+                            y: model.rawPower,
+                            type: 'scatter',
+                            mode: 'lines',
+                            line: { color: secondary, width: 2.5 },
+                            hovertemplate: 'Voltage %{x:.3f} V<br>Raw power %{y:.6g}<extra></extra>'
+                        }, {
+                            x: [c.voltageMin, c.voltageMax],
+                            y: [model.powerMin, model.powerMax],
+                            type: 'scatter',
+                            mode: 'markers',
+                            marker: { color: accent, size: 8, line: { color: '#ffffff', width: 1.5 } },
+                            customdata: [0, 1],
+                            hovertemplate: 'Voltage %{x:.3f} V<br>Raw power %{y:.6g}<br>Normalized %{customdata:.3f}<extra></extra>'
+                        }];
+                        const rawShapes = [{
+                            type: 'rect', xref: 'x', yref: 'paper',
+                            x0: c.voltageMin, x1: c.voltageMax, y0: 0, y1: 1,
+                            fillcolor: 'rgba(13,110,253,0.08)', line: { width: 0 }, layer: 'below'
+                        }, {
+                            type: 'line', x0: -3, x1: 3, y0: c.lower, y1: c.lower,
+                            line: { color: muted, width: 1, dash: 'dot' }
+                        }, {
+                            type: 'line', x0: -3, x1: 3, y0: c.upper, y1: c.upper,
+                            line: { color: muted, width: 1, dash: 'dot' }
+                        }];
+                        const rawAnnotations = [{
+                            xref: 'x', yref: 'paper', x: c.voltageMin, y: 1.03,
+                            text: `V min ${c.voltageMin.toFixed(3)} V`, showarrow: false,
+                            xanchor: 'left', font: { size: 10, color: accent }
+                        }, {
+                            xref: 'x', yref: 'paper', x: c.voltageMax, y: 1.03,
+                            text: `V max ${c.voltageMax.toFixed(3)} V`, showarrow: false,
+                            xanchor: 'right', font: { size: 10, color: accent }
+                        }, {
+                            xref: 'paper', yref: 'y', x: 0.99, y: c.lower,
+                            text: `P low ${this.formatBraggPlotNumber(c.lower)}`, showarrow: false,
+                            xanchor: 'right', yshift: 9, font: { size: 10, color: muted }
+                        }, {
+                            xref: 'paper', yref: 'y', x: 0.99, y: c.upper,
+                            text: `P high ${this.formatBraggPlotNumber(c.upper)}`, showarrow: false,
+                            xanchor: 'right', yshift: -9, font: { size: 10, color: muted }
+                        }];
+                        if (c.midpoint >= -3 && c.midpoint <= 3) {
+                            rawShapes.push({
+                                type: 'line', xref: 'x', yref: 'paper',
+                                x0: c.midpoint, x1: c.midpoint, y0: 0, y1: 1,
+                                line: { color: '#6b7788', width: 1.2, dash: 'dash' }
+                            });
+                            rawAnnotations.push({
+                                xref: 'x', yref: 'paper', x: c.midpoint, y: 0.03,
+                                text: `V0 ${this.formatBraggPlotNumber(c.midpoint)} V`, showarrow: false,
+                                xanchor: 'left', font: { size: 10, color: '#6b7788' }
+                            });
+                        }
+                        Plotly.react(rawElement, rawTraces, {
+                            ...commonLayout,
+                            title: {
+                                text: `k = ${this.formatBraggPlotNumber(c.growthRate)}   V0 = ${this.formatBraggPlotNumber(c.midpoint)} V   n = ${this.formatBraggPlotNumber(c.shape)}`,
+                                x: 0.02, xanchor: 'left', font: { size: 11, color: '#596579' }
+                            },
+                            xaxis: { ...commonAxis, title: 'Input voltage (V)', range: [-3, 3], dtick: 1 },
+                            yaxis: { ...commonAxis, title: 'Raw optical power' },
+                            shapes: rawShapes,
+                            annotations: rawAnnotations
+                        }, plotConfig);
+
+                        const normalizedTraces = [{
+                            x: model.inactiveVoltage,
+                            y: model.inactivePower,
+                            type: 'scatter', mode: 'lines',
+                            line: { color: muted, width: 2, dash: 'dot' },
+                            hovertemplate: 'Voltage %{x:.3f} V<br>Normalized power %{y:.6f}<br>Output -3.000 V<extra></extra>'
+                        }, {
+                            x: model.activeVoltage,
+                            y: model.activePower,
+                            type: 'scatter', mode: 'lines',
+                            line: { color: accent, width: 2.8 },
+                            hovertemplate: 'Voltage %{x:.3f} V<br>Normalized power %{y:.6f}<extra></extra>'
+                        }, {
+                            x: [c.voltageMin, model.thresholdVoltage, c.voltageMax],
+                            y: [0, c.threshold, 1],
+                            type: 'scatter', mode: 'markers',
+                            marker: { color: [muted, '#dc3545', accent], size: [7, 9, 7] },
+                            hovertemplate: 'Voltage %{x:.3f} V<br>Normalized power %{y:.6f}<extra></extra>'
+                        }];
+                        Plotly.react(normalizedElement, normalizedTraces, {
+                            ...commonLayout,
+                            title: {
+                                text: `Linear interval ${c.voltageMin.toFixed(3)} to ${c.voltageMax.toFixed(3)} V   cutoff ${this.formatBraggPlotNumber(c.threshold, 6)}`,
+                                x: 0.02, xanchor: 'left', font: { size: 11, color: '#596579' }
+                            },
+                            xaxis: {
+                                ...commonAxis,
+                                title: 'Input voltage (V)',
+                                range: [c.voltageMin, c.voltageMax]
+                            },
+                            yaxis: {
+                                ...commonAxis,
+                                title: 'Normalized optical power',
+                                range: [-0.04, 1.04], dtick: 0.2
+                            },
+                            shapes: [{
+                                type: 'rect', xref: 'x', yref: 'y',
+                                x0: c.voltageMin, x1: model.thresholdVoltage,
+                                y0: 0, y1: c.threshold,
+                                fillcolor: 'rgba(139,152,169,0.12)', line: { width: 0 }, layer: 'below'
+                            }, {
+                                type: 'line', xref: 'x', yref: 'paper',
+                                x0: model.thresholdVoltage, x1: model.thresholdVoltage, y0: 0, y1: 1,
+                                line: { color: '#dc3545', width: 1.2, dash: 'dash' }
+                            }, {
+                                type: 'line', xref: 'paper', yref: 'y',
+                                x0: 0, x1: 1, y0: c.threshold, y1: c.threshold,
+                                line: { color: '#dc3545', width: 1.2, dash: 'dash' }
+                            }],
+                            annotations: [{
+                                xref: 'x', yref: 'paper', x: model.thresholdVoltage, y: 0.03,
+                                text: `Cutoff ${model.thresholdVoltage.toFixed(3)} V`,
+                                showarrow: false, xanchor: 'left',
+                                font: { size: 10, color: '#dc3545' }
+                            }, {
+                                xref: 'paper', yref: 'paper', x: 0.02, y: 0.98,
+                                text: `At or below ${this.formatBraggPlotNumber(c.threshold, 6)}: output -3.000 V`,
+                                showarrow: false, xanchor: 'left', yanchor: 'top',
+                                bgcolor: 'rgba(255,255,255,0.88)', borderpad: 4,
+                                font: { size: 10, color: '#a52834' }
+                            }]
+                        }, plotConfig);
+                        this.braggPlotError = '';
+                    } catch (error) {
+                        this.braggPlotError = error?.message || 'Could not render the Bragg calibration plots.';
+                        if (typeof Plotly !== 'undefined') {
+                            Plotly.purge(rawElement);
+                            Plotly.purge(normalizedElement);
+                        }
+                    }
                 },
                 async openWritetableFolderPicker() {
                     this.pathBrowser.open = true;
@@ -1234,7 +1581,7 @@
                 },
                 formatK(value) {
                     const numeric = Number(value);
-                    return Number.isFinite(numeric) && numeric > 0 ? numeric.toExponential(6) : '—';
+                    return Number.isFinite(numeric) && numeric > 0 ? numeric.toExponential(6) : '-';
                 },
                 defaultBraggPowerCalibration() {
                     return {
