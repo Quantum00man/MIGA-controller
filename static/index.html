@@ -901,6 +901,37 @@
                             <label class="form-label small mb-1 fw-bold text-primary">Base Timing</label>
                             <input type="number" class="form-control form-control-sm" v-model.number="config.bragg_base_timing">
                         </div>
+                        <div class="col-12 mt-2 pt-2 border-top">
+                            <div class="row g-2 align-items-end">
+                                <div class="col-md-4">
+                                    <label class="form-label small mb-1 fw-bold text-primary">Export FWHM (us)</label>
+                                    <input type="number" class="form-control form-control-sm" v-model.number="braggExportFwhm"
+                                        min="0.001" step="0.001" :disabled="braggExportBusy">
+                                </div>
+                                <div class="col-md-4 d-grid">
+                                    <button type="button" class="btn btn-sm btn-outline-primary" @click="downloadSingleBraggMot"
+                                        :disabled="braggExportBusy">
+                                        <span v-if="braggExportBusy && braggExportAction === 'single'" class="spinner-border spinner-border-sm me-1"></span>
+                                        <i v-else class="bi bi-file-earmark-arrow-down me-1"></i>Single MOT
+                                    </button>
+                                </div>
+                                <div class="col-md-4 d-grid">
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" @click="downloadBraggScanZip"
+                                        :disabled="braggExportBusy">
+                                        <span v-if="braggExportBusy && braggExportAction === 'scan'" class="spinner-border spinner-border-sm me-1"></span>
+                                        <i v-else class="bi bi-file-zip me-1"></i>Scan ZIP
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="form-text mt-2">
+                                Uses the current sequence and saved Bragg calibration. Scan ZIP follows the current Range or Custom values;
+                                averages and randomization are ignored. Limit: 200 files and 100 MB.
+                            </div>
+                            <div v-if="braggExportMessage" class="alert py-1 px-2 mt-2 mb-0 small"
+                                :class="braggExportIsError ? 'alert-danger' : 'alert-success'">
+                                {{ braggExportMessage }}
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -1361,6 +1392,11 @@
                     },
                     isRunning: false, isSimulation: false, statusMessage: "IDLE", currentStep: 0, plotRevision: 0, logs: [], ws: null,
                     progressPercent: 0,
+                    braggExportFwhm: 50,
+                    braggExportBusy: false,
+                    braggExportAction: '',
+                    braggExportMessage: '',
+                    braggExportIsError: false,
                     currentSequenceName: "Default (seq0.mot)",
                     currentDdsXmlName: "",
                     currentRunId: "...",
@@ -1812,6 +1848,109 @@
                         this.addLog("Upload failed: " + (e.response?.data?.detail || e.message));
                         return false; // 上传失败
                     }
+                },
+                braggExportSequenceName() {
+                    return this.currentSequenceName || this.config.sequence_name || 'seq0.mot';
+                },
+                braggDownloadFilename(response, fallback) {
+                    const disposition = response.headers?.['content-disposition'] || '';
+                    const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+                    if (utf8Match) {
+                        try { return decodeURIComponent(utf8Match[1]); } catch (_) { return utf8Match[1]; }
+                    }
+                    const basicMatch = disposition.match(/filename="?([^";]+)"?/i);
+                    return basicMatch ? basicMatch[1] : fallback;
+                },
+                saveBraggDownload(response, fallback) {
+                    const filename = this.braggDownloadFilename(response, fallback);
+                    const blob = response.data instanceof Blob ? response.data : new Blob([response.data]);
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = filename;
+                    link.style.display = 'none';
+                    document.body.appendChild(link);
+                    link.click();
+                    link.remove();
+                    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+                    return filename;
+                },
+                async braggExportError(error) {
+                    let data = error.response?.data;
+                    if (data instanceof Blob) {
+                        const text = await data.text();
+                        try { data = JSON.parse(text); } catch (_) { data = text; }
+                    }
+                    return data?.detail || data?.message || data || error.message || 'Export failed.';
+                },
+                async requestBraggExport(url, payload, fallback, action) {
+                    this.braggExportBusy = true;
+                    this.braggExportAction = action;
+                    this.braggExportMessage = '';
+                    this.braggExportIsError = false;
+                    try {
+                        const response = await axios.post(url, payload, { responseType: 'blob' });
+                        const filename = this.saveBraggDownload(response, fallback);
+                        this.braggExportMessage = `Downloaded ${filename}.`;
+                        this.addLog(`Bragg export downloaded: ${filename}`);
+                    } catch (error) {
+                        const message = await this.braggExportError(error);
+                        this.braggExportIsError = true;
+                        this.braggExportMessage = String(message);
+                        this.addLog(`Bragg export failed: ${message}`);
+                    } finally {
+                        this.braggExportBusy = false;
+                        this.braggExportAction = '';
+                    }
+                },
+                downloadSingleBraggMot() {
+                    const fwhm = Number(this.braggExportFwhm);
+                    if (!Number.isFinite(fwhm) || fwhm <= 0) {
+                        this.braggExportIsError = true;
+                        this.braggExportMessage = 'FWHM must be a positive number.';
+                        return;
+                    }
+                    return this.requestBraggExport('/experiment/bragg/export/single', {
+                        sequence_name: this.braggExportSequenceName(),
+                        fwhm,
+                        bragg_shape: this.config.bragg_shape,
+                        bragg_base_timing: Number(this.config.bragg_base_timing)
+                    }, 'bragg_export.mot', 'single');
+                },
+                downloadBraggScanZip() {
+                    let count;
+                    try {
+                        count = this.estimateAxisPointCount({
+                            scan_type: this.config.dim1_type,
+                            method: this.config.dim1_method,
+                            start: this.config.start,
+                            stop: this.config.stop,
+                            step: this.config.step,
+                            list: this.config.custom_list
+                        });
+                    } catch (error) {
+                        this.braggExportIsError = true;
+                        this.braggExportMessage = error.message || 'Invalid scan values.';
+                        return;
+                    }
+                    if (count > 200) {
+                        this.braggExportIsError = true;
+                        this.braggExportMessage = `The scan contains ${count} values; the export limit is 200.`;
+                        return;
+                    }
+                    const scanConfig = {
+                        ...this.config,
+                        mode: 'bragg_rabi',
+                        scan_dimensions: 1,
+                        averages: 1,
+                        randomize: false,
+                        dim2_enabled: false,
+                        dim3_enabled: false
+                    };
+                    return this.requestBraggExport('/experiment/bragg/export/scan', {
+                        sequence_name: this.braggExportSequenceName(),
+                        scan_config: scanConfig
+                    }, 'bragg_scan.zip', 'scan');
                 },
                 async selectDdsXml(event) {
                     const file = event.target.files[0];

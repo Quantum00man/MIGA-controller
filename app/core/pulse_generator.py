@@ -9,6 +9,7 @@ import config
 BRAGG_VOLTAGE_MIN = -3.0
 BRAGG_VOLTAGE_MAX = 3.0
 BRAGG_OFF_VOLTAGE = -3.0
+BRAGG_MAX_POINTS = 2_000_000
 
 
 def _calibration_values(calibration: Dict[str, Any] | None) -> Tuple[float, ...]:
@@ -81,7 +82,6 @@ def normalized_power_to_voltage(
     voltage = midpoint - math.log(logarithm_argument) / growth
     return min(voltage_max, max(voltage_min, voltage))
 
-
 def generate_bragg_pulse(
     fwhm: float,
     shape: str = "blackman",
@@ -104,14 +104,26 @@ def generate_bragg_pulse(
         mean = 4.0 * std_dev
         x_end = 2.0 * mean
         num_points = max(1, int(x_end / clock_res))
-        x_values = np.linspace(0, x_end, num_points)
-        ideal_shape = np.exp(-((x_values - mean) ** 2) / (2 * std_dev ** 2))
     elif shape == "blackman":
         total_duration = fwhm / 0.405
         num_points = max(1, int(total_duration / clock_res))
-        ideal_shape = np.blackman(num_points)
     else:
         raise ValueError(f"Unsupported shape '{shape}'. Please choose 'gaussian' or 'blackman'.")
+
+    pulse_logic_duration = (num_points + 2) * clock_res
+    param1_compensation = float(base_timing) - pulse_logic_duration
+    if param1_compensation < 0:
+        raise ValueError(
+            f"Bragg pulse duration {pulse_logic_duration:.1f} us exceeds base timing {base_timing} us"
+        )
+    if num_points > BRAGG_MAX_POINTS:
+        raise ValueError(f"Bragg pulse contains more than {BRAGG_MAX_POINTS} points")
+
+    if shape == "gaussian":
+        x_values = np.linspace(0, x_end, num_points)
+        ideal_shape = np.exp(-((x_values - mean) ** 2) / (2 * std_dev ** 2))
+    else:
+        ideal_shape = np.blackman(num_points)
 
     y_values = [normalized_power_to_voltage(value, calibration) for value in ideal_shape]
     pulse_name = f"{shape.capitalize()}_pulse"
@@ -123,11 +135,4 @@ def generate_bragg_pulse(
     pulse_commands.append(
         f"+{clock_res:.1f}us {pulse_name} = {BRAGG_OFF_VOLTAGE:.3f}\t\t(32)"
     )
-
-    pulse_logic_duration = (num_points + 2) * clock_res
-    param1_compensation = float(base_timing) - pulse_logic_duration
-    if param1_compensation < 0:
-        raise ValueError(
-            f"Bragg pulse duration {pulse_logic_duration:.1f} us exceeds base timing {base_timing} us"
-        )
     return "\n".join(pulse_commands), f"{param1_compensation:.1f}"

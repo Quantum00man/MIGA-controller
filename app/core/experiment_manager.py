@@ -698,6 +698,10 @@ class ExperimentManager:
         except Exception as exc:
             print(f"[Manager Error] Failed to auto-configure driver: {exc}")
 
+    def load_settings_snapshot_from_disk(self) -> Dict[str, Any]:
+        """Read normalized settings without mutating manager or driver state."""
+        return self._load_initial_settings()
+
     def get_fit_model_bundle(self) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         fit_models = self.settings.get('fit_models') or fitting.get_default_fit_models()
         selected_fit_model = fitting.get_fit_model_by_key(
@@ -1002,6 +1006,7 @@ class ExperimentManager:
         return max(1, min(3, scan_dimensions))
 
     def _generate_parameters(self, config: Dict[str, Any]) -> List[Any]:
+        max_base_points = int(config.get('_max_base_points', 0) or 0)
         def normalize_single_value(value: float, target_type: str) -> Any:
             if target_type == 'int':
                 return int(round(float(value)))
@@ -1018,6 +1023,8 @@ class ExperimentManager:
                     raise ValueError(f"Invalid list format: {clist}")
                 if not raw_vals:
                     raise ValueError("Scan list cannot be empty")
+                if max_base_points and len(raw_vals) > max_base_points:
+                    raise ValueError(f"Bragg ZIP export is limited to {max_base_points} files")
                 return normalize_values(raw_vals, target_type)
 
             start = float(start)
@@ -1031,6 +1038,8 @@ class ExperimentManager:
                     raise ValueError(f"Invalid point count: {step_or_count}")
                 if n_points <= 0:
                     raise ValueError("Point count must be positive")
+                if max_base_points and n_points > max_base_points:
+                    raise ValueError(f"Bragg ZIP export is limited to {max_base_points} files")
                 if n_points == 1:
                     raw_vals = [start]
                 else:
@@ -1047,6 +1056,8 @@ class ExperimentManager:
                     compare = (lambda value: value <= stop + tolerance) if direction > 0 else (lambda value: value >= stop - tolerance)
                     while compare(current):
                         raw_vals.append(current)
+                        if max_base_points and len(raw_vals) > max_base_points:
+                            raise ValueError(f"Bragg ZIP export is limited to {max_base_points} files")
                         current += effective_step
                     if not raw_vals:
                         raw_vals = [start]
@@ -1149,6 +1160,29 @@ class ExperimentManager:
         if config.get('randomize', False):
             random.shuffle(full_scan)
         return full_scan
+
+    def build_bragg_export_fwhm_values(self, scan_config: Dict[str, Any]) -> List[float]:
+        payload = dict(scan_config or {})
+        if str(payload.get('mode') or '').strip().lower() != 'bragg_rabi':
+            raise ValueError("Bragg ZIP export requires Bragg Rabi mode")
+        if self._resolve_scan_dimensions(payload) != 1:
+            raise ValueError("Bragg ZIP export only supports a 1D scan")
+        payload['averages'] = 1
+        payload['randomize'] = False
+        payload['_max_base_points'] = 200
+        parameter_sets = self._generate_parameters(payload)
+        values = []
+        for parameter_set in parameter_sets:
+            normalized = self._normalize_parameter_list(parameter_set)
+            if not normalized:
+                continue
+            value = float(normalized[0])
+            if not math.isfinite(value) or value <= 0:
+                raise ValueError("Bragg FWHM values must be positive finite numbers")
+            values.append(value)
+        if not values:
+            raise ValueError("Bragg scan contains no FWHM values")
+        return values
 
     '''# [UPDATED] Robust VCD Parser with Debug Prints
     def _calculate_delay_from_vcd(self, vcd_path: str, launch_id: str, trigger_id: str) -> float:
@@ -1457,7 +1491,12 @@ class ExperimentManager:
 
         try:
             template_path = config.SEQUENCE_TEMPLATE_PATH_WIN if config.USE_SIMULATION else self.settings['template_path']
-            self.seq_editor.generate_sequence(template_path, config.SEQUENCE_OUTPUT_PATH, actual_params_to_write)
+            self.seq_editor.generate_sequence(
+                template_path,
+                config.SEQUENCE_OUTPUT_PATH,
+                actual_params_to_write,
+                bragg_mode=execution_config.get('mode') == 'bragg_rabi',
+            )
 
             cmot_bin = config.CMOT_BINARY_PATH_WIN if config.USE_SIMULATION else self.settings['cmot_path']
             self.driver.compile_vcd(config.SEQUENCE_OUTPUT_PATH, config.VCD_OUTPUT_PATH, binary_path=cmot_bin)

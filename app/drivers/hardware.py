@@ -9,7 +9,43 @@ import config
 
 class SequenceEditor:
     @staticmethod
-    def generate_sequence(template_path: str, output_path: str, parameters: List[float]):
+    def render_sequence_content(content: str, parameters: List[float]) -> str:
+        rendered = str(content)
+        for i, param in enumerate(parameters):
+            placeholder = f"<PARAMETER{i}>"
+            val_str = f"{param:.6f}" if isinstance(param, float) else str(param)
+            rendered = rendered.replace(placeholder, val_str)
+        return rendered
+
+    @staticmethod
+    def render_bragg_sequence_content(content: str, pulse_code: str, compensation: str) -> str:
+        placeholder = "<PARAMETER0>"
+        lines = str(content).splitlines(keepends=True)
+        placeholder_lines = [index for index, line in enumerate(lines) if placeholder in line]
+        bragg_lines = [index for index in placeholder_lines if "bragg" in lines[index].lower()]
+        if len(bragg_lines) == 1:
+            target_index = bragg_lines[0]
+        elif not bragg_lines and len(placeholder_lines) == 1:
+            target_index = placeholder_lines[0]
+        elif not placeholder_lines:
+            raise ValueError("Bragg sequence template must contain <PARAMETER0>")
+        else:
+            raise ValueError(
+                "Bragg sequence template must have exactly one <PARAMETER0> line containing 'Bragg'"
+            )
+
+        pulse_text = str(pulse_code)
+        if not pulse_text.startswith("\n"):
+            pulse_text = "\n" + pulse_text
+        for index in placeholder_lines:
+            lines[index] = lines[index].replace(
+                placeholder,
+                pulse_text if index == target_index else "",
+            )
+        return SequenceEditor.render_sequence_content("".join(lines), ["", compensation])
+
+    @staticmethod
+    def generate_sequence(template_path: str, output_path: str, parameters: List[float], *, bragg_mode: bool = False):
         if not os.path.exists(template_path):
             if config.USE_SIMULATION:
                 os.makedirs(os.path.dirname(template_path), exist_ok=True)
@@ -21,10 +57,12 @@ class SequenceEditor:
         with open(template_path, 'r') as f:
             content = f.read()
 
-        for i, param in enumerate(parameters):
-            placeholder = f"<PARAMETER{i}>"
-            val_str = f"{param:.6f}" if isinstance(param, float) else str(param)
-            content = content.replace(placeholder, val_str)
+        if bragg_mode:
+            if len(parameters) < 2:
+                raise ValueError("Bragg sequence generation requires pulse and compensation parameters")
+            content = SequenceEditor.render_bragg_sequence_content(content, parameters[0], parameters[1])
+        else:
+            content = SequenceEditor.render_sequence_content(content, parameters)
 
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         with open(output_path, 'w') as f:

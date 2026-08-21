@@ -88,6 +88,25 @@ class ScanConfig(BaseModel):
         return normalized
 
 
+class BraggSingleExportRequest(BaseModel):
+    sequence_name: str = Field("")
+    fwhm: float = Field(..., gt=0)
+    bragg_shape: str = Field("blackman")
+    bragg_base_timing: int = Field(331119, gt=0)
+
+    @validator("bragg_shape")
+    def validate_bragg_shape(cls, value):
+        normalized = str(value or "blackman").strip().lower()
+        if normalized not in {"blackman", "gaussian"}:
+            raise ValueError("Bragg shape must be blackman or gaussian")
+        return normalized
+
+
+class BraggScanExportRequest(BaseModel):
+    sequence_name: str = Field("")
+    scan_config: ScanConfig
+
+
 class RamanPowerCalibration(BaseModel):
     """Generalized-logistic DDS amplitude to optical-power calibration."""
 

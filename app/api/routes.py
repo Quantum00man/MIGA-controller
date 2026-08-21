@@ -5,16 +5,18 @@ import shutil
 import time
 from copy import deepcopy
 from pathlib import Path
+from urllib.parse import quote
 
 import numpy as np
 from fastapi import APIRouter, HTTPException, UploadFile, File, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from typing import Dict, Any, List
 from app.analysis import fitting
 from app.core.experiment_manager import ExperimentManager
 from app.core.data_loader import DataLoader
 from app.core.data_manager import DataManager
+from app.core.bragg_export import build_bragg_zip_export, build_single_bragg_export, read_sequence_template
 from app.core.optimization_manager import OBJECTIVE_METRICS, OptimizationManager
 from app.drivers.dds_table import DdsTableError, validate_dds_table
 from app.models.schemas import (
@@ -23,6 +25,8 @@ from app.models.schemas import (
     ArchiveRunReference,
     ArchiveScanFitRequest,
     ArchiveWaveformRequest,
+    BraggScanExportRequest,
+    BraggSingleExportRequest,
     ScanFitModelSaveRequest,
     ExperimentResponse,
     FitModelDefinition,
@@ -43,6 +47,23 @@ optimization_manager = OptimizationManager(manager)
 from app.core.schedule_manager import ScheduleManager
 schedule_manager = ScheduleManager(manager)
 data_loader = DataLoader()
+
+
+def _bragg_export_template_path(settings: Dict[str, Any]) -> Path:
+    if config.USE_SIMULATION:
+        return Path(config.SEQUENCE_TEMPLATE_PATH_WIN)
+    return Path(str(settings.get("template_path") or config.SEQUENCE_TEMPLATE_PATH_LINUX))
+
+
+def _attachment_response(payload: bytes, filename: str, media_type: str) -> Response:
+    ascii_name = filename.encode("ascii", "ignore").decode("ascii") or "bragg_export"
+    headers = {
+        "Content-Disposition": (
+            f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(filename, safe='')}"
+        ),
+        "Cache-Control": "no-store",
+    }
+    return Response(content=payload, media_type=media_type, headers=headers)
 
 
 def _default_index_ui_state() -> Dict[str, Any]:
@@ -291,6 +312,52 @@ async def upload_sequence(file: UploadFile = File(...)):
         return {"status": "success", "message": f"Sequence loaded: {file.filename}", "filename": file.filename}
     except Exception as e:
         raise HTTPException(500, f"Failed to upload sequence: {str(e)}")
+
+@router.post("/experiment/bragg/export/single")
+async def export_single_bragg_mot(request: BraggSingleExportRequest):
+    try:
+        export_settings = manager.load_settings_snapshot_from_disk()
+        template_content = read_sequence_template(_bragg_export_template_path(export_settings))
+        calibration = dict(
+            export_settings.get("bragg_power_calibration")
+            or config.DEFAULT_BRAGG_POWER_CALIBRATION
+        )
+        payload, filename = build_single_bragg_export(
+            template_content=template_content,
+            sequence_name=request.sequence_name,
+            fwhm=request.fwhm,
+            shape=request.bragg_shape,
+            base_timing=request.bragg_base_timing,
+            calibration=calibration,
+        )
+        return _attachment_response(payload, filename, "text/plain")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.post("/experiment/bragg/export/scan")
+async def export_bragg_scan_zip(request: BraggScanExportRequest):
+    try:
+        export_settings = manager.load_settings_snapshot_from_disk()
+        scan_config = request.scan_config.dict()
+        fwhm_values = manager.build_bragg_export_fwhm_values(scan_config)
+        template_content = read_sequence_template(_bragg_export_template_path(export_settings))
+        calibration = dict(
+            export_settings.get("bragg_power_calibration")
+            or config.DEFAULT_BRAGG_POWER_CALIBRATION
+        )
+        payload, filename = build_bragg_zip_export(
+            template_content=template_content,
+            sequence_name=request.sequence_name,
+            fwhm_values=fwhm_values,
+            shape=scan_config.get("bragg_shape", "blackman"),
+            base_timing=int(scan_config.get("bragg_base_timing", 331119)),
+            calibration=calibration,
+        )
+        return _attachment_response(payload, filename, "application/zip")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
 
 @router.post("/experiment/dds-table")
 async def upload_dds_table(file: UploadFile = File(...)):
