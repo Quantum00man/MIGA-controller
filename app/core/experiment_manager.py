@@ -25,6 +25,13 @@ from app.models.schemas import ScanConfig
 from app.core.data_manager import DataManager
 from app.core.structures import ExperimentStatus, ScanResult
 from app.core.pulse_generator import generate_bragg_pulse
+from app.core.sequence_markers import (
+    decode_mot_bytes,
+    marker_definitions_for_sequence,
+    normalize_marker_profiles,
+    normalize_marker_definitions,
+    validate_auto_marker_scan,
+)
 
 class ExperimentManager:
     _instance = None
@@ -432,6 +439,8 @@ class ExperimentManager:
             "raman_down_r1_calibration": dict(config.DEFAULT_RAMAN_POWER_CALIBRATION),
             "raman_down_r2_calibration": dict(config.DEFAULT_RAMAN_POWER_CALIBRATION),
             "bragg_power_calibration": dict(config.DEFAULT_BRAGG_POWER_CALIBRATION),
+            "sequence_marker_definitions": [],
+            "sequence_marker_profiles": {},
             
             # --- [关键修复] 显式添加这三个参数的默认值 ---
             "intf_alpha": 0.35,
@@ -468,6 +477,12 @@ class ExperimentManager:
             )
         )
 
+        normalized["sequence_marker_definitions"] = normalize_marker_definitions(
+            normalized.get("sequence_marker_definitions"), strict=False
+        )
+        normalized["sequence_marker_profiles"] = normalize_marker_profiles(
+            normalized.get("sequence_marker_profiles"), strict=False
+        )
         return self._normalize_k_calibration_settings(normalized)
 
     def _save_settings_to_disk(self):
@@ -652,6 +667,12 @@ class ExperimentManager:
                 strict=True
             )
         ))
+        new_settings["sequence_marker_definitions"] = normalize_marker_definitions(
+            new_settings.get("sequence_marker_definitions"), strict=True
+        )
+        new_settings["sequence_marker_profiles"] = normalize_marker_profiles(
+            new_settings.get("sequence_marker_profiles"), strict=True
+        )
         self.settings.update(new_settings)
         self._apply_runtime_settings()
         self._save_settings_to_disk()
@@ -905,6 +926,30 @@ class ExperimentManager:
             print(f"[AC Stark] {message}")
             return message
 
+    def _validate_auto_marker_execution(self, scan_config: Dict[str, Any], parameters: List[Any]) -> None:
+        if str(scan_config.get("parameter_source") or "classic").lower() != "markers":
+            return
+        if str(scan_config.get("mode") or "standard").lower() != "standard":
+            raise ValueError("Auto Markers only support Standard scan logic")
+        scan_dimensions = self._resolve_scan_dimensions(scan_config)
+        axes = [str(value or "").strip().upper() for value in scan_config.get("marker_axes", [])]
+        axes = [value for value in axes if value]
+        if len(axes) != scan_dimensions:
+            raise ValueError(f"Auto Markers require {scan_dimensions} selected marker axes")
+        if len(set(axes)) != len(axes):
+            raise ValueError("Auto Marker axes must be unique")
+        template_path = Path(
+            config.SEQUENCE_TEMPLATE_PATH_WIN if config.USE_SIMULATION else self.settings["template_path"]
+        )
+        if not template_path.is_file():
+            raise ValueError(f"Sequence template not found: {template_path}")
+        template_content, _ = decode_mot_bytes(template_path.read_bytes())
+        definitions = marker_definitions_for_sequence(
+            self.settings, scan_config.get("sequence_name") or "sequence.mot"
+        )
+        validate_auto_marker_scan(template_content, axes, parameters, definitions)
+        scan_config["marker_axes"] = axes
+
     def start_scan(self, scan_config: Dict[str, Any]) -> Dict[str, str]:
         if not hasattr(self, 'status'):
             self.status = ExperimentStatus()
@@ -922,6 +967,7 @@ class ExperimentManager:
                 parameters = self._build_lock_in_execution(scan_config)
             else:
                 parameters = self._generate_parameters(scan_config)
+            self._validate_auto_marker_execution(scan_config, parameters)
         except Exception as exc:
             self.release_run_slot('scan')
             return {'status': 'error', 'message': f'Param generation failed: {str(exc)}'}
@@ -1496,6 +1542,11 @@ class ExperimentManager:
                 config.SEQUENCE_OUTPUT_PATH,
                 actual_params_to_write,
                 bragg_mode=execution_config.get('mode') == 'bragg_rabi',
+                marker_axes=(execution_config.get('marker_axes') or [])
+                    if execution_config.get('parameter_source') == 'markers' else None,
+                marker_definitions=marker_definitions_for_sequence(
+                    self.settings, execution_config.get('sequence_name') or 'sequence.mot'
+                ),
             )
 
             cmot_bin = config.CMOT_BINARY_PATH_WIN if config.USE_SIMULATION else self.settings['cmot_path']

@@ -17,6 +17,17 @@ from app.core.experiment_manager import ExperimentManager
 from app.core.data_loader import DataLoader
 from app.core.data_manager import DataManager
 from app.core.bragg_export import build_bragg_zip_export, build_single_bragg_export, read_sequence_template
+from app.core.sequence_markers import (
+    add_sequence_marker,
+    decode_mot_bytes,
+    encode_mot_text,
+    inspect_sequence_markers,
+    marker_definitions_for_sequence,
+    marked_filename,
+    remove_sequence_marker,
+    render_auto_marker_sequence,
+    update_sequence_marker,
+)
 from app.core.optimization_manager import OBJECTIVE_METRICS, OptimizationManager
 from app.drivers.dds_table import DdsTableError, validate_dds_table
 from app.models.schemas import (
@@ -27,6 +38,11 @@ from app.models.schemas import (
     ArchiveWaveformRequest,
     BraggScanExportRequest,
     BraggSingleExportRequest,
+    SequenceMarkerAnnotateRequest,
+    SequenceMarkerInspectRequest,
+    SequenceMarkerPreviewRequest,
+    SequenceMarkerUpdateRequest,
+    SequenceMarkerRemoveRequest,
     ScanFitModelSaveRequest,
     ExperimentResponse,
     FitModelDefinition,
@@ -300,6 +316,155 @@ async def get_status():
             "run_id": run_label # <--- This is what index.html needs
         }
     )
+
+MAX_MARKER_MOT_BYTES = 10 * 1024 * 1024
+
+
+def _marker_definitions_payload(definitions=None, filename="sequence.mot"):
+    if definitions is not None:
+        return [item.dict() if hasattr(item, "dict") else dict(item) for item in definitions]
+    return marker_definitions_for_sequence(manager.settings, filename)
+
+
+def _marker_document_payload(filename, content, encoding, definitions=None):
+    return {
+        "filename": str(filename or "sequence.mot"),
+        "marked_filename": marked_filename(filename),
+        "content": content,
+        "encoding": encoding,
+        "inspection": inspect_sequence_markers(
+            content, _marker_definitions_payload(definitions, filename)
+        ),
+    }
+
+
+@router.post("/sequence-markers/inspect-upload")
+async def inspect_marker_upload(file: UploadFile = File(...)):
+    filename = str(file.filename or "sequence.mot")
+    if Path(filename).suffix.lower() != ".mot":
+        raise HTTPException(400, "Marker editor only accepts .mot files")
+    payload = await file.read()
+    if len(payload) > MAX_MARKER_MOT_BYTES:
+        raise HTTPException(400, "MOT file exceeds the 10 MB marker editor limit")
+    try:
+        content, encoding = decode_mot_bytes(payload)
+        return _marker_document_payload(filename, content, encoding)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.post("/sequence-markers/inspect")
+async def inspect_marker_document(request: SequenceMarkerInspectRequest):
+    if len(request.content.encode("utf-8")) > MAX_MARKER_MOT_BYTES:
+        raise HTTPException(400, "MOT file exceeds the 10 MB marker editor limit")
+    return _marker_document_payload(
+        request.filename,
+        request.content,
+        request.encoding,
+        request.definitions,
+    )
+
+
+@router.post("/sequence-markers/annotate")
+async def annotate_marker_document(request: SequenceMarkerAnnotateRequest):
+    try:
+        content = add_sequence_marker(
+            request.content,
+            request.marker_id,
+            request.target_line_number,
+            request.kind,
+            request.compensation_line_number,
+        )
+        return _marker_document_payload(
+            request.filename,
+            content,
+            request.encoding,
+            request.definitions,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+
+@router.post("/sequence-markers/update")
+async def update_marker_document(request: SequenceMarkerUpdateRequest):
+    try:
+        content = update_sequence_marker(
+            request.content,
+            request.old_marker_id,
+            request.marker_id,
+            request.target_line_number,
+            request.kind,
+            request.compensation_line_number,
+        )
+        return _marker_document_payload(
+            request.filename,
+            content,
+            request.encoding,
+            request.definitions,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+@router.post("/sequence-markers/remove")
+async def remove_marker_from_document(request: SequenceMarkerRemoveRequest):
+    try:
+        content = remove_sequence_marker(request.content, request.marker_id)
+        return _marker_document_payload(
+            request.filename,
+            content,
+            request.encoding,
+            request.definitions,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.post("/sequence-markers/download")
+async def download_marker_document(request: SequenceMarkerInspectRequest):
+    try:
+        payload = encode_mot_text(request.content, request.encoding)
+        return _attachment_response(payload, marked_filename(request.filename), "text/plain")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.get("/experiment/sequence/markers")
+async def inspect_current_sequence_markers(sequence_name: str = ""):
+    try:
+        settings = manager.load_settings_snapshot_from_disk()
+        template_path = _bragg_export_template_path(settings)
+        content, encoding = decode_mot_bytes(template_path.read_bytes())
+        return _marker_document_payload(sequence_name or template_path.name, content, encoding)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.post("/experiment/sequence/markers/preview")
+async def preview_current_sequence_markers(request: SequenceMarkerPreviewRequest):
+    try:
+        settings = manager.load_settings_snapshot_from_disk()
+        template_path = _bragg_export_template_path(settings)
+        content, _ = decode_mot_bytes(template_path.read_bytes())
+        rendered = render_auto_marker_sequence(
+            content,
+            request.marker_axes,
+            request.values,
+            marker_definitions_for_sequence(
+                settings, request.sequence_name or template_path.name
+            ),
+        )
+        original_lines = content.splitlines()
+        rendered_lines = rendered.splitlines()
+        changes = [
+            {"line_number": index + 1, "before": before, "after": after}
+            for index, (before, after) in enumerate(zip(original_lines, rendered_lines))
+            if before != after
+        ]
+        return {"changes": changes}
+    except (OSError, ValueError) as exc:
+        raise HTTPException(400, str(exc))
+
 
 # [NEW] Sequence Upload Endpoint
 @router.post("/experiment/sequence")

@@ -79,6 +79,25 @@ class ScanConfig(BaseModel):
     ac_stark_dds_xml_name: str = Field("")
     lock_in_a_value: float = Field(1.0)
     lock_in_b_value: float = Field(0.5)
+    parameter_source: str = Field("classic")
+    marker_axes: List[str] = Field(default_factory=list)
+
+    @validator("parameter_source")
+    def normalize_parameter_source(cls, value):
+        normalized = str(value or "classic").strip().lower()
+        if normalized not in {"classic", "markers"}:
+            raise ValueError("Parameter source must be classic or markers")
+        return normalized
+
+    @validator("marker_axes", pre=True)
+    def normalize_marker_axes(cls, value):
+        axes = value if isinstance(value, list) else []
+        normalized = []
+        for raw in axes[:3]:
+            marker_id = str(raw or "").strip().upper()
+            if marker_id:
+                normalized.append(marker_id)
+        return normalized
 
     @validator("ac_stark_raman_group")
     def normalize_ac_stark_raman_group(cls, value):
@@ -105,6 +124,82 @@ class BraggSingleExportRequest(BaseModel):
 class BraggScanExportRequest(BaseModel):
     sequence_name: str = Field("")
     scan_config: ScanConfig
+
+
+class SequenceMarkerDefinition(BaseModel):
+    id: str
+    display_name: str
+    kind: str
+    decimals: int = Field(0, ge=0, le=9)
+    hard_min: float
+    hard_max: float
+    default_start: float
+    default_stop: float
+    default_step: float = Field(..., gt=0)
+    default_method: str = Field("step_size")
+    expected_command: str = Field("")
+    expected_channel: str = Field("")
+    has_compensation: bool = Field(False)
+
+    @validator("id")
+    def validate_marker_id(cls, value):
+        normalized = str(value or "").strip().upper()
+        if not normalized:
+            raise ValueError("Marker ID is required")
+        return normalized
+
+    @validator("kind")
+    def validate_marker_kind(cls, value):
+        normalized = str(value or "").strip().lower()
+        if normalized not in {"dds_element", "dac_value", "duration"}:
+            raise ValueError("Unsupported marker type")
+        return normalized
+
+    @validator("default_method")
+    def validate_marker_default_method(cls, value):
+        normalized = str(value or "step_size").strip().lower()
+        if normalized not in {"step_size", "n_points"}:
+            raise ValueError("Marker default method must be step_size or n_points")
+        return normalized
+
+    @validator("hard_max")
+    def validate_marker_limits(cls, value, values):
+        minimum = values.get("hard_min")
+        if minimum is not None and value < minimum:
+            raise ValueError("Marker hard maximum must be greater than or equal to hard minimum")
+        return value
+
+
+class SequenceMarkerInspectRequest(BaseModel):
+    filename: str = Field("sequence.mot")
+    content: str
+    encoding: str = Field("utf-8")
+    definitions: List[SequenceMarkerDefinition] = Field(default_factory=list)
+
+
+class SequenceMarkerAnnotateRequest(SequenceMarkerInspectRequest):
+    marker_id: str
+    target_line_number: int = Field(..., gt=0)
+    kind: str
+    compensation_line_number: Optional[int] = Field(None, gt=0)
+
+
+
+class SequenceMarkerUpdateRequest(SequenceMarkerInspectRequest):
+    old_marker_id: str
+    marker_id: str
+    target_line_number: int = Field(..., gt=0)
+    kind: str
+    compensation_line_number: Optional[int] = Field(None, gt=0)
+
+class SequenceMarkerRemoveRequest(SequenceMarkerInspectRequest):
+    marker_id: str
+
+
+class SequenceMarkerPreviewRequest(BaseModel):
+    marker_axes: List[str]
+    sequence_name: str = Field("")
+    values: List[float]
 
 
 class RamanPowerCalibration(BaseModel):
@@ -314,6 +409,8 @@ class SystemSettings(BaseModel):
     raman_down_r1_calibration: RamanPowerCalibration = Field(default_factory=RamanPowerCalibration)
     raman_down_r2_calibration: RamanPowerCalibration = Field(default_factory=RamanPowerCalibration)
     bragg_power_calibration: BraggPowerCalibration = Field(default_factory=BraggPowerCalibration)
+    sequence_marker_definitions: List[SequenceMarkerDefinition] = Field(default_factory=list)
+    sequence_marker_profiles: Dict[str, List[SequenceMarkerDefinition]] = Field(default_factory=dict)
 
 
 class SystemUpdateRequest(BaseModel):

@@ -683,10 +683,10 @@
                     <div class="btn-group btn-group-sm w-100 mt-2" role="group">
                         <input type="radio" class="btn-check" name="runMode" id="runModeLive" value="live"
                             v-model="runMode" :disabled="isRunning || isScheduleActive()">
-                        <label class="btn btn-outline-secondary" for="runModeLive">Live Mode</label>
+                        <label class="btn btn-outline-secondary" for="runModeLive">Live</label>
                         <input type="radio" class="btn-check" name="runMode" id="runModeScheduled" value="scheduled"
                             v-model="runMode" :disabled="isRunning || isScheduleActive() || config.mode === 'ac_stark'">
-                        <label class="btn btn-outline-secondary" for="runModeScheduled">Scheduled Mode</label>
+                        <label class="btn btn-outline-secondary" for="runModeScheduled">Scheduled</label>
                     </div>
                     <div class="form-text mt-2" style="font-size: 0.72rem;">
                         {{ runMode === 'scheduled'
@@ -731,6 +731,37 @@
                 </div>
             </div>
 
+            <span class="section-label">Parameter Source</span>
+            <div class="card p-3 mb-3">
+                <div class="btn-group btn-group-sm w-100" role="group" aria-label="Parameter source">
+                    <input type="radio" class="btn-check" id="sourceClassic" value="classic" v-model="config.parameter_source"
+                        :disabled="isRunning || isScheduleActive()">
+                    <label class="btn btn-outline-secondary" for="sourceClassic">Classic Placeholders</label>
+                    <input type="radio" class="btn-check" id="sourceMarkers" value="markers" v-model="config.parameter_source"
+                        :disabled="isRunning || isScheduleActive() || runMode === 'scheduled'">
+                    <label class="btn btn-outline-primary" for="sourceMarkers">Auto Markers</label>
+                </div>
+                <template v-if="config.parameter_source === 'markers'">
+                    <div v-if="sequenceMarkerError" class="alert alert-danger py-2 px-2 mt-2 mb-0 small">{{ sequenceMarkerError }}</div>
+                    <div v-else-if="sequenceMarkerBusy" class="small text-muted mt-2"><span class="spinner-border spinner-border-sm me-1"></span>Inspecting sequence markers...</div>
+                    <div v-else class="mt-2">
+                        <div class="d-flex flex-wrap align-items-center gap-2 small">
+                            <span class="badge bg-success">{{ availableSequenceMarkers.length }} ready</span>
+                            <span v-if="undefinedSequenceMarkers.length" class="badge bg-warning text-dark">{{ undefinedSequenceMarkers.length }} need definitions</span>
+                            <a v-if="undefinedSequenceMarkers.length" href="/settings.html" target="_blank" class="ms-auto">Open Settings</a>
+                        </div>
+                        <div class="form-text">Live scans only. Marker defaults are loaded when selected and can be overridden within Hard Limits.</div>
+                        <button type="button" class="btn btn-outline-secondary btn-sm w-100 mt-2" @click="previewAutoMarkers"
+                            :disabled="!autoMarkerSelectionReady || sequenceMarkerBusy">
+                            <i class="bi bi-eye me-1"></i>Preview Current Values
+                        </button>
+                        <div v-if="sequenceMarkerPreview.length" class="mt-2 border rounded bg-light p-2 small font-monospace">
+                            <div v-for="line in sequenceMarkerPreview" :key="line.line_number">L{{ line.line_number }}: {{ line.rendered }}</div>
+                        </div>
+                    </div>
+                </template>
+                <div v-else class="form-text mt-2">Uses the existing &lt;PARAMETER0,1,2&gt; replacement workflow.</div>
+            </div>
             <div class="d-flex align-items-center justify-content-between mt-3 mb-2">
                 <span class="section-label" style="margin:0;">Repeat Previous Run</span>
                 <button type="button" class="btn btn-outline-secondary btn-sm" @click="toggleRepeatLoader" :disabled="(isRunning || isScheduleActive()) && !showRepeatLoader">
@@ -846,8 +877,18 @@
 
                 <span class="section-label" v-if="!['ac_stark', 'lock_in'].includes(config.mode)">Parameter P0</span>
                 <div class="card p-3" v-if="!['ac_stark', 'lock_in'].includes(config.mode)">
+                    <div v-if="config.parameter_source === 'markers'" class="mb-3">
+                        <label class="form-label small fw-bold text-primary mb-1">P0 Marker</label>
+                        <select class="form-select form-select-sm" v-model="config.marker_axes[0]" @change="applyMarkerDefaults(0)">
+                            <option value="" disabled>Select a defined marker</option>
+                            <option v-for="marker in availableSequenceMarkers" :key="marker.id" :value="marker.id" :disabled="isMarkerUsedByOtherAxis(marker.id, 0)">
+                                {{ marker.display_name || marker.id }}
+                            </option>
+                        </select>
+                        <div v-if="selectedMarkerDefinition(0)" class="form-text">Hard Limits: {{ formatMarkerLimit(selectedMarkerDefinition(0).hard_min) }} to {{ formatMarkerLimit(selectedMarkerDefinition(0).hard_max) }}</div>
+                    </div>
                     <div class="d-flex justify-content-between align-items-center mb-3">
-                        <div class="btn-group btn-group-sm" role="group">
+                        <div v-if="config.parameter_source !== 'markers'" class="btn-group btn-group-sm" role="group">
                             <input type="radio" class="btn-check" name="ptype" id="pfloat" value="float"
                                 v-model="config.param_type">
                             <label class="btn btn-outline-secondary px-2" for="pfloat">Float</label>
@@ -1070,8 +1111,16 @@
 
                 <span class="section-label" v-if="config.scan_dimensions >= 2">Parameter P1</span>
                 <div class="card p-3" v-if="config.scan_dimensions >= 2">
+                    <div v-if="config.parameter_source === 'markers'" class="mb-3">
+                        <label class="form-label small fw-bold text-primary mb-1">P1 Marker</label>
+                        <select class="form-select form-select-sm" v-model="config.marker_axes[1]" @change="applyMarkerDefaults(1)">
+                            <option value="" disabled>Select a defined marker</option>
+                            <option v-for="marker in availableSequenceMarkers" :key="marker.id" :value="marker.id" :disabled="isMarkerUsedByOtherAxis(marker.id, 1)">{{ marker.display_name || marker.id }}</option>
+                        </select>
+                        <div v-if="selectedMarkerDefinition(1)" class="form-text">Hard Limits: {{ formatMarkerLimit(selectedMarkerDefinition(1).hard_min) }} to {{ formatMarkerLimit(selectedMarkerDefinition(1).hard_max) }}</div>
+                    </div>
                     <div class="d-flex justify-content-between align-items-center mb-3">
-                        <div class="btn-group btn-group-sm" role="group">
+                        <div v-if="config.parameter_source !== 'markers'" class="btn-group btn-group-sm" role="group">
                             <input type="radio" class="btn-check" name="p1type" id="p1float" value="float"
                                 v-model="config.dim2_param_type">
                             <label class="btn btn-outline-secondary px-2" for="p1float">Float</label>
@@ -1110,8 +1159,16 @@
 
                 <span class="section-label" v-if="config.scan_dimensions >= 3">Parameter P2</span>
                 <div class="card p-3" v-if="config.scan_dimensions >= 3">
+                    <div v-if="config.parameter_source === 'markers'" class="mb-3">
+                        <label class="form-label small fw-bold text-primary mb-1">P2 Marker</label>
+                        <select class="form-select form-select-sm" v-model="config.marker_axes[2]" @change="applyMarkerDefaults(2)">
+                            <option value="" disabled>Select a defined marker</option>
+                            <option v-for="marker in availableSequenceMarkers" :key="marker.id" :value="marker.id" :disabled="isMarkerUsedByOtherAxis(marker.id, 2)">{{ marker.display_name || marker.id }}</option>
+                        </select>
+                        <div v-if="selectedMarkerDefinition(2)" class="form-text">Hard Limits: {{ formatMarkerLimit(selectedMarkerDefinition(2).hard_min) }} to {{ formatMarkerLimit(selectedMarkerDefinition(2).hard_max) }}</div>
+                    </div>
                     <div class="d-flex justify-content-between align-items-center mb-3">
-                        <div class="btn-group btn-group-sm" role="group">
+                        <div v-if="config.parameter_source !== 'markers'" class="btn-group btn-group-sm" role="group">
                             <input type="radio" class="btn-check" name="p2type" id="p2float" value="float"
                                 v-model="config.dim3_param_type">
                             <label class="btn btn-outline-secondary px-2" for="p2float">Float</label>
@@ -1370,6 +1427,7 @@
                     useList1: false, useList2: false, useList3: false,
                     config: {
                         scan_dimensions: 1,
+                        parameter_source: 'classic', marker_axes: ['', '', ''],
                         dim1_type: 'range', start: 0, stop: 10, step: 1, custom_list: '',
                         param_type: 'float', dim1_method: 'step_size',
                         dim2_enabled: false, dim2_type: 'range', dim2_param_type: 'float', dim2_method: 'step_size', dim2_start: 0, dim2_stop: 5, dim2_step: 1, dim2_list: '',
@@ -1397,6 +1455,10 @@
                     braggExportAction: '',
                     braggExportMessage: '',
                     braggExportIsError: false,
+                    sequenceMarkerBusy: false,
+                    sequenceMarkerError: '',
+                    sequenceMarkerInspection: { markers: [], lines: [], marker_count: 0, line_count: 0 },
+                    sequenceMarkerPreview: [],
                     currentSequenceName: "Default (seq0.mot)",
                     currentDdsXmlName: "",
                     currentRunId: "...",
@@ -1457,6 +1519,23 @@
                     dim3DisplayMode: 'slice', sliceAxis: 2, sliceIndex: 0
                 }
             },
+            computed: {
+                availableSequenceMarkers() {
+                    return (this.sequenceMarkerInspection.markers || [])
+                        .filter(marker => marker.role === 'scan' && marker.status === 'defined' && marker.definition)
+                        .map(marker => marker.definition);
+                },
+                undefinedSequenceMarkers() {
+                    return (this.sequenceMarkerInspection.markers || [])
+                        .filter(marker => marker.role === 'scan' && marker.status !== 'defined');
+                },
+                autoMarkerSelectionReady() {
+                    if (this.config.parameter_source !== 'markers') return false;
+                    const count = Math.max(1, Math.min(3, Number(this.config.scan_dimensions) || 1));
+                    const axes = (this.config.marker_axes || []).slice(0, count).filter(Boolean);
+                    return axes.length === count && new Set(axes).size === count;
+                }
+            },
             watch: {
                 currentTab() { this.plotRevision++; this.renderMainPlot(); },
                 showRawData() { this.plotRevision++; this.renderMainPlot(); },
@@ -1471,6 +1550,10 @@
                     }
                 },
                 'config.mode'(mode) {
+                    if (this.config.parameter_source === 'markers' && mode !== 'standard') {
+                        this.config.mode = 'standard';
+                        return;
+                    }
                     if (['ac_stark', 'lock_in'].includes(mode)) {
                         this.config.scan_dimensions = 1;
                         this.config.dim2_enabled = false;
@@ -1485,7 +1568,20 @@
                         this.resetHistory(1);
                     }
                 },
-                runMode() { this.saveState(); this.requestPlotResize(); },
+                runMode(value) {
+                    if (value === 'scheduled' && this.config.parameter_source === 'markers') this.config.parameter_source = 'classic';
+                    this.saveState();
+                    this.requestPlotResize();
+                },
+                'config.parameter_source'(source) {
+                    if (source === 'markers') {
+                        this.runMode = 'live';
+                        this.config.mode = 'standard';
+                        this.fetchSequenceMarkers();
+                    } else {
+                        this.sequenceMarkerPreview = [];
+                    }
+                },
                 sidebarWidth(value) { this.applySidebarWidthCss(value); },
                 currentSequenceName() { this.saveState(); },
                 scheduleSettings: {
@@ -1526,6 +1622,7 @@
                 this.ensureRealHardwareMode().catch(() => { });
                 this.fetchStatus();
                 this.fetchDdsXmlStatus();
+                this.fetchSequenceMarkers();
                     // Editable scan/queue state is local to this browser. Only the
                     // server-owned execution status is shared between clients.
                     this.sharedStateBootstrapComplete = true;
@@ -1569,6 +1666,95 @@
                 }
             },
             methods: {
+                markerKindLabel(kind) {
+                    return { dds_element: 'DDS integer', dac_value: 'DAC', duration: 'Duration' }[kind] || kind || 'Unknown';
+                },
+                formatMarkerLimit(value) {
+                    const numeric = Number(value);
+                    return Number.isFinite(numeric) ? numeric.toLocaleString('en-US', { maximumFractionDigits: 9 }) : '?';
+                },
+                selectedMarkerDefinition(axisIndex) {
+                    const markerId = (this.config.marker_axes || [])[axisIndex];
+                    return this.availableSequenceMarkers.find(marker => marker.id === markerId) || null;
+                },
+                isMarkerUsedByOtherAxis(markerId, axisIndex) {
+                    return (this.config.marker_axes || []).some((value, index) => index !== axisIndex && value === markerId);
+                },
+                markerAxisValue(axisIndex) {
+                    const raw = axisIndex === 0 ? this.config.start : (axisIndex === 1 ? this.config.dim2_start : this.config.dim3_start);
+                    return Number(raw);
+                },
+                applyMarkerDefaults(axisIndex) {
+                    const definition = this.selectedMarkerDefinition(axisIndex);
+                    if (!definition) return;
+                    const integerType = ['dds_element', 'duration'].includes(definition.kind) ? 'int' : 'float';
+                    if (axisIndex === 0) {
+                        this.config.param_type = integerType;
+                        this.config.start = definition.default_start;
+                        this.config.stop = definition.default_stop;
+                        this.config.step = definition.default_step;
+                        this.config.dim1_method = definition.default_method;
+                        this.useList1 = false;
+                    } else if (axisIndex === 1) {
+                        this.config.dim2_param_type = integerType;
+                        this.config.dim2_start = definition.default_start;
+                        this.config.dim2_stop = definition.default_stop;
+                        this.config.dim2_step = definition.default_step;
+                        this.config.dim2_method = definition.default_method;
+                        this.useList2 = false;
+                    } else {
+                        this.config.dim3_param_type = integerType;
+                        this.config.dim3_start = definition.default_start;
+                        this.config.dim3_stop = definition.default_stop;
+                        this.config.dim3_step = definition.default_step;
+                        this.config.dim3_method = definition.default_method;
+                        this.useList3 = false;
+                    }
+                    this.config.mode = 'standard';
+                    this.sequenceMarkerPreview = [];
+                },
+                async fetchSequenceMarkers() {
+                    this.sequenceMarkerBusy = true;
+                    this.sequenceMarkerError = '';
+                    try {
+                        const response = await axios.get('/experiment/sequence/markers', { params: { sequence_name: this.currentSequenceName } });
+                        this.sequenceMarkerInspection = response.data?.inspection || { markers: [], lines: [] };
+                        const availableIds = new Set(this.availableSequenceMarkers.map(marker => marker.id));
+                        this.config.marker_axes = (Array.isArray(this.config.marker_axes) ? this.config.marker_axes : ['', '', ''])
+                            .map(id => availableIds.has(id) ? id : '');
+                    } catch (error) {
+                        this.sequenceMarkerInspection = { markers: [], lines: [], marker_count: 0, line_count: 0 };
+                        this.sequenceMarkerError = this.formatRequestError(error);
+                    } finally {
+                        this.sequenceMarkerBusy = false;
+                    }
+                },
+                async previewAutoMarkers() {
+                    if (!this.autoMarkerSelectionReady) return;
+                    this.sequenceMarkerBusy = true;
+                    this.sequenceMarkerError = '';
+                    try {
+                        const count = Math.max(1, Math.min(3, Number(this.config.scan_dimensions) || 1));
+                        const markerAxes = this.config.marker_axes.slice(0, count);
+                        const values = markerAxes.map((_, index) => this.markerAxisValue(index));
+                        if (values.some(value => !Number.isFinite(value))) throw new Error('Current marker preview values must be numeric.');
+                        const response = await axios.post('/experiment/sequence/markers/preview', {
+                            marker_axes: markerAxes,
+                            values,
+                            sequence_name: this.currentSequenceName
+                        });
+                        this.sequenceMarkerPreview = (response.data?.changes || []).map(change => ({
+                            line_number: change.line_number,
+                            rendered: change.after
+                        }));
+                        if (!this.sequenceMarkerPreview.length) this.sequenceMarkerError = 'Preview produced no changed instruction lines.';
+                    } catch (error) {
+                        this.sequenceMarkerPreview = [];
+                        this.sequenceMarkerError = this.formatRequestError(error);
+                    } finally {
+                        this.sequenceMarkerBusy = false;
+                    }
+                },
                 async fetchStatus() {
                     try {
                         const res = await axios.get('/experiment/status');
@@ -1684,6 +1870,10 @@
                         );
                         this.runMode = state.runMode === 'scheduled' ? 'scheduled' : 'live';
                         this.config = { ...this.config, ...restoredConfig };
+                            this.config.parameter_source = this.config.parameter_source === 'markers' ? 'markers' : 'classic';
+                            this.config.marker_axes = Array.isArray(this.config.marker_axes)
+                                ? [...this.config.marker_axes.slice(0, 3), '', '', ''].slice(0, 3)
+                                : ['', '', ''];
                         this.currentSequenceName = String(state.currentSequenceName || restoredConfig.sequence_name || this.currentSequenceName).trim() || this.currentSequenceName;
                         this.currentDdsXmlName = String(state.currentDdsXmlName || restoredConfig.ac_stark_dds_xml_name || this.currentDdsXmlName).trim();
                         this.config.sequence_name = this.currentSequenceName;
@@ -1842,6 +2032,7 @@
                         });
                         this.currentSequenceName = res.data.filename;
                         this.config.sequence_name = res.data.filename;
+                        await this.fetchSequenceMarkers();
                         this.addLog("Sequence uploaded successfully.");
                         return true; // 上传成功
                     } catch (e) {
@@ -2853,7 +3044,19 @@ prepareScanPayload(sourceConfig = this.config, sequenceNameOverride = null) {
     payload.scan_dimensions = this.resolveScanDimensionsFromConfig(payload);
     payload.dim2_enabled = payload.scan_dimensions >= 2;
     payload.dim3_enabled = payload.scan_dimensions >= 3;
-    if (payload.scan_dimensions > 1) payload.mode = 'standard';
+    if (payload.parameter_source === 'markers') {
+        const axes = (payload.marker_axes || []).slice(0, payload.scan_dimensions).filter(Boolean);
+        if (this.runMode !== 'live') throw new Error('Auto Markers are available in Live only.');
+        if (axes.length !== payload.scan_dimensions || new Set(axes).size !== payload.scan_dimensions) {
+            throw new Error(`Select ${payload.scan_dimensions} unique marker axis${payload.scan_dimensions === 1 ? '' : 'es'}.`);
+        }
+        payload.marker_axes = axes;
+        payload.mode = 'standard';
+    } else {
+        payload.parameter_source = 'classic';
+        payload.marker_axes = [];
+        if (payload.scan_dimensions > 1) payload.mode = 'standard';
+    }
     return this.sanitizeStartPayload(payload, sequenceNameOverride);
 },
 ensureScheduledTasksValid() {

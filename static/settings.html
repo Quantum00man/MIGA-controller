@@ -217,9 +217,115 @@
             min-height: 340px;
         }
 
+        .settings-shell-wide {
+            width: calc(100vw - 32px);
+            max-width: 1580px;
+            transition: max-width 180ms ease;
+        }
+
+        .marker-editor-grid {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(390px, 440px);
+            gap: 20px;
+            align-items: start;
+        }
+
+        .marker-workspace-toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .marker-legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .marker-legend-item,
+        .marker-line-tag {
+            display: inline-flex;
+            align-items: center;
+            min-height: 24px;
+            padding: 2px 8px;
+            border: 1px solid transparent;
+            border-radius: 5px;
+            font-size: 0.7rem;
+            font-weight: 700;
+            line-height: 1.2;
+        }
+
+        .marker-legend-dds, .marker-line-tag.dds_element { color: #0a4f9c; border-color: #9ec5fe; background: #dbeafe; }
+        .marker-legend-dac, .marker-line-tag.dac_value { color: #176b3a; border-color: #9ad3af; background: #dcf4e4; }
+        .marker-legend-duration, .marker-line-tag.duration { color: #8a4b08; border-color: #f2c98a; background: #fff0d5; }
+        .marker-legend-comp, .marker-line-tag.compensation { color: #65409a; border-color: #cab5e8; background: #eee5fa; }
+
+        .marker-line-list {
+            height: clamp(640px, 68vh, 900px);
+            overflow: auto;
+            border: 1px solid #cfd8e3;
+            border-radius: 7px;
+            background: #fff;
+        }
+
+        .marker-line-row {
+            position: relative;
+            padding: 11px 13px;
+            border-bottom: 1px solid #e7ecf2;
+            background: #fff;
+            transition: background-color 120ms ease, box-shadow 120ms ease;
+        }
+
+        .marker-line-row:last-child { border-bottom: 0; }
+        .marker-line-row.marked { cursor: pointer; }
+        .marker-line-row.marked:hover { box-shadow: inset 4px 0 0 currentColor; filter: saturate(1.05); }
+        .marker-line-row.marker-row-dds { color: #0a4f9c; background: #edf5ff; }
+        .marker-line-row.marker-row-dac { color: #176b3a; background: #edf9f1; }
+        .marker-line-row.marker-row-duration { color: #8a4b08; background: #fff7e8; }
+        .marker-line-row.marker-row-compensation { color: #65409a; background: #f6f0fc; }
+        .marker-line-row.selected {
+            box-shadow: inset 5px 0 0 #0d6efd, inset 0 0 0 2px rgba(13, 110, 253, 0.28);
+        }
+
+        .marker-source {
+            margin: 0 0 8px;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            color: #27313a;
+            font-size: 0.78rem;
+            line-height: 1.45;
+        }
+
+        .marker-definition-pane {
+            position: sticky;
+            top: 12px;
+            max-height: calc(100vh - 32px);
+            overflow-y: auto;
+            border: 1px solid #cfd8e3;
+            border-radius: 7px;
+            padding: 18px;
+            background: #f8f9fa;
+        }
+
+        .marker-existing-list {
+            max-height: 320px;
+            overflow-y: auto;
+        }
+
         @media (max-width: 991.98px) {
             .bragg-plot-grid {
                 grid-template-columns: minmax(0, 1fr);
+            }
+
+            .marker-editor-grid {
+                grid-template-columns: minmax(0, 1fr);
+            }
+
+            .marker-definition-pane {
+                position: static;
             }
         }
 
@@ -289,6 +395,20 @@
                 padding: 10px 14px max(10px, env(safe-area-inset-bottom));
             }
 
+            .settings-shell-wide {
+                width: 100%;
+            }
+
+            .marker-line-list {
+                height: min(62vh, 620px);
+                min-height: 420px;
+            }
+
+            .marker-definition-pane {
+                max-height: none;
+                overflow: visible;
+            }
+
             .settings-actions .btn {
                 min-height: 44px;
                 flex: 1 1 0;
@@ -300,7 +420,7 @@
 
 <body>
 
-    <div id="app" class="settings-shell container">
+    <div id="app" class="settings-shell container" :class="{'settings-shell-wide': tab === 'markers'}">
         <div class="settings-page-header d-flex justify-content-between align-items-center mb-4">
             <h1><i class="bi bi-sliders me-2" aria-hidden="true"></i>Analysis Configuration</h1>
             <a href="/" class="settings-back btn btn-outline-secondary"><i class="bi bi-arrow-left" aria-hidden="true"></i><span>Back to Lab</span></a>
@@ -385,7 +505,7 @@
                                 <span class="input-group-text"><i class="bi bi-arrow-bar-down"></i></span>
                                 <input type="number" class="form-control" v-model.number="s.max_low" step="0.0001" placeholder="0.0001">
                             </div>
-                            <div class="form-text" style="font-size: 0.7rem;">Discard if Raw < Threshold (Noise/Empty).</div>
+                            <div class="form-text" style="font-size: 0.7rem;">Discard if Raw &lt; Threshold (Noise/Empty).</div>
                             </div>
 
                             <div class="col-12">
@@ -555,6 +675,170 @@
                             </div>
                         </div>
                     </div>
+                </div>
+
+                <div v-if="tab==='markers'">
+                    <div class="bg-light p-3 mb-3 rounded border">
+                        <div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
+                            <div>
+                                <h6 class="fw-bold text-primary mb-1"><i class="bi bi-tags me-2"></i>Visual MOT Marker Editor</h6>
+                                <div class="form-text mt-0">Select a detected value, name it, define safe limits and download a marked copy. The uploaded file is never overwritten.</div>
+                            </div>
+                            <button type="button" class="btn btn-primary btn-sm" @click="$refs.markerMotInput.click()" :disabled="markerBusy">
+                                <span v-if="markerBusy" class="spinner-border spinner-border-sm me-1"></span>
+                                <i v-else class="bi bi-file-earmark-code me-1"></i>{{ markerDocument ? 'Load Another MOT' : 'Load MOT File' }}
+                            </button>
+                            <input ref="markerMotInput" type="file" class="d-none" accept=".mot" @change="loadMarkerMotFile">
+                        </div>
+                    </div>
+
+                    <div v-if="markerError" class="alert alert-danger py-2" role="alert">
+                        <i class="bi bi-exclamation-triangle-fill me-2"></i>{{ markerError }}
+                    </div>
+                    <div v-if="markerMessage" class="alert alert-success py-2" role="status">
+                        <i class="bi bi-check-circle-fill me-2"></i>{{ markerMessage }}
+                    </div>
+
+                    <div v-if="!markerDocument && !markerBusy" class="border rounded p-4 text-center text-muted">
+                        <i class="bi bi-file-earmark-code fs-3 d-block mb-2"></i>
+                        Load a MOT file to inspect editable parameters and existing markers.
+                    </div>
+
+                    <template v-if="markerDocument">
+                        <div class="d-flex flex-wrap align-items-center gap-2 mb-3 small">
+                            <span class="fw-bold font-monospace">{{ markerDocument.filename }}</span>
+                            <span class="badge bg-light text-dark border">{{ markerInspection.line_count }} lines</span>
+                            <span class="badge bg-light text-dark border">{{ markerInspection.marker_count }} markers</span>
+                            <span class="badge bg-light text-dark border">{{ markerDocument.encoding }}</span>
+                        </div>
+
+                        <div v-if="markerInspection.markers.length" class="mb-3">
+                            <div class="small fw-bold text-muted mb-2">Existing Markers</div>
+                            <div class="marker-existing-list border rounded bg-white">
+                                <div v-for="marker in markerInspection.markers" :key="`${marker.role}:${marker.id}:${marker.marker_line_number}`"
+                                    class="d-flex flex-wrap align-items-center gap-2 px-3 py-2 border-bottom">
+                                    <span class="badge" :class="markerStatusClass(marker.status)">{{ marker.status }}</span>
+                                    <span class="font-monospace fw-bold">{{ marker.role.toUpperCase() }}:{{ marker.id }}</span>
+                                    <span class="small text-muted">Line {{ marker.target_line_number || '?' }} | {{ markerKindLabel(marker.kind) }}</span>
+                                    <span v-if="marker.message" class="small text-danger">{{ marker.message }}</span>
+                                    <div class="ms-auto d-flex gap-1" v-if="marker.role === 'scan'">
+                                        <button type="button" class="btn btn-outline-secondary btn-sm" @click="editExistingMarker(marker)">Definition</button>
+                                        <button type="button" class="btn btn-outline-danger btn-sm" @click="removeMarkerFromDocument(marker.id)">Remove</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="marker-editor-grid">
+                            <section aria-label="MOT parameter candidates">
+                                <div class="marker-workspace-toolbar">
+                                    <div class="input-group input-group-sm flex-grow-1" style="min-width: 280px;">
+                                        <span class="input-group-text bg-white"><i class="bi bi-search"></i></span>
+                                        <input type="search" class="form-control" v-model.trim="markerSearch" placeholder="Search line, command, channel or marker name">
+                                    </div>
+                                    <div class="marker-legend" aria-label="Marker color legend">
+                                        <span class="marker-legend-item marker-legend-dds">DDS</span>
+                                        <span class="marker-legend-item marker-legend-dac">DAC</span>
+                                        <span class="marker-legend-item marker-legend-duration">Duration</span>
+                                        <span class="marker-legend-item marker-legend-comp">Compensation</span>
+                                    </div>
+                                </div>
+                                <div class="marker-line-list">
+                                    <div v-if="!filteredMarkerLines.length" class="p-4 text-center text-muted small">No matching editable parameters.</div>
+                                    <div v-for="line in filteredMarkerLines" :key="line.line_number" class="marker-line-row"
+                                        :class="markerLineClass(line)" @click="handleMarkerLineClick(line)"
+                                        :tabindex="line.marked ? 0 : null" @keydown.enter.prevent="handleMarkerLineClick(line)">
+                                        <pre class="marker-source"><span class="text-muted me-2">{{ line.line_number }}</span>{{ line.source }}</pre>
+                                        <div class="d-flex flex-wrap align-items-center gap-1">
+                                            <button v-for="candidate in line.candidates" :key="candidate.candidate_id" type="button"
+                                                class="btn btn-outline-primary btn-sm" @click.stop="selectMarkerCandidate(candidate, line)"
+                                                :disabled="line.marked && !lineBelongsToEditingMarker(line)">
+                                                {{ candidate.label }}
+                                            </button>
+                                            <template v-for="marker in line.markers || []" :key="`${marker.role}:${marker.id}`">
+                                                <span class="marker-line-tag" :class="marker.role === 'comp' ? 'compensation' : marker.kind">
+                                                    {{ marker.role === 'comp' ? 'COMP' : markerKindLabel(marker.kind) }}: {{ marker.id }}
+                                                </span>
+                                            </template>
+                                            <span v-if="line.marked" class="small fw-bold ms-auto">Click row to edit</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </section>
+                            <aside class="marker-definition-pane" aria-label="Marker definition">
+                                <div v-if="!markerSelectedCandidate" class="text-center text-muted small py-4">
+                                    Select a parameter on the left or edit an existing marker definition.
+                                </div>
+                                <template v-else>
+                                    <div class="d-flex justify-content-between align-items-start gap-2 mb-3">
+                                        <div>
+                                            <div class="small text-muted">{{ markerEditingId ? `Editing ${markerEditingId}` : 'Selected target' }}</div>
+                                            <div class="fw-bold">Line {{ markerSelectedCandidate.line_number }} | {{ markerKindLabel(markerForm.kind) }}</div>
+                                        </div>
+                                        <button type="button" class="btn-close" aria-label="Clear selection" @click="clearMarkerSelection"></button>
+                                    </div>
+                                    <div class="mb-2">
+                                        <label class="form-label small fw-bold">Marker Name</label>
+                                        <input type="text" class="form-control form-control-sm" v-model.trim="markerForm.display_name"
+                                            placeholder="RAMAN LABELING DETUNING">
+                                        <div v-if="markerEditingId" class="form-text">Change the name or select another parameter line to move this marker.</div>
+                                        <label class="form-label small fw-bold mt-2">Marker ID</label>
+                                        <input type="text" class="form-control form-control-sm font-monospace" v-model.trim="markerForm.id" placeholder="Auto-generated from Marker Name">
+                                        <div class="form-text font-monospace">Effective ID: {{ markerNormalizedId || 'MARKER_ID' }}</div>
+                                    </div>
+                                    <div class="row g-2 mb-2">
+                                        <div class="col-6">
+                                            <label class="form-label small fw-bold">Hard Min</label>
+                                            <input type="number" class="form-control form-control-sm" :step="markerInputStep" v-model.number="markerForm.hard_min">
+                                        </div>
+                                        <div class="col-6">
+                                            <label class="form-label small fw-bold">Hard Max</label>
+                                            <input type="number" class="form-control form-control-sm" :step="markerInputStep" v-model.number="markerForm.hard_max">
+                                        </div>
+                                    </div>
+                                    <div class="small fw-bold text-muted mt-3 mb-2">Default Scan</div>
+                                    <div class="mb-2">
+                                        <select class="form-select form-select-sm" v-model="markerForm.default_method">
+                                            <option value="step_size">Step Size</option>
+                                            <option value="n_points">Point Count</option>
+                                        </select>
+                                    </div>
+                                    <div class="row g-2 mb-2">
+                                        <div class="col-4"><label class="form-label small">Start</label><input type="number" class="form-control form-control-sm" :step="markerInputStep" v-model.number="markerForm.default_start"></div>
+                                        <div class="col-4"><label class="form-label small">Stop</label><input type="number" class="form-control form-control-sm" :step="markerInputStep" v-model.number="markerForm.default_stop"></div>
+                                        <div class="col-4"><label class="form-label small">{{ markerForm.default_method === 'n_points' ? 'Count' : 'Step' }}</label><input type="number" class="form-control form-control-sm" :step="markerForm.default_method === 'n_points' ? 1 : markerInputStep" v-model.number="markerForm.default_step"></div>
+                                    </div>
+                                    <div v-if="markerForm.kind === 'dac_value'" class="mb-2">
+                                        <label class="form-label small fw-bold">Decimal Places</label>
+                                        <input type="number" class="form-control form-control-sm" min="0" max="9" step="1" v-model.number="markerForm.decimals">
+                                    </div>
+                                    <div v-if="markerForm.kind === 'duration'" class="mt-3 pt-2 border-top">
+                                        <div class="form-check form-switch mb-2">
+                                            <input class="form-check-input" type="checkbox" id="markerCompensationEnabled" v-model="markerForm.has_compensation">
+                                            <label class="form-check-label small fw-bold" for="markerCompensationEnabled">Keep sequence duration constant</label>
+                                        </div>
+                                        <select v-if="markerForm.has_compensation" class="form-select form-select-sm" v-model.number="markerCompensationLine">
+                                            <option :value="null" disabled>Select compensation duration</option>
+                                            <option v-for="item in markerCompensationCandidates" :key="item.candidate.candidate_id" :value="item.line_number">
+                                                Line {{ item.line_number }} | {{ item.source }}
+                                            </option>
+                                        </select>
+                                    </div>
+                                    <div class="d-grid mt-3">
+                                        <button v-if="markerEditingId" type="button" class="btn btn-primary btn-sm" @click="saveExistingMarkerDefinition" :disabled="markerBusy">Update Marker</button>
+                                        <button v-else type="button" class="btn btn-primary btn-sm" @click="addMarkerToDocument" :disabled="markerBusy">Add Marker</button>
+                                    </div>
+                                </template>
+                            </aside>
+                        </div>
+
+                        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mt-3 pt-3 border-top">
+                            <div class="small text-muted">Definitions are stored by Apply & Save. The marked MOT is downloaded separately.</div>
+                            <button type="button" class="btn btn-success btn-sm" @click="downloadMarkedMot" :disabled="markerBusy || !markerInspection.marker_count">
+                                <i class="bi bi-download me-1"></i>Download {{ markerDocument.marked_filename }}
+                            </button>
+                        </div>
+                    </template>
                 </div>
 
                 <div v-if="tab==='bragg'">
@@ -1054,6 +1338,7 @@
                         { id: 'phys', label: 'Physics & Gains', icon: 'bi-activity', description: 'Configure detector gains, signal filters and physical calibration constants.' },
                         { id: 'raman', label: 'Raman AC Stark', icon: 'bi-lightning-charge', description: 'Configure DDS writer access and four independent Raman amplitude-to-power calibration curves.' },
                         { id: 'bragg', label: 'Bragg Pulse', icon: 'bi-broadcast', description: 'Configure the channel-32 voltage-to-normalized-power curve and its linear operating interval.' },
+                        { id: 'markers', label: 'Sequence Markers', icon: 'bi-tags', description: 'Mark DDS, DAC and duration values visually, then define hard limits and default scans.' },
                         { id: 'fitting', label: 'Fitting Models', icon: 'bi-bezier2', description: 'Manage atom-area calculation and the models used for time-of-flight fitting.' },
                         { id: 'net', label: 'Network', icon: 'bi-hdd-network', description: 'Select the acquisition platform and configure device connection limits.' },
                         { id: 'logic', label: 'Logic & Channels', icon: 'bi-diagram-3', description: 'Set launch, trigger and linked-mode channel timing.' },
@@ -1061,6 +1346,22 @@
                         { id: 'update', label: 'System Update', icon: 'bi-arrow-repeat', description: 'Review the current checkout and update the controller from its configured GitHub source.' }
                     ],
                     updateInfo: {}, updateMsg: '', updateIsError: false, updateBusy: false,
+                    markerBusy: false,
+                    markerError: '',
+                    markerMessage: '',
+                    markerSearch: '',
+                    markerDocument: null,
+                    markerSelectedCandidate: null,
+                    markerSelectedLine: null,
+                    markerEditingId: '',
+                    markerCompensationLine: null,
+                    markerForm: {
+                        id: '', display_name: '', kind: '', decimals: 0,
+                        hard_min: 0, hard_max: 0,
+                        default_start: 0, default_stop: 0, default_step: 1,
+                        default_method: 'step_size', expected_command: '', expected_channel: '',
+                        has_compensation: false
+                    },
                     fitRoleOptions: [
                         { key: 'amplitude', label: 'Amplitude' },
                         { key: 'width', label: 'Width' },
@@ -1091,7 +1392,38 @@
                 },
                 braggCalibrationSignature() {
                     return JSON.stringify(this.s.bragg_power_calibration || {});
-                }
+                },
+                markerInspection() {
+                    return this.markerDocument?.inspection || { line_count: 0, marker_count: 0, markers: [], lines: [] };
+                },
+                filteredMarkerLines() {
+                    const query = String(this.markerSearch || '').trim().toLowerCase();
+                    const lines = this.markerInspection.lines || [];
+                    if (!query) return lines;
+                    return lines.filter(line => {
+                        const candidateText = (line.candidates || []).map(item => `${item.label} ${item.command} ${item.channel}`).join(' ');
+                        const markerText = (line.markers || []).map(item => `${item.id} ${item.role} ${item.kind}`).join(' ');
+                        return `${line.line_number} ${line.source} ${candidateText} ${markerText}`.toLowerCase().includes(query);
+                    });
+                },
+                markerCompensationCandidates() {
+                    const selectedLine = Number(this.markerSelectedCandidate?.line_number || 0);
+                    return (this.markerInspection.lines || []).flatMap(line =>
+                        (line.candidates || [])
+                            .filter(candidate => candidate.kind === 'duration'
+                                && line.line_number !== selectedLine
+                                && (!line.marked || (line.markers || []).some(marker => marker.id === this.markerEditingId && marker.role === 'comp')))
+                            .map(candidate => ({ line_number: line.line_number, source: line.source, candidate }))
+                    );
+                },
+                markerNormalizedId() {
+                    const source = String(this.markerForm.id || this.markerForm.display_name || '').trim();
+                    return source.replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '').toUpperCase();
+                },
+                markerInputStep() {
+                    if (this.markerForm.kind === 'dac_value') return 10 ** -Math.max(0, Number(this.markerForm.decimals) || 0);
+                    return 1;
+                },
             },
             watch: {
                 tab(value) {
@@ -1103,6 +1435,308 @@
             },
             mounted() { this.fetchSettings(); },
             methods: {
+                markerKindLabel(kind) {
+                    return { dds_element: 'DDS element', dac_value: 'DAC value', duration: 'Duration' }[kind] || kind || 'Unknown';
+                },
+                markerStatusClass(status) {
+                    return {
+                        defined: 'bg-success', undefined: 'bg-warning text-dark',
+                        conflict: 'bg-danger', invalid: 'bg-danger'
+                    }[status] || 'bg-secondary';
+                },
+                markerLineClass(line) {
+                    const classes = [];
+                    if (line.marked) classes.push('marked');
+                    const marker = (line.markers || [])[0];
+                    if (marker?.role === 'comp') classes.push('marker-row-compensation');
+                    else if (marker?.kind === 'dds_element') classes.push('marker-row-dds');
+                    else if (marker?.kind === 'dac_value') classes.push('marker-row-dac');
+                    else if (marker?.kind === 'duration') classes.push('marker-row-duration');
+                    const selectedTarget = Number(this.markerSelectedCandidate?.line_number || 0) === Number(line.line_number);
+                    const selectedCompensation = this.markerEditingId && Number(this.markerCompensationLine || 0) === Number(line.line_number);
+                    if (selectedTarget || selectedCompensation) classes.push('selected');
+                    return classes;
+                },
+                lineBelongsToEditingMarker(line) {
+                    return Boolean(this.markerEditingId) && (line.markers || []).some(marker => marker.id === this.markerEditingId);
+                },
+                handleMarkerLineClick(line) {
+                    if (!line?.marked) return;
+                    const lineMarker = (line.markers || [])[0];
+                    if (!lineMarker) return;
+                    const scanMarker = lineMarker.role === 'scan'
+                        ? lineMarker
+                        : (this.markerInspection.markers || []).find(marker => marker.role === 'scan' && marker.id === lineMarker.id);
+                    if (scanMarker) this.editExistingMarker(scanMarker);
+                },
+                markerProfileKey(filename = this.markerDocument?.filename) {
+                    const base = String(filename || 'sequence.mot').split(/[\\/]/).pop().replace(/\.mot$/i, '').replace(/_marked$/i, '').trim();
+                    return (base || 'sequence').replace(/\s+/g, ' ').toLowerCase();
+                },
+                markerDefinitions() {
+                    const profiles = this.s.sequence_marker_profiles;
+                    const profileKey = this.markerProfileKey();
+                    if (profiles && typeof profiles === 'object' && Object.prototype.hasOwnProperty.call(profiles, profileKey)) {
+                        return Array.isArray(profiles[profileKey]) ? profiles[profileKey] : [];
+                    }
+                    const markerIds = new Set((this.markerInspection.markers || []).filter(item => item.role === 'scan').map(item => item.id));
+                    const legacy = Array.isArray(this.s.sequence_marker_definitions) ? this.s.sequence_marker_definitions : [];
+                    return legacy.filter(item => markerIds.has(item.id));
+                },
+                setMarkerDefinitions(definitions) {
+                    const profileKey = this.markerProfileKey();
+                    this.s.sequence_marker_profiles = {
+                        ...(this.s.sequence_marker_profiles || {}),
+                        [profileKey]: definitions.map(item => ({ ...item }))
+                    };
+                },
+                markerErrorText(error) {
+                    const detail = error?.response?.data?.detail;
+                    if (Array.isArray(detail)) return detail.map(item => item.msg).join('; ');
+                    return detail || error?.message || 'Marker operation failed.';
+                },
+                markerDefinitionFromForm() {
+                    const id = this.markerNormalizedId;
+                    if (!id) throw new Error('Marker name is required.');
+                    const numericKeys = ['hard_min', 'hard_max', 'default_start', 'default_stop', 'default_step'];
+                    const values = Object.fromEntries(numericKeys.map(key => [key, Number(this.markerForm[key])]));
+                    if (Object.values(values).some(value => !Number.isFinite(value))) throw new Error('Limits and default scan values must be finite numbers.');
+                    if (values.hard_min > values.hard_max) throw new Error('Hard Min cannot exceed Hard Max.');
+                    if (values.default_start < values.hard_min || values.default_start > values.hard_max || values.default_stop < values.hard_min || values.default_stop > values.hard_max) {
+                        throw new Error('Default scan must stay inside the hard limits.');
+                    }
+                    if (values.default_step <= 0) throw new Error('Default step or count must be positive.');
+                    if (this.markerForm.default_method === 'n_points' && !Number.isInteger(values.default_step)) throw new Error('Point Count must be an integer.');
+                    if (['duration', 'dds_element'].includes(this.markerForm.kind) && Object.values(values).some(value => !Number.isInteger(value))) {
+                        throw new Error('DDS and duration definitions require integer limits and default scan values.');
+                    }
+                    const decimals = this.markerForm.kind === 'dac_value' ? Number(this.markerForm.decimals) : 0;
+                    if (!Number.isInteger(decimals) || decimals < 0 || decimals > 9) throw new Error('Decimal Places must be an integer from 0 to 9.');
+                    return {
+                        id,
+                        display_name: String(this.markerForm.display_name || id.replaceAll('_', ' ')).trim(),
+                        kind: this.markerForm.kind,
+                        decimals,
+                        ...values,
+                        default_method: this.markerForm.default_method,
+                        expected_command: String(this.markerForm.expected_command || ''),
+                        expected_channel: String(this.markerForm.expected_channel || ''),
+                        has_compensation: Boolean(this.markerForm.has_compensation)
+                    };
+                },
+                upsertMarkerDefinition(definition) {
+                    const definitions = this.markerDefinitions().filter(item => item.id !== definition.id);
+                    this.setMarkerDefinitions([...definitions, definition]);
+                },
+                markerDocumentRequest(definitions = this.markerDefinitions()) {
+                    return {
+                        filename: this.markerDocument.filename,
+                        content: this.markerDocument.content,
+                        encoding: this.markerDocument.encoding,
+                        definitions
+                    };
+                },
+                applyMarkerDocument(document) {
+                    this.markerDocument = document;
+                    this.markerError = '';
+                },
+                resetMarkerForm(candidate = null) {
+                    const value = Number(candidate?.value_us ?? candidate?.value ?? 0);
+                    const kind = candidate?.kind || '';
+                    const span = kind === 'dac_value' ? Math.max(1, Math.abs(value)) : Math.max(10, Math.ceil(Math.abs(value)));
+                    this.markerForm = {
+                        id: '', display_name: '', kind, decimals: kind === 'dac_value' ? 3 : 0,
+                        hard_min: kind === 'duration' ? 1 : Math.floor(value - span),
+                        hard_max: Math.ceil(value + span),
+                        default_start: value, default_stop: value, default_step: 1,
+                        default_method: 'step_size',
+                        expected_command: candidate?.command || '', expected_channel: candidate?.channel || '',
+                        has_compensation: false
+                    };
+                    this.markerEditingId = '';
+                    this.markerCompensationLine = null;
+                },
+                selectMarkerCandidate(candidate, line) {
+                    const editingId = this.markerEditingId;
+                    const previousName = this.markerForm.display_name;
+                    const previousFormId = this.markerForm.id;
+                    const previousKind = this.markerForm.kind;
+                    this.markerSelectedCandidate = candidate;
+                    this.markerSelectedLine = line;
+                    if (!editingId) {
+                        this.resetMarkerForm(candidate);
+                    } else if (candidate.kind !== previousKind) {
+                        this.resetMarkerForm(candidate);
+                        this.markerEditingId = editingId;
+                        this.markerForm.id = previousFormId || editingId;
+                        this.markerForm.display_name = previousName || editingId.replaceAll('_', ' ');
+                    } else {
+                        this.markerForm.kind = candidate.kind;
+                        this.markerForm.expected_command = candidate.command || '';
+                        this.markerForm.expected_channel = candidate.channel || '';
+                    }
+                    if (candidate.kind !== 'duration') {
+                        this.markerForm.has_compensation = false;
+                        this.markerCompensationLine = null;
+                    }
+                    this.markerMessage = '';
+                    this.markerError = '';
+                },
+                clearMarkerSelection() {
+                    this.markerSelectedCandidate = null;
+                    this.markerSelectedLine = null;
+                    this.resetMarkerForm();
+                },
+                async loadMarkerMotFile(event) {
+                    const file = event.target.files?.[0];
+                    event.target.value = '';
+                    if (!file) return;
+                    this.markerBusy = true;
+                    this.markerError = '';
+                    this.markerMessage = '';
+                    try {
+                        const form = new FormData();
+                        form.append('file', file);
+                        const response = await axios.post('/sequence-markers/inspect-upload', form);
+                        this.applyMarkerDocument(response.data);
+                        await this.refreshMarkerInspection();
+                        this.clearMarkerSelection();
+                        this.markerMessage = `Loaded ${response.data.filename}. Existing markers were detected automatically.`;
+                    } catch (error) {
+                        this.markerError = this.markerErrorText(error);
+                    } finally {
+                        this.markerBusy = false;
+                    }
+                },
+                async refreshMarkerInspection() {
+                    if (!this.markerDocument) return;
+                    const response = await axios.post('/sequence-markers/inspect', this.markerDocumentRequest());
+                    this.applyMarkerDocument(response.data);
+                },
+                async addMarkerToDocument() {
+                    if (!this.markerSelectedCandidate || !this.markerDocument) return;
+                    this.markerBusy = true;
+                    this.markerError = '';
+                    this.markerMessage = '';
+                    try {
+                        const definition = this.markerDefinitionFromForm();
+                        if (definition.has_compensation && !this.markerCompensationLine) throw new Error('Select a duration instruction for compensation.');
+                        const definitions = [...this.markerDefinitions().filter(item => item.id !== definition.id), definition];
+                        const payload = {
+                            ...this.markerDocumentRequest(definitions),
+                            marker_id: definition.id,
+                            target_line_number: this.markerSelectedCandidate.line_number,
+                            kind: definition.kind,
+                            compensation_line_number: definition.has_compensation ? Number(this.markerCompensationLine) : null
+                        };
+                        const response = await axios.post('/sequence-markers/annotate', payload);
+                        this.upsertMarkerDefinition(definition);
+                        this.applyMarkerDocument(response.data);
+                        this.clearMarkerSelection();
+                        this.markerMessage = `Added ${definition.id}. Click Apply & Save to store its definition.`;
+                    } catch (error) {
+                        this.markerError = this.markerErrorText(error);
+                    } finally {
+                        this.markerBusy = false;
+                    }
+                },
+                editExistingMarker(marker) {
+                    const candidate = marker.candidate;
+                    if (!candidate) {
+                        this.markerError = marker.message || 'This marker has no editable target.';
+                        return;
+                    }
+                    const definition = marker.definition;
+                    const compensation = (this.markerInspection.markers || []).find(item => item.role === 'comp' && item.id === marker.id);
+                    this.markerSelectedCandidate = candidate;
+                    this.markerSelectedLine = (this.markerInspection.lines || []).find(line => line.line_number === candidate.line_number) || null;
+                    this.resetMarkerForm(candidate);
+                    this.markerEditingId = marker.id;
+                    this.markerCompensationLine = compensation?.target_line_number || null;
+                    this.markerForm = definition ? {
+                        ...definition,
+                        id: definition.id || marker.id,
+                        has_compensation: Boolean(compensation)
+                    } : {
+                        ...this.markerForm,
+                        id: marker.id,
+                        display_name: marker.id.replaceAll('_', ' '),
+                        has_compensation: Boolean(compensation)
+                    };
+                    this.markerError = '';
+                    this.markerMessage = '';
+                },
+                async saveExistingMarkerDefinition() {
+                    if (!this.markerSelectedCandidate || !this.markerDocument || !this.markerEditingId) return;
+                    this.markerBusy = true;
+                    this.markerError = '';
+                    this.markerMessage = '';
+                    try {
+                        const oldMarkerId = this.markerEditingId;
+                        const definition = this.markerDefinitionFromForm();
+                        const duplicate = (this.markerInspection.markers || []).some(item => item.role === 'scan' && item.id === definition.id && item.id !== oldMarkerId);
+                        if (duplicate) throw new Error(`Marker ${definition.id} already exists in this sequence.`);
+                        if (definition.has_compensation && !this.markerCompensationLine) throw new Error('Select a duration instruction for compensation.');
+                        const definitions = [
+                            ...this.markerDefinitions().filter(item => item.id !== oldMarkerId && item.id !== definition.id),
+                            definition
+                        ];
+                        const response = await axios.post('/sequence-markers/update', {
+                            ...this.markerDocumentRequest(definitions),
+                            old_marker_id: oldMarkerId,
+                            marker_id: definition.id,
+                            target_line_number: this.markerSelectedCandidate.line_number,
+                            kind: definition.kind,
+                            compensation_line_number: definition.has_compensation ? Number(this.markerCompensationLine) : null
+                        });
+                        this.setMarkerDefinitions(definitions);
+                        this.applyMarkerDocument(response.data);
+                        this.clearMarkerSelection();
+                        this.markerMessage = `Updated ${definition.id}. Click Apply & Save to persist the definition.`;
+                    } catch (error) {
+                        this.markerError = this.markerErrorText(error);
+                    } finally {
+                        this.markerBusy = false;
+                    }
+                },
+                async removeMarkerFromDocument(markerId) {
+                    if (!this.markerDocument) return;
+                    this.markerBusy = true;
+                    this.markerError = '';
+                    try {
+                        const response = await axios.post('/sequence-markers/remove', {
+                            ...this.markerDocumentRequest(), marker_id: markerId
+                        });
+                        this.applyMarkerDocument(response.data);
+                        this.clearMarkerSelection();
+                        this.markerMessage = `Removed ${markerId} from this MOT copy. Its saved definition was kept.`;
+                    } catch (error) {
+                        this.markerError = this.markerErrorText(error);
+                    } finally {
+                        this.markerBusy = false;
+                    }
+                },
+                async downloadMarkedMot() {
+                    if (!this.markerDocument) return;
+                    this.markerBusy = true;
+                    this.markerError = '';
+                    try {
+                        const response = await axios.post('/sequence-markers/download', this.markerDocumentRequest(), { responseType: 'blob' });
+                        const url = URL.createObjectURL(response.data);
+                        const link = document.createElement('a');
+                        link.href = url;
+                        link.download = this.markerDocument.marked_filename;
+                        document.body.appendChild(link);
+                        link.click();
+                        link.remove();
+                        URL.revokeObjectURL(url);
+                        this.markerMessage = `Downloaded ${this.markerDocument.marked_filename}.`;
+                    } catch (error) {
+                        this.markerError = this.markerErrorText(error);
+                    } finally {
+                        this.markerBusy = false;
+                    }
+                },
                 getActiveTabDefinition() {
                     return this.tabDefinitions.find(item => item.id === this.tab) || this.tabDefinitions[0];
                 },
@@ -1661,6 +2295,12 @@
                         });
                     });
                     normalized.update_repo_url = String(normalized.update_repo_url || '').trim();
+                    normalized.sequence_marker_definitions = Array.isArray(normalized.sequence_marker_definitions)
+                        ? normalized.sequence_marker_definitions.map(item => ({ ...item }))
+                        : [];
+                    normalized.sequence_marker_profiles = normalized.sequence_marker_profiles && typeof normalized.sequence_marker_profiles === 'object'
+                        ? Object.fromEntries(Object.entries(normalized.sequence_marker_profiles).map(([key, items]) => [key, Array.isArray(items) ? items.map(item => ({ ...item })) : []]))
+                        : {};
                     normalized.update_branch = String(normalized.update_branch || 'main').trim() || 'main';
                     return normalized;
                 },

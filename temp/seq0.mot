@@ -1,4 +1,4 @@
-LOOP
+﻿LOOP
 
 COMMENT
 
@@ -21,12 +21,13 @@ INNER
 
 ## Sequence to ckeck the signal of AOM 3D UP and AOM 3D DOWN ##
 
++1us  sync = ON						(55)
 ##################################
-#            3D MOT              #<PARAMETER0>
+#            3D MOT              #107840000
 ##################################
 
 #TURN ON SHIM FIELDS AND 3D MOT MAGNETS#
-+2us Bais_coils_X=5.12			(31)#7.128 7.1 5.10 5.12
++2931.3us Bais_coils_X=5.12			(31)#7.128 7.1 5.10 5.12
 +2us Bais_coils_Y=4.93 			(33)#6.102 6.05 6.06 4.90 4.90  5.08
 +2us Bais_coils_Z=4.93			(35)#3.75 3.75 7.5 4.921 4.94
 ######################## Bragg thermalization #########################
@@ -65,10 +66,10 @@ INNER
 +30us AOM_3DMOT_Down =0.950		(20) #down beams. power set 950 500 #26 mW 380 0.5 0.550 590 635 650 580 510 600
 ########################################################################################
 
-+20us AOM_Detection =0.2				(22) #thermalization
++20us AOM_Detection =0.9				(22) #thermalization
 +10us AOM_Det= OFF					(52)
-+30us AOM_Raman1 =0.950					(23) #repump. power set 30
-+20us AOM_Raman2 =0.950					(24) #thermalization
++30us AOM_Raman1 =1				(23) #repump. power set 30
++20us AOM_Raman2 =1				(24) #thermalization
 
 
 
@@ -83,19 +84,19 @@ INNER
 
 # ********** molasses ************************************
 #+2us Exp_trig = ON      	   			(60)
-+300ms DDS1 [4]					(1) #cooling for molasses 2.8gamma-->3.2gamma 300 50 600
++1100ms DDS1 [4]					(1) #cooling for molasses 2.8gamma-->3.2gamma 300 50 600 300 1100
 +50ms TTL 2DMOT_Shutter = OFF			(48) #loading time 800 350 600 100
 
 +55us TTL 3DMOT_Coils = OFF				(67) #MOT coils off, delay 3.23 10 3
 +1us DDS1 trigger					(6)
 #********** launching *********************************** 
 #+1us Exp_trig = ON      	   			(60)
-+1us DDS4 [6]						(7)  #changes freq for launch 6200 6500 2, same amplitude for 3D DOWN and UP
++1us DDS4 [6]						(7)  #changes freq for launch 6200 6500 2, same amplitude for 3D DOWN and UP 6
 +2ms DDS1 [3]						(1)  #-2.8gamma for launching
 +10ms DDS4 trigger 					(12) #Change the state from here 18 28 32 36 10 5
 +1us DDS1 trigger					(6)
 
-#+2us Exp_trig = ON      	   			(60)
++2us Exp_trig = ON      	   			(60)
 
 # ********** frequency ramp ***************************************
 
@@ -189,105 +190,734 @@ INNER
 +2us AOM_3DMOT_Up= OFF					(51) # thermalization
 +5us AOM_3DMOT_Up =0.950 				(21)
 +5us AOM_3DMOT_Down =0.950 				(20)
-
-+1us AOM_Raman1 =0.245				(23) #repump. power set 30 0.293  45mw; 0.2435 15mw 0.223 4.285mw 0.223 0.215 0.252
-+2us AOM_Raman2 =0.345			(24) #thermalization       406 0.383 25mw; 0.3165 8.3mw 0.31 7.77mw 0.332 0.351
++5us DDS5 [1]						(14)#Raman down power ratio R1 18mW;R2 9.5mW
++1us AOM_Raman1 =1				(23) #repump. power set 30 0.293  45mw; 0.2435 15mw 0.223 4.285mw 0.223 0.215 0.252 0.245 0.250
++2us AOM_Raman2 =1			(24) #thermalization       406 0.383 25mw; 0.3165 8.3mw 0.31 7.77mw 0.332 0.351 0.345 0.330
 
 ######################################
-#   Raman_down_velocity_selection    #<PARAMETER0>
+#   Raman_down_velocity_selection    #331057.6
 ######################################
-+18us DDS1 [86]					(2) #Set raman delt -771.7 mF0 129; 93 120 69 118 146-hk 145 144 [116 -hk fine] [20-140] [peak 85] [79 +hk] 82 87
++18us DDS1 [79]					(2) #[20-140] [peak 85] [79 +hk] 82 87 [96 PEAK] [AC 410 490] [423-495 lightshift] 86 79 +hk; 109 -hk 
 +31.7ms TTL_AOM_Raman1 = ON				(49)#42.4 33.4 31.7
 
 +2us Raman_Dw_Shutter=ON				(40) #turn on shutter
-+13833us TTL_AOM_Raman1 = OFF				(49)#Raman down pulse #5000 10 15 15.1 15.366 15366 13833
++1us DDS1 [109]					(1)
++13582us TTL_AOM_Raman1 = OFF				(49)#Raman down pulse #5000 10 15 15.1 15.366 15366 13833
 
-
-+110us TTL_AOM_Raman1 = ON				(49) #150 pulse duration 270 136 131 90 131 115
++130us TTL_AOM_Raman1 = ON				(49) #150 pulse duration 270 136 131 90 131 115 110 140 130 125
++1us DDS1 TRIGGER					(6)
++500us TTL_AOM_Raman1 = ON				(49)
++130us TTL_AOM_Raman1 = ON				(49)
 +2us Raman_Dw_Shutter= OFF				(40) #turn on shutter
-+5ms TTL_AOM_Raman1 = OFF				(49)
++5000us TTL_AOM_Raman1 = OFF				(49)
  #
 
 ######################################
 #   Detection_push    #
-######################################<PARAMETER0>
+######################################331057.6
 +2us AOM_Detection =0.9				(22)#0.69
 +2us DDS1 [15]						(2) #15
 +2us AOM_Det= ON					(52)
 #+1us redpitaya = ON					(68)
 +2us Det_Shutter = ON					(45)
-+9380us AOM_Det= OFF					(52) #11000 10609 total 10879 10673 total8206 8070 9770 9775 9500 9541 7708 9435  10296 9400 9359 9375
++8979us AOM_Det= OFF					(52) #11000 10609 total 10879 10673 total8206 8070 9770 9775 9500 9541 7708 9435  10296 9400 9359 9375 9380 9350 9360 9365
 +920us AOM_Det= ON					(52)#350 920
 +2us Det_shutter = OFF					(45)
 +5ms AOM_Det= OFF					(52)
-+2us AOM_Raman1 =0.365					(23) #repump. power set 30 0.293  45mw; 0.2435 15mw0.560 0.365 0.950 0.365
-+2us AOM_Raman2 =0.950					(24) #thermalization       406 0.383 25mw; 0.3165 8.3mw 0.950
-+2us AOM_Detection =1			(22)
-######################################<PARAMETER0>
++1us DDS5 [2]						(14)#Raman UP
++2us AOM_Raman1 =1					(23) #repump. power set 30 0.293  45mw; 0.2435 15mw0.560 0.365 0.950 0.365
++2us AOM_Raman2 =1					(24) #thermalization       406 0.383 25mw; 0.3165 8.3mw 0.950
++2us AOM_Detection =1			(22)#1
+######################################331057.6
 #   Raman_UP_State_selection  -hk  #
 ######################################
-+20us DDS1 [212]					(2) #--wdw 798.2 30 --wdwDw 803 30 [141--261] [202 -HK]
++20us DDS1 [383]					(2) #--wdw 798.2 30 --wdwDw 803 30 [141--281|];[282--422| 383
 +8555us TTL_AOM_Raman1 = ON				(49)#42.4 6670 total 7020 6100 total 16773 7773 6770 6789 8897 8520 7659
 +2us Raman_Up_Shutter=OFF				(41)
 +6256us TTL_AOM_Raman1 = OFF				(49)#RAMAN PULSE MOMENT 10000#10333 9504 TOTAL  9193
-+35us TTL_AOM_Raman1 = ON				(49) #Raman up pulse time 62 59 50 40 35 38 51 60 56
++60us TTL_AOM_Raman1 = ON				(49) #Raman up pulse time 62 59 50 40 35 38 51 60 56 35 70
 +2us Raman_Up_Shutter=OFF				(41)
 +7223us TTL_AOM_Raman1 = OFF				(49)#5000 total 5059 ;5009 5019 5024 total5059 6021 7219
-+2us AOM_Raman1 =0.250					(23)#0.25
++2us AOM_Raman1 =1					(23)#0.25
 
 ################################
-#       F1 Push			#<PARAMETER0>
+#       F1 Push			#331057.6
 ################################
 +2us DDS1 [6]						(2)
 +2us  TTL_AOM_Raman1 = ON				(49)#F1push 9333
 +2us Repump_push_Shutter = OFF				(43)
-+9526us TTL_AOM_Raman1 = OFF				(49)#F1push 9331 10334 7611 9505
++9501us TTL_AOM_Raman1 = OFF				(49)#F1push 9331 10334 7611 9505 9526 9491
 +100us TTL_AOM_Raman1 = ON				(49)#900 400 200 
 +1us Gaussian_pulse = OFF				(63)
 ######################## Bragg thermalization #########################
-+0.2us Gaussian_pulse = 7				(32) # thermalization
++0.2us DAC_Gaussian_pulse = -3				(32) # thermalization
 ######################## Bragg thermalization #########################
 +1.8us Repump_push_Shutter = OFF				(43)
 +5520us TTL_AOM_Raman1 = OFF				(49)#5000 total14333 total5720
-+2us AOM_Raman1 =0.345					(23) #repump. power set 30 0.293  45mw; 0.2435 15mw 0.560 0.365
-+2us AOM_Raman2 =0.590					(24) #thermalization       406 0.383 25mw; 0.3165 8.3mw 950
++1us DDS5 [2]						(14)#Raman UP 2
++2us AOM_Raman1 =1					(23) #repump. power set 30 0.293  45mw; 0.2435 15mw 0.560 0.365 0.345
++2us AOM_Raman2 =1				(24) #thermalization       406 0.383 25mw; 0.3165 8.3mw 950 0.590 
 
 
 
 ######################################
-#   Bragg pulse 25microseconds  35 127microseconds     25 91microseconds         <PARAMETER0>
+#   Bragg pulse 25microseconds  35 127microseconds     25 91microseconds         331057.6
 ######################################
-+300000us Gaussian_pulse = 7				(32) # thermalization 310000
-+1us daq DAC = 7					(37)
-#+2us Exp_trig = ON      	   			(60)
-+500us Gaussian_pulse = ON		(63) #313034 315757 249207  +hk 256103 322117 319056 320000 320000 238160 315000
-+100us Gaussian_pulse = OFF		(63) #50 37 35 44
++320000us TTL_Gaussian_pulse = ON				(63)#317500
+#+7500us daq DAC = 7					(37)
 ###bragg###
-
++500.0us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -2.045		(32)
++0.2us Blackman_pulse = -2.025		(32)
++0.2us Blackman_pulse = -2.004		(32)
++0.2us Blackman_pulse = -1.983		(32)
++0.2us Blackman_pulse = -1.962		(32)
++0.2us Blackman_pulse = -1.942		(32)
++0.2us Blackman_pulse = -1.921		(32)
++0.2us Blackman_pulse = -1.900		(32)
++0.2us Blackman_pulse = -1.879		(32)
++0.2us Blackman_pulse = -1.858		(32)
++0.2us Blackman_pulse = -1.838		(32)
++0.2us Blackman_pulse = -1.817		(32)
++0.2us Blackman_pulse = -1.797		(32)
++0.2us Blackman_pulse = -1.776		(32)
++0.2us Blackman_pulse = -1.756		(32)
++0.2us Blackman_pulse = -1.735		(32)
++0.2us Blackman_pulse = -1.715		(32)
++0.2us Blackman_pulse = -1.695		(32)
++0.2us Blackman_pulse = -1.675		(32)
++0.2us Blackman_pulse = -1.654		(32)
++0.2us Blackman_pulse = -1.634		(32)
++0.2us Blackman_pulse = -1.615		(32)
++0.2us Blackman_pulse = -1.595		(32)
++0.2us Blackman_pulse = -1.575		(32)
++0.2us Blackman_pulse = -1.555		(32)
++0.2us Blackman_pulse = -1.536		(32)
++0.2us Blackman_pulse = -1.517		(32)
++0.2us Blackman_pulse = -1.497		(32)
++0.2us Blackman_pulse = -1.478		(32)
++0.2us Blackman_pulse = -1.459		(32)
++0.2us Blackman_pulse = -1.440		(32)
++0.2us Blackman_pulse = -1.421		(32)
++0.2us Blackman_pulse = -1.402		(32)
++0.2us Blackman_pulse = -1.383		(32)
++0.2us Blackman_pulse = -1.365		(32)
++0.2us Blackman_pulse = -1.346		(32)
++0.2us Blackman_pulse = -1.327		(32)
++0.2us Blackman_pulse = -1.309		(32)
++0.2us Blackman_pulse = -1.291		(32)
++0.2us Blackman_pulse = -1.273		(32)
++0.2us Blackman_pulse = -1.254		(32)
++0.2us Blackman_pulse = -1.236		(32)
++0.2us Blackman_pulse = -1.219		(32)
++0.2us Blackman_pulse = -1.201		(32)
++0.2us Blackman_pulse = -1.183		(32)
++0.2us Blackman_pulse = -1.165		(32)
++0.2us Blackman_pulse = -1.148		(32)
++0.2us Blackman_pulse = -1.130		(32)
++0.2us Blackman_pulse = -1.113		(32)
++0.2us Blackman_pulse = -1.095		(32)
++0.2us Blackman_pulse = -1.078		(32)
++0.2us Blackman_pulse = -1.061		(32)
++0.2us Blackman_pulse = -1.044		(32)
++0.2us Blackman_pulse = -1.027		(32)
++0.2us Blackman_pulse = -1.010		(32)
++0.2us Blackman_pulse = -0.993		(32)
++0.2us Blackman_pulse = -0.976		(32)
++0.2us Blackman_pulse = -0.960		(32)
++0.2us Blackman_pulse = -0.943		(32)
++0.2us Blackman_pulse = -0.926		(32)
++0.2us Blackman_pulse = -0.910		(32)
++0.2us Blackman_pulse = -0.893		(32)
++0.2us Blackman_pulse = -0.877		(32)
++0.2us Blackman_pulse = -0.861		(32)
++0.2us Blackman_pulse = -0.844		(32)
++0.2us Blackman_pulse = -0.828		(32)
++0.2us Blackman_pulse = -0.812		(32)
++0.2us Blackman_pulse = -0.796		(32)
++0.2us Blackman_pulse = -0.780		(32)
++0.2us Blackman_pulse = -0.764		(32)
++0.2us Blackman_pulse = -0.748		(32)
++0.2us Blackman_pulse = -0.732		(32)
++0.2us Blackman_pulse = -0.717		(32)
++0.2us Blackman_pulse = -0.701		(32)
++0.2us Blackman_pulse = -0.685		(32)
++0.2us Blackman_pulse = -0.670		(32)
++0.2us Blackman_pulse = -0.654		(32)
++0.2us Blackman_pulse = -0.639		(32)
++0.2us Blackman_pulse = -0.623		(32)
++0.2us Blackman_pulse = -0.608		(32)
++0.2us Blackman_pulse = -0.593		(32)
++0.2us Blackman_pulse = -0.577		(32)
++0.2us Blackman_pulse = -0.562		(32)
++0.2us Blackman_pulse = -0.547		(32)
++0.2us Blackman_pulse = -0.532		(32)
++0.2us Blackman_pulse = -0.517		(32)
++0.2us Blackman_pulse = -0.501		(32)
++0.2us Blackman_pulse = -0.486		(32)
++0.2us Blackman_pulse = -0.471		(32)
++0.2us Blackman_pulse = -0.456		(32)
++0.2us Blackman_pulse = -0.442		(32)
++0.2us Blackman_pulse = -0.427		(32)
++0.2us Blackman_pulse = -0.412		(32)
++0.2us Blackman_pulse = -0.397		(32)
++0.2us Blackman_pulse = -0.382		(32)
++0.2us Blackman_pulse = -0.368		(32)
++0.2us Blackman_pulse = -0.353		(32)
++0.2us Blackman_pulse = -0.338		(32)
++0.2us Blackman_pulse = -0.324		(32)
++0.2us Blackman_pulse = -0.309		(32)
++0.2us Blackman_pulse = -0.294		(32)
++0.2us Blackman_pulse = -0.280		(32)
++0.2us Blackman_pulse = -0.265		(32)
++0.2us Blackman_pulse = -0.251		(32)
++0.2us Blackman_pulse = -0.236		(32)
++0.2us Blackman_pulse = -0.222		(32)
++0.2us Blackman_pulse = -0.207		(32)
++0.2us Blackman_pulse = -0.193		(32)
++0.2us Blackman_pulse = -0.179		(32)
++0.2us Blackman_pulse = -0.164		(32)
++0.2us Blackman_pulse = -0.150		(32)
++0.2us Blackman_pulse = -0.136		(32)
++0.2us Blackman_pulse = -0.121		(32)
++0.2us Blackman_pulse = -0.107		(32)
++0.2us Blackman_pulse = -0.093		(32)
++0.2us Blackman_pulse = -0.078		(32)
++0.2us Blackman_pulse = -0.064		(32)
++0.2us Blackman_pulse = -0.050		(32)
++0.2us Blackman_pulse = -0.036		(32)
++0.2us Blackman_pulse = -0.022		(32)
++0.2us Blackman_pulse = -0.007		(32)
++0.2us Blackman_pulse = 0.007		(32)
++0.2us Blackman_pulse = 0.021		(32)
++0.2us Blackman_pulse = 0.035		(32)
++0.2us Blackman_pulse = 0.049		(32)
++0.2us Blackman_pulse = 0.064		(32)
++0.2us Blackman_pulse = 0.078		(32)
++0.2us Blackman_pulse = 0.092		(32)
++0.2us Blackman_pulse = 0.106		(32)
++0.2us Blackman_pulse = 0.120		(32)
++0.2us Blackman_pulse = 0.134		(32)
++0.2us Blackman_pulse = 0.149		(32)
++0.2us Blackman_pulse = 0.163		(32)
++0.2us Blackman_pulse = 0.177		(32)
++0.2us Blackman_pulse = 0.191		(32)
++0.2us Blackman_pulse = 0.205		(32)
++0.2us Blackman_pulse = 0.219		(32)
++0.2us Blackman_pulse = 0.234		(32)
++0.2us Blackman_pulse = 0.248		(32)
++0.2us Blackman_pulse = 0.262		(32)
++0.2us Blackman_pulse = 0.276		(32)
++0.2us Blackman_pulse = 0.291		(32)
++0.2us Blackman_pulse = 0.305		(32)
++0.2us Blackman_pulse = 0.319		(32)
++0.2us Blackman_pulse = 0.333		(32)
++0.2us Blackman_pulse = 0.348		(32)
++0.2us Blackman_pulse = 0.362		(32)
++0.2us Blackman_pulse = 0.376		(32)
++0.2us Blackman_pulse = 0.391		(32)
++0.2us Blackman_pulse = 0.405		(32)
++0.2us Blackman_pulse = 0.419		(32)
++0.2us Blackman_pulse = 0.434		(32)
++0.2us Blackman_pulse = 0.448		(32)
++0.2us Blackman_pulse = 0.463		(32)
++0.2us Blackman_pulse = 0.477		(32)
++0.2us Blackman_pulse = 0.492		(32)
++0.2us Blackman_pulse = 0.506		(32)
++0.2us Blackman_pulse = 0.521		(32)
++0.2us Blackman_pulse = 0.535		(32)
++0.2us Blackman_pulse = 0.550		(32)
++0.2us Blackman_pulse = 0.565		(32)
++0.2us Blackman_pulse = 0.579		(32)
++0.2us Blackman_pulse = 0.594		(32)
++0.2us Blackman_pulse = 0.609		(32)
++0.2us Blackman_pulse = 0.624		(32)
++0.2us Blackman_pulse = 0.639		(32)
++0.2us Blackman_pulse = 0.654		(32)
++0.2us Blackman_pulse = 0.669		(32)
++0.2us Blackman_pulse = 0.684		(32)
++0.2us Blackman_pulse = 0.699		(32)
++0.2us Blackman_pulse = 0.714		(32)
++0.2us Blackman_pulse = 0.729		(32)
++0.2us Blackman_pulse = 0.744		(32)
++0.2us Blackman_pulse = 0.759		(32)
++0.2us Blackman_pulse = 0.775		(32)
++0.2us Blackman_pulse = 0.790		(32)
++0.2us Blackman_pulse = 0.805		(32)
++0.2us Blackman_pulse = 0.821		(32)
++0.2us Blackman_pulse = 0.836		(32)
++0.2us Blackman_pulse = 0.852		(32)
++0.2us Blackman_pulse = 0.868		(32)
++0.2us Blackman_pulse = 0.883		(32)
++0.2us Blackman_pulse = 0.899		(32)
++0.2us Blackman_pulse = 0.915		(32)
++0.2us Blackman_pulse = 0.931		(32)
++0.2us Blackman_pulse = 0.947		(32)
++0.2us Blackman_pulse = 0.963		(32)
++0.2us Blackman_pulse = 0.979		(32)
++0.2us Blackman_pulse = 0.995		(32)
++0.2us Blackman_pulse = 1.012		(32)
++0.2us Blackman_pulse = 1.028		(32)
++0.2us Blackman_pulse = 1.045		(32)
++0.2us Blackman_pulse = 1.061		(32)
++0.2us Blackman_pulse = 1.078		(32)
++0.2us Blackman_pulse = 1.095		(32)
++0.2us Blackman_pulse = 1.111		(32)
++0.2us Blackman_pulse = 1.128		(32)
++0.2us Blackman_pulse = 1.145		(32)
++0.2us Blackman_pulse = 1.162		(32)
++0.2us Blackman_pulse = 1.180		(32)
++0.2us Blackman_pulse = 1.197		(32)
++0.2us Blackman_pulse = 1.214		(32)
++0.2us Blackman_pulse = 1.232		(32)
++0.2us Blackman_pulse = 1.249		(32)
++0.2us Blackman_pulse = 1.267		(32)
++0.2us Blackman_pulse = 1.285		(32)
++0.2us Blackman_pulse = 1.303		(32)
++0.2us Blackman_pulse = 1.321		(32)
++0.2us Blackman_pulse = 1.339		(32)
++0.2us Blackman_pulse = 1.357		(32)
++0.2us Blackman_pulse = 1.375		(32)
++0.2us Blackman_pulse = 1.394		(32)
++0.2us Blackman_pulse = 1.412		(32)
++0.2us Blackman_pulse = 1.431		(32)
++0.2us Blackman_pulse = 1.450		(32)
++0.2us Blackman_pulse = 1.469		(32)
++0.2us Blackman_pulse = 1.488		(32)
++0.2us Blackman_pulse = 1.507		(32)
++0.2us Blackman_pulse = 1.526		(32)
++0.2us Blackman_pulse = 1.546		(32)
++0.2us Blackman_pulse = 1.565		(32)
++0.2us Blackman_pulse = 1.585		(32)
++0.2us Blackman_pulse = 1.605		(32)
++0.2us Blackman_pulse = 1.625		(32)
++0.2us Blackman_pulse = 1.645		(32)
++0.2us Blackman_pulse = 1.665		(32)
++0.2us Blackman_pulse = 1.685		(32)
++0.2us Blackman_pulse = 1.705		(32)
++0.2us Blackman_pulse = 1.726		(32)
++0.2us Blackman_pulse = 1.746		(32)
++0.2us Blackman_pulse = 1.767		(32)
++0.2us Blackman_pulse = 1.788		(32)
++0.2us Blackman_pulse = 1.809		(32)
++0.2us Blackman_pulse = 1.830		(32)
++0.2us Blackman_pulse = 1.851		(32)
++0.2us Blackman_pulse = 1.872		(32)
++0.2us Blackman_pulse = 1.893		(32)
++0.2us Blackman_pulse = 1.914		(32)
++0.2us Blackman_pulse = 1.935		(32)
++0.2us Blackman_pulse = 1.957		(32)
++0.2us Blackman_pulse = 1.978		(32)
++0.2us Blackman_pulse = 1.999		(32)
++0.2us Blackman_pulse = 2.020		(32)
++0.2us Blackman_pulse = 2.042		(32)
++0.2us Blackman_pulse = 2.063		(32)
++0.2us Blackman_pulse = 2.084		(32)
++0.2us Blackman_pulse = 2.105		(32)
++0.2us Blackman_pulse = 2.126		(32)
++0.2us Blackman_pulse = 2.147		(32)
++0.2us Blackman_pulse = 2.167		(32)
++0.2us Blackman_pulse = 2.188		(32)
++0.2us Blackman_pulse = 2.208		(32)
++0.2us Blackman_pulse = 2.228		(32)
++0.2us Blackman_pulse = 2.247		(32)
++0.2us Blackman_pulse = 2.266		(32)
++0.2us Blackman_pulse = 2.285		(32)
++0.2us Blackman_pulse = 2.303		(32)
++0.2us Blackman_pulse = 2.321		(32)
++0.2us Blackman_pulse = 2.338		(32)
++0.2us Blackman_pulse = 2.355		(32)
++0.2us Blackman_pulse = 2.371		(32)
++0.2us Blackman_pulse = 2.387		(32)
++0.2us Blackman_pulse = 2.401		(32)
++0.2us Blackman_pulse = 2.415		(32)
++0.2us Blackman_pulse = 2.428		(32)
++0.2us Blackman_pulse = 2.440		(32)
++0.2us Blackman_pulse = 2.451		(32)
++0.2us Blackman_pulse = 2.461		(32)
++0.2us Blackman_pulse = 2.470		(32)
++0.2us Blackman_pulse = 2.478		(32)
++0.2us Blackman_pulse = 2.484		(32)
++0.2us Blackman_pulse = 2.490		(32)
++0.2us Blackman_pulse = 2.494		(32)
++0.2us Blackman_pulse = 2.497		(32)
++0.2us Blackman_pulse = 2.499		(32)
++0.2us Blackman_pulse = 2.500		(32)
++0.2us Blackman_pulse = 2.499		(32)
++0.2us Blackman_pulse = 2.497		(32)
++0.2us Blackman_pulse = 2.494		(32)
++0.2us Blackman_pulse = 2.490		(32)
++0.2us Blackman_pulse = 2.484		(32)
++0.2us Blackman_pulse = 2.478		(32)
++0.2us Blackman_pulse = 2.470		(32)
++0.2us Blackman_pulse = 2.461		(32)
++0.2us Blackman_pulse = 2.451		(32)
++0.2us Blackman_pulse = 2.440		(32)
++0.2us Blackman_pulse = 2.428		(32)
++0.2us Blackman_pulse = 2.415		(32)
++0.2us Blackman_pulse = 2.401		(32)
++0.2us Blackman_pulse = 2.387		(32)
++0.2us Blackman_pulse = 2.371		(32)
++0.2us Blackman_pulse = 2.355		(32)
++0.2us Blackman_pulse = 2.338		(32)
++0.2us Blackman_pulse = 2.321		(32)
++0.2us Blackman_pulse = 2.303		(32)
++0.2us Blackman_pulse = 2.285		(32)
++0.2us Blackman_pulse = 2.266		(32)
++0.2us Blackman_pulse = 2.247		(32)
++0.2us Blackman_pulse = 2.228		(32)
++0.2us Blackman_pulse = 2.208		(32)
++0.2us Blackman_pulse = 2.188		(32)
++0.2us Blackman_pulse = 2.167		(32)
++0.2us Blackman_pulse = 2.147		(32)
++0.2us Blackman_pulse = 2.126		(32)
++0.2us Blackman_pulse = 2.105		(32)
++0.2us Blackman_pulse = 2.084		(32)
++0.2us Blackman_pulse = 2.063		(32)
++0.2us Blackman_pulse = 2.042		(32)
++0.2us Blackman_pulse = 2.020		(32)
++0.2us Blackman_pulse = 1.999		(32)
++0.2us Blackman_pulse = 1.978		(32)
++0.2us Blackman_pulse = 1.957		(32)
++0.2us Blackman_pulse = 1.935		(32)
++0.2us Blackman_pulse = 1.914		(32)
++0.2us Blackman_pulse = 1.893		(32)
++0.2us Blackman_pulse = 1.872		(32)
++0.2us Blackman_pulse = 1.851		(32)
++0.2us Blackman_pulse = 1.830		(32)
++0.2us Blackman_pulse = 1.809		(32)
++0.2us Blackman_pulse = 1.788		(32)
++0.2us Blackman_pulse = 1.767		(32)
++0.2us Blackman_pulse = 1.746		(32)
++0.2us Blackman_pulse = 1.726		(32)
++0.2us Blackman_pulse = 1.705		(32)
++0.2us Blackman_pulse = 1.685		(32)
++0.2us Blackman_pulse = 1.665		(32)
++0.2us Blackman_pulse = 1.645		(32)
++0.2us Blackman_pulse = 1.625		(32)
++0.2us Blackman_pulse = 1.605		(32)
++0.2us Blackman_pulse = 1.585		(32)
++0.2us Blackman_pulse = 1.565		(32)
++0.2us Blackman_pulse = 1.546		(32)
++0.2us Blackman_pulse = 1.526		(32)
++0.2us Blackman_pulse = 1.507		(32)
++0.2us Blackman_pulse = 1.488		(32)
++0.2us Blackman_pulse = 1.469		(32)
++0.2us Blackman_pulse = 1.450		(32)
++0.2us Blackman_pulse = 1.431		(32)
++0.2us Blackman_pulse = 1.412		(32)
++0.2us Blackman_pulse = 1.394		(32)
++0.2us Blackman_pulse = 1.375		(32)
++0.2us Blackman_pulse = 1.357		(32)
++0.2us Blackman_pulse = 1.339		(32)
++0.2us Blackman_pulse = 1.321		(32)
++0.2us Blackman_pulse = 1.303		(32)
++0.2us Blackman_pulse = 1.285		(32)
++0.2us Blackman_pulse = 1.267		(32)
++0.2us Blackman_pulse = 1.249		(32)
++0.2us Blackman_pulse = 1.232		(32)
++0.2us Blackman_pulse = 1.214		(32)
++0.2us Blackman_pulse = 1.197		(32)
++0.2us Blackman_pulse = 1.180		(32)
++0.2us Blackman_pulse = 1.162		(32)
++0.2us Blackman_pulse = 1.145		(32)
++0.2us Blackman_pulse = 1.128		(32)
++0.2us Blackman_pulse = 1.111		(32)
++0.2us Blackman_pulse = 1.095		(32)
++0.2us Blackman_pulse = 1.078		(32)
++0.2us Blackman_pulse = 1.061		(32)
++0.2us Blackman_pulse = 1.045		(32)
++0.2us Blackman_pulse = 1.028		(32)
++0.2us Blackman_pulse = 1.012		(32)
++0.2us Blackman_pulse = 0.995		(32)
++0.2us Blackman_pulse = 0.979		(32)
++0.2us Blackman_pulse = 0.963		(32)
++0.2us Blackman_pulse = 0.947		(32)
++0.2us Blackman_pulse = 0.931		(32)
++0.2us Blackman_pulse = 0.915		(32)
++0.2us Blackman_pulse = 0.899		(32)
++0.2us Blackman_pulse = 0.883		(32)
++0.2us Blackman_pulse = 0.868		(32)
++0.2us Blackman_pulse = 0.852		(32)
++0.2us Blackman_pulse = 0.836		(32)
++0.2us Blackman_pulse = 0.821		(32)
++0.2us Blackman_pulse = 0.805		(32)
++0.2us Blackman_pulse = 0.790		(32)
++0.2us Blackman_pulse = 0.775		(32)
++0.2us Blackman_pulse = 0.759		(32)
++0.2us Blackman_pulse = 0.744		(32)
++0.2us Blackman_pulse = 0.729		(32)
++0.2us Blackman_pulse = 0.714		(32)
++0.2us Blackman_pulse = 0.699		(32)
++0.2us Blackman_pulse = 0.684		(32)
++0.2us Blackman_pulse = 0.669		(32)
++0.2us Blackman_pulse = 0.654		(32)
++0.2us Blackman_pulse = 0.639		(32)
++0.2us Blackman_pulse = 0.624		(32)
++0.2us Blackman_pulse = 0.609		(32)
++0.2us Blackman_pulse = 0.594		(32)
++0.2us Blackman_pulse = 0.579		(32)
++0.2us Blackman_pulse = 0.565		(32)
++0.2us Blackman_pulse = 0.550		(32)
++0.2us Blackman_pulse = 0.535		(32)
++0.2us Blackman_pulse = 0.521		(32)
++0.2us Blackman_pulse = 0.506		(32)
++0.2us Blackman_pulse = 0.492		(32)
++0.2us Blackman_pulse = 0.477		(32)
++0.2us Blackman_pulse = 0.463		(32)
++0.2us Blackman_pulse = 0.448		(32)
++0.2us Blackman_pulse = 0.434		(32)
++0.2us Blackman_pulse = 0.419		(32)
++0.2us Blackman_pulse = 0.405		(32)
++0.2us Blackman_pulse = 0.391		(32)
++0.2us Blackman_pulse = 0.376		(32)
++0.2us Blackman_pulse = 0.362		(32)
++0.2us Blackman_pulse = 0.348		(32)
++0.2us Blackman_pulse = 0.333		(32)
++0.2us Blackman_pulse = 0.319		(32)
++0.2us Blackman_pulse = 0.305		(32)
++0.2us Blackman_pulse = 0.291		(32)
++0.2us Blackman_pulse = 0.276		(32)
++0.2us Blackman_pulse = 0.262		(32)
++0.2us Blackman_pulse = 0.248		(32)
++0.2us Blackman_pulse = 0.234		(32)
++0.2us Blackman_pulse = 0.219		(32)
++0.2us Blackman_pulse = 0.205		(32)
++0.2us Blackman_pulse = 0.191		(32)
++0.2us Blackman_pulse = 0.177		(32)
++0.2us Blackman_pulse = 0.163		(32)
++0.2us Blackman_pulse = 0.149		(32)
++0.2us Blackman_pulse = 0.134		(32)
++0.2us Blackman_pulse = 0.120		(32)
++0.2us Blackman_pulse = 0.106		(32)
++0.2us Blackman_pulse = 0.092		(32)
++0.2us Blackman_pulse = 0.078		(32)
++0.2us Blackman_pulse = 0.064		(32)
++0.2us Blackman_pulse = 0.049		(32)
++0.2us Blackman_pulse = 0.035		(32)
++0.2us Blackman_pulse = 0.021		(32)
++0.2us Blackman_pulse = 0.007		(32)
++0.2us Blackman_pulse = -0.007		(32)
++0.2us Blackman_pulse = -0.022		(32)
++0.2us Blackman_pulse = -0.036		(32)
++0.2us Blackman_pulse = -0.050		(32)
++0.2us Blackman_pulse = -0.064		(32)
++0.2us Blackman_pulse = -0.078		(32)
++0.2us Blackman_pulse = -0.093		(32)
++0.2us Blackman_pulse = -0.107		(32)
++0.2us Blackman_pulse = -0.121		(32)
++0.2us Blackman_pulse = -0.136		(32)
++0.2us Blackman_pulse = -0.150		(32)
++0.2us Blackman_pulse = -0.164		(32)
++0.2us Blackman_pulse = -0.179		(32)
++0.2us Blackman_pulse = -0.193		(32)
++0.2us Blackman_pulse = -0.207		(32)
++0.2us Blackman_pulse = -0.222		(32)
++0.2us Blackman_pulse = -0.236		(32)
++0.2us Blackman_pulse = -0.251		(32)
++0.2us Blackman_pulse = -0.265		(32)
++0.2us Blackman_pulse = -0.280		(32)
++0.2us Blackman_pulse = -0.294		(32)
++0.2us Blackman_pulse = -0.309		(32)
++0.2us Blackman_pulse = -0.324		(32)
++0.2us Blackman_pulse = -0.338		(32)
++0.2us Blackman_pulse = -0.353		(32)
++0.2us Blackman_pulse = -0.368		(32)
++0.2us Blackman_pulse = -0.382		(32)
++0.2us Blackman_pulse = -0.397		(32)
++0.2us Blackman_pulse = -0.412		(32)
++0.2us Blackman_pulse = -0.427		(32)
++0.2us Blackman_pulse = -0.442		(32)
++0.2us Blackman_pulse = -0.456		(32)
++0.2us Blackman_pulse = -0.471		(32)
++0.2us Blackman_pulse = -0.486		(32)
++0.2us Blackman_pulse = -0.501		(32)
++0.2us Blackman_pulse = -0.517		(32)
++0.2us Blackman_pulse = -0.532		(32)
++0.2us Blackman_pulse = -0.547		(32)
++0.2us Blackman_pulse = -0.562		(32)
++0.2us Blackman_pulse = -0.577		(32)
++0.2us Blackman_pulse = -0.593		(32)
++0.2us Blackman_pulse = -0.608		(32)
++0.2us Blackman_pulse = -0.623		(32)
++0.2us Blackman_pulse = -0.639		(32)
++0.2us Blackman_pulse = -0.654		(32)
++0.2us Blackman_pulse = -0.670		(32)
++0.2us Blackman_pulse = -0.685		(32)
++0.2us Blackman_pulse = -0.701		(32)
++0.2us Blackman_pulse = -0.717		(32)
++0.2us Blackman_pulse = -0.732		(32)
++0.2us Blackman_pulse = -0.748		(32)
++0.2us Blackman_pulse = -0.764		(32)
++0.2us Blackman_pulse = -0.780		(32)
++0.2us Blackman_pulse = -0.796		(32)
++0.2us Blackman_pulse = -0.812		(32)
++0.2us Blackman_pulse = -0.828		(32)
++0.2us Blackman_pulse = -0.844		(32)
++0.2us Blackman_pulse = -0.861		(32)
++0.2us Blackman_pulse = -0.877		(32)
++0.2us Blackman_pulse = -0.893		(32)
++0.2us Blackman_pulse = -0.910		(32)
++0.2us Blackman_pulse = -0.926		(32)
++0.2us Blackman_pulse = -0.943		(32)
++0.2us Blackman_pulse = -0.960		(32)
++0.2us Blackman_pulse = -0.976		(32)
++0.2us Blackman_pulse = -0.993		(32)
++0.2us Blackman_pulse = -1.010		(32)
++0.2us Blackman_pulse = -1.027		(32)
++0.2us Blackman_pulse = -1.044		(32)
++0.2us Blackman_pulse = -1.061		(32)
++0.2us Blackman_pulse = -1.078		(32)
++0.2us Blackman_pulse = -1.095		(32)
++0.2us Blackman_pulse = -1.113		(32)
++0.2us Blackman_pulse = -1.130		(32)
++0.2us Blackman_pulse = -1.148		(32)
++0.2us Blackman_pulse = -1.165		(32)
++0.2us Blackman_pulse = -1.183		(32)
++0.2us Blackman_pulse = -1.201		(32)
++0.2us Blackman_pulse = -1.219		(32)
++0.2us Blackman_pulse = -1.236		(32)
++0.2us Blackman_pulse = -1.254		(32)
++0.2us Blackman_pulse = -1.273		(32)
++0.2us Blackman_pulse = -1.291		(32)
++0.2us Blackman_pulse = -1.309		(32)
++0.2us Blackman_pulse = -1.327		(32)
++0.2us Blackman_pulse = -1.346		(32)
++0.2us Blackman_pulse = -1.365		(32)
++0.2us Blackman_pulse = -1.383		(32)
++0.2us Blackman_pulse = -1.402		(32)
++0.2us Blackman_pulse = -1.421		(32)
++0.2us Blackman_pulse = -1.440		(32)
++0.2us Blackman_pulse = -1.459		(32)
++0.2us Blackman_pulse = -1.478		(32)
++0.2us Blackman_pulse = -1.497		(32)
++0.2us Blackman_pulse = -1.517		(32)
++0.2us Blackman_pulse = -1.536		(32)
++0.2us Blackman_pulse = -1.555		(32)
++0.2us Blackman_pulse = -1.575		(32)
++0.2us Blackman_pulse = -1.595		(32)
++0.2us Blackman_pulse = -1.615		(32)
++0.2us Blackman_pulse = -1.634		(32)
++0.2us Blackman_pulse = -1.654		(32)
++0.2us Blackman_pulse = -1.675		(32)
++0.2us Blackman_pulse = -1.695		(32)
++0.2us Blackman_pulse = -1.715		(32)
++0.2us Blackman_pulse = -1.735		(32)
++0.2us Blackman_pulse = -1.756		(32)
++0.2us Blackman_pulse = -1.776		(32)
++0.2us Blackman_pulse = -1.797		(32)
++0.2us Blackman_pulse = -1.817		(32)
++0.2us Blackman_pulse = -1.838		(32)
++0.2us Blackman_pulse = -1.858		(32)
++0.2us Blackman_pulse = -1.879		(32)
++0.2us Blackman_pulse = -1.900		(32)
++0.2us Blackman_pulse = -1.921		(32)
++0.2us Blackman_pulse = -1.942		(32)
++0.2us Blackman_pulse = -1.962		(32)
++0.2us Blackman_pulse = -1.983		(32)
++0.2us Blackman_pulse = -2.004		(32)
++0.2us Blackman_pulse = -2.025		(32)
++0.2us Blackman_pulse = -2.045		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
++0.2us Blackman_pulse = -3.000		(32)
 ###bragg###
+#+310000us Gaussian_pulse = 7				(32) # thermalization 310000
+#+8000us Gaussian_pulse = ON		(63) #313034 315757 249207  +hk 256103 322117 319056 320000 320000 238160 315000
+#+25us Gaussian_pulse = OFF		(63) #50 37 35 44
 
 
 
-######################################<PARAMETER0>
+
+
+
+######################################
 #   Raman_UP_state_labelling_spec    #
 ######################################
-+300000us DDS1 [340]				(2) #--wdw 798.2 30 --wdwDw 805 15Fine:[383--483]state:[315 +hk][426 -hk,464 +hk] 328963.4 410803.4 333963.4 331076 331089 331075
+###SCAN:RAMAN_LABELING_DETUNING###
++328495us DDS1 [394]				(2) #[141--281|];[282--422|+hk322;-hk382] 366 353 350 171 -hk; 231 +hk 330995.2
 +1100us TTL_AOM_Raman1 = ON				(49)#42.4 6670 total 7020
 +2us Raman_Up_Shutter=ON				(41)
 +2us AOM_Det= ON					(52)
 +2us Det_shutter = ON					(45)
-+12000us TTL_AOM_Raman1 = OFF				(49)#RAMAN PULSE MOMENT 10000#10333 9504 4997 14997 15000 15234 
-+100us TTL_AOM_Raman1 = ON				(49) #Raman up pulse time 62 59 50 36 48 42 200 50 59  56 68 55 45
++13200us TTL_AOM_Raman1 = OFF				(49)#RAMAN PULSE MOMENT 10000#10333 9504 4997 14997 15000 15234 13881
+###SCAN:RAMAN_LABELING_DURATION###
++80us TTL_AOM_Raman1 = ON				(49) #Raman up pulse time 62 59 50 36 48 42 200 50 59  56 68 55 45 100 90 85 90 80
++1us DDS5 [3]						(14)# FOR repump DET
 ######################## Bragg thermalization #########################
 +1us Gaussian_pulse = ON				(63)
-+0.2us Gaussian_pulse = 7				(32) # thermalization
++0.2us Gaussian_pulse = 3				(32) # thermalization
 ######################## Bragg thermalization #########################
 
 +1.8us Raman_Up_Shutter=OFF				(41)
 #+2us Det_shutter = ON					(45)
 #+4983us TTL_AOM_Raman1 =OFF				(49)#5000 total 5059
 +2us DDS1 [14]						(2)  #Detection frequency, -0.3 GAMMA optimal value #400mV 720 664 659 629.9 15 RAMAN UP ; 10 RAMAN DOWN 14
-+2us AOM_Raman1 =0.2					(23)
++2us AOM_Raman1 =0.57					(23)
 
 
 
@@ -301,10 +931,11 @@ INNER
 +2us TTL_Repump_det = ON				(44)
 
 
-+6206us AOM_Det= OFF					(52) #11 Detection on 2000 2050 2010 TOTAL 2047 4000 3786 3778 3787 *3790 3500 3350 3000 2988 6235 6245
-+2us TTL_AOM_Raman1 = OFF				(49) # repumper on
+###COMP:RAMAN_LABELING_DURATION###
++5026us AOM_Det= OFF					(52) #11 Detection on 2000 2050 2010 TOTAL 2047 4000 3786 3778 3787 *3790 3500 3350 3000 2988 6235 6245 6206 4335 4340 4335 4345 5026
++2us TTL_AOM_Raman1 = OFF				(49) # repumper on ##MODIFICATION##
 +2ms redpitaya = ON					(68)
-+1us daq DAC = 7					(37)
++1us daq DAC = ON					(64)
 
 +99ms TTL_AOM_Raman1 = ON				(49) #20
 +2us AOM_Det= ON					(52)#2MICROS
@@ -313,7 +944,7 @@ INNER
 +2us TTL_Repump_det = OFF				(44)
 +5ms TTL_AOM_Raman1 = OFF				(49)
 +1ms redpitaya = OFF					(68)
-+1us daq DAC = 0					(37)
++1us daq DAC = OFF					(64)
 
 ################################
 #       	close		#
@@ -330,8 +961,13 @@ INNER
 
 +5us DDS1 [0]						(2)
 +5us DDS4 [0]						(8)
++1us  sync = OFF						(55)
 +5us DDS5 [0]						(14)
-
+###############2DMOT_3DMOT_Thermalization######################
++5us TTL 2DMOT_Shutter = ON			(48)
++5us 3DMOT_Up_Shutter = ON 				(46) #shutter up. up AOM
++5us 3DMOT_Down_Shutter = ON 				(47) #shutter up. down AOM
++5us Repump_MOT_Shutter = ON				(42) #shutter up. repump
 
 
 ENDINNER

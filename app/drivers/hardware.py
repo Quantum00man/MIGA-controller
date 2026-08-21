@@ -45,7 +45,15 @@ class SequenceEditor:
         return SequenceEditor.render_sequence_content("".join(lines), ["", compensation])
 
     @staticmethod
-    def generate_sequence(template_path: str, output_path: str, parameters: List[float], *, bragg_mode: bool = False):
+    def generate_sequence(
+        template_path: str,
+        output_path: str,
+        parameters: List[float],
+        *,
+        bragg_mode: bool = False,
+        marker_axes: List[str] | None = None,
+        marker_definitions: List[dict] | None = None,
+    ):
         if not os.path.exists(template_path):
             if config.USE_SIMULATION:
                 os.makedirs(os.path.dirname(template_path), exist_ok=True)
@@ -57,7 +65,15 @@ class SequenceEditor:
         with open(template_path, 'r') as f:
             content = f.read()
 
-        if bragg_mode:
+        if marker_axes:
+            from app.core.sequence_markers import render_auto_marker_sequence
+            content = render_auto_marker_sequence(
+                content,
+                marker_axes,
+                parameters,
+                marker_definitions or [],
+            )
+        elif bragg_mode:
             if len(parameters) < 2:
                 raise ValueError("Bragg sequence generation requires pulse and compensation parameters")
             content = SequenceEditor.render_bragg_sequence_content(content, parameters[0], parameters[1])
