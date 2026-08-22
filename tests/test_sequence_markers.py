@@ -2,6 +2,10 @@ import unittest
 
 from app.core.sequence_markers import (
     add_sequence_marker,
+    definitions_with_embedded,
+    embed_marker_definitions,
+    extract_embedded_marker_definitions,
+    find_matching_marker_definition_suggestions,
     inspect_sequence_markers,
     marked_filename,
     marker_definitions_for_sequence,
@@ -10,6 +14,7 @@ from app.core.sequence_markers import (
     normalize_marker_definitions,
     remove_sequence_marker,
     render_auto_marker_sequence,
+    render_digital_marker_states,
     update_sequence_marker,
 )
 
@@ -144,6 +149,18 @@ class MarkerUpdateTests(unittest.TestCase):
         self.assertEqual(line["markers"][0]["role"], "scan")
 
 class MarkerRenderingTests(unittest.TestCase):
+    def test_dds_element_replacement_does_not_change_command_suffix(self):
+        content = "###SCAN:FREQ###\n+1us DDS1 [1] (2)\n"
+        definition = {
+            "id": "FREQ", "display_name": "Frequency", "kind": "dds_element",
+            "decimals": 0, "hard_min": 1, "hard_max": 10,
+            "default_start": 1, "default_stop": 3, "default_step": 1,
+            "default_method": "step_size", "expected_command": "DDS1",
+            "expected_channel": "2", "has_compensation": False,
+        }
+        rendered = render_auto_marker_sequence(content, ["FREQ"], [2], [definition])
+        self.assertIn("DDS1 [2]", rendered)
+
     def test_renders_three_marker_types_with_required_formats(self):
         marked = add_sequence_marker(MOT, "REPUMP_DAC", 2, "dac_value")
         marked = add_sequence_marker(marked, "LABEL_DETUNING", 4, "dds_element")
@@ -202,6 +219,143 @@ class MarkerRenderingTests(unittest.TestCase):
                 [definition("LABEL_DETUNING", "dds_element", hard_min=0, hard_max=1023)],
             )
 
+
+
+class EmbeddedMarkerDefinitionTests(unittest.TestCase):
+    def test_round_trip_makes_mot_self_contained(self):
+        marked = add_sequence_marker(MOT, "LABEL_DURATION", 4, "duration", 5)
+        item = definition(
+            "LABEL_DURATION", "duration", hard_min=1, hard_max=5000,
+            default_start=20, default_stop=200, default_step=5,
+            expected_command="TTL_AOM_Raman1", expected_channel="49",
+            has_compensation=True,
+        )
+        embedded = embed_marker_definitions(marked, [item])
+        self.assertIn("#@MIGA_MARKER_DEF", embedded)
+        parsed = extract_embedded_marker_definitions(embedded, strict=True)
+        self.assertEqual(parsed["definitions"][0]["id"], "LABEL_DURATION")
+        inspection = inspect_sequence_markers(embedded)
+        scan = next(marker for marker in inspection["markers"] if marker["role"] == "scan")
+        self.assertEqual(scan["status"], "defined")
+        self.assertEqual(scan["definition_source"], "embedded")
+        self.assertEqual(inspection["embedded_definition_ids"], ["LABEL_DURATION"])
+
+    def test_embedded_definition_overrides_conflicting_settings_in_render(self):
+        marked = add_sequence_marker(MOT, "REPUMP_DAC", 2, "dac_value")
+        embedded_definition = definition(
+            "REPUMP_DAC", "dac_value", hard_min=0, hard_max=10,
+            default_start=0, default_stop=10, default_step=1,
+            expected_command="AOM_Raman1", expected_channel="23",
+        )
+        content = embed_marker_definitions(marked, [embedded_definition])
+        restrictive_settings = definition(
+            "REPUMP_DAC", "dac_value", hard_min=0, hard_max=1,
+            default_start=0, default_stop=1, default_step=0.1,
+        )
+        resolution = definitions_with_embedded(content, [restrictive_settings])
+        self.assertEqual(resolution["definitions"][0]["hard_max"], 10)
+        self.assertEqual(len(resolution["conflicts"]), 1)
+        rendered = render_auto_marker_sequence(content, ["REPUMP_DAC"], [5], [restrictive_settings])
+        self.assertIn("AOM_Raman1 =5.000", rendered)
+
+    def test_malformed_embedded_definition_blocks_runtime_rendering(self):
+        content = "###SCAN:FREQ###\n#@MIGA_MARKER_DEF {bad json}\n+1us DDS1 [1] (2)\n"
+        with self.assertRaisesRegex(ValueError, "Invalid embedded Marker definition"):
+            render_auto_marker_sequence(
+                content,
+                ["FREQ"],
+                [2],
+                [definition("FREQ", "dds_element", hard_min=0, hard_max=10)],
+            )
+
+    def test_missing_embedded_payload_is_reported(self):
+        parsed = extract_embedded_marker_definitions(
+            "###SCAN:FREQ###\n#@MIGA_MARKER_DEF\n+1us DDS1 [1] (2)\n"
+        )
+        self.assertEqual(len(parsed["errors"]), 1)
+
+    def test_complete_embedding_rejects_missing_definition(self):
+        content = "###SCAN:A###\n+1us DDS1 [1] (2)\n###SCAN:B###\n+1us DDS1 [2] (2)\n"
+        with self.assertRaisesRegex(ValueError, "definitions are missing for: B"):
+            embed_marker_definitions(
+                content,
+                [definition("A", "dds_element", hard_min=0, hard_max=10)],
+                require_complete=True,
+            )
+
+    def test_update_and_remove_do_not_leave_orphan_metadata(self):
+        marked = add_sequence_marker(MOT, "OLD", 3, "dds_element")
+        marked = embed_marker_definitions(
+            marked,
+            [definition("OLD", "dds_element", hard_min=0, hard_max=500)],
+        )
+        target_line = next(
+            marker["target_line_number"]
+            for marker in inspect_sequence_markers(marked)["markers"]
+            if marker["role"] == "scan"
+        )
+        updated = update_sequence_marker(marked, "OLD", "NEW", target_line, "dds_element")
+        self.assertNotIn("#@MIGA_MARKER_DEF", updated)
+        updated = embed_marker_definitions(
+            updated,
+            [definition("NEW", "dds_element", hard_min=0, hard_max=500)],
+        )
+        removed = remove_sequence_marker(updated, "NEW")
+        self.assertNotIn("#@MIGA_MARKER_DEF", removed)
+        self.assertNotIn("###SCAN:NEW###", removed)
+
+    def test_digital_state_round_trip_and_step_local_render(self):
+        source = "+1us Gaussian_pulse = OFF (63) # keep comment\n"
+        marked = add_sequence_marker(source, "BRAGG_ENABLE", 1, "digital_state")
+        item = definition(
+            "BRAGG_ENABLE", "digital_state",
+            expected_command="Gaussian_pulse", expected_channel="63",
+        )
+        embedded = embed_marker_definitions(marked, [item])
+        self.assertIn("###STATE:BRAGG_ENABLE###", embedded)
+        inspection = inspect_sequence_markers(embedded)
+        marker = inspection["markers"][0]
+        self.assertEqual(marker["role"], "state")
+        self.assertEqual(marker["kind"], "digital_state")
+        self.assertEqual(marker["candidate"]["value"], "OFF")
+        self.assertEqual(marker["status"], "defined")
+
+        rendered = render_digital_marker_states(
+            embedded,
+            {"BRAGG_ENABLE": "ON"},
+            [],
+        )
+        self.assertIn("Gaussian_pulse = ON (63) # keep comment", rendered)
+        self.assertIn("Gaussian_pulse = OFF (63) # keep comment", embedded)
+
+    def test_digital_state_cannot_be_used_as_auto_marker_axis(self):
+        source = "+1us Gaussian_pulse = OFF (63)\n"
+        marked = add_sequence_marker(source, "BRAGG_ENABLE", 1, "digital_state")
+        item = definition("BRAGG_ENABLE", "digital_state")
+        embedded = embed_marker_definitions(marked, [item])
+        with self.assertRaisesRegex(ValueError, "not found|cannot be used as a scan axis"):
+            render_auto_marker_sequence(embedded, ["BRAGG_ENABLE"], [1], [])
+
+    def test_old_file_suggests_unique_matching_definitions_from_other_profile(self):
+        content = (
+            "###SCAN:KNOWN###\n+1us DDS1 [1] (2)\n"
+            "###SCAN:MISSING###\n+10us TTL_AOM_Raman1 = ON (49)\n"
+            "###COMP:MISSING###\n+100us AOM_Det = OFF (52)\n"
+        )
+        known = definition("KNOWN", "dds_element", hard_min=0, hard_max=10)
+        missing = definition(
+            "MISSING", "duration", hard_min=1, hard_max=1000,
+            default_start=10, default_stop=100, default_step=10,
+            expected_command="TTL_AOM_Raman1", expected_channel="49",
+            has_compensation=True,
+        )
+        settings = {
+            "sequence_marker_definitions": [known],
+            "sequence_marker_profiles": {"another_sequence": [known, missing]},
+        }
+        result = find_matching_marker_definition_suggestions(content, settings, "renamed.mot")
+        self.assertEqual([item["id"] for item in result["suggestions"]], ["MISSING"])
+        self.assertFalse(result["ambiguities"])
 
 
 class MarkerProfileTests(unittest.TestCase):

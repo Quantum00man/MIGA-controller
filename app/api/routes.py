@@ -21,6 +21,8 @@ from app.core.sequence_markers import (
     add_sequence_marker,
     decode_mot_bytes,
     encode_mot_text,
+    embed_marker_definitions,
+    find_matching_marker_definition_suggestions,
     inspect_sequence_markers,
     marker_definitions_for_sequence,
     marked_filename,
@@ -29,6 +31,8 @@ from app.core.sequence_markers import (
     update_sequence_marker,
 )
 from app.core.optimization_manager import OBJECTIVE_METRICS, OptimizationManager
+from app.core.marker_optimization_manager import MARKER_OBJECTIVES, MarkerOptimizationManager
+from app.core.marker_document_store import SequenceMarkerDocumentStore
 from app.drivers.dds_table import DdsTableError, validate_dds_table
 from app.models.schemas import (
     AnalysisSettings,
@@ -48,6 +52,8 @@ from app.models.schemas import (
     FitModelDefinition,
     IndexUiStateRequest,
     OptimizationConfig,
+    MarkerOptimizationConfig,
+    MarkerOptimizationPresetRequest,
     ReAnalysisRequest,
     ScanConfig,
     ScheduleRequest,
@@ -60,6 +66,8 @@ import config
 router = APIRouter()
 manager = ExperimentManager()
 optimization_manager = OptimizationManager(manager)
+marker_optimization_manager = MarkerOptimizationManager(manager)
+marker_document_store = SequenceMarkerDocumentStore(config.SEQUENCE_MARKER_DOCUMENTS_DIR)
 from app.core.schedule_manager import ScheduleManager
 schedule_manager = ScheduleManager(manager)
 data_loader = DataLoader()
@@ -284,6 +292,80 @@ async def download_optimization_artifact(kind: str):
         raise HTTPException(500, str(exc))
 
 
+@router.get("/marker-optimization/catalog", response_model=ExperimentResponse)
+async def get_marker_optimization_catalog():
+    return ExperimentResponse(
+        status="success",
+        message="Marker optimization catalog loaded",
+        data={"metrics": OBJECTIVE_METRICS, "objectives": MARKER_OBJECTIVES},
+    )
+
+
+@router.post("/marker-optimization/start", response_model=ExperimentResponse)
+async def start_marker_optimization(config_payload: MarkerOptimizationConfig):
+    result = marker_optimization_manager.start(config_payload.dict())
+    if result["status"] == "error":
+        raise HTTPException(400, result["message"])
+    return ExperimentResponse(status=result["status"], message=result["message"], data=result.get("data"))
+
+
+@router.post("/marker-optimization/stop", response_model=ExperimentResponse)
+async def stop_marker_optimization():
+    result = marker_optimization_manager.stop()
+    return ExperimentResponse(status=result["status"], message=result["message"], data=result.get("data"))
+
+
+@router.get("/marker-optimization/status", response_model=ExperimentResponse)
+async def get_marker_optimization_status():
+    return ExperimentResponse(
+        status="success",
+        message="Marker optimization status loaded",
+        data=marker_optimization_manager.get_status(),
+    )
+
+
+@router.get("/marker-optimization/download/{kind}")
+async def download_marker_optimization_artifact(kind: str):
+    try:
+        artifact_path, download_name = marker_optimization_manager.get_export_file(kind)
+        media_types = {
+            "report_bundle": "application/zip",
+            "report_pdf": "application/pdf",
+            "report_json": "application/json",
+            "optimized_sequence": "text/plain",
+            "workflow_preset": "application/json",
+        }
+        return FileResponse(path=artifact_path, media_type=media_types.get(kind, "application/octet-stream"), filename=download_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+
+
+@router.get("/marker-optimization/presets", response_model=ExperimentResponse)
+async def list_marker_optimization_presets(sequence_name: str):
+    return ExperimentResponse(
+        status="success",
+        message="Marker optimization presets loaded",
+        data={"presets": marker_optimization_manager.list_presets(sequence_name)},
+    )
+
+
+@router.post("/marker-optimization/presets", response_model=ExperimentResponse)
+async def save_marker_optimization_preset(request: MarkerOptimizationPresetRequest):
+    try:
+        record = marker_optimization_manager.save_preset(request.sequence_name, request.name, request.workflow)
+        return ExperimentResponse(status="success", message="Preset saved", data=record)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.delete("/marker-optimization/presets/{name}", response_model=ExperimentResponse)
+async def delete_marker_optimization_preset(name: str, sequence_name: str):
+    removed = marker_optimization_manager.delete_preset(sequence_name, name)
+    if not removed:
+        raise HTTPException(404, "Preset not found for this sequence profile")
+    return ExperimentResponse(status="success", message="Preset deleted")
+
+
 @router.get("/index/state", response_model=ExperimentResponse)
 async def get_index_state():
     record = _load_index_ui_state_record()
@@ -327,15 +409,95 @@ def _marker_definitions_payload(definitions=None, filename="sequence.mot"):
 
 
 def _marker_document_payload(filename, content, encoding, definitions=None):
+    fallback_definitions = _marker_definitions_payload(definitions, filename)
+    inspection = inspect_sequence_markers(content, fallback_definitions)
+    active_definition_ids = {
+        marker["id"]
+        for marker in inspection.get("markers", [])
+        if marker.get("role") in {"scan", "state"} and marker.get("definition")
+    }
+    suggestions = find_matching_marker_definition_suggestions(
+        content,
+        manager.settings,
+        filename,
+    )
     return {
         "filename": str(filename or "sequence.mot"),
         "marked_filename": marked_filename(filename),
         "content": content,
         "encoding": encoding,
-        "inspection": inspect_sequence_markers(
-            content, _marker_definitions_payload(definitions, filename)
-        ),
+        "inspection": inspection,
+        "definition_suggestions": [
+            item for item in suggestions["suggestions"]
+            if item["id"] not in active_definition_ids
+        ],
+        "definition_ambiguities": [
+            item for item in suggestions["ambiguities"]
+            if item["id"] not in active_definition_ids
+        ],
     }
+
+@router.get("/sequence-markers/saved")
+async def list_saved_marker_documents():
+    return marker_document_store.list()
+
+
+@router.get("/sequence-markers/saved/document")
+async def load_saved_marker_document(sequence_name: str = "", profile_key: str = ""):
+    try:
+        record, content = marker_document_store.load(
+            sequence_name=sequence_name,
+            profile_key=profile_key,
+        )
+        document = _marker_document_payload(
+            record.get("filename") or sequence_name or "sequence.mot",
+            content,
+            record.get("encoding") or "utf-8",
+        )
+        document["saved_record"] = record
+        return document
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+
+
+@router.post("/sequence-markers/saved")
+async def save_marker_document(request: SequenceMarkerInspectRequest):
+    try:
+        definitions = _marker_definitions_payload(request.definitions, request.filename)
+        content = embed_marker_definitions(
+            request.content,
+            definitions,
+            require_complete=True,
+        )
+        payload = encode_mot_text(content, request.encoding)
+        if len(payload) > MAX_MARKER_MOT_BYTES:
+            raise ValueError("MOT file exceeds the 10 MB marker editor limit")
+        record = marker_document_store.save(
+            request.filename,
+            content,
+            request.encoding,
+        )
+        document = _marker_document_payload(
+            request.filename,
+            content,
+            request.encoding,
+            definitions,
+        )
+        return {"status": "success", "record": record, "document": document}
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.get("/sequence-markers/saved/download")
+async def download_saved_marker_document(sequence_name: str = "", profile_key: str = ""):
+    try:
+        payload, filename = marker_document_store.download(
+            sequence_name=sequence_name,
+            profile_key=profile_key,
+        )
+        return _attachment_response(payload, filename, "text/plain")
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
 
 
 @router.post("/sequence-markers/inspect-upload")
@@ -368,6 +530,7 @@ async def inspect_marker_document(request: SequenceMarkerInspectRequest):
 @router.post("/sequence-markers/annotate")
 async def annotate_marker_document(request: SequenceMarkerAnnotateRequest):
     try:
+        definitions = _marker_definitions_payload(request.definitions, request.filename)
         content = add_sequence_marker(
             request.content,
             request.marker_id,
@@ -375,20 +538,21 @@ async def annotate_marker_document(request: SequenceMarkerAnnotateRequest):
             request.kind,
             request.compensation_line_number,
         )
+        content = embed_marker_definitions(content, definitions, require_complete=False)
         return _marker_document_payload(
             request.filename,
             content,
             request.encoding,
-            request.definitions,
+            definitions,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc))
 
 
-
 @router.post("/sequence-markers/update")
 async def update_marker_document(request: SequenceMarkerUpdateRequest):
     try:
+        definitions = _marker_definitions_payload(request.definitions, request.filename)
         content = update_sequence_marker(
             request.content,
             request.old_marker_id,
@@ -397,24 +561,28 @@ async def update_marker_document(request: SequenceMarkerUpdateRequest):
             request.kind,
             request.compensation_line_number,
         )
+        content = embed_marker_definitions(content, definitions, require_complete=False)
         return _marker_document_payload(
             request.filename,
             content,
             request.encoding,
-            request.definitions,
+            definitions,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc))
 
+
 @router.post("/sequence-markers/remove")
 async def remove_marker_from_document(request: SequenceMarkerRemoveRequest):
     try:
+        definitions = _marker_definitions_payload(request.definitions, request.filename)
         content = remove_sequence_marker(request.content, request.marker_id)
+        content = embed_marker_definitions(content, definitions, require_complete=False)
         return _marker_document_payload(
             request.filename,
             content,
             request.encoding,
-            request.definitions,
+            definitions,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc))
@@ -423,7 +591,13 @@ async def remove_marker_from_document(request: SequenceMarkerRemoveRequest):
 @router.post("/sequence-markers/download")
 async def download_marker_document(request: SequenceMarkerInspectRequest):
     try:
-        payload = encode_mot_text(request.content, request.encoding)
+        definitions = _marker_definitions_payload(request.definitions, request.filename)
+        content = embed_marker_definitions(
+            request.content,
+            definitions,
+            require_complete=True,
+        )
+        payload = encode_mot_text(content, request.encoding)
         return _attachment_response(payload, marked_filename(request.filename), "text/plain")
     except ValueError as exc:
         raise HTTPException(400, str(exc))

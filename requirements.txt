@@ -1,4 +1,5 @@
 fastapi
+matplotlib>=3.6
 uvicorn
 numpy==1.26.4
 scipy==1.11.4

@@ -262,6 +262,7 @@
         .marker-legend-dac, .marker-line-tag.dac_value { color: #176b3a; border-color: #9ad3af; background: #dcf4e4; }
         .marker-legend-duration, .marker-line-tag.duration { color: #8a4b08; border-color: #f2c98a; background: #fff0d5; }
         .marker-legend-comp, .marker-line-tag.compensation { color: #65409a; border-color: #cab5e8; background: #eee5fa; }
+        .marker-legend-state, .marker-line-tag.digital_state { color: #8a2d52; border-color: #e6a9c1; background: #fbe5ee; }
 
         .marker-line-list {
             height: clamp(640px, 68vh, 900px);
@@ -286,6 +287,7 @@
         .marker-line-row.marker-row-dac { color: #176b3a; background: #edf9f1; }
         .marker-line-row.marker-row-duration { color: #8a4b08; background: #fff7e8; }
         .marker-line-row.marker-row-compensation { color: #65409a; background: #f6f0fc; }
+        .marker-line-row.marker-row-state { color: #8a2d52; background: #fdf0f5; }
         .marker-line-row.selected {
             box-shadow: inset 5px 0 0 #0d6efd, inset 0 0 0 2px rgba(13, 110, 253, 0.28);
         }
@@ -682,7 +684,7 @@
                         <div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
                             <div>
                                 <h6 class="fw-bold text-primary mb-1"><i class="bi bi-tags me-2"></i>Visual MOT Marker Editor</h6>
-                                <div class="form-text mt-0">Select a detected value, name it, define safe limits and download a marked copy. The uploaded file is never overwritten.</div>
+                                <div class="form-text mt-0">Select a parameter or ON/OFF instruction and define its marker. Apply & Save stores a recoverable marked copy on this controller; the uploaded source file is never overwritten.</div>
                             </div>
                             <button type="button" class="btn btn-primary btn-sm" @click="$refs.markerMotInput.click()" :disabled="markerBusy">
                                 <span v-if="markerBusy" class="spinner-border spinner-border-sm me-1"></span>
@@ -690,6 +692,48 @@
                             </button>
                             <input ref="markerMotInput" type="file" class="d-none" accept=".mot" @change="loadMarkerMotFile">
                         </div>
+                    </div>
+
+                    <div v-if="savedMarkerDocuments.length" class="card border-primary-subtle mb-3">
+                        <div class="card-body py-2 px-3">
+                            <div class="d-flex flex-wrap align-items-end gap-2">
+                                <div class="flex-grow-1" style="min-width: 260px;">
+                                    <label class="form-label small fw-bold text-muted mb-1">Saved Marked MOT</label>
+                                    <select class="form-select form-select-sm" v-model="savedMarkerProfile" :disabled="markerBusy">
+                                        <option v-for="document in savedMarkerDocuments" :key="document.profile_key" :value="document.profile_key">
+                                            {{ document.marked_filename }} · {{ document.marker_count }} markers · {{ formatMarkerSavedTime(document.updated_at_ms) }}
+                                        </option>
+                                    </select>
+                                </div>
+                                <button type="button" class="btn btn-outline-primary btn-sm" @click="loadSavedMarkerDocument()" :disabled="markerBusy || !savedMarkerProfile">
+                                    <i class="bi bi-arrow-counterclockwise me-1"></i>Restore
+                                </button>
+                                <a class="btn btn-outline-success btn-sm" :class="{ disabled: !savedMarkerProfile }" :href="savedMarkerDownloadUrl || '#'">
+                                    <i class="bi bi-download me-1"></i>Download Saved Copy
+                                </a>
+                            </div>
+                            <div class="form-text">Saved copies remain available after leaving Settings or restarting the controller.</div>
+                        </div>
+                    </div>
+
+                    <div v-if="markerInspection.embedded_definition_errors?.length" class="alert alert-danger py-2" role="alert">
+                        <div class="fw-bold"><i class="bi bi-file-earmark-x me-2"></i>Invalid embedded Marker metadata</div>
+                        <div v-for="error in markerInspection.embedded_definition_errors" :key="error.line_number" class="small">Line {{ error.line_number }}: {{ error.message }}</div>
+                    </div>
+                    <div v-if="markerInspection.definition_conflicts?.length" class="alert alert-warning py-2" role="status">
+                        <div class="fw-bold"><i class="bi bi-exclamation-diamond me-2"></i>Embedded definitions override different Settings values</div>
+                        <div class="small">{{ markerInspection.definition_conflicts.map(item => item.id).join(', ') }}</div>
+                    </div>
+                    <div v-if="markerDefinitionSuggestions.length" class="alert alert-info py-2 d-flex flex-wrap align-items-center gap-2" role="status">
+                        <div class="flex-grow-1">
+                            <div class="fw-bold"><i class="bi bi-magic me-2"></i>{{ markerDefinitionSuggestions.length }} matching definitions found in existing sequence profiles</div>
+                            <div class="small">Import them, then Apply & Save to make this MOT self-contained.</div>
+                        </div>
+                        <button type="button" class="btn btn-info btn-sm" @click="importSuggestedMarkerDefinitions()" :disabled="markerBusy">Import Matching Definitions</button>
+                    </div>
+                    <div v-if="markerDefinitionAmbiguities.length" class="alert alert-warning py-2" role="status">
+                        <div class="fw-bold"><i class="bi bi-intersect me-2"></i>Some Marker IDs have multiple different matching definitions</div>
+                        <div class="small">Edit these definitions explicitly: {{ markerDefinitionAmbiguities.map(item => item.id).join(', ') }}</div>
                     </div>
 
                     <div v-if="markerError" class="alert alert-danger py-2" role="alert">
@@ -718,10 +762,11 @@
                                 <div v-for="marker in markerInspection.markers" :key="`${marker.role}:${marker.id}:${marker.marker_line_number}`"
                                     class="d-flex flex-wrap align-items-center gap-2 px-3 py-2 border-bottom">
                                     <span class="badge" :class="markerStatusClass(marker.status)">{{ marker.status }}</span>
+                                    <span v-if="marker.definition_source" class="badge bg-light text-dark border">{{ marker.definition_source === 'embedded' ? 'MOT definition' : 'Settings fallback' }}</span>
                                     <span class="font-monospace fw-bold">{{ marker.role.toUpperCase() }}:{{ marker.id }}</span>
                                     <span class="small text-muted">Line {{ marker.target_line_number || '?' }} | {{ markerKindLabel(marker.kind) }}</span>
                                     <span v-if="marker.message" class="small text-danger">{{ marker.message }}</span>
-                                    <div class="ms-auto d-flex gap-1" v-if="marker.role === 'scan'">
+                                    <div class="ms-auto d-flex gap-1" v-if="['scan', 'state'].includes(marker.role)">
                                         <button type="button" class="btn btn-outline-secondary btn-sm" @click="editExistingMarker(marker)">Definition</button>
                                         <button type="button" class="btn btn-outline-danger btn-sm" @click="removeMarkerFromDocument(marker.id)">Remove</button>
                                     </div>
@@ -740,6 +785,7 @@
                                         <span class="marker-legend-item marker-legend-dds">DDS</span>
                                         <span class="marker-legend-item marker-legend-dac">DAC</span>
                                         <span class="marker-legend-item marker-legend-duration">Duration</span>
+                                        <span class="marker-legend-item marker-legend-state">ON/OFF State</span>
                                         <span class="marker-legend-item marker-legend-comp">Compensation</span>
                                     </div>
                                 </div>
@@ -767,7 +813,7 @@
                             </section>
                             <aside class="marker-definition-pane" aria-label="Marker definition">
                                 <div v-if="!markerSelectedCandidate" class="text-center text-muted small py-4">
-                                    Select a parameter on the left or edit an existing marker definition.
+                                    Select a parameter or digital state on the left, or edit an existing marker definition.
                                 </div>
                                 <template v-else>
                                     <div class="d-flex justify-content-between align-items-start gap-2 mb-3">
@@ -786,6 +832,12 @@
                                         <input type="text" class="form-control form-control-sm font-monospace" v-model.trim="markerForm.id" placeholder="Auto-generated from Marker Name">
                                         <div class="form-text font-monospace">Effective ID: {{ markerNormalizedId || 'MARKER_ID' }}</div>
                                     </div>
+                                    <div v-if="markerForm.kind === 'digital_state'" class="alert alert-light border py-2 small">
+                                        <div class="fw-bold mb-1">Step-local digital condition</div>
+                                        Current sequence state: <span class="font-monospace fw-bold">{{ markerSelectedCandidate.value }}</span>.
+                                        Marker Optimization can select Keep current, ON or OFF independently for every Step.
+                                    </div>
+                                    <template v-if="markerForm.kind !== 'digital_state'">
                                     <div class="row g-2 mb-2">
                                         <div class="col-6">
                                             <label class="form-label small fw-bold">Hard Min</label>
@@ -808,6 +860,7 @@
                                         <div class="col-4"><label class="form-label small">Stop</label><input type="number" class="form-control form-control-sm" :step="markerInputStep" v-model.number="markerForm.default_stop"></div>
                                         <div class="col-4"><label class="form-label small">{{ markerForm.default_method === 'n_points' ? 'Count' : 'Step' }}</label><input type="number" class="form-control form-control-sm" :step="markerForm.default_method === 'n_points' ? 1 : markerInputStep" v-model.number="markerForm.default_step"></div>
                                     </div>
+                                    </template>
                                     <div v-if="markerForm.kind === 'dac_value'" class="mb-2">
                                         <label class="form-label small fw-bold">Decimal Places</label>
                                         <input type="number" class="form-control form-control-sm" min="0" max="9" step="1" v-model.number="markerForm.decimals">
@@ -833,7 +886,7 @@
                         </div>
 
                         <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mt-3 pt-3 border-top">
-                            <div class="small text-muted">Definitions are stored by Apply & Save. The marked MOT is downloaded separately.</div>
+                            <div class="small text-muted">Apply & Save stores both the definitions and this marked MOT. Downloading now is optional.</div>
                             <button type="button" class="btn btn-success btn-sm" @click="downloadMarkedMot" :disabled="markerBusy || !markerInspection.marker_count">
                                 <i class="bi bi-download me-1"></i>Download {{ markerDocument.marked_filename }}
                             </button>
@@ -1338,7 +1391,7 @@
                         { id: 'phys', label: 'Physics & Gains', icon: 'bi-activity', description: 'Configure detector gains, signal filters and physical calibration constants.' },
                         { id: 'raman', label: 'Raman AC Stark', icon: 'bi-lightning-charge', description: 'Configure DDS writer access and four independent Raman amplitude-to-power calibration curves.' },
                         { id: 'bragg', label: 'Bragg Pulse', icon: 'bi-broadcast', description: 'Configure the channel-32 voltage-to-normalized-power curve and its linear operating interval.' },
-                        { id: 'markers', label: 'Sequence Markers', icon: 'bi-tags', description: 'Mark DDS, DAC and duration values visually, then define hard limits and default scans.' },
+                        { id: 'markers', label: 'Sequence Markers', icon: 'bi-tags', description: 'Mark DDS, DAC, duration and ON/OFF values visually, then define their execution rules.' },
                         { id: 'fitting', label: 'Fitting Models', icon: 'bi-bezier2', description: 'Manage atom-area calculation and the models used for time-of-flight fitting.' },
                         { id: 'net', label: 'Network', icon: 'bi-hdd-network', description: 'Select the acquisition platform and configure device connection limits.' },
                         { id: 'logic', label: 'Logic & Channels', icon: 'bi-diagram-3', description: 'Set launch, trigger and linked-mode channel timing.' },
@@ -1351,6 +1404,8 @@
                     markerMessage: '',
                     markerSearch: '',
                     markerDocument: null,
+                    savedMarkerDocuments: [],
+                    savedMarkerProfile: '',
                     markerSelectedCandidate: null,
                     markerSelectedLine: null,
                     markerEditingId: '',
@@ -1392,6 +1447,16 @@
                 },
                 braggCalibrationSignature() {
                     return JSON.stringify(this.s.bragg_power_calibration || {});
+                },
+                savedMarkerDownloadUrl() {
+                    if (!this.savedMarkerProfile) return '';
+                    return `/sequence-markers/saved/download?profile_key=${encodeURIComponent(this.savedMarkerProfile)}`;
+                },
+                markerDefinitionSuggestions() {
+                    return Array.isArray(this.markerDocument?.definition_suggestions) ? this.markerDocument.definition_suggestions : [];
+                },
+                markerDefinitionAmbiguities() {
+                    return Array.isArray(this.markerDocument?.definition_ambiguities) ? this.markerDocument.definition_ambiguities : [];
                 },
                 markerInspection() {
                     return this.markerDocument?.inspection || { line_count: 0, marker_count: 0, markers: [], lines: [] };
@@ -1435,8 +1500,67 @@
             },
             mounted() { this.fetchSettings(); },
             methods: {
+                formatMarkerSavedTime(timestamp) {
+                    const numeric = Number(timestamp);
+                    return Number.isFinite(numeric) && numeric > 0 ? new Date(numeric).toLocaleString() : 'unknown time';
+                },
+                async fetchSavedMarkerDocuments(restoreLast = false) {
+                    try {
+                        const response = await axios.get('/sequence-markers/saved');
+                        this.savedMarkerDocuments = Array.isArray(response.data?.documents) ? response.data.documents : [];
+                        const profiles = new Set(this.savedMarkerDocuments.map(item => item.profile_key));
+                        if (!profiles.has(this.savedMarkerProfile)) {
+                            this.savedMarkerProfile = response.data?.last_profile || this.savedMarkerDocuments[0]?.profile_key || '';
+                        }
+                        if (restoreLast && this.savedMarkerProfile) {
+                            await this.loadSavedMarkerDocument(this.savedMarkerProfile, true);
+                        }
+                    } catch (error) {
+                        this.markerError = this.markerErrorText(error);
+                    }
+                },
+                async loadSavedMarkerDocument(profileKey = this.savedMarkerProfile, automatic = false) {
+                    if (!profileKey) return;
+                    this.markerBusy = true;
+                    this.markerError = '';
+                    try {
+                        const response = await axios.get('/sequence-markers/saved/document', { params: { profile_key: profileKey } });
+                        this.applyMarkerDocument(response.data);
+                        this.savedMarkerProfile = profileKey;
+                        this.clearMarkerSelection();
+                        if (!automatic) this.markerMessage = `Restored ${response.data.marked_filename} from saved marked MOT documents.`;
+                    } catch (error) {
+                        this.markerError = this.markerErrorText(error);
+                    } finally {
+                        this.markerBusy = false;
+                    }
+                },
+                async persistMarkerDocument() {
+                    if (!this.markerDocument) return null;
+                    const response = await axios.post('/sequence-markers/saved', this.markerDocumentRequest());
+                    const record = response.data?.record || null;
+                    await this.fetchSavedMarkerDocuments(false);
+                    if (response.data?.document) this.applyMarkerDocument(response.data.document);
+                    if (record?.profile_key) this.savedMarkerProfile = record.profile_key;
+                    return record;
+                },
+                async importSuggestedMarkerDefinitions(showMessage = true) {
+                    const suggestions = this.markerDefinitionSuggestions;
+                    if (!suggestions.length) return 0;
+                    const importedIds = new Set(suggestions.map(item => item.definition.id));
+                    const definitions = [
+                        ...this.markerDefinitions().filter(item => !importedIds.has(item.id)),
+                        ...suggestions.map(item => ({ ...item.definition }))
+                    ];
+                    this.setMarkerDefinitions(definitions);
+                    await this.refreshMarkerInspection();
+                    if (showMessage) {
+                        this.markerMessage = `Imported ${suggestions.length} matching definitions. Apply & Save will embed them in ${this.markerDocument.marked_filename}.`;
+                    }
+                    return suggestions.length;
+                },
                 markerKindLabel(kind) {
-                    return { dds_element: 'DDS element', dac_value: 'DAC value', duration: 'Duration' }[kind] || kind || 'Unknown';
+                    return { dds_element: 'DDS element', dac_value: 'DAC value', duration: 'Duration', digital_state: 'ON/OFF state' }[kind] || kind || 'Unknown';
                 },
                 markerStatusClass(status) {
                     return {
@@ -1452,6 +1576,7 @@
                     else if (marker?.kind === 'dds_element') classes.push('marker-row-dds');
                     else if (marker?.kind === 'dac_value') classes.push('marker-row-dac');
                     else if (marker?.kind === 'duration') classes.push('marker-row-duration');
+                    else if (marker?.kind === 'digital_state') classes.push('marker-row-state');
                     const selectedTarget = Number(this.markerSelectedCandidate?.line_number || 0) === Number(line.line_number);
                     const selectedCompensation = this.markerEditingId && Number(this.markerCompensationLine || 0) === Number(line.line_number);
                     if (selectedTarget || selectedCompensation) classes.push('selected');
@@ -1464,10 +1589,10 @@
                     if (!line?.marked) return;
                     const lineMarker = (line.markers || [])[0];
                     if (!lineMarker) return;
-                    const scanMarker = lineMarker.role === 'scan'
+                    const ownerMarker = ['scan', 'state'].includes(lineMarker.role)
                         ? lineMarker
                         : (this.markerInspection.markers || []).find(marker => marker.role === 'scan' && marker.id === lineMarker.id);
-                    if (scanMarker) this.editExistingMarker(scanMarker);
+                    if (ownerMarker) this.editExistingMarker(ownerMarker);
                 },
                 markerProfileKey(filename = this.markerDocument?.filename) {
                     const base = String(filename || 'sequence.mot').split(/[\\/]/).pop().replace(/\.mot$/i, '').replace(/_marked$/i, '').trim();
@@ -1476,12 +1601,17 @@
                 markerDefinitions() {
                     const profiles = this.s.sequence_marker_profiles;
                     const profileKey = this.markerProfileKey();
+                    let fallback = [];
                     if (profiles && typeof profiles === 'object' && Object.prototype.hasOwnProperty.call(profiles, profileKey)) {
-                        return Array.isArray(profiles[profileKey]) ? profiles[profileKey] : [];
+                        fallback = Array.isArray(profiles[profileKey]) ? profiles[profileKey] : [];
+                    } else {
+                        const markerIds = new Set((this.markerInspection.markers || []).filter(item => ['scan', 'state'].includes(item.role)).map(item => item.id));
+                        const legacy = Array.isArray(this.s.sequence_marker_definitions) ? this.s.sequence_marker_definitions : [];
+                        fallback = legacy.filter(item => markerIds.has(item.id));
                     }
-                    const markerIds = new Set((this.markerInspection.markers || []).filter(item => item.role === 'scan').map(item => item.id));
-                    const legacy = Array.isArray(this.s.sequence_marker_definitions) ? this.s.sequence_marker_definitions : [];
-                    return legacy.filter(item => markerIds.has(item.id));
+                    const merged = new Map(fallback.map(item => [item.id, { ...item }]));
+                    (this.markerInspection.embedded_definitions || []).forEach(item => merged.set(item.id, { ...item }));
+                    return Array.from(merged.values());
                 },
                 setMarkerDefinitions(definitions) {
                     const profileKey = this.markerProfileKey();
@@ -1498,6 +1628,26 @@
                 markerDefinitionFromForm() {
                     const id = this.markerNormalizedId;
                     if (!id) throw new Error('Marker name is required.');
+                    const base = {
+                        id,
+                        display_name: String(this.markerForm.display_name || id.replaceAll('_', ' ')).trim(),
+                        kind: this.markerForm.kind,
+                        expected_command: String(this.markerForm.expected_command || ''),
+                        expected_channel: String(this.markerForm.expected_channel || '')
+                    };
+                    if (this.markerForm.kind === 'digital_state') {
+                        return {
+                            ...base,
+                            decimals: 0,
+                            hard_min: 0,
+                            hard_max: 1,
+                            default_start: 0,
+                            default_stop: 1,
+                            default_step: 1,
+                            default_method: 'step_size',
+                            has_compensation: false
+                        };
+                    }
                     const numericKeys = ['hard_min', 'hard_max', 'default_start', 'default_stop', 'default_step'];
                     const values = Object.fromEntries(numericKeys.map(key => [key, Number(this.markerForm[key])]));
                     if (Object.values(values).some(value => !Number.isFinite(value))) throw new Error('Limits and default scan values must be finite numbers.');
@@ -1513,14 +1663,10 @@
                     const decimals = this.markerForm.kind === 'dac_value' ? Number(this.markerForm.decimals) : 0;
                     if (!Number.isInteger(decimals) || decimals < 0 || decimals > 9) throw new Error('Decimal Places must be an integer from 0 to 9.');
                     return {
-                        id,
-                        display_name: String(this.markerForm.display_name || id.replaceAll('_', ' ')).trim(),
-                        kind: this.markerForm.kind,
+                        ...base,
                         decimals,
                         ...values,
                         default_method: this.markerForm.default_method,
-                        expected_command: String(this.markerForm.expected_command || ''),
-                        expected_channel: String(this.markerForm.expected_channel || ''),
                         has_compensation: Boolean(this.markerForm.has_compensation)
                     };
                 },
@@ -1541,14 +1687,17 @@
                     this.markerError = '';
                 },
                 resetMarkerForm(candidate = null) {
-                    const value = Number(candidate?.value_us ?? candidate?.value ?? 0);
                     const kind = candidate?.kind || '';
+                    const isDigital = kind === 'digital_state';
+                    const value = isDigital ? 0 : Number(candidate?.value_us ?? candidate?.value ?? 0);
                     const span = kind === 'dac_value' ? Math.max(1, Math.abs(value)) : Math.max(10, Math.ceil(Math.abs(value)));
                     this.markerForm = {
                         id: '', display_name: '', kind, decimals: kind === 'dac_value' ? 3 : 0,
-                        hard_min: kind === 'duration' ? 1 : Math.floor(value - span),
-                        hard_max: Math.ceil(value + span),
-                        default_start: value, default_stop: value, default_step: 1,
+                        hard_min: isDigital ? 0 : (kind === 'duration' ? 1 : Math.floor(value - span)),
+                        hard_max: isDigital ? 1 : Math.ceil(value + span),
+                        default_start: isDigital ? 0 : value,
+                        default_stop: isDigital ? 1 : value,
+                        default_step: 1,
                         default_method: 'step_size',
                         expected_command: candidate?.command || '', expected_channel: candidate?.channel || '',
                         has_compensation: false
@@ -1674,7 +1823,7 @@
                     try {
                         const oldMarkerId = this.markerEditingId;
                         const definition = this.markerDefinitionFromForm();
-                        const duplicate = (this.markerInspection.markers || []).some(item => item.role === 'scan' && item.id === definition.id && item.id !== oldMarkerId);
+                        const duplicate = (this.markerInspection.markers || []).some(item => ["scan", "state"].includes(item.role) && item.id === definition.id && item.id !== oldMarkerId);
                         if (duplicate) throw new Error(`Marker ${definition.id} already exists in this sequence.`);
                         if (definition.has_compensation && !this.markerCompensationLine) throw new Error('Select a duration instruction for compensation.');
                         const definitions = [
@@ -2050,16 +2199,25 @@
                         const res = await axios.get('/settings/all');
                         this.s = this.normalizeSettings(res.data);
                         await this.fetchUpdateStatus(true);
+                        await this.fetchSavedMarkerDocuments(!this.markerDocument);
                     } catch (e) { console.error(e); }
                 },
 
                 async saveSettings() {
                     this.saving = true;
-                    this.s = this.normalizeSettings(this.s);
-                    if(this.s.hardware_platform === 'daq') this.syncDecimation();
                     try {
+                        if (this.markerDocument && this.markerDefinitionSuggestions.length) {
+                            await this.importSuggestedMarkerDefinitions(false);
+                        }
+                        this.s = this.normalizeSettings(this.s);
+                        if(this.s.hardware_platform === 'daq') this.syncDecimation();
                         await axios.post('/settings/all', this.s);
-                        this.isError = false; this.msg = "Configuration updated successfully.";
+                        const savedMarkerRecord = this.markerDocument ? await this.persistMarkerDocument() : null;
+                        this.isError = false;
+                        this.msg = savedMarkerRecord
+                            ? `Configuration and ${savedMarkerRecord.marked_filename} saved successfully.`
+                            : "Configuration updated successfully.";
+                        if (savedMarkerRecord) this.markerMessage = `${savedMarkerRecord.marked_filename} now contains its complete definitions and can be restored or downloaded later.`;
                         setTimeout(() => this.msg = '', 3000);
                     } catch (e) {
                         this.isError = true; this.msg = "Error: " + (e.response?.data?.detail || e.message);

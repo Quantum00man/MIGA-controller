@@ -151,7 +151,7 @@ class SequenceMarkerDefinition(BaseModel):
     @validator("kind")
     def validate_marker_kind(cls, value):
         normalized = str(value or "").strip().lower()
-        if normalized not in {"dds_element", "dac_value", "duration"}:
+        if normalized not in {"dds_element", "dac_value", "duration", "digital_state"}:
             raise ValueError("Unsupported marker type")
         return normalized
 
@@ -258,6 +258,51 @@ class ScheduleRequest(BaseModel):
     timingMode: str = Field("sequential")
     sequentialGapSec: float = Field(0, ge=0)
     tasks: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class MarkerOptimizationStepConfig(BaseModel):
+    marker_id: str
+    start: float
+    stop: float
+    step: float = Field(..., gt=0)
+    scan_method: str = Field("step_size")
+    average_count: int = Field(1, ge=1, le=1000)
+    metric_key: str = Field("transition_probability_up")
+    metric_source: str = Field("fit")
+    objective: str = Field("maximize")
+    minimum_r_squared: float = Field(0.75, ge=-1.0, le=1.0)
+
+    digital_states: Dict[str, str] = Field(default_factory=dict)
+
+    @validator("digital_states", pre=True)
+    def validate_digital_states(cls, value):
+        states = value if isinstance(value, dict) else {}
+        normalized = {}
+        for marker_id, state in states.items():
+            key = str(marker_id or "").strip().upper()
+            selected = str(state or "current").strip().lower()
+            if not key:
+                continue
+            if selected not in {"current", "on", "off"}:
+                raise ValueError(f"Digital state for {key} must be current, on, or off")
+            normalized[key] = selected
+        return normalized
+
+class MarkerOptimizationConfig(BaseModel):
+    workflow_name: str = Field("")
+    sequence_name: str = Field("")
+    ext_trigger: bool = Field(False)
+    fit_center_up: float = Field(0)
+    fit_width_up: float = Field(0)
+    fit_center_dw: float = Field(0)
+    fit_width_dw: float = Field(0)
+    steps: List[MarkerOptimizationStepConfig] = Field(default_factory=list)
+
+
+class MarkerOptimizationPresetRequest(BaseModel):
+    sequence_name: str
+    name: str
+    workflow: Dict[str, Any] = Field(default_factory=dict)
 
 
 class OptimizationVariableConfig(BaseModel):

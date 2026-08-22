@@ -1536,7 +1536,7 @@ class ExperimentManager:
         metadata = dict(metadata or {})
 
         try:
-            template_path = config.SEQUENCE_TEMPLATE_PATH_WIN if config.USE_SIMULATION else self.settings['template_path']
+            template_path = execution_config.get('_template_path_override') or (config.SEQUENCE_TEMPLATE_PATH_WIN if config.USE_SIMULATION else self.settings['template_path'])
             self.seq_editor.generate_sequence(
                 template_path,
                 config.SEQUENCE_OUTPUT_PATH,

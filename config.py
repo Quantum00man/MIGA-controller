@@ -15,6 +15,8 @@ SETTINGS_FILE_PATH = BASE_DIR / "user_settings.json"
 USER_JSON_PATH = BASE_DIR / "user.json"
 INDEX_UI_STATE_PATH = BASE_DIR / "index_ui_state.json"
 SCHEDULE_STATE_PATH = BASE_DIR / "schedule_state.json"
+MARKER_OPTIMIZATION_PRESETS_PATH = BASE_DIR / "marker_optimization_presets.json"
+SEQUENCE_MARKER_DOCUMENTS_DIR = BASE_DIR / "marker_documents"
 DDS_TABLE_UPLOAD_PATH = BASE_DIR / "temp" / "dds_uploaded.xml"
 DDS_TABLE_UPLOAD_META_PATH = BASE_DIR / "temp" / "dds_uploaded.json"
 

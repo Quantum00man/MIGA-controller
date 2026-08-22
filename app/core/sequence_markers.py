@@ -1,25 +1,29 @@
 from __future__ import annotations
 
+import json
 import math
 from pathlib import Path
 import re
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 
-MARKER_RE = re.compile(r"^\s*###(SCAN|COMP):([A-Za-z0-9_ -]+)###\s*$", re.IGNORECASE)
+MARKER_RE = re.compile(r"^\s*###(SCAN|STATE|COMP):([A-Za-z0-9_ -]+)###\s*$", re.IGNORECASE)
+MARKER_DEFINITION_RE = re.compile(r"^\s*#@MIGA_MARKER_DEF(?:\s+(?P<payload>.*?))?\s*$")
+MARKER_DEFINITION_VERSION = 1
 DURATION_RE = re.compile(
     r"^(?P<prefix>\s*)\+(?P<value>[-+]?(?:\d+(?:\.\d*)?|\.\d+))(?P<unit>us|ms|s)\b",
     re.IGNORECASE,
 )
 DDS_RE = re.compile(r"\bDDS[A-Za-z0-9_]*\s*\[\s*(?P<value>[-+]?\d+)\s*\]", re.IGNORECASE)
 DAC_RE = re.compile(r"=\s*(?P<value>[-+]?(?:\d+(?:\.\d*)?|\.\d+))(?=\s|\(|#|$)")
+DIGITAL_RE = re.compile(r"=\s*(?P<value>ON|OFF)(?=\s|\(|#|$)", re.IGNORECASE)
 COMMAND_RE = re.compile(
     r"^\s*\+[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:us|ms|s)\s+(?P<command>[A-Za-z0-9_]+)",
     re.IGNORECASE,
 )
 CHANNEL_RE = re.compile(r"\((?P<channel>\d+)\)")
 
-MARKER_KINDS = {"dds_element", "dac_value", "duration"}
+MARKER_KINDS = {"dds_element", "dac_value", "duration", "digital_state"}
 
 
 def normalize_marker_id(value: str) -> str:
@@ -127,6 +131,19 @@ def detect_line_candidates(line: str, line_number: int) -> List[Dict[str, Any]]:
     command, channel = _command_and_channel(line)
     candidates: List[Dict[str, Any]] = []
 
+    digital_match = DIGITAL_RE.search(code)
+    if digital_match:
+        state = digital_match.group("value").upper()
+        candidates.append({
+            "candidate_id": f"{line_number}:digital_state",
+            "line_number": line_number,
+            "kind": "digital_state",
+            "value": state,
+            "unit": "state",
+            "command": command,
+            "channel": channel,
+            "label": f"Digital state {state}",
+        })
     duration_match = DURATION_RE.search(code)
     if duration_match:
         value = float(duration_match.group("value"))
@@ -192,30 +209,36 @@ def normalize_marker_definitions(
             kind = str(raw.get("kind") or "").strip().lower()
             if kind not in MARKER_KINDS:
                 raise ValueError(f"Unsupported marker type for {marker_id}: {kind}")
-            hard_min = float(raw.get("hard_min"))
-            hard_max = float(raw.get("hard_max"))
-            if not math.isfinite(hard_min) or not math.isfinite(hard_max) or hard_min > hard_max:
-                raise ValueError(f"Invalid hard limits for {marker_id}")
-            decimals = int(raw.get("decimals", 3 if kind == "dac_value" else 0))
-            if decimals < 0 or decimals > 9:
-                raise ValueError(f"Decimals for {marker_id} must be between 0 and 9")
-            default_method = str(raw.get("default_method") or "step_size").strip().lower()
-            if default_method not in {"step_size", "n_points"}:
-                raise ValueError(f"Invalid default scan method for {marker_id}")
-            default_start = float(raw.get("default_start"))
-            default_stop = float(raw.get("default_stop"))
-            default_step = float(raw.get("default_step"))
-            for default_value in (default_start, default_stop):
-                if not math.isfinite(default_value) or default_value < hard_min or default_value > hard_max:
-                    raise ValueError(f"Default scan for {marker_id} exceeds hard limits")
-            if not math.isfinite(default_step) or default_step <= 0:
-                raise ValueError(f"Default step/count for {marker_id} must be positive")
-            if default_method == "n_points":
-                _format_number(default_step, 0)
-            if kind in {"dds_element", "duration"}:
-                for value in (hard_min, hard_max, default_start, default_stop, default_step):
-                    _format_number(value, 0)
+            if kind == "digital_state":
                 decimals = 0
+                hard_min, hard_max = 0.0, 1.0
+                default_start, default_stop, default_step = 0.0, 1.0, 1.0
+                default_method = "step_size"
+            else:
+                hard_min = float(raw.get("hard_min"))
+                hard_max = float(raw.get("hard_max"))
+                if not math.isfinite(hard_min) or not math.isfinite(hard_max) or hard_min > hard_max:
+                    raise ValueError(f"Invalid hard limits for {marker_id}")
+                decimals = int(raw.get("decimals", 3 if kind == "dac_value" else 0))
+                if decimals < 0 or decimals > 9:
+                    raise ValueError(f"Decimals for {marker_id} must be between 0 and 9")
+                default_method = str(raw.get("default_method") or "step_size").strip().lower()
+                if default_method not in {"step_size", "n_points"}:
+                    raise ValueError(f"Invalid default scan method for {marker_id}")
+                default_start = float(raw.get("default_start"))
+                default_stop = float(raw.get("default_stop"))
+                default_step = float(raw.get("default_step"))
+                for default_value in (default_start, default_stop):
+                    if not math.isfinite(default_value) or default_value < hard_min or default_value > hard_max:
+                        raise ValueError(f"Default scan for {marker_id} exceeds hard limits")
+                if not math.isfinite(default_step) or default_step <= 0:
+                    raise ValueError(f"Default step/count for {marker_id} must be positive")
+                if default_method == "n_points":
+                    _format_number(default_step, 0)
+                if kind in {"dds_element", "duration"}:
+                    for value in (hard_min, hard_max, default_start, default_stop, default_step):
+                        _format_number(value, 0)
+                    decimals = 0
             normalized.append({
                 "id": marker_id,
                 "display_name": str(raw.get("display_name") or marker_id.replace("_", " ")).strip(),
@@ -229,15 +252,13 @@ def normalize_marker_definitions(
                 "default_method": default_method,
                 "expected_command": str(raw.get("expected_command") or "").strip(),
                 "expected_channel": str(raw.get("expected_channel") or "").strip(),
-                "has_compensation": bool(raw.get("has_compensation", False)),
+                "has_compensation": bool(raw.get("has_compensation", False)) if kind == "duration" else False,
             })
             seen.add(marker_id)
         except (TypeError, ValueError) as exc:
             if strict:
                 raise ValueError(str(exc)) from exc
     return normalized
-
-
 
 def normalize_marker_profiles(
     profiles: Any,
@@ -263,13 +284,226 @@ def normalize_marker_profiles(
         )
     return normalized
 
+
+def _definition_signature(definition: Dict[str, Any]) -> str:
+    return json.dumps(definition, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def extract_embedded_marker_definitions(
+    content: str,
+    *,
+    strict: bool = False,
+) -> Dict[str, Any]:
+    lines = str(content).splitlines()
+    definitions: List[Dict[str, Any]] = []
+    records: List[Dict[str, Any]] = []
+    errors: List[Dict[str, Any]] = []
+    seen = set()
+    for index, line in enumerate(lines, start=1):
+        match = MARKER_DEFINITION_RE.match(line)
+        if not match:
+            continue
+        try:
+            raw = json.loads(match.group("payload"))
+            if not isinstance(raw, dict):
+                raise ValueError("metadata payload must be a JSON object")
+            version = int(raw.get("v", MARKER_DEFINITION_VERSION))
+            if version != MARKER_DEFINITION_VERSION:
+                raise ValueError(f"unsupported metadata version {version}")
+            definition = normalize_marker_definitions([raw], strict=True)[0]
+            marker_id = definition["id"]
+            previous_index = index - 1
+            while previous_index >= 1 and not lines[previous_index - 1].strip():
+                previous_index -= 1
+            marker_match = MARKER_RE.match(lines[previous_index - 1]) if previous_index >= 1 else None
+            if not marker_match or marker_match.group(1).upper() not in {"SCAN", "STATE"}:
+                raise ValueError("metadata must immediately follow a SCAN or STATE marker")
+            owner_id = normalize_marker_id(marker_match.group(2))
+            if owner_id != marker_id:
+                raise ValueError(f"metadata ID {marker_id} does not match marker {owner_id}")
+            if marker_id in seen:
+                raise ValueError(f"duplicate embedded definition for {marker_id}")
+            seen.add(marker_id)
+            definitions.append(definition)
+            records.append({
+                "id": marker_id,
+                "line_number": index,
+                "marker_line_number": previous_index,
+                "definition": definition,
+            })
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            error = {"line_number": index, "message": str(exc), "source": line}
+            errors.append(error)
+            if strict:
+                raise ValueError(f"Embedded Marker definition at line {index}: {exc}") from exc
+    return {"definitions": definitions, "records": records, "errors": errors}
+
+
+def definitions_with_embedded(
+    content: str,
+    fallback_definitions: Optional[Iterable[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    fallback = normalize_marker_definitions(fallback_definitions, strict=False)
+    embedded_result = extract_embedded_marker_definitions(content, strict=False)
+    embedded = embedded_result["definitions"]
+    fallback_map = {item["id"]: item for item in fallback}
+    embedded_map = {item["id"]: item for item in embedded}
+    conflicts = []
+    for marker_id in sorted(set(fallback_map) & set(embedded_map)):
+        if _definition_signature(fallback_map[marker_id]) != _definition_signature(embedded_map[marker_id]):
+            conflicts.append({
+                "id": marker_id,
+                "message": "Embedded MOT definition differs from Settings; embedded definition is active",
+                "embedded": embedded_map[marker_id],
+                "settings": fallback_map[marker_id],
+            })
+    merged = dict(fallback_map)
+    merged.update(embedded_map)
+    return {
+        "definitions": list(merged.values()),
+        "embedded_definitions": embedded,
+        "embedded_ids": sorted(embedded_map),
+        "definition_sources": {
+            marker_id: ("embedded" if marker_id in embedded_map else "settings")
+            for marker_id in merged
+        },
+        "conflicts": conflicts,
+        "errors": embedded_result["errors"],
+        "records": embedded_result["records"],
+    }
+
+
+def resolve_marker_definitions(
+    content: str,
+    settings: Dict[str, Any],
+    filename: str,
+) -> Dict[str, Any]:
+    fallback = marker_definitions_for_sequence(settings, filename)
+    resolved = definitions_with_embedded(content, fallback)
+    resolved["profile_key"] = sequence_marker_profile_key(filename)
+    resolved["fallback_definitions"] = fallback
+    return resolved
+
+
+def find_matching_marker_definition_suggestions(
+    content: str,
+    settings: Dict[str, Any],
+    filename: str,
+) -> Dict[str, Any]:
+    resolution = resolve_marker_definitions(content, settings, filename)
+    inspection = inspect_sequence_markers(content, resolution["definitions"])
+    resolved_ids = {item["id"] for item in resolution["definitions"]}
+    candidates_by_id: Dict[str, List[Tuple[Dict[str, Any], str]]] = {}
+
+    sources: List[Tuple[str, Iterable[Dict[str, Any]]]] = []
+    profiles = settings.get("sequence_marker_profiles")
+    if isinstance(profiles, dict):
+        sources.extend((str(profile), definitions) for profile, definitions in profiles.items())
+    sources.append(("legacy", settings.get("sequence_marker_definitions") or []))
+    for source_name, raw_definitions in sources:
+        for definition in normalize_marker_definitions(raw_definitions, strict=False):
+            candidates_by_id.setdefault(definition["id"], []).append((definition, source_name))
+
+    suggestions = []
+    ambiguities = []
+    for marker in inspection["markers"]:
+        if marker["role"] not in {"scan", "state"} or marker["id"] in resolved_ids:
+            continue
+        target = marker.get("candidate") or {}
+        compatible: Dict[str, Dict[str, Any]] = {}
+        source_names: Dict[str, List[str]] = {}
+        for definition, source_name in candidates_by_id.get(marker["id"], []):
+            if definition["kind"] != marker["kind"]:
+                continue
+            expected_command = definition.get("expected_command") or ""
+            expected_channel = definition.get("expected_channel") or ""
+            if expected_command and expected_command != target.get("command"):
+                continue
+            if expected_channel and expected_channel != target.get("channel"):
+                continue
+            signature = _definition_signature(definition)
+            compatible[signature] = definition
+            source_names.setdefault(signature, []).append(source_name)
+        if len(compatible) == 1:
+            signature, definition = next(iter(compatible.items()))
+            suggestions.append({
+                "id": marker["id"],
+                "definition": definition,
+                "source_profiles": sorted(set(source_names[signature])),
+            })
+        elif len(compatible) > 1:
+            ambiguities.append({
+                "id": marker["id"],
+                "message": "Multiple compatible profiles contain different definitions",
+                "options": [
+                    {"definition": definition, "source_profiles": sorted(set(source_names[signature]))}
+                    for signature, definition in compatible.items()
+                ],
+            })
+    return {"suggestions": suggestions, "ambiguities": ambiguities}
+
+
+def serialize_embedded_marker_definition(definition: Dict[str, Any]) -> str:
+    normalized = normalize_marker_definitions([definition], strict=True)[0]
+    payload = {"v": MARKER_DEFINITION_VERSION, **normalized}
+    return "#@MIGA_MARKER_DEF " + json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+
+def embed_marker_definitions(
+    content: str,
+    definitions: Iterable[Dict[str, Any]],
+    *,
+    require_complete: bool = True,
+) -> str:
+    normalized = normalize_marker_definitions(definitions, strict=True)
+    definition_map = {item["id"]: item for item in normalized}
+    raw_lines = str(content).splitlines(keepends=True)
+    cleaned_lines = [
+        line for line in raw_lines
+        if not MARKER_DEFINITION_RE.match(line.rstrip("\r\n"))
+    ]
+    owner_ids = []
+    for line in cleaned_lines:
+        match = MARKER_RE.match(line.rstrip("\r\n"))
+        if match and match.group(1).upper() in {"SCAN", "STATE"}:
+            owner_ids.append(normalize_marker_id(match.group(2)))
+    missing = sorted(set(owner_ids) - set(definition_map))
+    if require_complete and missing:
+        raise ValueError(
+            "Cannot make MOT self-contained; definitions are missing for: " + ", ".join(missing)
+        )
+    newline = _line_ending(content)
+    output: List[str] = []
+    for line in cleaned_lines:
+        output.append(line)
+        match = MARKER_RE.match(line.rstrip("\r\n"))
+        if not match or match.group(1).upper() not in {"SCAN", "STATE"}:
+            continue
+        marker_id = normalize_marker_id(match.group(2))
+        definition = definition_map.get(marker_id)
+        if not definition:
+            continue
+        if not line.endswith(("\n", "\r")):
+            output[-1] += newline
+        output.append(serialize_embedded_marker_definition(definition) + newline)
+    return "".join(output)
+
+
 def inspect_sequence_markers(
     content: str,
     definitions: Optional[Iterable[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     lines = str(content).splitlines(keepends=True)
-    definition_list = normalize_marker_definitions(definitions, strict=False)
+    resolution = definitions_with_embedded(content, definitions)
+    definition_list = resolution["definitions"]
     definition_map = {item["id"]: item for item in definition_list}
+    embedded_ids = set(resolution["embedded_ids"])
     candidates: List[Dict[str, Any]] = []
     candidates_by_line: Dict[int, List[Dict[str, Any]]] = {}
     for index, line in enumerate(lines, start=1):
@@ -297,8 +531,10 @@ def inspect_sequence_markers(
         target_candidates = candidates_by_line.get(target_line or -1, [])
         if role == "COMP":
             inferred_kind = "duration"
-        elif definition and role == "SCAN":
+        elif definition and role in {"SCAN", "STATE"}:
             inferred_kind = definition["kind"]
+        elif role == "STATE":
+            inferred_kind = "digital_state"
         elif any(item["kind"] == "dds_element" for item in target_candidates):
             inferred_kind = "dds_element"
         elif any(item["kind"] == "dac_value" for item in target_candidates):
@@ -315,13 +551,17 @@ def inspect_sequence_markers(
             status, message = "invalid", "No executable instruction follows this marker"
         elif target_candidate is None:
             status, message = "conflict", f"Target line has no {inferred_kind} value"
-        elif definition and role == "SCAN":
+        elif definition and role in {"SCAN", "STATE"}:
             expected_command = definition.get("expected_command") or ""
             expected_channel = definition.get("expected_channel") or ""
             if expected_command and target_candidate.get("command") != expected_command:
                 status, message = "conflict", f"Expected command {expected_command}"
             elif expected_channel and target_candidate.get("channel") != expected_channel:
                 status, message = "conflict", f"Expected channel ({expected_channel})"
+            elif role == "STATE" and definition["kind"] != "digital_state":
+                status, message = "conflict", "STATE marker requires a digital_state definition"
+            elif role == "SCAN" and definition["kind"] == "digital_state":
+                status, message = "conflict", "Digital state markers must use STATE"
         markers.append({
             "id": marker_id,
             "role": role.lower(),
@@ -331,6 +571,7 @@ def inspect_sequence_markers(
             "kind": inferred_kind,
             "candidate": target_candidate,
             "definition": definition,
+            "definition_source": "embedded" if marker_id in embedded_ids else ("settings" if definition else ""),
             "status": status,
             "message": message,
         })
@@ -382,6 +623,9 @@ def inspect_sequence_markers(
         "marker_count": len(markers),
         "markers": markers,
         "lines": line_records,
+        "embedded_definition_ids": sorted(embedded_ids),
+        "embedded_definition_errors": resolution["errors"],
+        "definition_conflicts": resolution["conflicts"],
     }
 
 
@@ -409,7 +653,8 @@ def add_sequence_marker(
         raise ValueError("Selected target no longer matches the requested marker type")
     if any(record["line_number"] == int(target_line_number) and record["marked"] for record in inspection["lines"]):
         raise ValueError("Selected instruction already has a marker")
-    insertions = [(int(target_line_number) - 1, f"###SCAN:{marker_id}###")]
+    owner_role = "STATE" if kind == "digital_state" else "SCAN"
+    insertions = [(int(target_line_number) - 1, f"###{owner_role}:{marker_id}###")]
     if compensation_line_number is not None:
         if kind != "duration":
             raise ValueError("Only duration markers can use compensation")
@@ -429,7 +674,6 @@ def add_sequence_marker(
     return "".join(lines)
 
 
-
 def update_sequence_marker(
     content: str,
     old_marker_id: str,
@@ -442,7 +686,7 @@ def update_sequence_marker(
     new_marker_id = normalize_marker_id(new_marker_id)
     inspection = inspect_sequence_markers(content)
     existing = [marker for marker in inspection["markers"] if marker["id"] == old_marker_id]
-    if not any(marker["role"] == "scan" for marker in existing):
+    if not any(marker["role"] in {"scan", "state"} for marker in existing):
         raise ValueError(f"Marker {old_marker_id} was not found")
     if new_marker_id != old_marker_id and any(
         marker["id"] == new_marker_id for marker in inspection["markers"]
@@ -450,11 +694,17 @@ def update_sequence_marker(
         raise ValueError(f"Marker {new_marker_id} already exists in this file")
 
     lines = str(content).splitlines(keepends=True)
+    embedded_record_lines = {
+        record["line_number"]
+        for record in extract_embedded_marker_definitions(content)["records"]
+        if record["id"] == old_marker_id
+    }
     marker_line_numbers = {
         index
         for index, line in enumerate(lines, start=1)
-        if (match := MARKER_RE.match(line.rstrip("\r\n")))
-        and normalize_marker_id(match.group(2)) == old_marker_id
+        if ((match := MARKER_RE.match(line.rstrip("\r\n")))
+            and normalize_marker_id(match.group(2)) == old_marker_id)
+        or index in embedded_record_lines
     }
 
     def map_after_removal(line_number: int) -> int:
@@ -478,14 +728,20 @@ def update_sequence_marker(
         mapped_compensation,
     )
 
+
 def remove_sequence_marker(content: str, marker_id: str) -> str:
     marker_id = normalize_marker_id(marker_id)
     lines = str(content).splitlines(keepends=True)
+    metadata_lines = {
+        record["line_number"]
+        for record in extract_embedded_marker_definitions(content)["records"]
+        if record["id"] == marker_id
+    }
     kept = []
     removed = 0
-    for line in lines:
+    for index, line in enumerate(lines, start=1):
         match = MARKER_RE.match(line.rstrip("\r\n"))
-        if match and normalize_marker_id(match.group(2)) == marker_id:
+        if (match and normalize_marker_id(match.group(2)) == marker_id) or index in metadata_lines:
             removed += 1
             continue
         kept.append(line)
@@ -498,14 +754,22 @@ def _definition_map(definitions: Iterable[Dict[str, Any]]) -> Dict[str, Dict[str
     return {item["id"]: item for item in normalize_marker_definitions(definitions, strict=True)}
 
 
-def _replace_candidate(line: str, kind: str, value: float, definition: Dict[str, Any]) -> str:
+def _replace_candidate(line: str, kind: str, value: Any, definition: Dict[str, Any]) -> str:
     code, separator, comment = line.partition("#")
     decimals = int(definition.get("decimals", 0))
     if kind == "dds_element":
         formatted = _format_number(value, 0)
         if not DDS_RE.search(code):
             raise ValueError("DDS marker target no longer contains an element index")
-        code = DDS_RE.sub(lambda match: match.group(0).replace(match.group("value"), formatted, 1), code, count=1)
+        code = DDS_RE.sub(
+            lambda match: (
+                match.group(0)[:match.start("value") - match.start(0)]
+                + formatted
+                + match.group(0)[match.end("value") - match.start(0):]
+            ),
+            code,
+            count=1,
+        )
     elif kind == "dac_value":
         formatted = _format_number(value, decimals)
         if not DAC_RE.search(code):
@@ -516,6 +780,17 @@ def _replace_candidate(line: str, kind: str, value: float, definition: Dict[str,
         if not DURATION_RE.search(code):
             raise ValueError("Duration marker target no longer contains a leading time")
         code = DURATION_RE.sub(lambda match: f"{match.group('prefix')}+{formatted}us", code, count=1)
+    elif kind == "digital_state":
+        formatted = str(value or "").strip().upper()
+        if formatted not in {"ON", "OFF"}:
+            raise ValueError("Digital state must be ON or OFF")
+        if not DIGITAL_RE.search(code):
+            raise ValueError("Digital state marker target no longer contains ON or OFF")
+        code = DIGITAL_RE.sub(
+            lambda match: match.group(0).replace(match.group("value"), formatted, 1),
+            code,
+            count=1,
+        )
     else:
         raise ValueError(f"Unsupported marker type: {kind}")
     return code + (separator + comment if separator else "")
@@ -547,7 +822,13 @@ def render_auto_marker_sequence(
         raise ValueError("Auto Marker axes and scan values do not match")
     if len(set(axes)) != len(axes):
         raise ValueError("Auto Marker axes must be unique")
-    definition_map = _definition_map(definitions)
+    definition_resolution = definitions_with_embedded(content, definitions)
+    if definition_resolution["errors"]:
+        first_error = definition_resolution["errors"][0]
+        raise ValueError(
+            f"Invalid embedded Marker definition at line {first_error['line_number']}: {first_error['message']}"
+        )
+    definition_map = _definition_map(definition_resolution["definitions"])
     inspection = inspect_sequence_markers(content, definition_map.values())
     scan_markers = {marker["id"]: marker for marker in inspection["markers"] if marker["role"] == "scan"}
     comp_markers = {marker["id"]: marker for marker in inspection["markers"] if marker["role"] == "comp"}
@@ -557,7 +838,9 @@ def render_auto_marker_sequence(
     for marker_id, raw_value in zip(axes, values):
         definition = definition_map.get(marker_id)
         if not definition:
-            raise ValueError(f"Marker {marker_id} has no Settings definition")
+            raise ValueError(f"Marker {marker_id} has no embedded or Settings definition")
+        if definition["kind"] == "digital_state":
+            raise ValueError(f"Digital state marker {marker_id} cannot be used as a scan axis")
         marker = scan_markers.get(marker_id)
         if not marker:
             raise ValueError(f"Marker {marker_id} was not found in the sequence")
@@ -585,13 +868,63 @@ def render_auto_marker_sequence(
             comp_definition = {**definition, "kind": "duration", "decimals": 0}
             replacements.setdefault(comp_line, []).append(("duration", new_compensation, comp_definition))
         elif compensation:
-            raise ValueError(f"Marker {marker_id} has a compensation marker but Settings compensation is disabled")
+            raise ValueError(f"Marker {marker_id} has a compensation marker but compensation is disabled by the active definition")
 
     for line_number, line_replacements in replacements.items():
         updated = lines[line_number - 1]
         for kind, value, definition in line_replacements:
             updated = _replace_candidate(updated, kind, value, definition)
         lines[line_number - 1] = updated
+    return "".join(lines)
+
+
+def render_digital_marker_states(
+    content: str,
+    states: Dict[str, str],
+    definitions: Iterable[Dict[str, Any]],
+) -> str:
+    if not states:
+        return str(content)
+    definition_resolution = definitions_with_embedded(content, definitions)
+    if definition_resolution["errors"]:
+        first_error = definition_resolution["errors"][0]
+        raise ValueError(
+            f"Invalid embedded Marker definition at line {first_error['line_number']}: {first_error['message']}"
+        )
+    definition_map = _definition_map(definition_resolution["definitions"])
+    inspection = inspect_sequence_markers(content, definition_map.values())
+    state_markers = {
+        marker["id"]: marker
+        for marker in inspection["markers"]
+        if marker["role"] == "state"
+    }
+    normalized_states: Dict[str, str] = {}
+    for raw_marker_id, raw_state in states.items():
+        marker_id = normalize_marker_id(raw_marker_id)
+        if marker_id in normalized_states:
+            raise ValueError(f"Duplicate digital state marker: {marker_id}")
+        state = str(raw_state or "").strip().upper()
+        if state not in {"ON", "OFF"}:
+            raise ValueError(f"Digital state for {marker_id} must be ON or OFF")
+        normalized_states[marker_id] = state
+
+    lines = str(content).splitlines(keepends=True)
+    for marker_id, state in normalized_states.items():
+        definition = definition_map.get(marker_id)
+        marker = state_markers.get(marker_id)
+        if not definition or definition.get("kind") != "digital_state":
+            raise ValueError(f"State marker {marker_id} has no digital_state definition")
+        if not marker:
+            raise ValueError(f"State marker {marker_id} was not found in the sequence")
+        if marker["status"] != "defined":
+            raise ValueError(f"State marker {marker_id} is {marker['status']}: {marker['message']}")
+        target_line = int(marker["target_line_number"])
+        lines[target_line - 1] = _replace_candidate(
+            lines[target_line - 1],
+            "digital_state",
+            state,
+            definition,
+        )
     return "".join(lines)
 
 
