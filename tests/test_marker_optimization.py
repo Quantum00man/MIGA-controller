@@ -296,7 +296,7 @@ class MarkerOptimizationWorkflowTests(unittest.TestCase):
             class FakeDataManager:
                 current_run_dir = run_dir
                 current_run_id_str = "run_test"
-                def init_run(self, payload): pass
+                def init_run(self, payload): captured["run_config"] = payload
                 def close_run(self): pass
 
             manager = MarkerOptimizationManager(experiment)
@@ -325,6 +325,9 @@ class MarkerOptimizationWorkflowTests(unittest.TestCase):
             self.assertEqual(status["steps"][0]["status"], "completed")
             self.assertEqual(status["steps"][1]["status"], "failed")
             self.assertEqual(status["applied_values"], {"FREQ": 2})
+            self.assertEqual(captured["run_config"]["mode"], "marker_optimization")
+            self.assertEqual(captured["run_config"]["scan_dimensions"], 1)
+            self.assertEqual(captured["run_config"]["run_label"], "source.mot")
             self.assertIn("DDS1 [2]", captured["working"])
             self.assertIn("TTL_AOM_Raman1 = OFF", captured["working"])
             self.assertIn("TTL_AOM_Raman1 = ON", captured["step_1_execution"])

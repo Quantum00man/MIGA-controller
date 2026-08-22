@@ -268,6 +268,7 @@ class MarkerOptimizationManager:
             "phase": "idle",
             "message": "IDLE",
             "run_id": None,
+            "run_label": "",
             "started_at_ms": None,
             "ended_at_ms": None,
             "current_step": 0,
@@ -726,6 +727,7 @@ class MarkerOptimizationManager:
             fig.suptitle("MIGA Sequential Marker Optimization Report", fontsize=17, fontweight="bold", y=0.97)
             summary_lines = [
                 f"Workflow: {report.get('workflow_name') or 'Untitled workflow'}",
+                f"Run label: {report.get('run_label') or 'Unlabeled'}",
                 f"Sequence: {report.get('sequence_name')}",
                 f"Run ID: {report.get('run_id')}",
                 f"Outcome: {str(report.get('phase') or '').upper()}",
@@ -855,6 +857,7 @@ class MarkerOptimizationManager:
             "report_version": 3,
             "generated_at_ms": int(time.time() * 1000),
             "workflow_name": payload.get("workflow_name"),
+            "run_label": payload.get("run_label") or payload.get("workflow_name") or sequence_name,
             "sequence_name": sequence_name,
             "sequence_encoding": encoding,
             "sequence_profile": sequence_marker_profile_key(sequence_name),
@@ -891,6 +894,7 @@ class MarkerOptimizationManager:
             "report_bundle": zip_path,
             "report_pdf": pdf_path,
             "report_json": report_json_path,
+            "original_sequence": original_path,
             "optimized_sequence": final_path,
             "workflow_preset": preset_path,
         }
@@ -912,12 +916,20 @@ class MarkerOptimizationManager:
         try:
             run_config = copy.deepcopy(payload)
             run_config["_marker_optimization_mode"] = True
+            run_config["mode"] = "marker_optimization"
+            run_config["scan_dimensions"] = 1
+            run_config["run_label"] = (
+                str(payload.get("run_label") or "").strip()
+                or str(payload.get("workflow_name") or "").strip()
+                or str(payload.get("sequence_name") or "Marker optimization").strip()
+            )
+            run_config["randomize"] = any(bool(step.get("randomize")) for step in steps)
             run_config["_system_settings_snapshot"] = copy.deepcopy(self.experiment_manager.settings)
             data_manager.init_run(run_config)
             run_dir = data_manager.current_run_dir
             working_path = run_dir / "working_sequence.mot"
             working_path.write_text(working_content, encoding="utf-8")
-            self._set_status(run_id=data_manager.current_run_id_str, message="Workflow run initialized")
+            self._set_status(run_id=data_manager.current_run_id_str, run_label=run_config["run_label"], message="Workflow run initialized")
             for step in steps:
                 if self._stop_requested:
                     raise InterruptedError("Marker optimization stopped by user")

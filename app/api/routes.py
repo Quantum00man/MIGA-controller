@@ -332,6 +332,7 @@ async def download_marker_optimization_artifact(kind: str):
             "report_bundle": "application/zip",
             "report_pdf": "application/pdf",
             "report_json": "application/json",
+            "original_sequence": "text/plain",
             "optimized_sequence": "text/plain",
             "workflow_preset": "application/json",
         }
@@ -947,7 +948,21 @@ async def download_archived_sequence(year: str, month: str, day: str, run_id: st
     except Exception as exc:
         raise HTTPException(500, str(exc))
 
+@router.get("/archive/marker-optimization/artifact/{year}/{month}/{day}/{run_id}/{kind}")
+async def download_archived_marker_optimization_artifact(
+    year: str, month: str, day: str, run_id: str, kind: str
+):
+    try:
+        artifact_path, download_name = data_loader.get_marker_optimization_artifact(
+            year, month, day, run_id, kind
+        )
+        return FileResponse(path=artifact_path, media_type="application/octet-stream", filename=download_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
 @router.get("/archive/waveform/{year}/{month}/{day}/{run_id}/{step_index}")
+
 async def load_archived_waveform(year: str, month: str, day: str, run_id: str, step_index: int):
     try: return data_loader.load_waveform(year, month, day, run_id, step_index)
     except FileNotFoundError: raise HTTPException(404, "Waveform not found")

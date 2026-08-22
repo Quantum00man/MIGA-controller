@@ -74,6 +74,9 @@
             <input ref="sequenceInput" type="file" accept=".mot" class="d-none" @change="uploadSequence">
             <div class="small text-muted mb-3">{{ availableMarkers.length }} valid scan markers and {{ availableStateMarkers.length }} digital conditions detected. Presets are isolated by this sequence profile.</div>
 
+            <div class="mb-2"><div class="small-label">Optimization note</div><input class="form-control form-control-sm" v-model.trim="workflow.run_label" :disabled="status.is_running" placeholder="e.g. Raman labeling optimization"></div>
+            <div class="small text-muted mb-3">Saved as the Archive run label for this complete optimization.</div>
+
             <div class="row g-2 mb-3">
                 <div class="col-7"><div class="small-label">Workflow name</div><input class="form-control form-control-sm" v-model.trim="workflow.workflow_name" :disabled="status.is_running"></div>
                 <div class="col-5"><div class="small-label">Preset name</div><input class="form-control form-control-sm" v-model.trim="presetName" :disabled="status.is_running"></div>
@@ -177,16 +180,16 @@
             </div>
 
             <div class="panel mb-3">
+                <div class="panel-head">Measured response, smooth fit and applied value</div>
+                <div id="fitPlot"></div>
+            </div>
+
+            <div class="panel mb-3">
                 <div class="panel-head">Latest UP and DOWN TOF signals with fitting windows</div>
                 <div class="tof-grid">
                     <div id="tofPlotUp" class="tof-plot"></div>
                     <div id="tofPlotDown" class="tof-plot"></div>
                 </div>
-            </div>
-
-            <div class="panel mb-3">
-                <div class="panel-head">Measured response, smooth fit and applied value</div>
-                <div id="fitPlot"></div>
             </div>
 
             <div class="panel mb-3" v-if="status.export_urls && Object.keys(status.export_urls).length">
@@ -196,6 +199,7 @@
                     <div class="d-flex flex-wrap gap-2">
                         <a class="btn btn-primary" :href="status.export_urls.report_bundle"><i class="bi bi-file-earmark-zip me-1"></i>Complete report ZIP</a>
                         <a class="btn btn-outline-secondary" :href="status.export_urls.report_pdf">PDF report</a>
+                        <a class="btn btn-outline-secondary" :href="status.export_urls.original_sequence">Original MOT</a>
                         <a class="btn btn-outline-secondary" :href="status.export_urls.optimized_sequence">Optimized MOT</a>
                         <a class="btn btn-outline-secondary" :href="status.export_urls.workflow_preset">Preset JSON</a>
                     </div>
@@ -214,7 +218,7 @@ Vue.createApp({
     data(){ return {
         currentSequenceName:'sequence.mot', availableMarkers:[], availableStateMarkers:[], presets:[], presetName:'', selectedPreset:'', uid:1,
         catalog:{metrics:{transition_probability_up:'Transition Probability UP'},objectives:{}},
-        workflow:{workflow_name:'Sequential marker optimization',sequence_name:'',ext_trigger:false,fit_center_up:0,fit_width_up:0,fit_center_dw:0,fit_width_dw:0,steps:[]},
+        workflow:{workflow_name:'Sequential marker optimization',run_label:'',sequence_name:'',ext_trigger:false,fit_center_up:0,fit_width_up:0,fit_center_dw:0,fit_width_dw:0,steps:[]},
         status:{is_running:false,phase:'idle',message:'IDLE',steps:[],applied_values:{},export_urls:{}}, logs:[], pollTimer:null, ws:null, latestTof:null
     }},
     computed:{
@@ -345,7 +349,7 @@ Vue.createApp({
         },
         formatNumber(value,digits=3){const n=Number(value);return Number.isFinite(n)?n.toFixed(digits):'-';},
         async loadPresets(){try{const res=await axios.get('/marker-optimization/presets',{params:{sequence_name:this.currentSequenceName}});this.presets=res.data?.data?.presets||[];}catch(e){this.addLog('Preset loading failed: '+this.requestError(e));}},
-        async savePreset(){try{await axios.post('/marker-optimization/presets',{sequence_name:this.currentSequenceName,name:this.presetName,workflow:this.payload()});await this.loadPresets();this.selectedPreset=this.presetName;this.addLog('Preset saved: '+this.presetName);}catch(e){this.addLog('Preset save failed: '+this.requestError(e));}},
+        async savePreset(){try{await axios.post('/marker-optimization/presets',{sequence_name:this.currentSequenceName,name:this.presetName,workflow:{...this.payload(),run_label:''}});await this.loadPresets();this.selectedPreset=this.presetName;this.addLog('Preset saved: '+this.presetName);}catch(e){this.addLog('Preset save failed: '+this.requestError(e));}},
         applyPreset(){
             const preset = this.presets.find(item => item.name === this.selectedPreset);
             if (!preset) return;

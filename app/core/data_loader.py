@@ -46,6 +46,9 @@ class DataLoader:
 
     def _build_run_entry(self, run_dir: Path) -> Dict[str, Any]:
         config_data = self._load_config_data(run_dir)
+        has_marker_optimization = (run_dir / "marker_optimization_report.json").is_file()
+        if has_marker_optimization:
+            config_data = {**config_data, "mode": "marker_optimization"}
         run_id = run_dir.name
         run_label = self._clean_run_label(config_data.get("run_label"))
         display_name = f"{run_id} | {run_label}" if run_label else run_id
@@ -62,6 +65,7 @@ class DataLoader:
             "scan_dimensions": scan_dimensions,
             "randomize": bool(config_data.get("randomize", False)),
             "mode": str(config_data.get("mode") or "standard").strip().lower() or "standard",
+            "has_marker_optimization": has_marker_optimization,
         }
 
     def get_run_entry(self, year: str, month: str, day: str, run_id: str) -> Dict[str, Any]:
@@ -211,6 +215,12 @@ class DataLoader:
             "lock_in_position": self._parse_int(row.get("LockIn_Position"), -1),
             "lock_in_state": str(row.get("LockIn_State") or "").strip().lower(),
             "lock_in_reference": self._parse_int(row.get("LockIn_Reference"), 0),
+            "workflow_step": self._parse_int(row.get("Workflow_Step"), -1),
+            "workflow_marker": str(row.get("Workflow_Marker") or "").strip(),
+            "workflow_point": self._parse_int(row.get("Workflow_Point"), -1),
+            "workflow_repeat": self._parse_int(row.get("Workflow_Repeat"), -1),
+            "workflow_shot": self._parse_int(row.get("Workflow_Shot"), -1),
+            "workflow_randomized": self._parse_int(row.get("Workflow_Randomized"), -1),
         }
 
     def _read_results_csv(self, run_dir: Path, max_points: Optional[int] = MAX_DISPLAY_POINTS) -> List[Dict[str, Any]]:
@@ -402,12 +412,159 @@ class DataLoader:
             summary.append(row)
         return summary
 
+    def _load_marker_optimization_report(self, run_dir: Path) -> Dict[str, Any]:
+        report_path = run_dir / "marker_optimization_report.json"
+        if not report_path.is_file():
+            return {}
+        try:
+            return self._sanitize_structure(json.loads(report_path.read_text(encoding="utf-8")))
+        except Exception:
+            return {}
+
+    def _marker_optimization_artifact_paths(self, run_dir: Path) -> Dict[str, Path]:
+        artifacts: Dict[str, Path] = {}
+        exact = {
+            "report_pdf": run_dir / "marker_optimization_report.pdf",
+            "report_json": run_dir / "marker_optimization_report.json",
+            "workflow_preset": run_dir / "workflow_preset.json",
+        }
+        for kind, path in exact.items():
+            if path.is_file():
+                artifacts[kind] = path
+        patterns = {
+            "original_sequence": "*_original.mot",
+            "optimized_sequence": "*_optimized.mot",
+            "report_bundle": "*_marker_optimization_report.zip",
+        }
+        for kind, pattern in patterns.items():
+            matches = sorted(run_dir.glob(pattern))
+            if matches:
+                artifacts[kind] = matches[0]
+        return artifacts
+
+    def get_marker_optimization_artifact(
+        self, year: str, month: str, day: str, run_id: str, kind: str
+    ) -> Tuple[Path, str]:
+        run_dir = self._get_run_dir(year, month, day, run_id)
+        artifact = self._marker_optimization_artifact_paths(run_dir).get(str(kind or "").strip())
+        if artifact is None or not artifact.is_file():
+            raise FileNotFoundError(f"Marker optimization artifact not found: {kind}")
+        return artifact, artifact.name
+
+    def _build_marker_optimization_archive(
+        self, run_dir: Path, full_points: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        report = self._load_marker_optimization_report(run_dir)
+        report_steps = report.get("steps") if isinstance(report.get("steps"), list) else []
+        points_by_step: Dict[int, List[Dict[str, Any]]] = {}
+        has_persisted_steps = any(int(point.get("workflow_step", -1)) > 0 for point in full_points)
+        if has_persisted_steps:
+            for point in full_points:
+                workflow_step = int(point.get("workflow_step", -1))
+                if workflow_step > 0:
+                    points_by_step.setdefault(workflow_step, []).append(point)
+        else:
+            # Legacy optimization CSV files stored steps contiguously. The
+            # scientific report retains the exact number of acquired repeats.
+            cursor = 0
+            for fallback_index, step in enumerate(report_steps, start=1):
+                step_index = int(step.get("index") or fallback_index)
+                shot_count = sum(
+                    max(1, len(point.get("repeats") or []))
+                    for point in (step.get("points") or [])
+                )
+                if shot_count <= 0:
+                    continue
+                points_by_step[step_index] = full_points[cursor:cursor + shot_count]
+                cursor += shot_count
+
+        known_indices = {
+            int(step.get("index") or index)
+            for index, step in enumerate(report_steps, start=1)
+        } | set(points_by_step)
+        report_lookup = {
+            int(step.get("index") or index): step
+            for index, step in enumerate(report_steps, start=1)
+        }
+        step_payloads: List[Dict[str, Any]] = []
+        for step_index in sorted(known_indices):
+            step = report_lookup.get(step_index, {})
+            step_points = points_by_step.get(step_index, [])
+            step_payloads.append({
+                "index": step_index,
+                "marker_id": step.get("marker_id") or (
+                    step_points[0].get("workflow_marker") if step_points else ""
+                ),
+                "marker_name": step.get("marker_name") or step.get("marker_id") or f"Step {step_index}",
+                "marker_kind": step.get("marker_kind") or "",
+                "status": step.get("status") or "unknown",
+                "objective": step.get("objective") or "",
+                "metric_key": step.get("metric_key") or "",
+                "metric_label": step.get("metric_label") or "",
+                "metric_source": step.get("metric_source") or "fit",
+                "average_count": step.get("average_count") or 1,
+                "randomize": bool(step.get("randomize", False)),
+                "minimum_r_squared": step.get("minimum_r_squared"),
+                "start": step.get("start"),
+                "stop": step.get("stop"),
+                "step": step.get("step"),
+                "scan_method": step.get("scan_method") or "step_size",
+                "applied_value": step.get("applied_value"),
+                "digital_conditions": step.get("digital_conditions") or [],
+                "error": step.get("error"),
+                "analysis": step.get("analysis") if isinstance(step.get("analysis"), dict) else {},
+                "data": self._sample_sequence(step_points, MAX_DISPLAY_POINTS),
+                "stats": self._build_stats_array(step_points, scan_dimensions=1),
+                "preview_map": self._build_preview_map(step_points, scan_dimensions=1),
+                "total_points": len(step_points),
+            })
+
+        artifact_labels = {
+            "original_sequence": "Original MOT",
+            "optimized_sequence": "Optimized MOT",
+            "report_pdf": "PDF Report",
+            "report_json": "JSON Report",
+            "workflow_preset": "Preset JSON",
+            "report_bundle": "Complete Package",
+        }
+        artifacts = [
+            {"kind": kind, "filename": path.name, "label": artifact_labels.get(kind, kind)}
+            for kind, path in self._marker_optimization_artifact_paths(run_dir).items()
+        ]
+        configuration = report.get("configuration") if isinstance(report.get("configuration"), dict) else {}
+        return {
+            "workflow_name": report.get("workflow_name") or "",
+            "run_label": report.get("run_label") or configuration.get("run_label") or "",
+            "phase": report.get("phase") or "unknown",
+            "stop_reason": report.get("stop_reason"),
+            "error": report.get("error"),
+            "started_at_ms": report.get("started_at_ms"),
+            "ended_at_ms": report.get("ended_at_ms"),
+            "completed_steps": report.get("completed_steps") or 0,
+            "total_steps": report.get("total_steps") or len(step_payloads),
+            "applied_values": report.get("applied_values") or {},
+            "steps": step_payloads,
+            "artifacts": artifacts,
+        }
+
     def load_run(self, year: str, month: str, day: str, run_id: str) -> Dict[str, Any]:
         run_dir = self._get_run_dir(year, month, day, run_id)
         config_data = self._load_config_data(run_dir)
         scan_dimensions = self._resolve_scan_dimensions(config_data)
         full_points = self._read_results_csv(run_dir, max_points=None)
-        sampled_points = self._sample_sequence(full_points, MAX_DISPLAY_POINTS)
+        marker_optimization = self._build_marker_optimization_archive(run_dir, full_points)
+        is_marker_optimization = bool(marker_optimization.get("steps")) or (
+            run_dir / "marker_optimization_report.json"
+        ).is_file()
+        if is_marker_optimization:
+            config_data = {**config_data, "mode": "marker_optimization", "scan_dimensions": 1}
+            scan_dimensions = 1
+        initial_step = (marker_optimization.get("steps") or [{}])[0]
+        sampled_points = (
+            initial_step.get("data", [])
+            if is_marker_optimization
+            else self._sample_sequence(full_points, MAX_DISPLAY_POINTS)
+        )
         is_lock_in = str(config_data.get("mode") or "").strip().lower() == "lock_in"
         expected_lock_in_blocks = self._parse_int(config_data.get("averages"), 0) if is_lock_in else 0
         lock_in_analysis = build_lock_in_analysis(full_points, expected_blocks=expected_lock_in_blocks) if is_lock_in else {}
@@ -416,11 +573,20 @@ class DataLoader:
             "run_entry": self._build_run_entry(run_dir),
             "scan_dimensions": scan_dimensions,
             "data": sampled_points,
-            "stats": self._build_stats_array(full_points, scan_dimensions=scan_dimensions),
+            "stats": (
+                initial_step.get("stats", [])
+                if is_marker_optimization
+                else self._build_stats_array(full_points, scan_dimensions=scan_dimensions)
+            ),
             "ac_stark_summary": self._build_ac_stark_summary(full_points),
             "lock_in_analysis": lock_in_analysis,
-            "preview_map": self._build_preview_map(full_points, scan_dimensions=scan_dimensions),
+            "preview_map": (
+                initial_step.get("preview_map", {})
+                if is_marker_optimization
+                else self._build_preview_map(full_points, scan_dimensions=scan_dimensions)
+            ),
             "total_points": len(full_points),
+            "marker_optimization": marker_optimization if is_marker_optimization else None,
         }
 
 

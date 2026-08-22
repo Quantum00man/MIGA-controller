@@ -291,6 +291,7 @@ class MarkerOptimizationStepConfig(BaseModel):
 
 class MarkerOptimizationConfig(BaseModel):
     workflow_name: str = Field("")
+    run_label: str = Field("")
     sequence_name: str = Field("")
     ext_trigger: bool = Field(False)
     fit_center_up: float = Field(0)

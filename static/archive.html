@@ -491,6 +491,18 @@
         }
 
         .archive-display-menu {
+        .optimization-overview { border-left: 4px solid var(--archive-accent); }
+        .optimization-step-nav { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 3px; }
+        .optimization-step-btn { min-width: 170px; text-align: left; white-space: normal; }
+        .optimization-step-btn .step-title { display: block; font-weight: 700; line-height: 1.2; }
+        .optimization-step-btn .step-meta { display: block; margin-top: 3px; font-size: .72rem; opacity: .78; }
+        .optimization-summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+        .optimization-summary-item { padding: 10px 12px; border: 1px solid var(--archive-border-soft); border-radius: 8px; background: var(--archive-surface-subtle); }
+        .optimization-summary-value { display: block; margin-top: 2px; font-size: 1rem; font-weight: 750; color: var(--archive-text); overflow-wrap: anywhere; }
+        .optimization-downloads { display: flex; flex-wrap: wrap; gap: 8px; }
+        @media (max-width: 767px) {
+            .optimization-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        }
             position: relative;
         }
 
@@ -827,12 +839,12 @@
                             <div class="small text-muted" style="font-size: 0.75em;" v-if="loadedRunEntry?.summary">{{ loadedRunEntry.summary }}</div>
                             <div class="small text-muted" style="font-size: 0.75em;" v-if="loadedRunEntry?.sequence_name">Sequence: {{ loadedRunEntry.sequence_name }}</div>
                             <div class="small text-muted" style="font-size: 0.75em;">{{ dataCount }} Points</div>
-                            <button class="btn btn-outline-secondary btn-sm w-100 mt-2" @click="exportLoadedSequence"
+                            <button v-if="!isMarkerOptimizationArchive()" class="btn btn-outline-secondary btn-sm w-100 mt-2" @click="exportLoadedSequence"
                                 :disabled="isExportingSequence || !loadedRunEntry?.has_sequence_file">
                                 <span v-if="isExportingSequence" class="spinner-border spinner-border-sm me-1"></span>
                                 <i v-else class="bi bi-download me-1"></i>{{ isExportingSequence ? 'Exporting...' : 'Export Sequence' }}
                             </button>
-                            <div class="small text-muted mt-2" style="font-size: 0.72em;" v-if="loadedRunEntry && !loadedRunEntry.has_sequence_file">
+                            <div class="small text-muted mt-2" style="font-size: 0.72em;" v-if="!isMarkerOptimizationArchive() && loadedRunEntry && !loadedRunEntry.has_sequence_file">
                                 No archived sequence file saved for this run.
                             </div>
                         </div>
@@ -843,7 +855,7 @@
                     </div>
                 </div>
 
-                <div class="card border-primary shadow-sm" v-if="loadedPoints.length > 0 && !isAcStarkArchive()">
+                <div class="card border-primary shadow-sm" v-if="loadedPoints.length > 0 && !isAcStarkArchive() && !isMarkerOptimizationArchive()">
                     <button type="button"
                         class="card-header collapsible-card-header bg-primary text-white border-0 d-flex justify-content-between align-items-center"
                         @click="togglePanel('reanalysis')" aria-controls="reanalysis-panel"
@@ -1099,6 +1111,53 @@
                 <div class="mobile-archive-note alert alert-info py-2 mb-2">
                     Phone view supports run selection, 1D plots and Allan analysis. Re-analysis and fitting controls are available on iPad or desktop.
                 </div>
+                <section v-if="isMarkerOptimizationArchive()" class="card optimization-overview mb-4 border-0 shadow-sm" aria-labelledby="optimization-overview-title">
+                    <div class="card-header bg-white d-flex flex-wrap justify-content-between align-items-start gap-2">
+                        <div>
+                            <div id="optimization-overview-title" class="fw-bold"><i class="bi bi-diagram-3 me-2 text-primary"></i>{{ markerOptimization.run_label || markerOptimization.workflow_name || 'Marker Optimization' }}</div>
+                            <div class="small text-muted mt-1">{{ markerOptimization.workflow_name || 'Sequential workflow' }} · {{ markerOptimization.completed_steps || 0 }} / {{ markerOptimization.total_steps || 0 }} steps completed</div>
+                        </div>
+                        <span class="badge text-uppercase" :class="optimizationPhaseClass()">{{ markerOptimization.phase || 'unknown' }}</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="optimization-step-nav mb-3" role="tablist" aria-label="Optimization steps">
+                            <button v-for="step in markerOptimization.steps" :key="step.index" type="button"
+                                class="btn optimization-step-btn"
+                                :class="Number(selectedOptimizationStep) === Number(step.index) ? 'btn-primary' : 'btn-outline-secondary'"
+                                role="tab" :aria-selected="Number(selectedOptimizationStep) === Number(step.index)"
+                                @click="selectMarkerOptimizationStep(step.index)">
+                                <span class="step-title">Step {{ step.index }} · {{ step.marker_name || step.marker_id }}</span>
+                                <span class="step-meta">{{ step.status }} · {{ step.total_points || 0 }} shots</span>
+                            </button>
+                        </div>
+                        <div v-if="activeOptimizationStep()" class="optimization-summary-grid mb-3">
+                            <div class="optimization-summary-item"><span class="form-label-small">Scan range</span><span class="optimization-summary-value">{{ formatOptimizationRange(activeOptimizationStep()) }}</span></div>
+                            <div class="optimization-summary-item"><span class="form-label-small">Scan method</span><span class="optimization-summary-value">{{ activeOptimizationStep().scan_method || 'step_size' }}</span></div>
+                            <div class="optimization-summary-item"><span class="form-label-small">Acquisition</span><span class="optimization-summary-value">avg × {{ activeOptimizationStep().average_count || 1 }} · random {{ activeOptimizationStep().randomize ? 'ON' : 'OFF' }}</span></div>
+                            <div class="optimization-summary-item"><span class="form-label-small">Objective</span><span class="optimization-summary-value">{{ activeOptimizationStep().objective || 'n/a' }}</span></div>
+                            <div class="optimization-summary-item"><span class="form-label-small">Target metric</span><span class="optimization-summary-value">{{ activeOptimizationStep().metric_label || activeOptimizationStep().metric_key || 'n/a' }} · {{ activeOptimizationStep().metric_source || 'fit' }}</span></div>
+                            <div class="optimization-summary-item"><span class="form-label-small">Fit optimum</span><span class="optimization-summary-value">{{ formatMetricValue(activeOptimizationStep().analysis?.continuous_optimum) }}</span></div>
+                            <div class="optimization-summary-item"><span class="form-label-small">Applied value</span><span class="optimization-summary-value">{{ formatMetricValue(activeOptimizationStep().applied_value) }}</span></div>
+                            <div class="optimization-summary-item"><span class="form-label-small">Fit quality</span><span class="optimization-summary-value">R² {{ formatMetricValue(activeOptimizationStep().analysis?.r_squared) }} · min {{ formatMetricValue(activeOptimizationStep().minimum_r_squared) }}</span></div>
+                        </div>
+                        <div v-if="activeOptimizationStep()?.digital_conditions?.length" class="d-flex flex-wrap align-items-center gap-2 mb-3">
+                            <span class="form-label-small mb-0">Digital conditions</span>
+                            <span v-for="condition in activeOptimizationStep().digital_conditions" :key="condition.id" class="badge bg-light text-dark border">{{ condition.display_name || condition.id }} = {{ condition.effective_state }}</span>
+                        </div>
+                        <div v-if="Object.keys(markerOptimization.applied_values || {}).length" class="d-flex flex-wrap align-items-center gap-2 mb-3">
+                            <span class="form-label-small mb-0">Final applied parameters</span>
+                            <span v-for="(value, key) in markerOptimization.applied_values" :key="key" class="badge bg-success">{{ key }} = {{ value }}</span>
+                        </div>
+                        <div class="optimization-downloads">
+                            <a v-for="artifact in markerOptimization.artifacts" :key="artifact.kind"
+                                class="btn btn-sm" :class="artifact.kind === 'report_bundle' ? 'btn-primary' : 'btn-outline-secondary'"
+                                :href="optimizationArtifactUrl(artifact.kind)">
+                                <i class="bi bi-download me-1"></i>{{ artifact.label }}
+                            </a>
+                        </div>
+                        <div v-if="markerOptimization.error" class="alert alert-danger small py-2 mt-3 mb-0">{{ markerOptimization.error }}</div>
+                    </div>
+                </section>
                 <div class="card mb-4 border-0 shadow-sm" :class="{'maximized': maximizedView === 'analysis'}">
                     <div class="analysis-header card-header bg-white">
                         <div class="analysis-header-top">
@@ -1401,6 +1460,7 @@
                     currentWaveforms: [],
                     selectedAllanWindow: null,
                     loadedPoints: [], currentCalculatedPoints: [], originalSettings: {}, loadedConfig: {}, currentScanDimensions: 1,
+                    markerOptimization: null, selectedOptimizationStep: null,
                     displayMode: 'saved',
                     savedDataCount: 0, displayedStats: [], savedStats: [], recalculatedStats: [],
                     savedPreviewMap: {}, recalculatedPreviewMap: {},
@@ -1727,11 +1787,63 @@
                         ? this.tabs.filter(tab => ["atoms", "prob"].includes(tab.id))
                         : this.tabs;
                 },
+                isMarkerOptimizationArchive() {
+                    return Boolean(this.markerOptimization)
+                        || String(this.loadedConfig?.mode || "").trim().toLowerCase() === "marker_optimization";
+                },
+                activeOptimizationStep() {
+                    if (!this.markerOptimization?.steps?.length) return null;
+                    return this.markerOptimization.steps.find(
+                        step => Number(step.index) === Number(this.selectedOptimizationStep)
+                    ) || this.markerOptimization.steps[0];
+                },
+                optimizationPhaseClass() {
+                    const phase = String(this.markerOptimization?.phase || "").toLowerCase();
+                    if (phase === "completed") return "bg-success";
+                    if (phase === "failed") return "bg-danger";
+                    if (phase === "stopped") return "bg-warning text-dark";
+                    return "bg-secondary";
+                },
+                formatOptimizationRange(step) {
+                    if (!step) return "n/a";
+                    const start = this.formatMetricValue(step.start);
+                    const stop = this.formatMetricValue(step.stop);
+                    const increment = this.formatMetricValue(step.step);
+                    return `${start} to ${stop} · step ${increment}`;
+                },
+                optimizationArtifactUrl(kind) {
+                    const ref = this.loadedRunRef;
+                    if (!ref?.run_id || !kind) return "#";
+                    return `/archive/marker-optimization/artifact/${encodeURIComponent(ref.year)}/${encodeURIComponent(ref.month)}/${encodeURIComponent(ref.day)}/${encodeURIComponent(ref.run_id)}/${encodeURIComponent(kind)}`;
+                },
+                async selectMarkerOptimizationStep(stepIndex) {
+                    const step = this.markerOptimization?.steps?.find(
+                        item => Number(item.index) === Number(stepIndex)
+                    );
+                    if (!step) return;
+                    this.selectedOptimizationStep = Number(step.index);
+                    this.loadedPoints = Array.isArray(step.data) ? step.data : [];
+                    this.savedStats = this.normalizeStatsRows(step.stats || []);
+                    this.savedPreviewMap = step.preview_map && typeof step.preview_map === "object" ? step.preview_map : {};
+                    this.currentScanDimensions = 1;
+                    this.plotMode = "series";
+                    this.displayMode = "saved";
+                    this.selectedPointKey = "";
+                    this.selectedPointKeys = [];
+                    this.selectedPointLabel = "";
+                    this.currentWaveforms = [];
+                    this.resetScanFitSession({ clearRange: true });
+                    await this.applyDisplayedPoints(this.loadedPoints, this.savedStats, this.savedPreviewMap, true);
+                },
+                getArchiveXAxisLabel() {
+                    const step = this.activeOptimizationStep();
+                    return step?.marker_name || step?.marker_id || "Parameter P0";
+                },
                 show3DControls() {
                     return this.getActiveScanDimensions() === 3;
                 },
                 canUseAllanMode() {
-                    return !this.isAcStarkArchive() && !this.isLockInArchive() && this.getActiveScanDimensions() === 1 && !Boolean(this.loadedConfig?.randomize);
+                    return !this.isAcStarkArchive() && !this.isLockInArchive() && !this.isMarkerOptimizationArchive() && this.getActiveScanDimensions() === 1 && !Boolean(this.loadedConfig?.randomize);
                 },
                 normalizeAllanScaleMode(mode) {
                     return mode === 'relative' ? 'relative' : 'absolute';
@@ -2808,7 +2920,7 @@
                 getDays() { return (this.selectedYear && this.selectedMonth) ? Object.keys(this.archiveTree[this.selectedYear][this.selectedMonth] || {}).sort() : []; },
                 normalizeRunEntry(entry) {
                     if (typeof entry === 'string') {
-                        return { id: entry, run_id: entry, run_label: '', display_name: entry, summary: '', sequence_name: '', has_sequence_file: false };
+                        return { id: entry, run_id: entry, run_label: '', display_name: entry, summary: '', sequence_name: '', has_sequence_file: false, mode: 'standard', has_marker_optimization: false };
                     }
                     const runId = String(entry?.id || entry?.run_id || '').trim();
                     const runLabel = String(entry?.run_label || '').trim();
@@ -2820,6 +2932,8 @@
                         summary: String(entry?.summary || '').trim(),
                         sequence_name: String(entry?.sequence_name || '').trim(),
                         has_sequence_file: Boolean(entry?.has_sequence_file),
+                        mode: String(entry?.mode || 'standard').trim().toLowerCase(),
+                        has_marker_optimization: Boolean(entry?.has_marker_optimization),
                     };
                 },
                 getRuns() {
@@ -2865,6 +2979,8 @@
                     this.selectedPointLabel = '';
                     this.selectedAllanWindow = null;
                     this.currentWaveforms = [];
+                    this.markerOptimization = null;
+                    this.selectedOptimizationStep = null;
                     this.clearAllanCache();
                     this.errorMsg = '';
                     this.resetScanFitSession({ clearRange: true });
@@ -2884,6 +3000,11 @@
 
                         const snap = res.data.config?.['_system_settings_snapshot'] || {};
                         this.loadedConfig = res.data.config || {};
+                        this.markerOptimization = res.data.marker_optimization && typeof res.data.marker_optimization === 'object'
+                            ? res.data.marker_optimization
+                            : null;
+                        this.selectedOptimizationStep = this.markerOptimization?.steps?.length
+                            ? Number(this.markerOptimization.steps[0].index) : null;
                         if (this.isAcStarkArchive() && !["atoms", "prob"].includes(this.currentTab)) this.currentTab = "atoms";
                         this.currentScanDimensions = this.resolveScanDimensions(res.data.scan_dimensions, this.loadedConfig);
                         this.originalSettings = this.normalizeAnalysis(snap);
@@ -3405,7 +3526,7 @@
                         ...base,
                         margin: isUp ? { t: 34, b: 8, l: 68, r: 20 } : { t: 8, b: 44, l: 68, r: 20 },
                         yaxis: { ...base.yaxis, title: metric.label + (isUp ? metric.suffixUp : metric.suffixDw) },
-                        xaxis: { ...base.xaxis, title: isUp ? '' : 'Parameter P0', showticklabels: !isUp },
+                        xaxis: { ...base.xaxis, title: isUp ? '' : this.getArchiveXAxisLabel(), showticklabels: !isUp },
                         title: { text: isUp ? 'UP Channel' : 'DOWN Channel', font: { size: 13 }, x: 0.05, y: 0.93 }
                     };
                 },
@@ -3415,7 +3536,7 @@
                         ...base,
                         margin: { t: 8, b: 44, l: 68, r: 20 },
                         yaxis: { ...base.yaxis, title: 'Total Atoms' },
-                        xaxis: { ...base.xaxis, title: 'Parameter P0', showticklabels: true },
+                        xaxis: { ...base.xaxis, title: this.getArchiveXAxisLabel(), showticklabels: true },
                         title: { text: 'TOTAL (UP+DW)', font: { size: 13 }, x: 0.05, y: 0.93 }
                     };
                 },
@@ -3589,6 +3710,57 @@
                         ...this.buildPlaneExtremaTraces(matrix.planeRows, field, metric.label, matrix.xAxisIndex, matrix.yAxisIndex)
                     ];
                 },
+                getOptimizationFitOverlay(channel) {
+                    const step = this.activeOptimizationStep();
+                    const analysis = step?.analysis || {};
+                    const metricKey = String(step?.metric_key || "");
+                    const tabByPrefix = [
+                        ["atom_number_", "atoms"],
+                        ["amplitude_", "amp"],
+                        ["temperature_", "temp"],
+                        ["arrival_time_", "arrival"],
+                        ["transition_probability_", "prob"],
+                        ["intf_p", "intf"]
+                    ];
+                    const targetTab = tabByPrefix.find(([prefix]) => metricKey.startsWith(prefix))?.[1];
+                    const targetChannel = (
+                        metricKey.endsWith("_dw") || metricKey.endsWith("p2")
+                    ) ? "dw" : "up";
+                    const x = Array.isArray(analysis.fit_x_dense) ? analysis.fit_x_dense : [];
+                    const y = Array.isArray(analysis.fit_curve_dense) ? analysis.fit_curve_dense : [];
+                    if (targetTab !== this.currentTab || targetChannel !== channel || x.length < 2 || x.length !== y.length) return null;
+                    return {
+                        x,
+                        y,
+                        appliedValue: analysis.selected_value ?? step.applied_value,
+                        model: analysis.model || "Optimization fit"
+                    };
+                },
+                buildOptimizationFitTrace(overlay) {
+                    return {
+                        x: overlay.x,
+                        y: overlay.y,
+                        mode: "lines",
+                        name: overlay.model,
+                        hovertemplate: `${this.getArchiveXAxisLabel()}=%{x:.6g}<br>Fit=%{y:.6g}<extra>Optimization fit</extra>`,
+                        line: { color: "#ef6c00", width: 2.5 }
+                    };
+                },
+                applyOptimizationFitLayout(layout, overlay) {
+                    const appliedValue = Number(overlay?.appliedValue);
+                    if (!Number.isFinite(appliedValue)) return layout;
+                    return {
+                        ...layout,
+                        shapes: [
+                            ...(layout.shapes || []),
+                            {
+                                type: "line", x0: appliedValue, x1: appliedValue, y0: 0, y1: 1,
+                                xref: "x", yref: "paper",
+                                line: { color: "#198754", width: 2, dash: "dash" }
+                            }
+                        ]
+                    };
+                },
                 render1DPlot(rows, metric) {
                     const x = rows.map(row => row.x);
                     const keys = rows.map(row => row.key);
@@ -3641,6 +3813,16 @@
                     if (scanFitOverlay?.channel === 'dw') {
                         tracesDw.push(this.buildScanFitTrace(scanFitOverlay, '#0f766e'));
                         layoutDw = this.applyScanFitLayout(layoutDw, scanFitOverlay, '#0f766e');
+                    }
+                    const optimizationUp = this.getOptimizationFitOverlay("up");
+                    const optimizationDw = this.getOptimizationFitOverlay("dw");
+                    if (optimizationUp) {
+                        tracesUp.push(this.buildOptimizationFitTrace(optimizationUp));
+                        layoutUp = this.applyOptimizationFitLayout(layoutUp, optimizationUp);
+                    }
+                    if (optimizationDw) {
+                        tracesDw.push(this.buildOptimizationFitTrace(optimizationDw));
+                        layoutDw = this.applyOptimizationFitLayout(layoutDw, optimizationDw);
                     }
 
                     this.layoutResUp = layoutUp;

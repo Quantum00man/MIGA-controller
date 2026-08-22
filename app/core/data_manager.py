@@ -25,6 +25,8 @@ RESULTS_CSV_HEADER = [
     "AC_Stark_Amplitude_R1", "AC_Stark_Amplitude_R2",
     "AC_Stark_Actual_Power_R1", "AC_Stark_Actual_Power_R2",
     "LockIn_Block", "LockIn_Position", "LockIn_State", "LockIn_Reference",
+    "Workflow_Step", "Workflow_Marker", "Workflow_Point", "Workflow_Repeat",
+    "Workflow_Shot", "Workflow_Randomized",
 ]
 
 
@@ -195,6 +197,12 @@ class DataManager:
             lock_in_position=result.lock_in_position if result.lock_in_position is not None else -1,
             lock_in_state=result.lock_in_state or "",
             lock_in_reference=result.lock_in_reference if result.lock_in_reference is not None else 0,
+            workflow_step=result.workflow_step if result.workflow_step is not None else -1,
+            workflow_marker=result.workflow_marker or "",
+            workflow_point=result.workflow_point if result.workflow_point is not None else -1,
+            workflow_repeat=result.workflow_repeat if result.workflow_repeat is not None else -1,
+            workflow_shot=result.workflow_shot if result.workflow_shot is not None else -1,
+            workflow_randomized=(1 if result.workflow_randomized else 0) if result.workflow_randomized is not None else -1,
         )
 
     def _write_csv_row(self, result: ScanResult, step_index: int):
@@ -227,6 +235,12 @@ class DataManager:
             result.lock_in_position if result.lock_in_position is not None else "",
             result.lock_in_state or "",
             result.lock_in_reference if result.lock_in_reference is not None else "",
+            result.workflow_step if result.workflow_step is not None else "",
+            result.workflow_marker or "",
+            result.workflow_point if result.workflow_point is not None else "",
+            result.workflow_repeat if result.workflow_repeat is not None else "",
+            result.workflow_shot if result.workflow_shot is not None else "",
+            (1 if result.workflow_randomized else 0) if result.workflow_randomized is not None else "",
         ]
         self.csv_writer.writerow(row)
         self.csv_handle.flush()

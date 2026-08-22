@@ -50,6 +50,14 @@ class ScanResult:
     lock_in_state: Optional[str] = None
     lock_in_reference: Optional[int] = None
 
+    # Sequential Marker Optimization provenance. Empty for ordinary scans.
+    workflow_step: Optional[int] = None
+    workflow_marker: Optional[str] = None
+    workflow_point: Optional[int] = None
+    workflow_repeat: Optional[int] = None
+    workflow_shot: Optional[int] = None
+    workflow_randomized: Optional[bool] = None
+
     # Mean of the last 200 raw TOF samples before offset removal.
     tail_mean_up_raw: Optional[float] = None
     tail_mean_dw_raw: Optional[float] = None
