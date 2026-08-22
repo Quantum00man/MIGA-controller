@@ -27,22 +27,38 @@ class MarkerOptimizationAnalysisTests(unittest.TestCase):
     def test_nearest_scanned_point_tie_uses_lower_value(self):
         self.assertEqual(_nearest_scanned_point([140, 142], 141), 140)
 
-    def test_spectral_center_maps_fit_to_actual_integer_point(self):
+    def test_spectral_center_applies_unscanned_integer_optimum(self):
         x = np.arange(130, 153, 2, dtype=float)
         y = _gaussian(x, 0.08, 0.82, 141.2, 4.0)
-        result = analyze_marker_scan(self.points(x, y), "spectral_center", minimum_r_squared=0.99)
+        result = analyze_marker_scan(self.points(x, y), "spectral_center", minimum_r_squared=0.99, marker_kind="dds_element", marker_decimals=0)
         self.assertAlmostEqual(result["continuous_optimum"], 141.2, places=4)
-        self.assertEqual(result["selected_value"], 142)
-        self.assertIn(result["selected_value"], x.tolist())
+        self.assertEqual(result["selected_value"], 141)
+        self.assertNotIn(result["selected_value"], x.tolist())
+        self.assertFalse(result["selected_was_sampled"])
+        self.assertGreaterEqual(len(result["fit_x_dense"]), 500)
+        self.assertEqual(len(result["fit_x_dense"]), len(result["fit_curve_dense"]))
         self.assertGreater(result["r_squared"], 0.999)
 
-    def test_damped_rabi_maps_pi_time_to_actual_integer_point(self):
+    def test_spectral_center_respects_dac_decimal_resolution(self):
+        x = np.arange(0.0, 1.01, 0.1, dtype=float)
+        y = _gaussian(x, 0.03, 0.9, 0.3334, 0.16)
+        result = analyze_marker_scan(
+            self.points(x, y), "spectral_center", minimum_r_squared=0.99,
+            marker_kind="dac_value", marker_decimals=3,
+        )
+        self.assertAlmostEqual(result["continuous_optimum"], 0.3334, places=4)
+        self.assertEqual(result["selected_value"], 0.333)
+        self.assertFalse(result["selected_was_sampled"])
+
+    def test_damped_rabi_applies_unscanned_integer_pi_time(self):
         x = np.arange(10, 131, 10, dtype=float)
         y = _damped_rabi(x, 0.04, 0.91, 53.0, 450.0)
-        result = analyze_marker_scan(self.points(x, y), "rabi_pi", minimum_r_squared=0.99)
+        result = analyze_marker_scan(self.points(x, y), "rabi_pi", minimum_r_squared=0.99, marker_kind="duration", marker_decimals=0)
         self.assertAlmostEqual(result["continuous_optimum"], 53.0, places=3)
-        self.assertEqual(result["selected_value"], 50)
-        self.assertIsInstance(result["selected_value"], float)
+        self.assertEqual(result["selected_value"], 53)
+        self.assertIsInstance(result["selected_value"], int)
+        self.assertNotIn(result["selected_value"], x.tolist())
+        self.assertFalse(result["selected_was_sampled"])
 
     def test_boundary_optimum_stops_raw_objective(self):
         with self.assertRaisesRegex(ValueError, "scan boundary"):
@@ -94,12 +110,15 @@ class MarkerOptimizationReportTests(unittest.TestCase):
                 "marker_name": "Test DAC",
                 "marker_kind": "dac_value",
                 "objective": "maximize",
+                "randomize": True,
                 "metric_label": "Transition Probability UP",
                 "status": "completed",
                 "points": points,
                 "analysis": {
                     "model": "none",
                     "selected_value": 2.0,
+                    "selected_was_sampled": True,
+                    "continuous_optimum": 2.0,
                     "r_squared": None,
                     "fit_curve": [None, None, None],
                     "residuals": [None, None, None],
@@ -122,13 +141,19 @@ class MarkerOptimizationReportTests(unittest.TestCase):
             self.assertGreater(artifacts["report_pdf"].stat().st_size, 1000)
             report = json.loads(artifacts["report_json"].read_text(encoding="utf-8"))
             self.assertEqual(report["phase"], "completed")
-            self.assertEqual(report["report_version"], 2)
+            self.assertEqual(report["report_version"], 3)
             self.assertEqual(report["steps"][0]["digital_states"], {"ENABLE": "ON"})
+            self.assertTrue(report["steps"][0]["randomize"])
             preset = json.loads(artifacts["workflow_preset"].read_text(encoding="utf-8"))
             self.assertEqual(preset["steps"][0]["digital_states"], {"ENABLE": "on"})
+            self.assertTrue(preset["steps"][0]["randomize"])
             scan_csv = next(run_dir.glob("*_scan.csv")).read_text(encoding="utf-8")
             self.assertIn("digital_states_json", scan_csv)
             self.assertIn('ENABLE', scan_csv)
+            self.assertIn("randomized", scan_csv)
+            fit_csv = next(run_dir.glob("*_fit_residuals.csv")).read_text(encoding="utf-8")
+            self.assertIn("continuous_optimum", fit_csv)
+            self.assertIn("applied_was_sampled", fit_csv)
             with zipfile.ZipFile(artifacts["report_bundle"]) as archive:
                 names = set(archive.namelist())
             self.assertIn("source_marked_original.mot", names)
@@ -176,16 +201,63 @@ class MarkerOptimizationWorkflowTests(unittest.TestCase):
                 "steps": [{
                     "marker_id": "FREQ", "objective": "maximize",
                     "metric_key": "transition_probability_up", "metric_source": "fit",
-                    "average_count": 1, "start": 1, "stop": 3, "step": 1,
+                    "average_count": 1, "randomize": True, "start": 1, "stop": 3, "step": 1,
                     "scan_method": "step_size", "digital_states": {"ENABLE": "on"},
                 }],
             })
 
         self.assertEqual({item["id"] for item in definitions}, {"FREQ", "ENABLE"})
         self.assertEqual(steps[0]["values"], [1.0, 2.0, 3.0])
+        self.assertTrue(steps[0]["randomize"])
         self.assertEqual(steps[0]["digital_state_choices"], {"ENABLE": "on"})
         self.assertEqual(steps[0]["digital_states"], {"ENABLE": "ON"})
         self.assertEqual(steps[0]["digital_conditions"][0]["current_state"], "OFF")
+
+    def test_randomize_shuffles_all_point_average_shots_and_keeps_sorted_aggregates(self):
+        from types import SimpleNamespace
+
+        experiment = mock.Mock()
+        experiment.on_data_ready = None
+        execution_order = []
+
+        def execute(params, execution, **kwargs):
+            execution_order.append(float(params[0]))
+            return {"params": params, "metadata": kwargs.get("metadata", {})}
+
+        def process(job, fit_config, **kwargs):
+            value = float(job["params"][0])
+            return SimpleNamespace(transition_probability_up=value), {
+                "stream_type": "marker_optimization_shot",
+                "time_axis": [0.0, 0.001],
+                "raw_data_up": [0.0, 1.0],
+                "raw_data_dw": [0.0, 0.5],
+                "fit_data_up": [0.0, 1.0],
+                "fit_data_dw": [0.0, 0.5],
+            }
+
+        experiment.execute_single_measurement.side_effect = execute
+        experiment.process_measurement_job.side_effect = process
+        manager = MarkerOptimizationManager(experiment)
+        step = {
+            "index": 1, "marker_id": "FREQ", "marker_name": "Frequency",
+            "metric_key": "transition_probability_up", "metric_source": "fit",
+            "values": [1.0, 2.0, 3.0], "average_count": 2, "randomize": True,
+            "digital_states": {},
+        }
+        manager._status = {
+            **manager._idle_status(), "is_running": True, "steps": [step],
+        }
+        with mock.patch("app.core.marker_optimization_manager.random.shuffle", side_effect=lambda items: items.reverse()) as shuffle:
+            points, next_shot = manager._evaluate_step(
+                step, {}, {}, Path("sequence.mot"), mock.Mock(), 0,
+            )
+
+        shuffle.assert_called_once()
+        self.assertEqual(execution_order, [3.0, 2.0, 1.0, 3.0, 2.0, 1.0])
+        self.assertEqual([point["value"] for point in points], [1.0, 2.0, 3.0])
+        self.assertTrue(all(len(point["repeats"]) == 2 for point in points))
+        self.assertEqual(next_shot, 6)
+        self.assertEqual(manager.get_status()["total_points"], 6)
 
     def test_failure_in_later_step_keeps_prior_applied_value_and_finalizes_report(self):
 

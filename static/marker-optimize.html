@@ -18,8 +18,8 @@
         .panel-head { padding:12px 16px; border-bottom:1px solid var(--line); font-size:.82rem; letter-spacing:.05em; text-transform:uppercase; font-weight:800; color:#485969; }
         .step-card { border:1px solid #dce4eb; border-left:4px solid var(--blue); border-radius:8px; padding:13px; background:#fbfcfd; margin-bottom:12px; }
         .step-number { width:27px; height:27px; display:inline-grid; place-items:center; border-radius:50%; background:#e6f0f8; color:#14598e; font-weight:800; font-size:.78rem; }
-        .step-status { font-size:.68rem; padding:3px 7px; border-radius:999px; font-weight:800; text-transform:uppercase; background:#e9ecef; color:#56616b; }
-        .step-status.completed { background:#d9f2e3; color:#17623a; } .step-status.running { background:#dceeff; color:#075b9c; }
+        .step-status { display:inline-flex; align-items:center; justify-content:center; min-width:76px; white-space:nowrap; font-size:.68rem; padding:4px 10px; border-radius:999px; font-weight:800; text-transform:uppercase; background:#e9ecef; color:#56616b; }
+        .step-status.completed,.step-status.running { background:#d9f2e3; color:#17623a; border:1px solid #a8d8bc; }
         .step-status.failed,.step-status.stopped { background:#fde2e2; color:#9c2222; }
         .small-label { font-size:.7rem; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); font-weight:750; margin-bottom:3px; }
         .metric-tile { min-height:92px; padding:14px; border:1px solid var(--line); border-radius:8px; background:linear-gradient(180deg,#fff,#fafbfd); }
@@ -28,12 +28,19 @@
         .workflow-line:before { content:""; position:absolute; left:8px; top:12px; bottom:-15px; width:2px; background:#d8e2ea; }
         .workflow-line:last-child:before { display:none; }
         .workflow-dot { position:absolute; left:1px; top:6px; width:16px; height:16px; border-radius:50%; background:#c7d2dc; border:3px solid white; box-shadow:0 0 0 1px #c7d2dc; }
-        .workflow-dot.completed { background:#238b57; box-shadow:0 0 0 1px #238b57; } .workflow-dot.running { background:#1976b9; box-shadow:0 0 0 1px #1976b9; }
+        .workflow-dot.completed,.workflow-dot.running { background:#238b57; box-shadow:0 0 0 1px #238b57; }
         .workflow-dot.failed,.workflow-dot.stopped { background:#c23a3a; box-shadow:0 0 0 1px #c23a3a; }
         #fitPlot { height:390px; }
+        .tof-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; padding:12px; }
+        .tof-plot { height:245px; min-width:0; }
+        .trace-meta { display:flex; flex-wrap:wrap; gap:8px 18px; margin-top:7px; color:#526170; font-size:.78rem; }
+        .trace-result { display:flex; flex-wrap:wrap; gap:10px 24px; margin-top:9px; padding:9px 11px; border-left:3px solid #238b57; background:#f3faf6; }
+        .trace-result-label { display:block; color:#617064; font-size:.66rem; font-weight:800; letter-spacing:.06em; text-transform:uppercase; }
+        .trace-number { display:block; color:#173c29; font:700 1.12rem Consolas,monospace; line-height:1.25; }
         #log { height:190px; overflow:auto; background:#18222c; color:#9ce3ba; font:12px Consolas,monospace; padding:12px; border-radius:0 0 9px 9px; }
         .report-callout { border-left:4px solid #536d7e; background:#f6f8fa; padding:12px 14px; }
         .drag-buttons .btn { padding:.1rem .35rem; }
+        @media(max-width:720px){ .tof-grid{grid-template-columns:1fr}.digital-condition-row{grid-template-columns:1fr}.digital-condition-row .form-select{width:100%} }
         .digital-conditions { margin-top:12px; padding-top:10px; border-top:1px solid var(--line); }
         .digital-condition-row { display:grid; grid-template-columns:minmax(0,1fr) 128px; gap:10px; align-items:center; padding:7px 0; }
         .digital-condition-row + .digital-condition-row { border-top:1px solid #e9eef2; }
@@ -110,9 +117,9 @@
                     <div class="col-3"><div class="small-label">Start</div><input type="number" class="form-control form-control-sm" v-model.number="step.start" :step="inputStep(step)" :disabled="status.is_running"></div>
                     <div class="col-3"><div class="small-label">Stop</div><input type="number" class="form-control form-control-sm" v-model.number="step.stop" :step="inputStep(step)" :disabled="status.is_running"></div>
                     <div class="col-3"><div class="small-label">{{ step.scan_method==='n_points' ? 'Points' : 'Step' }}</div><input type="number" class="form-control form-control-sm" v-model.number="step.step" :step="step.scan_method==='n_points' ? 1 : inputStep(step)" :min="step.scan_method==='n_points' ? 2 : 0.000001" :disabled="status.is_running"></div>
-                    <div class="col-3"><div class="small-label">Average</div><input type="number" class="form-control form-control-sm" v-model.number="step.average_count" min="1" step="1" :disabled="status.is_running"></div>
+                    <div class="col-3"><div class="small-label">Average</div><input type="number" class="form-control form-control-sm" v-model.number="step.average_count" min="1" step="1" :disabled="status.is_running"><div class="form-check mt-2"><input class="form-check-input" type="checkbox" v-model="step.randomize" :id="`random-${step.uid}`" :disabled="status.is_running"><label class="form-check-label small" :for="`random-${step.uid}`">Randomize</label></div></div>
                 </div>
-                <div class="form-text">Hard limits: {{ markerFor(step)?.hard_min }} to {{ markerFor(step)?.hard_max }} · {{ markerFor(step)?.kind }}</div>
+                <div class="form-text">Hard limits: {{ markerFor(step)?.hard_min }} to {{ markerFor(step)?.hard_max }} | {{ markerFor(step)?.kind }}</div>
                 <div v-if="availableStateMarkers.length" class="digital-conditions">
                     <div class="d-flex justify-content-between align-items-center gap-2 mb-1">
                         <div class="small-label mb-0">Digital conditions</div>
@@ -121,7 +128,7 @@
                     <div class="digital-condition-row" v-for="stateMarker in availableStateMarkers" :key="stateMarker.id">
                         <div class="small">
                             <div class="fw-bold text-truncate" :title="stateMarker.display_name">{{ stateMarker.display_name }}</div>
-                            <div class="text-muted">Sequence <span class="digital-state-current">{{ stateMarker.current_state }}</span> · line {{ stateMarker.target_line_number }}</div>
+                            <div class="text-muted">Sequence <span class="digital-state-current">{{ stateMarker.current_state }}</span> | line {{ stateMarker.target_line_number }}</div>
                         </div>
                         <div>
                             <label class="visually-hidden" :for="`state-${step.uid}-${stateMarker.id}`">{{ stateMarker.display_name }} state</label>
@@ -151,8 +158,8 @@
 
         <section class="workspace">
             <div class="row g-3 mb-3">
-                <div class="col-md-3"><div class="metric-tile"><div class="small-label">Run</div><div class="metric-value">{{ status.run_id || '—' }}</div><div class="small text-muted">{{ status.phase || 'idle' }}</div></div></div>
-                <div class="col-md-3"><div class="metric-tile"><div class="small-label">Active marker</div><div class="metric-value">{{ activeStep?.marker_name || '—' }}</div><div class="small text-muted">Point {{ status.current_point || 0 }} / {{ status.total_points || 0 }}</div></div></div>
+                <div class="col-md-3"><div class="metric-tile"><div class="small-label">Run</div><div class="metric-value">{{ status.run_id || '-' }}</div><div class="small text-muted">{{ status.phase || 'idle' }}</div></div></div>
+                <div class="col-md-3"><div class="metric-tile"><div class="small-label">Active marker</div><div class="metric-value">{{ activeStep?.marker_name || '-' }}</div><div class="small text-muted">Shot {{ status.current_point || 0 }} / {{ status.total_points || 0 }}</div></div></div>
                 <div class="col-md-6"><div class="metric-tile"><div class="small-label">Applied values</div><div class="d-flex gap-2 flex-wrap mt-2"><span v-if="!Object.keys(status.applied_values || {}).length" class="text-muted">None yet</span><span class="badge bg-success" v-for="(value,key) in status.applied_values">{{ key }} = {{ value }}</span></div></div></div>
             </div>
 
@@ -161,8 +168,8 @@
                 <div class="p-3">
                     <div class="workflow-line pb-4" v-for="step in displaySteps" :key="step.index || step.uid">
                         <span :class="['workflow-dot',step.status]"></span>
-                        <div class="d-flex justify-content-between gap-3"><div><strong>{{ step.index || displaySteps.indexOf(step)+1 }}. {{ step.marker_name || markerFor(step)?.display_name || step.marker_id }}</strong><div class="small text-muted">{{ objectiveLabel(step.objective) }} · {{ step.metric_label || catalog.metrics[step.metric_key] }} · {{ step.start }} → {{ step.stop }}</div></div><span :class="['step-status',step.status]">{{ step.status || 'pending' }}</span></div>
-                        <div v-if="step.analysis" class="small mt-2"><strong>Fit optimum:</strong> {{ formatNumber(step.analysis.continuous_optimum) }} · <strong>Applied sampled point:</strong> {{ step.analysis.selected_value }} <span v-if="step.analysis.r_squared!==null">· R² {{ formatNumber(step.analysis.r_squared,5) }}</span></div>
+                        <div class="d-flex justify-content-between gap-3"><div><strong>{{ step.index || displaySteps.indexOf(step)+1 }}. {{ step.marker_name || markerFor(step)?.display_name || step.marker_id }}</strong><div class="trace-meta"><span>{{ objectiveLabel(step.objective) }}</span><span>{{ step.metric_label || catalog.metrics[step.metric_key] }}</span><span><strong>Scan range:</strong> {{ step.start }} to {{ step.stop }}</span><span><strong>Average:</strong> {{ step.average_count || 1 }}</span><span><strong>Random:</strong> {{ step.randomize ? 'ON' : 'OFF' }}</span></div></div><span :class="['step-status',step.status]">{{ step.status || 'pending' }}</span></div>
+                        <div v-if="step.analysis" class="trace-result"><div><span class="trace-result-label">Fit optimum</span><span class="trace-number">{{ formatNumber(step.analysis.continuous_optimum) }}</span></div><div><span class="trace-result-label">Applied value</span><span class="trace-number">{{ step.analysis.selected_value }}</span></div><div v-if="step.analysis.r_squared!==null"><span class="trace-result-label">R²</span><span class="trace-number">{{ formatNumber(step.analysis.r_squared,5) }}</span></div><div><span class="trace-result-label">Directly sampled</span><span class="trace-number">{{ step.analysis.selected_was_sampled ? 'YES' : 'NO' }}</span></div></div>
                         <div v-if="conditionSummary(step)" class="small digital-summary mt-1"><strong>Digital conditions:</strong> {{ conditionSummary(step) }}</div>
                         <div class="small text-danger mt-1" v-if="step.error">{{ step.error }}</div>
                     </div>
@@ -170,7 +177,15 @@
             </div>
 
             <div class="panel mb-3">
-                <div class="panel-head">Measured response, fit and selected sampled point</div>
+                <div class="panel-head">Latest UP and DOWN TOF signals with fitting windows</div>
+                <div class="tof-grid">
+                    <div id="tofPlotUp" class="tof-plot"></div>
+                    <div id="tofPlotDown" class="tof-plot"></div>
+                </div>
+            </div>
+
+            <div class="panel mb-3">
+                <div class="panel-head">Measured response, smooth fit and applied value</div>
                 <div id="fitPlot"></div>
             </div>
 
@@ -200,7 +215,7 @@ Vue.createApp({
         currentSequenceName:'sequence.mot', availableMarkers:[], availableStateMarkers:[], presets:[], presetName:'', selectedPreset:'', uid:1,
         catalog:{metrics:{transition_probability_up:'Transition Probability UP'},objectives:{}},
         workflow:{workflow_name:'Sequential marker optimization',sequence_name:'',ext_trigger:false,fit_center_up:0,fit_width_up:0,fit_center_dw:0,fit_width_dw:0,steps:[]},
-        status:{is_running:false,phase:'idle',message:'IDLE',steps:[],applied_values:{},export_urls:{}}, logs:[], pollTimer:null, ws:null
+        status:{is_running:false,phase:'idle',message:'IDLE',steps:[],applied_values:{},export_urls:{}}, logs:[], pollTimer:null, ws:null, latestTof:null
     }},
     computed:{
         progressPercent(){ const total=Math.max(1,Number(this.status.total_steps||this.workflow.steps.length)); const complete=(this.status.steps||[]).filter(s=>s.status==='completed').length; const active=this.status.is_running?Math.max(0,Number(this.status.current_point||0)/Math.max(1,Number(this.status.total_points||1))):0; return Math.min(100,Math.round(((complete+active)/total)*100)); },
@@ -211,10 +226,33 @@ Vue.createApp({
         await this.loadCatalog();
         try{ const res=await axios.get('/index/state'); this.currentSequenceName=res.data?.data?.state?.currentSequenceName||this.currentSequenceName; }catch(e){}
         await this.loadMarkers(); await this.loadPresets(); await this.fetchStatus(); this.connectWebSocket();
-        this.pollTimer=setInterval(()=>this.fetchStatus(),1500); window.addEventListener('resize',this.renderPlot); this.addLog('Marker optimization console ready.');
+        this.pollTimer=setInterval(()=>this.fetchStatus(),1500); window.addEventListener('resize',this.handleResize); this.$nextTick(()=>{this.renderPlot();this.renderTof(this.latestTof);}); this.addLog('Marker optimization console ready.');
     },
-    beforeUnmount(){ clearInterval(this.pollTimer); if(this.ws)this.ws.close(); window.removeEventListener('resize',this.renderPlot); },
+    beforeUnmount(){ clearInterval(this.pollTimer); if(this.ws)this.ws.close(); window.removeEventListener('resize',this.handleResize); },
     methods:{
+        handleResize(){ ['fitPlot','tofPlotUp','tofPlotDown'].forEach(id=>{const el=document.getElementById(id);if(el)Plotly.Plots.resize(el);}); },
+        renderTof(data){
+            if (data) this.latestTof = data;
+            const payload = data || this.latestTof || {};
+            const time = Array.isArray(payload.time_axis) ? payload.time_axis.map(value => Number(value) * 1000) : [];
+            const baseLayout = {
+                margin:{t:34,r:14,b:46,l:58}, paper_bgcolor:'transparent', plot_bgcolor:'#fff',
+                xaxis:{title:'Time (ms)',gridcolor:'#e4e9ee',showline:true,mirror:true,ticks:'inside'},
+                yaxis:{title:'Signal (V)',gridcolor:'#e4e9ee',showline:true,mirror:true,ticks:'inside'},
+                showlegend:true, legend:{orientation:'h',x:0,y:1.14},
+                annotations:time.length?[]:[{text:'Latest shot will appear here',showarrow:false,x:.5,y:.5,xref:'paper',yref:'paper',font:{color:'#7b8792'}}]
+            };
+            const renderChannel = (id, raw, fit, windowRange, title, fitColor, shadeColor) => {
+                const traces = time.length ? [
+                    {x:time,y:Array.isArray(raw)?raw:[],type:'scatter',mode:'markers',name:'Raw',marker:{color:'#263238',size:2,opacity:.32}},
+                    {x:time,y:Array.isArray(fit)?fit:[],type:'scatter',mode:'lines',name:'Fit',line:{color:fitColor,width:2}}
+                ] : [];
+                const shapes = Array.isArray(windowRange) && windowRange.length===2 ? [{type:'rect',xref:'x',yref:'paper',x0:Number(windowRange[0])*1000,x1:Number(windowRange[1])*1000,y0:0,y1:1,fillcolor:shadeColor,opacity:.1,line:{width:0}}] : [];
+                Plotly.react(id,traces,{...baseLayout,title:{text:title,font:{size:12},x:.05},shapes},{responsive:true,displaylogo:false});
+            };
+            renderChannel('tofPlotUp',payload.raw_data_up,payload.fit_data_up,payload.window_up,'UP Signal','#d62728','#dc3545');
+            renderChannel('tofPlotDown',payload.raw_data_dw,payload.fit_data_dw,payload.window_dw,'DOWN Signal','#1769aa','#0d6efd');
+        },
         addLog(message){ this.logs.push({time:new Date().toLocaleTimeString(),message:String(message)}); this.$nextTick(()=>{const el=document.getElementById('log');if(el)el.scrollTop=el.scrollHeight;}); },
         requestError(error){ return error?.response?.data?.detail||error?.response?.data?.message||error?.message||String(error); },
         async loadCatalog(){ try{const res=await axios.get('/marker-optimization/catalog');this.catalog=res.data.data;}catch(e){this.addLog(this.requestError(e));} },
@@ -275,7 +313,7 @@ Vue.createApp({
                 objective: marker.kind === 'dds_element' ? 'spectral_center' : (marker.kind === 'duration' ? 'rabi_pi' : 'maximize'),
                 metric_key: 'transition_probability_up', metric_source: 'fit', minimum_r_squared: .75,
                 start: marker.default_start, stop: marker.default_stop, step: marker.default_step,
-                scan_method: marker.default_method || 'step_size', average_count: 1,
+                scan_method: marker.default_method || 'step_size', average_count: 1, randomize: false,
                 digital_states: this.defaultDigitalStates()
             };
             this.workflow.steps.push(step);
@@ -288,8 +326,24 @@ Vue.createApp({
         async stopWorkflow(){try{const res=await axios.post('/marker-optimization/stop');this.addLog(res.data.message);}catch(e){this.addLog('Stop failed: '+this.requestError(e));}},
         async fetchStatus(){try{const res=await axios.get('/marker-optimization/status');this.applyStatus(res.data.data||{});}catch(e){}},
         applyStatus(status){this.status={...this.status,...status};this.$nextTick(this.renderPlot);},
-        renderPlot(){const step=this.activeStep||(this.status.steps||[]).slice().reverse().find(s=>s.points?.length);const points=step?.points||[];const x=points.map(p=>p.value),y=points.map(p=>p.metric_mean),err=points.map(p=>p.metric_sem||0);const traces=[{x,y,error_y:{type:'data',array:err,visible:true},mode:'markers',name:'Mean ± SEM',marker:{size:9,color:'#1769aa'}}];const fit=step?.analysis?.fit_curve||[];if(fit.length===x.length&&fit.some(v=>v!==null))traces.push({x,y:fit,mode:'lines',name:step.analysis.model||'Fit',line:{color:'#ef6c00',width:2}});if(step?.analysis?.selected_value!==undefined)traces.push({x:[step.analysis.selected_value,step.analysis.selected_value],y:[Math.min(...y),Math.max(...y)],mode:'lines',name:'Applied point',line:{color:'#c62828',dash:'dash'}});Plotly.react('fitPlot',traces,{margin:{t:35,r:20,b:55,l:70},paper_bgcolor:'transparent',plot_bgcolor:'transparent',xaxis:{title:step?.marker_name||'Marker value',gridcolor:'#e4e9ee'},yaxis:{title:step?.metric_label||'Metric',gridcolor:'#e4e9ee'},legend:{orientation:'h',y:1.12},annotations:points.length?[]:[{text:'Scan data will appear here',showarrow:false,x:.5,y:.5,xref:'paper',yref:'paper',font:{color:'#7b8792'}}]},{responsive:true,displaylogo:false});},
-        formatNumber(value,digits=3){const n=Number(value);return Number.isFinite(n)?n.toFixed(digits):'—';},
+        renderPlot(){
+            const step=this.activeStep||(this.status.steps||[]).slice().reverse().find(item=>item.points?.length);
+            const points=[...(step?.points||[])].sort((a,b)=>Number(a.value)-Number(b.value));
+            const x=points.map(point=>point.value), y=points.map(point=>point.metric_mean), err=points.map(point=>point.metric_sem||0);
+            const traces=[{x,y,error_y:{type:'data',array:err,visible:true},mode:'lines+markers',name:'Mean ± SEM',line:{color:'#1769aa',width:1.6},marker:{size:8,color:'#1769aa'}}];
+            const denseX=step?.analysis?.fit_x_dense||[], denseFit=step?.analysis?.fit_curve_dense||[];
+            if(denseX.length===denseFit.length&&denseX.length>1){
+                traces.push({x:denseX,y:denseFit,mode:'lines',name:step.analysis.model||'Fit',line:{color:'#ef6c00',width:2.4}});
+            }else{
+                const fit=step?.analysis?.fit_curve||[];
+                if(fit.length===x.length&&fit.some(value=>value!==null))traces.push({x,y:fit,mode:'lines',name:step.analysis.model||'Fit',line:{color:'#ef6c00',width:2.4}});
+            }
+            if(step?.analysis?.selected_value!==undefined&&y.length){
+                traces.push({x:[step.analysis.selected_value,step.analysis.selected_value],y:[Math.min(...y),Math.max(...y)],mode:'lines',name:'Applied value',line:{color:'#c62828',dash:'dash',width:2}});
+            }
+            Plotly.react('fitPlot',traces,{margin:{t:35,r:20,b:55,l:70},paper_bgcolor:'transparent',plot_bgcolor:'transparent',xaxis:{title:step?.marker_name||'Marker value',gridcolor:'#e4e9ee'},yaxis:{title:step?.metric_label||'Metric',gridcolor:'#e4e9ee'},legend:{orientation:'h',y:1.12},annotations:points.length?[]:[{text:'Scan data will appear here',showarrow:false,x:.5,y:.5,xref:'paper',yref:'paper',font:{color:'#7b8792'}}]},{responsive:true,displaylogo:false});
+        },
+        formatNumber(value,digits=3){const n=Number(value);return Number.isFinite(n)?n.toFixed(digits):'-';},
         async loadPresets(){try{const res=await axios.get('/marker-optimization/presets',{params:{sequence_name:this.currentSequenceName}});this.presets=res.data?.data?.presets||[];}catch(e){this.addLog('Preset loading failed: '+this.requestError(e));}},
         async savePreset(){try{await axios.post('/marker-optimization/presets',{sequence_name:this.currentSequenceName,name:this.presetName,workflow:this.payload()});await this.loadPresets();this.selectedPreset=this.presetName;this.addLog('Preset saved: '+this.presetName);}catch(e){this.addLog('Preset save failed: '+this.requestError(e));}},
         applyPreset(){
@@ -297,7 +351,7 @@ Vue.createApp({
             if (!preset) return;
             const saved = JSON.parse(JSON.stringify(preset.workflow || {}));
             const steps = (saved.steps || []).map(rawStep => {
-                const step = { ...rawStep, uid: this.uid++ };
+                const step = { ...rawStep, randomize: Boolean(rawStep.randomize), uid: this.uid++ };
                 return this.syncDigitalStates(step, rawStep.digital_states);
             });
             this.workflow = { ...this.workflow, ...saved, steps };
@@ -305,7 +359,27 @@ Vue.createApp({
             this.addLog('Preset loaded: ' + preset.name);
         },
         async deletePreset(){if(!this.selectedPreset)return;try{await axios.delete('/marker-optimization/presets/'+encodeURIComponent(this.selectedPreset),{params:{sequence_name:this.currentSequenceName}});this.addLog('Preset deleted: '+this.selectedPreset);this.selectedPreset='';await this.loadPresets();}catch(e){this.addLog('Preset delete failed: '+this.requestError(e));}},
-        connectWebSocket(){const protocol=location.protocol==='https:'?'wss:':'ws:';this.ws=new WebSocket(`${protocol}//${location.host}/ws`);this.ws.onclose=()=>setTimeout(()=>this.connectWebSocket(),3000);this.ws.onmessage=event=>{let data;try{data=JSON.parse(event.data);}catch(e){return;}if(!String(data.stream_type||'').startsWith('marker_optimization'))return;if(data.stream_type==='marker_optimization_complete'){this.applyStatus(data.status||{});this.addLog('Workflow finished: '+(data.status?.stop_reason||data.status?.phase));}else if(data.stream_type==='marker_optimization_step_complete'){this.addLog(`Applied ${data.marker_id} = ${data.analysis?.selected_value}`);this.fetchStatus();}else if(data.stream_type==='marker_optimization_point'){this.fetchStatus();}};}
+        connectWebSocket(){
+            const protocol=location.protocol==='https:'?'wss:':'ws:';
+            this.ws=new WebSocket(`${protocol}//${location.host}/ws`);
+            this.ws.onclose=()=>setTimeout(()=>this.connectWebSocket(),3000);
+            this.ws.onmessage=event=>{
+                let data;
+                try{data=JSON.parse(event.data);}catch(e){return;}
+                if(!String(data.stream_type||'').startsWith('marker_optimization'))return;
+                if(data.stream_type==='marker_optimization_shot'){
+                    this.renderTof(data);
+                }else if(data.stream_type==='marker_optimization_complete'){
+                    this.applyStatus(data.status||{});
+                    this.addLog('Workflow finished: '+(data.status?.stop_reason||data.status?.phase));
+                }else if(data.stream_type==='marker_optimization_step_complete'){
+                    this.addLog(`Applied ${data.marker_id} = ${data.analysis?.selected_value}`);
+                    this.fetchStatus();
+                }else if(data.stream_type==='marker_optimization_point'){
+                    this.fetchStatus();
+                }
+            };
+        }
     }
 }).mount('#app');
 </script>

@@ -267,6 +267,7 @@ class MarkerOptimizationStepConfig(BaseModel):
     step: float = Field(..., gt=0)
     scan_method: str = Field("step_size")
     average_count: int = Field(1, ge=1, le=1000)
+    randomize: bool = Field(False)
     metric_key: str = Field("transition_probability_up")
     metric_source: str = Field("fit")
     objective: str = Field("maximize")

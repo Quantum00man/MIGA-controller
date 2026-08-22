@@ -4,6 +4,7 @@ import copy
 import csv
 import json
 import math
+import random
 import re
 import threading
 import time
@@ -77,11 +78,13 @@ def analyze_marker_scan(
     objective: str,
     *,
     minimum_r_squared: float = 0.75,
+    marker_kind: str = "",
+    marker_decimals: int = 9,
 ) -> Dict[str, Any]:
-    """Analyze aggregated scan points and select an actual sampled point.
+    """Analyze aggregated scan points and choose a safe value to apply.
 
-    Ties are resolved toward the lower scan value. Fit objectives fail when the
-    selected sampled point is a boundary point or the requested quality is not met.
+    Fit objectives may apply an in-range, hardware-representable value that was
+    not sampled. Measured maximum/minimum objectives still apply a measured point.
     """
     ordered = sorted(
         (
@@ -108,7 +111,10 @@ def analyze_marker_scan(
 
     fit_parameters: Dict[str, float] = {}
     fit_curve: np.ndarray
+    dense_x = np.asarray([], dtype=float)
+    dense_curve = np.asarray([], dtype=float)
     covariance: Optional[np.ndarray] = None
+    fitted_objective = objective_key in {"spectral_center", "rabi_pi"}
     if objective_key == "maximize":
         best_y = float(np.max(y))
         candidates = x[np.isclose(y, best_y, rtol=1e-12, atol=1e-12)]
@@ -142,6 +148,8 @@ def analyze_marker_scan(
             maxfev=50000,
         )
         fit_curve = _gaussian(x, *popt)
+        dense_x = np.linspace(float(x[0]), float(x[-1]), max(500, len(x)))
+        dense_curve = _gaussian(dense_x, *popt)
         continuous_optimum = float(popt[2])
         fit_parameters = {
             "offset": float(popt[0]),
@@ -174,6 +182,8 @@ def analyze_marker_scan(
             maxfev=100000,
         )
         fit_curve = _damped_rabi(x, *popt)
+        dense_x = np.linspace(float(x[0]), float(x[-1]), max(500, len(x)))
+        dense_curve = _damped_rabi(dense_x, *popt)
         continuous_optimum = float(popt[2])
         fit_parameters = {
             "offset": float(popt[0]),
@@ -184,21 +194,41 @@ def analyze_marker_scan(
         r_squared = _r_squared(y, fit_curve)
         model = "Exponentially damped sin-squared Rabi"
 
-    selected_value = _nearest_scanned_point(x.tolist(), continuous_optimum)
-    selected_index = int(np.where(np.isclose(x, selected_value, rtol=0.0, atol=1e-12))[0][0])
-    boundary = selected_index in {0, len(x) - 1}
     quality_threshold = float(minimum_r_squared)
     if r_squared is not None and (not math.isfinite(r_squared) or r_squared < quality_threshold):
         raise ValueError(f"Fit quality R²={r_squared:.4f} is below the required {quality_threshold:.4f}")
-    if boundary:
+
+    if fitted_objective:
+        tolerance = max(abs(float(x[-1] - x[0])) * 1e-12, 1e-12)
+        if continuous_optimum < float(x[0]) - tolerance or continuous_optimum > float(x[-1]) + tolerance:
+            raise ValueError(
+                f"Fitted optimum {continuous_optimum:g} is outside scan range {float(x[0]):g} to {float(x[-1]):g}"
+            )
+        kind = str(marker_kind or "").strip().lower()
+        if kind in {"dds_element", "duration"}:
+            selected_value = int(round(continuous_optimum))
+        else:
+            decimals = max(0, min(9, int(marker_decimals)))
+            selected_value = round(continuous_optimum, decimals)
+        if selected_value < float(x[0]) - tolerance or selected_value > float(x[-1]) + tolerance:
+            raise ValueError(
+                f"Representable optimum {selected_value:g} is outside scan range {float(x[0]):g} to {float(x[-1]):g}"
+            )
+    else:
+        selected_value = _nearest_scanned_point(x.tolist(), continuous_optimum)
+
+    sampled_matches = np.where(np.isclose(x, selected_value, rtol=0.0, atol=1e-12))[0]
+    selected_was_sampled = len(sampled_matches) > 0
+    selected_index = int(sampled_matches[0]) if selected_was_sampled else None
+    selected_metric_mean = float(y[selected_index]) if selected_index is not None else None
+    if not fitted_objective and selected_index in {0, len(x) - 1}:
         raise ValueError(
             f"Selected optimum {selected_value:g} is on the scan boundary; expand or shift the scan range"
         )
 
     parameter_uncertainty = None
     if covariance is not None:
-        optimum_index = 2
-        variance = float(covariance[optimum_index, optimum_index])
+        variance = float(covariance[2, 2])
         if math.isfinite(variance) and variance >= 0:
             parameter_uncertainty = math.sqrt(variance)
     residuals = y - fit_curve if np.all(np.isfinite(fit_curve)) else np.full_like(y, np.nan)
@@ -208,12 +238,15 @@ def analyze_marker_scan(
         "continuous_optimum": continuous_optimum,
         "selected_value": selected_value,
         "selected_index": selected_index,
-        "selected_metric_mean": float(y[selected_index]),
+        "selected_was_sampled": selected_was_sampled,
+        "selected_metric_mean": selected_metric_mean,
         "r_squared": r_squared,
         "minimum_r_squared": quality_threshold,
         "optimum_standard_error": parameter_uncertainty,
         "fit_parameters": fit_parameters,
         "fit_curve": [None if not math.isfinite(float(value)) else float(value) for value in fit_curve],
+        "fit_x_dense": [float(value) for value in dense_x],
+        "fit_curve_dense": [float(value) for value in dense_curve],
         "residuals": [None if not math.isfinite(float(value)) else float(value) for value in residuals],
         "points": ordered,
     }
@@ -389,6 +422,7 @@ class MarkerOptimizationManager:
             if source not in {"fit", "nofit"}:
                 raise ValueError(f"Step {index}: metric source must be fit or nofit")
             average_count = int(raw.get("average_count", 1) or 1)
+            randomize = bool(raw.get("randomize", False))
             if average_count < 1 or average_count > 1000:
                 raise ValueError(f"Step {index}: average count must be between 1 and 1000")
             values = self._scan_values(raw, definition)
@@ -443,11 +477,13 @@ class MarkerOptimizationManager:
                 "marker_id": marker_id,
                 "marker_name": definition.get("display_name") or marker_id,
                 "marker_kind": definition["kind"],
+                "marker_decimals": int(definition.get("decimals", 0)),
                 "objective": objective,
                 "metric_key": metric_key,
                 "metric_label": OBJECTIVE_METRICS[metric_key],
                 "metric_source": source,
                 "average_count": average_count,
+                "randomize": randomize,
                 "minimum_r_squared": _finite_float(raw.get("minimum_r_squared", 0.75), "Minimum R²"),
                 "start": values[0],
                 "stop": values[-1],
@@ -529,10 +565,12 @@ class MarkerOptimizationManager:
         data_manager: DataManager,
         global_shot: int,
     ) -> Tuple[List[Dict[str, Any]], int]:
-        values = step["values"]
-        average_count = step["average_count"]
-        total_shots = sum(len(item.get("values") or []) * int(item.get("average_count", 1)) for item in self._snapshot()["steps"])
-        points: List[Dict[str, Any]] = []
+        values = list(step["values"])
+        average_count = int(step["average_count"])
+        total_shots = sum(
+            len(item.get("values") or []) * int(item.get("average_count", 1))
+            for item in self._snapshot()["steps"]
+        )
         execution_config = {
             **payload,
             "mode": "standard",
@@ -540,69 +578,97 @@ class MarkerOptimizationManager:
             "marker_axes": [step["marker_id"]],
             "_template_path_override": str(working_path),
         }
-        for point_index, value in enumerate(values, start=1):
-            repeats: List[float] = []
-            for repeat_index in range(1, average_count + 1):
-                if self._stop_requested:
-                    raise InterruptedError("Marker optimization stopped by user")
-                metadata = {
-                    "workflow_step": step["index"],
-                    "workflow_marker": step["marker_id"],
-                    "workflow_point": point_index,
-                    "workflow_repeat": repeat_index,
-                    "digital_states": copy.deepcopy(step.get("digital_states") or {}),
-                }
-                job = self.experiment_manager.execute_single_measurement(
-                    [value],
-                    execution_config,
-                    idx=global_shot,
-                    total_steps=total_shots,
-                    scan_dimensions=1,
-                    metadata=metadata,
-                )
-                result, shot_payload = self.experiment_manager.process_measurement_job(
-                    job,
-                    fit_config,
-                    data_manager=data_manager,
-                    save_step_index=global_shot + 1,
-                    stream_type="marker_optimization_shot",
-                    extra_payload={
-                        "workflow_step": step["index"],
-                        "marker_id": step["marker_id"],
-                        "scan_value": value,
-                        "point_index": point_index,
-                        "repeat_index": repeat_index,
-                        "average_count": average_count,
-                        "digital_states": copy.deepcopy(step.get("digital_states") or {}),
-                    },
-                )
-                self._emit(shot_payload)
-                if result is None:
-                    raise RuntimeError(shot_payload.get("error") or "Marker optimization shot failed")
-                repeats.append(self._metric_value(result, step["metric_key"], step["metric_source"]))
-                global_shot += 1
-                self._set_status(
-                    current_point=point_index,
-                    total_points=len(values),
-                    message=(
-                        f"Step {step['index']}: {step['marker_name']} · point {point_index}/{len(values)} "
-                        f"· repeat {repeat_index}/{average_count}"
-                    ),
-                )
-            point = {
-                "value": value,
-                "metric_mean": float(mean(repeats)),
-                "metric_std": float(pstdev(repeats)) if len(repeats) > 1 else 0.0,
-                "metric_sem": float(pstdev(repeats) / math.sqrt(len(repeats))) if len(repeats) > 1 else 0.0,
-                "repeats": [float(item) for item in repeats],
+        shot_plan = [
+            {"point_index": point_index, "value": value, "repeat_index": repeat_index}
+            for repeat_index in range(1, average_count + 1)
+            for point_index, value in enumerate(values, start=1)
+        ]
+        if step.get("randomize"):
+            random.shuffle(shot_plan)
+        repeats_by_value: Dict[float, List[float]] = {float(value): [] for value in values}
+
+        def aggregate_points() -> List[Dict[str, Any]]:
+            aggregated: List[Dict[str, Any]] = []
+            for value in sorted(repeats_by_value):
+                repeats = repeats_by_value[value]
+                if not repeats:
+                    continue
+                deviation = float(pstdev(repeats)) if len(repeats) > 1 else 0.0
+                aggregated.append({
+                    "value": value,
+                    "metric_mean": float(mean(repeats)),
+                    "metric_std": deviation,
+                    "metric_sem": deviation / math.sqrt(len(repeats)) if len(repeats) > 1 else 0.0,
+                    "repeats": [float(item) for item in repeats],
+                })
+            return aggregated
+
+        points: List[Dict[str, Any]] = []
+        for shot_number, shot in enumerate(shot_plan, start=1):
+            if self._stop_requested:
+                raise InterruptedError("Marker optimization stopped by user")
+            point_index = int(shot["point_index"])
+            repeat_index = int(shot["repeat_index"])
+            value = float(shot["value"])
+            metadata = {
+                "workflow_step": step["index"],
+                "workflow_marker": step["marker_id"],
+                "workflow_point": point_index,
+                "workflow_repeat": repeat_index,
+                "workflow_shot": shot_number,
+                "workflow_randomized": bool(step.get("randomize")),
+                "digital_states": copy.deepcopy(step.get("digital_states") or {}),
             }
-            points.append(point)
+            job = self.experiment_manager.execute_single_measurement(
+                [value], execution_config, idx=global_shot, total_steps=total_shots,
+                scan_dimensions=1, metadata=metadata,
+            )
+            result, shot_payload = self.experiment_manager.process_measurement_job(
+                job,
+                fit_config,
+                data_manager=data_manager,
+                save_step_index=global_shot + 1,
+                stream_type="marker_optimization_shot",
+                extra_payload={
+                    "workflow_step": step["index"],
+                    "marker_id": step["marker_id"],
+                    "scan_value": value,
+                    "point_index": point_index,
+                    "repeat_index": repeat_index,
+                    "shot_number": shot_number,
+                    "shot_count": len(shot_plan),
+                    "average_count": average_count,
+                    "randomized": bool(step.get("randomize")),
+                    "digital_states": copy.deepcopy(step.get("digital_states") or {}),
+                },
+            )
+            self._emit(shot_payload)
+            if result is None:
+                raise RuntimeError(shot_payload.get("error") or "Marker optimization shot failed")
+            repeats_by_value[value].append(
+                self._metric_value(result, step["metric_key"], step["metric_source"])
+            )
+            global_shot += 1
+            points = aggregate_points()
             self._update_step(step["index"], points=points)
+            self._set_status(
+                current_point=shot_number,
+                total_points=len(shot_plan),
+                current_scan_value=value,
+                message=(
+                    f"Step {step['index']}: {step['marker_name']} | shot {shot_number}/{len(shot_plan)} "
+                    f"| value {value:g} | repeat {repeat_index}/{average_count}"
+                ),
+            )
+            current_point = next(item for item in points if item["value"] == value)
             self._emit({
                 "stream_type": "marker_optimization_point",
                 "workflow_step": step["index"],
                 "marker_id": step["marker_id"],
-                "point": point,
+                "point": current_point,
+                "shot_number": shot_number,
+                "shot_count": len(shot_plan),
+                "randomized": bool(step.get("randomize")),
             })
         return points, global_shot
 
@@ -614,27 +680,38 @@ class MarkerOptimizationManager:
     @staticmethod
     def _write_step_csv(run_dir: Path, step: Dict[str, Any]) -> Tuple[Path, Path]:
         prefix = f"step_{int(step['index']):02d}_{re.sub(r'[^A-Za-z0-9_.-]+', '_', step['marker_id'])}"
+        analysis = step.get("analysis") or {}
         raw_path = run_dir / f"{prefix}_scan.csv"
         with open(raw_path, "w", newline="", encoding="utf-8") as handle:
             writer = csv.writer(handle)
-            writer.writerow(["scan_value", "metric_mean", "metric_std", "metric_sem", "repeat_values", "digital_states_json"])
+            writer.writerow([
+                "scan_value", "metric_mean", "metric_std", "metric_sem", "repeat_values",
+                "randomized", "digital_states_json",
+            ])
             for point in step.get("points") or []:
                 writer.writerow([
                     point["value"], point["metric_mean"], point["metric_std"], point["metric_sem"],
-                    ";".join(str(value) for value in point.get("repeats") or []), json.dumps(step.get("digital_states") or {}, sort_keys=True),
+                    ";".join(str(value) for value in point.get("repeats") or []),
+                    bool(step.get("randomize")),
+                    json.dumps(step.get("digital_states") or {}, sort_keys=True),
                 ])
         fit_path = run_dir / f"{prefix}_fit_residuals.csv"
-        analysis = step.get("analysis") or {}
         fit_curve = analysis.get("fit_curve") or []
         residuals = analysis.get("residuals") or []
         with open(fit_path, "w", newline="", encoding="utf-8") as handle:
             writer = csv.writer(handle)
-            writer.writerow(["scan_value", "observed", "fitted", "residual"])
+            writer.writerow([
+                "scan_value", "observed", "fitted", "residual", "continuous_optimum",
+                "applied_value", "applied_was_sampled",
+            ])
             for index, point in enumerate(step.get("points") or []):
                 writer.writerow([
                     point["value"], point["metric_mean"],
                     fit_curve[index] if index < len(fit_curve) else "",
                     residuals[index] if index < len(residuals) else "",
+                    analysis.get("continuous_optimum", ""),
+                    analysis.get("selected_value", ""),
+                    analysis.get("selected_was_sampled", ""),
                 ])
         return raw_path, fit_path
 
@@ -664,9 +741,9 @@ class MarkerOptimizationManager:
             summary_lines.extend([
                 "",
                 "Decision policy:",
-                "  Fit-derived optima are mapped to the nearest actually scanned point.",
-                "  Equal-distance ties select the lower point.",
-                "  Boundary optima, failed fits, or insufficient fit quality stop the workflow.",
+                "  Fit objectives apply the nearest hardware-representable value inside the scan range.",
+                "  The applied fitted value does not need to be an actually sampled point.",
+                "  Raw extrema remain sampled-point decisions; failed or insufficient fits stop the workflow.",
             ])
             fig.text(0.08, 0.90, "\n".join(summary_lines), va="top", family="monospace", fontsize=10, wrap=True)
             fig.text(0.08, 0.04, "Generated automatically. Inspect raw CSV, residuals, and sequence snapshots in the report bundle.", fontsize=8, color="#555555")
@@ -682,9 +759,14 @@ class MarkerOptimizationManager:
                 if len(x):
                     ax.errorbar(x, y, yerr=sem, fmt="o", capsize=3, label="Measured mean ± SEM")
                 analysis = step.get("analysis") or {}
-                fit_curve = analysis.get("fit_curve") or []
-                if len(fit_curve) == len(x) and any(value is not None for value in fit_curve):
-                    ax.plot(x, np.asarray([np.nan if value is None else value for value in fit_curve]), "-", label=analysis.get("model") or "Fit")
+                fit_x_dense = analysis.get("fit_x_dense") or []
+                fit_curve_dense = analysis.get("fit_curve_dense") or []
+                if len(fit_x_dense) == len(fit_curve_dense) and len(fit_x_dense) > 1:
+                    ax.plot(fit_x_dense, fit_curve_dense, "-", linewidth=1.8, label=analysis.get("model") or "Fit")
+                else:
+                    fit_curve = analysis.get("fit_curve") or []
+                    if len(fit_curve) == len(x) and any(value is not None for value in fit_curve):
+                        ax.plot(x, np.asarray([np.nan if value is None else value for value in fit_curve]), "-", label=analysis.get("model") or "Fit")
                 selected = analysis.get("selected_value")
                 if selected is not None:
                     ax.axvline(float(selected), color="#c62828", linestyle="--", label=f"Applied: {selected:g}")
@@ -701,6 +783,16 @@ class MarkerOptimizationManager:
                 residual_ax.grid(alpha=0.25)
                 r2 = analysis.get("r_squared")
                 details = f"Objective: {step.get('objective')}    Model: {analysis.get('model') or 'n/a'}"
+                details += (
+                    f"    Range: {step.get('start')} to {step.get('stop')}"
+                    f"    Average: {step.get('average_count', 1)}"
+                    f"    Randomized: {'yes' if step.get('randomize') else 'no'}"
+                )
+                if analysis.get("continuous_optimum") is not None:
+                    details += f"\nFit optimum: {analysis.get('continuous_optimum'):.6g}"
+                if selected is not None:
+                    sampled_label = "sampled" if analysis.get("selected_was_sampled") else "not directly sampled"
+                    details += f"    Applied value: {selected:g} ({sampled_label})"
                 if r2 is not None:
                     details += f"    R²: {r2:.5f}"
                 conditions = step.get("digital_conditions") or []
@@ -749,7 +841,7 @@ class MarkerOptimizationManager:
             "steps": [
                 {
                     **{key: step.get(key) for key in (
-                        "marker_id", "objective", "metric_key", "metric_source", "average_count",
+                        "marker_id", "objective", "metric_key", "metric_source", "average_count", "randomize",
                         "minimum_r_squared", "start", "stop", "step", "scan_method"
                     )},
                     "digital_states": copy.deepcopy(step.get("digital_state_choices") or {}),
@@ -760,7 +852,7 @@ class MarkerOptimizationManager:
         preset_path = run_dir / "workflow_preset.json"
         preset_path.write_text(json.dumps(preset, ensure_ascii=False, indent=2), encoding="utf-8")
         report = {
-            "report_version": 2,
+            "report_version": 3,
             "generated_at_ms": int(time.time() * 1000),
             "workflow_name": payload.get("workflow_name"),
             "sequence_name": sequence_name,
@@ -853,6 +945,8 @@ class MarkerOptimizationManager:
                         points,
                         step["objective"],
                         minimum_r_squared=step["minimum_r_squared"],
+                        marker_kind=step["marker_kind"],
+                        marker_decimals=step.get("marker_decimals", 9),
                     )
                 except Exception as exc:
                     message = str(exc)
@@ -865,9 +959,6 @@ class MarkerOptimizationManager:
                     )
                     raise RuntimeError(f"Step {step_index} ({step['marker_name']}) failed: {message}") from exc
                 selected = analysis["selected_value"]
-                if step["marker_kind"] in {"dds_element", "duration"}:
-                    selected = int(round(selected))
-                    analysis["selected_value"] = selected
                 working_content = render_auto_marker_sequence(
                     working_content,
                     [step["marker_id"]],
