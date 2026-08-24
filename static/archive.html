@@ -1356,12 +1356,34 @@
                     </div>
                 </section>
                 <section v-if="syncManifest" class="card mb-4 border-0 shadow-sm">
-                    <div class="card-header bg-white py-3">
+                    <div class="analysis-header card-header bg-white">
                         <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
-                            <div><i class="bi bi-bounding-box-circles text-primary me-2"></i><span class="fw-bold">SYNC Differential Replay</span></div>
-                            <span class="badge" :class="syncManifest.runtime?.status === 'done' ? 'bg-success' : 'bg-secondary'">{{ syncManifest.runtime?.status || 'saved' }}</span>
+                            <div><i class="bi bi-bounding-box-circles text-primary me-2"></i><span class="fw-bold">SYNC Analysis</span></div>
+                            <div class="d-flex flex-wrap align-items-center gap-2">
+                                <span class="badge" :class="syncManifest.runtime?.status === 'done' ? 'bg-success' : 'bg-secondary'">{{ syncManifest.runtime?.status || 'saved' }}</span>
+                                <select class="form-select form-select-sm" style="width:auto" v-model="syncArchiveViewMode" @change="handleSyncArchiveViewChange">
+                                    <option value="node">Node Data</option>
+                                    <option value="differential">Differential Replay</option>
+                                </select>
+                                <select v-if="syncArchiveViewMode === 'node'" class="form-select form-select-sm" style="width:auto" v-model="syncArchiveNodeSource" @change="renderSyncArchiveNodePlots">
+                                    <option value="master">Master</option>
+                                    <option v-for="slaveId in syncArchiveSlaveOptions()" :key="slaveId" :value="slaveId">{{ syncArchiveNodeLabel(slaveId) }}</option>
+                                </select>
+                                <div class="form-check form-switch mb-0">
+                                    <input class="form-check-input" type="checkbox" id="syncArchiveShowRaw" v-model="showRawData">
+                                    <label class="form-check-label small fw-bold text-muted" for="syncArchiveShowRaw">{{ syncArchiveViewMode === 'node' ? 'Show NoFit' : 'Use NoFit' }}</label>
+                                </div>
+                            </div>
                         </div>
-                        <div class="row g-2 mt-1">
+                        <div v-if="syncArchiveViewMode === 'node'" class="analysis-metric-nav-wrap mt-2">
+                            <ul class="nav analysis-metric-nav" role="tablist" aria-label="Archived SYNC metric">
+                                <li class="nav-item" v-for="tab in tabs" :key="tab.id">
+                                    <button type="button" :class="['nav-link', syncArchiveTab === tab.id ? 'active' : '']"
+                                        role="tab" :aria-selected="syncArchiveTab === tab.id" @click="setSyncArchiveTab(tab.id)">{{ tab.label }}</button>
+                                </li>
+                            </ul>
+                        </div>
+                        <div v-else class="row g-2 mt-2">
                             <div class="col-lg-6 d-flex gap-2">
                                 <span class="badge bg-primary align-self-center">X Master</span>
                                 <select class="form-select form-select-sm" v-model="syncArchiveAxisX.metric" @change="renderSyncArchivePlot"><option v-for="item in syncArchiveMetricOptions" :key="item.key" :value="item.key">{{ item.label }}</option></select>
@@ -1370,7 +1392,7 @@
                             <div class="col-lg-6 d-flex gap-2">
                                 <span class="badge bg-secondary align-self-center">Y Slave</span>
                                 <select class="form-select form-select-sm" v-model="syncArchiveSlaveId" @change="resetSyncArchiveReplay">
-                                    <option v-for="slaveId in syncArchiveSlaveOptions()" :key="slaveId" :value="slaveId">{{ slaveId }}</option>
+                                    <option v-for="slaveId in syncArchiveSlaveOptions()" :key="slaveId" :value="slaveId">{{ syncArchiveNodeLabel(slaveId) }}</option>
                                 </select>
                                 <select class="form-select form-select-sm" v-model="syncArchiveAxisY.metric" @change="renderSyncArchivePlot"><option v-for="item in syncArchiveMetricOptions" :key="item.key" :value="item.key">{{ item.label }}</option></select>
                                 <select class="form-select form-select-sm" v-model="syncArchiveAxisY.channel" @change="renderSyncArchivePlot"><option value="up">UP</option><option value="dw">DOWN</option></select>
@@ -1384,7 +1406,11 @@
                             </div>
                         </div>
                     </div>
-                    <div id="syncArchivePlot" style="height:520px"></div>
+                    <div v-if="syncArchiveViewMode === 'node'" class="card-body p-0">
+                        <div id="syncArchiveNodePlotUp" class="analysis-plot-panel" style="height:360px"></div>
+                        <div id="syncArchiveNodePlotDw" class="analysis-plot-panel analysis-plot-panel-divider" style="height:360px"></div>
+                    </div>
+                    <div v-else id="syncArchivePlot" style="height:520px"></div>
                 </section>
                 <div class="card mb-4 border-0 shadow-sm" :class="{'maximized': maximizedView === 'analysis'}">
                     <div class="analysis-header card-header bg-white">
@@ -1775,12 +1801,19 @@
                     loadedPoints: [], currentCalculatedPoints: [], originalSettings: {}, loadedConfig: {}, currentScanDimensions: 1,
                     markerOptimization: null, selectedOptimizationStep: null,
                     syncManifest: null,
+                    syncArchiveViewMode: 'node',
+                    syncArchiveNodeSource: 'master',
+                    syncArchiveTab: 'atoms',
                     syncArchiveSlaveId: '',
                     syncArchiveAxisX: { metric: 'intf_p', channel: 'up' },
                     syncArchiveAxisY: { metric: 'intf_p', channel: 'up' },
                     syncArchiveMetricOptions: [
                         { key: 'atom_number', label: 'Atom Number' },
                         { key: 'amplitude', label: 'Max Voltage' },
+                        { key: 'tail_mean', label: 'Tail Mean' },
+                        { key: 'sigma', label: 'Width' },
+                        { key: 'temperature', label: 'Temperature' },
+                        { key: 'arrival_time', label: 'Arrival Time' },
                         { key: 'transition_probability', label: 'Transition Probability' },
                         { key: 'intf_p', label: 'Interferometer P' }
                     ],
@@ -1824,7 +1857,13 @@
             },
             watch: {
                 currentTab() { this.handlePlotContextChange(); },
-                showRawData() { this.handlePlotContextChange(); if (this.syncManifest) this.renderSyncArchivePlot(); },
+                showRawData() {
+                    this.handlePlotContextChange();
+                    if (this.syncManifest) this.$nextTick(() => {
+                        if (this.syncArchiveViewMode === 'node') this.renderSyncArchiveNodePlots();
+                        else this.renderSyncArchivePlot();
+                    });
+                },
                 showTofFitCurve() { this.handleCurveVisibilityChange(); },
                 showTofRawCurve() { this.handleCurveVisibilityChange(); },
                 showScanFitCurve() { this.handleScanFitVisibilityChange(); }
@@ -3611,6 +3650,8 @@
                     this.currentWaveforms = [];
                     this.markerOptimization = null;
                     this.syncManifest = null;
+                    this.syncArchiveViewMode = 'node';
+                    this.syncArchiveNodeSource = 'master';
                     this.syncArchiveSlaveId = '';
                     if (this.syncArchiveReplayTimer) clearInterval(this.syncArchiveReplayTimer);
                     this.syncArchiveReplayTimer = null;
@@ -3673,7 +3714,10 @@
                         }
                         this.isLoading = false;
                         await this.$nextTick();
-                        if (this.syncManifest) this.renderSyncArchivePlot();
+                        if (this.syncManifest) {
+                            if (this.syncArchiveViewMode === 'node') this.renderSyncArchiveNodePlots();
+                            else this.renderSyncArchivePlot();
+                        }
                         await this.applyDisplayedPoints(this.loadedPoints, this.savedStats, this.savedPreviewMap, true);
                         if (this.plotMode === 'allan') {
                             await this.refreshAllanIfNeeded(false);
@@ -4054,7 +4098,109 @@
                 },
                 syncArchiveSlaveOptions() {
                     const pairs = Array.isArray(this.syncManifest?.pairs) ? this.syncManifest.pairs : [];
-                    return [...new Set(pairs.map(pair => String(pair.slave_node_id || '')).filter(Boolean))];
+                    const savedSlaves = Object.keys(this.syncManifest?.node_results?.slaves || {});
+                    return [...new Set([
+                        ...savedSlaves,
+                        ...pairs.map(pair => String(pair.slave_node_id || '')).filter(Boolean),
+                    ])];
+                },
+                syncArchiveNodeRows(source = this.syncArchiveNodeSource) {
+                    const nodes = this.syncManifest?.node_results;
+                    if (source === 'master' && Array.isArray(nodes?.master)) return nodes.master;
+                    if (source !== 'master' && Array.isArray(nodes?.slaves?.[source])) return nodes.slaves[source];
+                    const pairs = Array.isArray(this.syncManifest?.pairs) ? this.syncManifest.pairs : [];
+                    const selected = source === 'master'
+                        ? pairs.map(pair => pair.master)
+                        : pairs.filter(pair => String(pair.slave_node_id || '') === String(source)).map(pair => pair.slave);
+                    const byShot = new Map();
+                    selected.filter(Boolean).forEach(row => byShot.set(Number(row.sync_shot_index), row));
+                    return [...byShot.values()].sort((a, b) => Number(a.sync_shot_index) - Number(b.sync_shot_index));
+                },
+                syncArchiveNodeLabel(nodeId) {
+                    if (nodeId === 'master') return 'Master';
+                    const state = (this.syncManifest?.runtime?.slaves || []).find(
+                        slave => String(slave.node_id || '') === String(nodeId)
+                    );
+                    return state?.name || nodeId;
+                },
+                syncArchiveTabField(tabId, channel, noFit = false) {
+                    const channelSuffix = channel === 'dw' ? 'dw' : 'up';
+                    const suffix = noFit ? '_nofit' : '';
+                    switch (tabId) {
+                        case 'amp': return `amplitude_${channelSuffix}${suffix}`;
+                        case 'tail': return `tail_mean_${channelSuffix}_raw`;
+                        case 'sigma': return `sigma_${channelSuffix}${suffix}`;
+                        case 'temp': return `temperature_${channelSuffix}${suffix}`;
+                        case 'arrival': return `arrival_time_${channelSuffix}${suffix}`;
+                        case 'prob': return `transition_probability_${channelSuffix}${suffix}`;
+                        case 'intf': return `${channel === 'dw' ? 'intf_p2' : 'intf_p1'}${suffix}`;
+                        default: return `atom_number_${channelSuffix}${suffix}`;
+                    }
+                },
+                syncArchiveNodeSeries(channel, noFit = false) {
+                    const field = this.syncArchiveTabField(this.syncArchiveTab, channel, noFit);
+                    const grouped = new Map();
+                    this.syncArchiveNodeRows().forEach(row => {
+                        if (row?.error) return;
+                        const x = Number(row.sync_p0);
+                        const y = Number(row[field]);
+                        if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+                        const key = x.toFixed(9);
+                        const item = grouped.get(key) || { x, sum: 0, count: 0 };
+                        item.sum += y;
+                        item.count += 1;
+                        grouped.set(key, item);
+                    });
+                    return [...grouped.values()].map(item => ({ x: item.x, y: item.sum / item.count, count: item.count }))
+                        .sort((a, b) => a.x - b.x);
+                },
+                setSyncArchiveTab(tabId) {
+                    this.syncArchiveTab = tabId;
+                    this.renderSyncArchiveNodePlots();
+                },
+                handleSyncArchiveViewChange() {
+                    if (this.syncArchiveReplayPlaying) this.toggleSyncArchiveReplay();
+                    this.$nextTick(() => {
+                        if (this.syncArchiveViewMode === 'node') this.renderSyncArchiveNodePlots();
+                        else this.renderSyncArchivePlot();
+                    });
+                },
+                renderSyncArchiveNodePlots() {
+                    if (typeof Plotly === 'undefined') return;
+                    const metric = this.getMetricConfig(this.syncArchiveTab);
+                    const sourceLabel = this.syncArchiveNodeLabel(this.syncArchiveNodeSource);
+                    const renderChannel = (channel, elementId, color) => {
+                        const element = document.getElementById(elementId);
+                        if (!element) return;
+                        const fit = this.syncArchiveNodeSeries(channel, false);
+                        const traces = [{
+                            x: fit.map(point => point.x), y: fit.map(point => point.y),
+                            text: fit.map(point => `${point.count} shot${point.count === 1 ? '' : 's'}`),
+                            type: 'scatter', mode: 'lines+markers', name: this.syncArchiveTab === 'tail' ? 'Raw' : 'Fit',
+                            line: { color, width: 2.5 }, marker: { size: 8 },
+                        }];
+                        if (this.showRawData && this.syncArchiveTab !== 'tail') {
+                            const raw = this.syncArchiveNodeSeries(channel, true);
+                            traces.push({
+                                x: raw.map(point => point.x), y: raw.map(point => point.y),
+                                text: raw.map(point => `${point.count} shot${point.count === 1 ? '' : 's'}`),
+                                type: 'scatter', mode: 'lines+markers', name: 'NoFit',
+                                line: { color, width: 1.2, dash: 'dot' },
+                                marker: { size: 6, symbol: 'circle-open', opacity: 0.65 },
+                            });
+                        }
+                        const isUp = channel === 'up';
+                        Plotly.react(element, traces, {
+                            margin: isUp ? { t: 42, b: 8, l: 68, r: 20 } : { t: 18, b: 48, l: 68, r: 20 },
+                            title: { text: `${sourceLabel} | ${isUp ? 'UP Channel' : 'DOWN Channel'}`, font: { size: 13 }, x: 0.05 },
+                            xaxis: { title: isUp ? '' : 'Parameter P0', showticklabels: !isUp, showline: true, mirror: true, ticks: 'inside', gridcolor: '#dde5ee' },
+                            yaxis: { title: metric.label + (isUp ? metric.suffixUp : metric.suffixDw), showline: true, mirror: true, ticks: 'inside', gridcolor: '#dde5ee' },
+                            legend: { orientation: 'h', x: 1, xanchor: 'right', y: 1.12 }, hovermode: 'closest',
+                            paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
+                        }, { responsive: true, displaylogo: false });
+                    };
+                    renderChannel('up', 'syncArchiveNodePlotUp', '#dc3545');
+                    renderChannel('dw', 'syncArchiveNodePlotDw', '#0d6efd');
                 },
                 resetSyncArchiveReplay() {
                     if (this.syncArchiveReplayPlaying) this.toggleSyncArchiveReplay();
@@ -4062,6 +4208,7 @@
                     this.renderSyncArchivePlot();
                 },
                 syncArchiveMetricField(axis) {
+                    if (axis.metric === 'tail_mean') return `tail_mean_${axis.channel === 'dw' ? 'dw' : 'up'}_raw`;
                     const suffix = this.showRawData ? '_nofit' : '';
                     if (axis.metric === 'intf_p') return `intf_p${axis.channel === 'dw' ? '2' : '1'}${suffix}`;
                     return `${axis.metric}_${axis.channel === 'dw' ? 'dw' : 'up'}${suffix}`;
@@ -4082,8 +4229,8 @@
                         marker: { size: 8, color: points.map(p => p.shot), colorscale: 'Viridis', showscale: true, colorbar: { title: 'Shot' } }
                     }], {
                         margin: { l: 75, r: 70, t: 45, b: 70 }, title: 'Saved differential Lissajous',
-                        xaxis: { title: `Master · ${this.syncArchiveAxisX.metric} · ${this.syncArchiveAxisX.channel.toUpperCase()}` },
-                        yaxis: { title: `Slave · ${this.syncArchiveAxisY.metric} · ${this.syncArchiveAxisY.channel.toUpperCase()}` }, hovermode: 'closest'
+                        xaxis: { title: `Master | ${this.syncArchiveAxisX.metric} | ${this.syncArchiveAxisX.channel.toUpperCase()}` },
+                        yaxis: { title: `Slave | ${this.syncArchiveAxisY.metric} | ${this.syncArchiveAxisY.channel.toUpperCase()}` }, hovermode: 'closest'
                     }, { responsive: true, displaylogo: false });
                 },
                 toggleSyncArchiveReplay() {

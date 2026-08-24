@@ -21,10 +21,16 @@ from app.core.experiment_manager import ExperimentManager
 
 SYNC_RESULT_FIELDS = (
     "atom_number_up", "atom_number_dw", "amplitude_up", "amplitude_dw",
+    "tail_mean_up_raw", "tail_mean_dw_raw",
+    "sigma_up", "sigma_dw", "temperature_up", "temperature_dw",
+    "arrival_time_up", "arrival_time_dw",
     "transition_probability_up", "transition_probability_dw",
     "intf_n1", "intf_n2", "intf_p1", "intf_p2",
     "atom_number_up_nofit", "atom_number_dw_nofit",
     "amplitude_up_nofit", "amplitude_dw_nofit",
+    "sigma_up_nofit", "sigma_dw_nofit",
+    "temperature_up_nofit", "temperature_dw_nofit",
+    "arrival_time_up_nofit", "arrival_time_dw_nofit",
     "transition_probability_up_nofit", "transition_probability_dw_nofit",
     "intf_n1_nofit", "intf_n2_nofit", "intf_p1_nofit", "intf_p2_nofit",
 )
@@ -592,7 +598,23 @@ class SyncManager:
                     "master": self._compact_result(master),
                     "slave": self._compact_result(slave),
                 })
+            node_results = {
+                "master": [
+                    self._compact_result(payload)
+                    for _, payload in sorted(self._master_results.items())
+                ],
+                "slaves": {
+                    slave_id: [
+                        self._compact_result(payload)
+                        for _, payload in sorted(results.items())
+                    ]
+                    for slave_id, results in self._slave_results.items()
+                },
+            }
         target = Path(run_dir) / "sync_manifest.json"
         tmp = target.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps({"runtime": runtime, "pairs": pairs}, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.write_text(
+            json.dumps({"runtime": runtime, "pairs": pairs, "node_results": node_results}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
         tmp.replace(target)

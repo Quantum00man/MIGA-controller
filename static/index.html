@@ -1335,26 +1335,33 @@
 
         <main class="main-content">
             <div v-if="isSyncMode()" class="card mb-4 border-0 shadow-sm">
-                <div class="card-header bg-white py-3">
-                    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
-                        <div><i class="bi bi-bounding-box-circles text-primary me-2"></i><span class="fw-bold">SYNC Analysis</span></div>
-                        <div class="d-flex flex-wrap gap-2 align-items-center">
-                            <select class="form-select form-select-sm" style="width:auto" v-model="syncViewMode" @change="renderSyncPlot">
-                                <option value="node">Node series</option>
-                                <option value="lissajous">Lissajous</option>
+                <div class="analysis-header card-header bg-white">
+                    <div class="analysis-header-top">
+                        <div class="analysis-header-title"><i class="bi bi-bounding-box-circles fs-5 me-2"></i><span>SYNC Analysis</span></div>
+                        <div class="analysis-header-actions d-flex flex-wrap gap-2 align-items-center">
+                            <select class="form-select form-select-sm" style="width:auto" v-model="syncViewMode" @change="handleSyncViewModeChange">
+                                <option value="node">Node Data</option>
+                                <option value="lissajous">Differential</option>
                             </select>
                             <select v-if="syncViewMode === 'node'" class="form-select form-select-sm" style="width:auto" v-model="syncDisplaySource" @change="renderSyncPlot">
                                 <option value="master">Master</option>
                                 <option v-for="slave in syncSlaves" :key="slave.id" :value="slave.id">{{ slave.name }}</option>
                             </select>
+                            <div class="form-check form-switch mb-0">
+                                <input class="form-check-input" type="checkbox" id="syncShowRaw" v-model="showRawData">
+                                <label class="form-check-label small fw-bold text-muted" for="syncShowRaw">{{ syncViewMode === 'node' ? 'Show NoFit' : 'Use NoFit' }}</label>
+                            </div>
                         </div>
                     </div>
-                    <div v-if="syncViewMode === 'node'" class="d-flex flex-wrap gap-2 mt-2">
-                        <select class="form-select form-select-sm" style="width:auto" v-model="syncNodeMetric" @change="renderSyncPlot">
-                            <option v-for="item in syncMetricOptions" :key="item.key" :value="item.key">{{ item.label }}</option>
-                        </select>
+                    <div v-if="syncViewMode === 'node'" class="analysis-metric-nav-wrap">
+                        <ul class="nav analysis-metric-nav" role="tablist" aria-label="SYNC analysis metric">
+                            <li class="nav-item" v-for="tab in tabs" :key="tab.id">
+                                <button type="button" :class="['nav-link', currentTab === tab.id ? 'active' : '']"
+                                    role="tab" :aria-selected="currentTab === tab.id" @click="currentTab = tab.id">{{ tab.label }}</button>
+                            </li>
+                        </ul>
                     </div>
-                    <div v-else class="row g-2 mt-1">
+                    <div v-else class="row g-2 mt-2">
                         <div class="col-lg-6 d-flex gap-2">
                             <span class="badge bg-primary align-self-center">X</span>
                             <select class="form-select form-select-sm" v-model="syncAxisX.source" @change="syncAxesChanged"><option value="master">Master</option><option v-for="slave in syncSlaves" :key="slave.id" :value="slave.id">{{ slave.name }}</option></select>
@@ -1376,7 +1383,11 @@
                         </div>
                     </div>
                 </div>
-                <div id="syncPlot" style="height:560px"></div>
+                <div v-if="syncViewMode === 'node'" class="card-body p-0">
+                    <div id="resultsPlotUp" class="analysis-plot-panel" style="height:360px"></div>
+                    <div id="resultsPlotDw" class="analysis-plot-panel analysis-plot-panel-divider" style="height:360px"></div>
+                </div>
+                <div v-else id="syncPlot" style="height:560px"></div>
             </div>
 
             <div v-else class="card mb-4 border-0 shadow-sm" :class="{'maximized': maximizedView === 'analysis'}">
@@ -1574,15 +1585,19 @@
                     syncMasterDelayMs: 100,
                     syncRuntime: { active: false, status: 'idle', slaves: [], paired_count: 0 },
                     syncNodeResults: { master: [] },
+                    syncHistoryMaps: { master: {} },
                     syncPairs: [],
-                    syncViewMode: 'lissajous',
+                    syncViewMode: 'node',
                     syncDisplaySource: 'master',
-                    syncNodeMetric: 'intf_p',
                     syncAxisX: { source: 'master', metric: 'intf_p', channel: 'up' },
                     syncAxisY: { source: '', metric: 'intf_p', channel: 'up' },
                     syncMetricOptions: [
                         { key: 'atom_number', label: 'Atom Number' },
                         { key: 'amplitude', label: 'Max Voltage' },
+                        { key: 'tail_mean', label: 'Tail Mean' },
+                        { key: 'sigma', label: 'Width' },
+                        { key: 'temperature', label: 'Temperature' },
+                        { key: 'arrival_time', label: 'Arrival Time' },
                         { key: 'transition_probability', label: 'Transition Probability' },
                         { key: 'intf_p', label: 'Interferometer P' }
                     ],
@@ -1680,6 +1695,7 @@
                     if (value === 'sync') {
                         if (['lock_in', 'ac_stark'].includes(this.config.mode)) this.config.mode = 'standard';
                         this.fetchSyncConfig();
+                        this.$nextTick(() => this.syncViewMode === 'node' ? this.initPlots() : this.renderSyncPlot());
                     }
                     this.saveState();
                     this.requestPlotResize();
@@ -3670,8 +3686,33 @@ finishScheduledRun(finalStatus = 'IDLE') {
 
                     return { label, fitUp, fitDw, rawUp, rawDw, nameUp, nameDw, suffixUp, suffixDw };
                 },
-                getAggregatedPoints() {
-                    const points = Object.values(this.historyMap).map(item => {
+                accumulateHistoryResult(historyMap, data, params) {
+                    const key = this.getHistoryKey(params);
+                    if (!historyMap[key]) historyMap[key] = this.createHistoryAccumulator(params);
+                    const item = historyMap[key];
+                    item.params = [...params];
+                    item.count += 1;
+                    ['atoms', 'temp', 'sigma', 'amp', 'arrival', 'prob'].forEach(metric => {
+                        const field = metric === 'arrival' ? 'arrival_time'
+                            : (metric === 'prob' ? 'transition_probability'
+                                : (metric === 'amp' ? 'amplitude'
+                                    : (metric === 'atoms' ? 'atom_number' : metric === 'temp' ? 'temperature' : metric)));
+                        item[`sum_${metric}_up`] += (data[`${field}_up`] || 0);
+                        item[`sum_${metric}_dw`] += (data[`${field}_dw`] || 0);
+                        item[`sum_nf_${metric}_up`] += (data[`${field}_up_nofit`] || 0);
+                        item[`sum_nf_${metric}_dw`] += (data[`${field}_dw_nofit`] || 0);
+                    });
+                    item.sum_tail_up += (data.tail_mean_up_raw || 0);
+                    item.sum_tail_dw += (data.tail_mean_dw_raw || 0);
+                    item.sum_nf_tail_up += (data.tail_mean_up_raw || 0);
+                    item.sum_nf_tail_dw += (data.tail_mean_dw_raw || 0);
+                    item.sum_intf_p_up += (data.intf_p1 || 0);
+                    item.sum_intf_p_dw += (data.intf_p2 || 0);
+                    item.sum_nf_intf_p_up += (data.intf_p1_nofit || 0);
+                    item.sum_nf_intf_p_dw += (data.intf_p2_nofit || 0);
+                },
+                aggregateHistoryMap(historyMap) {
+                    const points = Object.values(historyMap || {}).map(item => {
                         const n = item.count || 1;
                         const avg = (sum) => sum / n;
                         return {
@@ -3705,6 +3746,9 @@ finishScheduledRun(finalStatus = 'IDLE') {
                         return 0;
                     });
                     return points;
+                },
+                getAggregatedPoints() {
+                    return this.aggregateHistoryMap(this.historyMap);
                 },
                 build1DSeries(points, metric) {
                     const series = { x: [], fitUp: [], rawUp: [], fitDw: [], rawDw: [] };
@@ -4283,11 +4327,21 @@ finishScheduledRun(finalStatus = 'IDLE') {
                 handleSyncNodeData(data) {
                     const source = data.sync_role === 'master' ? 'master' : String(data.sync_node_id || 'slave');
                     if (!Array.isArray(this.syncNodeResults[source])) this.syncNodeResults[source] = [];
+                    if (!this.syncHistoryMaps[source]) this.syncHistoryMaps[source] = {};
                     const shotIndex = Number(data.sync_shot_index);
                     const rows = this.syncNodeResults[source];
                     const existing = rows.findIndex(item => Number(item.sync_shot_index) === shotIndex);
                     if (existing >= 0) rows.splice(existing, 1, data); else rows.push(data);
                     rows.sort((a, b) => Number(a.sync_shot_index) - Number(b.sync_shot_index));
+                    if (!data.error) {
+                        const params = Array.isArray(data.sync_parameters) && data.sync_parameters.length
+                            ? data.sync_parameters.map(Number)
+                            : (Array.isArray(data.all_parameters) && data.all_parameters.length
+                                ? data.all_parameters.map(Number) : [Number(data.sync_p0)]);
+                        if (params.length && params.every(Number.isFinite)) {
+                            this.accumulateHistoryResult(this.syncHistoryMaps[source], data, params);
+                        }
+                    }
                     if (source === 'master') {
                         this.currentStep = Math.max(this.currentStep, shotIndex + 1);
                         const total = Number(data.total_steps) || 1;
@@ -4306,6 +4360,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     this.$nextTick(() => this.renderSyncPlot());
                 },
                 syncMetricField(metric, channel) {
+                    if (metric === 'tail_mean') return `tail_mean_${channel === 'dw' ? 'dw' : 'up'}_raw`;
                     const suffix = this.showRawData ? '_nofit' : '';
                     if (metric === 'intf_p') return `intf_p${channel === 'dw' ? '2' : '1'}${suffix}`;
                     return `${metric}_${channel === 'dw' ? 'dw' : 'up'}${suffix}`;
@@ -4333,24 +4388,37 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     this.syncReplayCount = this.syncLissajousRows().length;
                     this.renderSyncPlot();
                 },
+                handleSyncViewModeChange() {
+                    if (this.syncReplayPlaying) this.toggleSyncReplay();
+                    this.$nextTick(() => {
+                        if (this.syncViewMode === 'node') this.initPlots();
+                        else this.renderSyncPlot();
+                        this.requestPlotResize();
+                    });
+                },
+                renderSyncNodePlots() {
+                    if (!document.getElementById('resultsPlotUp') || !document.getElementById('resultsPlotDw')) return;
+                    const points = this.aggregateHistoryMap(this.syncHistoryMaps[this.syncDisplaySource] || {});
+                    const metric = this.getMetricConfig();
+                    const dimensions = Math.max(1, Math.min(3, points.reduce(
+                        (maximum, point) => Math.max(maximum, point.params?.length || 1), 1
+                    )));
+                    if (dimensions === 1) {
+                        this.render1DPlot(points, metric);
+                    } else if (dimensions === 2) {
+                        this.render2DHeatmap(points, metric);
+                    } else {
+                        this.syncSliceState(points);
+                        this.render3DPlot(points, metric);
+                    }
+                },
                 renderSyncPlot() {
-                    const element = document.getElementById('syncPlot');
-                    if (!element || typeof Plotly === 'undefined') return;
                     if (this.syncViewMode === 'node') {
-                        const rows = this.syncNodeResults[this.syncDisplaySource] || [];
-                        const makeTrace = (channel, color) => {
-                            const field = this.syncMetricField(this.syncNodeMetric, channel);
-                            const valid = rows.map(row => ({ x: Number(row.sync_p0), y: Number(row[field]), shot: Number(row.sync_shot_index) + 1 }))
-                                .filter(point => Number.isFinite(point.x) && Number.isFinite(point.y));
-                            return { x: valid.map(p => p.x), y: valid.map(p => p.y), text: valid.map(p => `Shot ${p.shot}`), type: 'scatter', mode: 'lines+markers', name: channel === 'up' ? 'UP' : 'DOWN', line: { color }, marker: { size: 7 } };
-                        };
-                        Plotly.react(element, [makeTrace('up', '#dc3545'), makeTrace('dw', '#0d6efd')], {
-                            margin: { l: 70, r: 25, t: 45, b: 60 },
-                            title: `${this.syncDisplaySource === 'master' ? 'Master' : (this.syncSlaves.find(s => s.id === this.syncDisplaySource)?.name || this.syncDisplaySource)} · ${this.syncMetricOptions.find(m => m.key === this.syncNodeMetric)?.label || this.syncNodeMetric}`,
-                            xaxis: { title: 'P0' }, yaxis: { title: this.syncNodeMetric }, legend: { orientation: 'h' }, hovermode: 'closest'
-                        }, { responsive: true, displaylogo: false });
+                        this.renderSyncNodePlots();
                         return;
                     }
+                    const element = document.getElementById('syncPlot');
+                    if (!element || typeof Plotly === 'undefined') return;
                     const rows = this.syncLissajousRows().slice(0, Math.max(0, Number(this.syncReplayCount) || 0));
                     const valid = rows.map(row => ({
                         x: this.syncAxisValue(row.xRecord, this.syncAxisX),
@@ -4368,8 +4436,8 @@ finishScheduledRun(finalStatus = 'IDLE') {
                         name: 'Paired shots'
                     }], {
                         margin: { l: 75, r: 70, t: 45, b: 70 }, title: 'Differential Lissajous',
-                        xaxis: { title: `${this.syncAxisX.source} · ${this.syncAxisX.metric} · ${this.syncAxisX.channel.toUpperCase()}` },
-                        yaxis: { title: `${this.syncAxisY.source} · ${this.syncAxisY.metric} · ${this.syncAxisY.channel.toUpperCase()}`, scaleanchor: null },
+                        xaxis: { title: `${this.syncAxisX.source} | ${this.syncAxisX.metric} | ${this.syncAxisX.channel.toUpperCase()}` },
+                        yaxis: { title: `${this.syncAxisY.source} | ${this.syncAxisY.metric} | ${this.syncAxisY.channel.toUpperCase()}`, scaleanchor: null },
                         hovermode: 'closest'
                     }, { responsive: true, displaylogo: false });
                 },
@@ -4500,29 +4568,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                                 return;
                             }
 
-                            const key = this.getHistoryKey(scannedParams);
-                            if (!this.historyMap[key]) {
-                                this.historyMap[key] = this.createHistoryAccumulator(scannedParams);
-                            }
-                            const item = this.historyMap[key];
-                            item.params = [...scannedParams];
-                            item.count += 1;
-                            ['atoms', 'temp', 'sigma', 'amp', 'arrival', 'prob'].forEach(metric => {
-                                const k = metric === 'arrival' ? 'arrival_time' : (metric === 'prob' ? 'transition_probability' : (metric === 'amp' ? 'amplitude' : (metric === 'atoms' ? 'atom_number' : metric === 'temp' ? 'temperature' : metric)));
-                                item[`sum_${metric}_up`] += (data[`${k}_up`] || 0);
-                                item[`sum_${metric}_dw`] += (data[`${k}_dw`] || 0);
-                                item[`sum_nf_${metric}_up`] += (data[`${k}_up_nofit`] || 0);
-                                item[`sum_nf_${metric}_dw`] += (data[`${k}_dw_nofit`] || 0);
-                            });
-                            item.sum_tail_up += (data.tail_mean_up_raw || 0);
-                            item.sum_tail_dw += (data.tail_mean_dw_raw || 0);
-                            item.sum_nf_tail_up += (data.tail_mean_up_raw || 0);
-                            item.sum_nf_tail_dw += (data.tail_mean_dw_raw || 0);
-                            item.sum_intf_p_up += (data.intf_p1 || 0);
-                            item.sum_intf_p_dw += (data.intf_p2 || 0);
-
-                            item.sum_nf_intf_p_up += (data.intf_p1_nofit || 0);
-                            item.sum_nf_intf_p_dw += (data.intf_p2_nofit || 0);
+                            this.accumulateHistoryResult(this.historyMap, data, scannedParams);
                             this.plotRevision++;
                             this.renderMainPlot();
 
@@ -4575,7 +4621,11 @@ finishScheduledRun(finalStatus = 'IDLE') {
                 if (!uploadSuccess) throw new Error('Master sequence upload failed.');
 
                 this.syncNodeResults = { master: [] };
-                this.syncSlaves.forEach(slave => { this.syncNodeResults[slave.id] = []; });
+                this.syncHistoryMaps = { master: {} };
+                this.syncSlaves.forEach(slave => {
+                    this.syncNodeResults[slave.id] = [];
+                    this.syncHistoryMaps[slave.id] = {};
+                });
                 this.syncPairs = [];
                 this.syncReplayCount = 0;
                 this.syncReplayPlaying = false;
