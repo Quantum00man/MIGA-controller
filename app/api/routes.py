@@ -15,6 +15,7 @@ from typing import Dict, Any, List
 from app.analysis import fitting
 from app.core.experiment_manager import ExperimentManager
 from app.core.data_loader import DataLoader
+from app.core.archive_collection_store import ArchiveCollectionStore
 from app.core.data_manager import DataManager
 from app.core.bragg_export import build_bragg_zip_export, build_single_bragg_export, read_sequence_template
 from app.core.sequence_markers import (
@@ -37,6 +38,11 @@ from app.drivers.dds_table import DdsTableError, validate_dds_table
 from app.models.schemas import (
     AnalysisSettings,
     ArchiveAllanRequest,
+    ArchiveCollectionFolderCreate,
+    ArchiveCollectionFolderUpdate,
+    ArchiveFavoriteBatchRequest,
+    ArchiveFavoriteCreate,
+    ArchiveFavoriteUpdate,
     ArchiveRunReference,
     ArchiveScanFitRequest,
     ArchiveWaveformRequest,
@@ -71,6 +77,7 @@ marker_document_store = SequenceMarkerDocumentStore(config.SEQUENCE_MARKER_DOCUM
 from app.core.schedule_manager import ScheduleManager
 schedule_manager = ScheduleManager(manager)
 data_loader = DataLoader()
+archive_collection_store = ArchiveCollectionStore(config.DATA_BASE_DIR)
 
 
 def _bragg_export_template_path(settings: Dict[str, Any]) -> Path:
@@ -931,6 +938,101 @@ async def save_custom_scan_fitting_model(req: ScanFitModelSaveRequest):
 # --- 4. Archive ---
 @router.get("/archive/tree")
 async def get_archive_tree(): return data_loader.get_archive_tree()
+
+
+@router.get("/archive/collections")
+async def get_archive_collections():
+    return archive_collection_store.snapshot()
+
+
+@router.post("/archive/collections/folders")
+async def create_archive_collection_folder(req: ArchiveCollectionFolderCreate):
+    try:
+        return archive_collection_store.create_folder(req.name, req.parent_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
+
+
+@router.patch("/archive/collections/folders/{folder_id}")
+async def update_archive_collection_folder(folder_id: int, req: ArchiveCollectionFolderUpdate):
+    try:
+        return archive_collection_store.update_folder(folder_id, req.name, req.parent_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
+
+
+@router.delete("/archive/collections/folders/{folder_id}")
+async def delete_archive_collection_folder(folder_id: int):
+    try:
+        archive_collection_store.delete_folder(folder_id)
+        return {"status": "ok"}
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
+
+
+@router.post("/archive/collections/favorites")
+async def create_archive_favorite(req: ArchiveFavoriteCreate):
+    try:
+        entry = data_loader.get_run_entry(req.year, req.month, req.day, req.run_id)
+        preview = data_loader.build_collection_preview(
+            req.year, req.month, req.day, req.run_id, req.preview_metric, req.preview_step
+        )
+        return archive_collection_store.create_favorite(
+            req.folder_id,
+            req.dict(include={"year", "month", "day", "run_id"}),
+            {
+                "source_type": "optimization" if entry.get("has_marker_optimization") else "scan",
+                "original_label": entry.get("run_label") or "",
+                "sequence_name": entry.get("sequence_name") or "",
+                "summary": entry.get("summary") or "",
+            },
+            preview,
+            req.alias,
+            req.note,
+            req.preview_metric,
+            req.preview_step,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
+
+
+@router.patch("/archive/collections/favorites/{favorite_id}")
+async def update_archive_favorite(favorite_id: int, req: ArchiveFavoriteUpdate):
+    try:
+        return archive_collection_store.update_favorite(
+            favorite_id, **req.dict(exclude_unset=True)
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
+
+
+@router.delete("/archive/collections/favorites/{favorite_id}")
+async def delete_archive_favorite(favorite_id: int):
+    try:
+        archive_collection_store.delete_favorite(favorite_id)
+        return {"status": "ok"}
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+
+
+@router.post("/archive/collections/favorites/batch")
+async def batch_archive_favorites(req: ArchiveFavoriteBatchRequest):
+    try:
+        return archive_collection_store.batch_favorites(req.action, req.favorite_ids, req.folder_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
 
 @router.get("/archive/load/{year}/{month}/{day}/{run_id}")
 async def load_archived_run(year: str, month: str, day: str, run_id: str):

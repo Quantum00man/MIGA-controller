@@ -759,6 +759,54 @@
                 white-space: nowrap;
             }
         }
+        .archive-source-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; background: var(--archive-surface-subtle); border: 1px solid var(--archive-border); border-radius: 7px; }
+        .archive-source-switch .btn { border: 0; min-height: 34px; font-size: .78rem; font-weight: 700; }
+        .collection-tree { max-height: 340px; overflow-y: auto; border: 1px solid var(--archive-border-soft); border-radius: 7px; background: #fff; }
+        .collection-tree-row { display: grid; grid-template-columns: 24px minmax(0,1fr) auto; align-items: center; width: 100%; min-height: 38px; padding: 4px 7px; border: 0; border-bottom: 1px solid var(--archive-border-soft); background: transparent; color: var(--archive-text); text-align: left; font-size: .79rem; }
+        .collection-tree-row:last-child { border-bottom: 0; }
+        .collection-tree-row:hover, .collection-tree-row.active { background: var(--archive-accent-soft); color: #084298; }
+        .collection-tree-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .collections-browser { min-height: 430px; }
+        .collections-toolbar { display: grid; grid-template-columns: minmax(220px,1fr) auto auto auto; gap: 8px; align-items: center; }
+        .collections-content { display: grid; grid-template-columns: minmax(0,1fr) 290px; min-height: 330px; border-top: 1px solid var(--archive-border-soft); }
+        .collection-results { padding: 14px; min-width: 0; }
+        .collection-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(245px,1fr)); gap: 10px; }
+        .collection-grid.list-view { display: flex; flex-direction: column; }
+        .collection-item { position: relative; min-width: 0; padding: 12px; border: 1px solid var(--archive-border); border-radius: 7px; background: #fff; cursor: pointer; transition: border-color .12s ease, box-shadow .12s ease; }
+        .collection-item:hover, .collection-item.active { border-color: var(--archive-accent); box-shadow: 0 4px 14px rgba(13,110,253,.1); }
+        .collection-grid.list-view .collection-item { display: grid; grid-template-columns: 28px minmax(180px,1fr) 210px auto; align-items: center; gap: 12px; }
+        .collection-item-check { position: absolute; top: 10px; right: 10px; }
+        .collection-grid.list-view .collection-item-check { position: static; }
+        .collection-mini-plot { width: 100%; height: 72px; margin-top: 9px; border-radius: 5px; background: #f8fafc; }
+        .collection-grid.list-view .collection-mini-plot { height: 54px; margin: 0; }
+        .collection-mini-axis { stroke: #d5dde7; stroke-width: 1; }
+        .collection-mini-up { fill: none; stroke: #dc3545; stroke-width: 2; }
+        .collection-mini-down { fill: none; stroke: #0d6efd; stroke-width: 2; }
+        .collection-preview-panel { padding: 16px; border-left: 1px solid var(--archive-border-soft); background: var(--archive-surface-subtle); }
+        .collection-preview-panel .collection-mini-plot { height: 120px; background: #fff; border: 1px solid var(--archive-border-soft); }
+        .collection-note { min-height: 64px; white-space: pre-wrap; overflow-wrap: anywhere; }
+        .collection-empty { display: grid; place-items: center; min-height: 260px; color: var(--archive-text-muted); text-align: center; }
+        .collection-batch-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 14px; border-top: 1px solid #b6d4fe; border-bottom: 1px solid #b6d4fe; background: #e7f1ff; }
+        .collection-dialog-backdrop { position: fixed; inset: 0; z-index: 1080; display: grid; place-items: center; padding: 18px; background: rgba(20,31,48,.45); }
+        .collection-dialog { width: min(560px,100%); max-height: calc(100vh - 36px); overflow-y: auto; border-radius: 9px; background: #fff; box-shadow: 0 24px 70px rgba(20,31,48,.28); }
+        .collection-folder-picker { max-height: 230px; overflow-y: auto; border: 1px solid var(--archive-border); border-radius: 7px; }
+        .collection-folder-choice { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 40px; padding: 7px 10px; border: 0; border-bottom: 1px solid var(--archive-border-soft); background: #fff; text-align: left; }
+        .collection-folder-choice.active { background: var(--archive-accent-soft); color: #084298; font-weight: 700; }
+        .collection-integrity-ok { color: #146c43; background: #d1e7dd; }
+        .collection-integrity-modified { color: #664d03; background: #fff3cd; }
+        .collection-integrity-missing { color: #842029; background: #f8d7da; }
+        @media (max-width: 1199.98px) {
+            .collections-content { grid-template-columns: 1fr; }
+            .collection-preview-panel { border-left: 0; border-top: 1px solid var(--archive-border-soft); }
+        }
+        @media (max-width: 767.98px) {
+            .collections-toolbar { grid-template-columns: 1fr 1fr; }
+            .collections-toolbar .collection-search { grid-column: 1 / -1; }
+            .collection-grid.list-view .collection-item { display: block; }
+            .collection-grid.list-view .collection-item-check { position: absolute; }
+            .collection-preview-panel { padding: 12px; }
+        }
+
     </style>
 </head>
 
@@ -782,8 +830,17 @@
             <div class="archive-sidebar col-md-3 col-xxl-2 d-flex flex-column gap-3">
 
                 <div class="card">
-                    <div class="card-header"><i class="bi bi-hdd-stack me-2"></i>Run Selection</div>
+                    <div class="card-header"><i class="bi bi-hdd-stack me-2"></i>Archive Source</div>
                     <div class="card-body p-3">
+                        <div class="archive-source-switch mb-3" role="group" aria-label="Archive source">
+                            <button class="btn" :class="archiveSourceMode === 'timeline' ? 'btn-primary text-white' : 'btn-light'" @click="archiveSourceMode = 'timeline'">
+                                <i class="bi bi-clock-history me-1"></i>Timeline
+                            </button>
+                            <button class="btn" :class="archiveSourceMode === 'collections' ? 'btn-primary text-white' : 'btn-light'" @click="openCollections">
+                                <i class="bi bi-star-fill me-1"></i>Collections
+                            </button>
+                        </div>
+                        <div v-if="archiveSourceMode === 'timeline'">
                         <button class="btn btn-success w-100 mb-3 btn-sm fw-bold shadow-sm" @click="loadLatestRun">
                             <i class="bi bi-lightning-charge-fill me-1"></i> Load Latest Run
                         </button>
@@ -830,6 +887,38 @@
                             <span v-if="isLoading" class="spinner-border spinner-border-sm me-1"></span>
                             {{ isLoading ? 'Loading...' : 'Load Data' }}
                         </button>
+                        <button class="btn btn-outline-warning w-100 btn-sm fw-bold mt-2" @click="openFavoriteDialogForTimelineRun"
+                            :disabled="!selectedRun">
+                            <i class="bi bi-star me-1"></i>Favorite selected run
+                        </button>
+                        </div>
+
+                        <div v-else>
+                            <div class="d-flex gap-1 mb-2">
+                                <button class="btn btn-primary btn-sm flex-grow-1 fw-bold" @click="openFolderDialog('create')"><i class="bi bi-folder-plus me-1"></i>New folder</button>
+                                <button class="btn btn-outline-secondary btn-sm" title="Refresh collections" aria-label="Refresh collections" @click="fetchCollections"><i class="bi bi-arrow-clockwise"></i></button>
+                            </div>
+                            <div v-if="collectionError" class="alert alert-danger small py-2">{{ collectionError }}</div>
+                            <div v-if="collectionFolders.length" class="collection-tree" role="tree" aria-label="Collection folders">
+                                <button v-for="folder in visibleCollectionFolders()" :key="folder.id" class="collection-tree-row"
+                                    :class="{active: Number(selectedCollectionFolderId) === Number(folder.id)}"
+                                    :style="{paddingLeft: (7 + folder.depth * 14) + 'px'}" @click="selectCollectionFolder(folder.id)">
+                                    <span @click.stop="toggleCollectionFolder(folder.id)">
+                                        <i class="bi" :class="folder.has_children && !collapsedCollectionFolderIds.includes(folder.id) ? 'bi-chevron-down' : (folder.has_children ? 'bi-chevron-right' : 'bi-dot')"></i>
+                                    </span>
+                                    <span class="collection-tree-name"><i class="bi bi-folder2 me-1"></i>{{ folder.name }}</span>
+                                    <span class="badge bg-light text-dark border">{{ folder.item_count }}</span>
+                                </button>
+                            </div>
+                            <div v-else class="small text-muted border rounded p-3 text-center">Create your first folder to organize paper data.</div>
+                            <div v-if="selectedCollectionFolderId" class="d-grid gap-1 mt-2">
+                                <div class="btn-group btn-group-sm">
+                                    <button class="btn btn-outline-primary" @click="openFolderDialog('create', selectedCollectionFolderId)">Subfolder</button>
+                                    <button class="btn btn-outline-secondary" @click="openFolderDialog('rename', selectedCollectionFolderId)">Rename</button>
+                                    <button class="btn btn-outline-danger" @click="deleteCollectionFolder">Delete</button>
+                                </div>
+                            </div>
+                        </div>
 
                         <div v-if="loadedRunId" class="mt-3 p-2 bg-light rounded border text-center">
                             <div class="text-success fw-bold small mb-1"><i
@@ -839,6 +928,9 @@
                             <div class="small text-muted" style="font-size: 0.75em;" v-if="loadedRunEntry?.summary">{{ loadedRunEntry.summary }}</div>
                             <div class="small text-muted" style="font-size: 0.75em;" v-if="loadedRunEntry?.sequence_name">Sequence: {{ loadedRunEntry.sequence_name }}</div>
                             <div class="small text-muted" style="font-size: 0.75em;">{{ dataCount }} Points</div>
+                            <button class="btn btn-outline-warning btn-sm w-100 mt-2 fw-bold" @click="openFavoriteDialogForLoadedRun">
+                                <i class="bi bi-star me-1"></i>Add to Collections
+                            </button>
                             <button v-if="!isMarkerOptimizationArchive()" class="btn btn-outline-secondary btn-sm w-100 mt-2" @click="exportLoadedSequence"
                                 :disabled="isExportingSequence || !loadedRunEntry?.has_sequence_file">
                                 <span v-if="isExportingSequence" class="spinner-border spinner-border-sm me-1"></span>
@@ -1111,6 +1203,104 @@
                 <div class="mobile-archive-note alert alert-info py-2 mb-2">
                     Phone view supports run selection, 1D plots and Allan analysis. Re-analysis and fitting controls are available on iPad or desktop.
                 </div>
+                <section v-if="archiveSourceMode === 'collections'" class="card collections-browser mb-4 border-0 shadow-sm" aria-labelledby="collections-title">
+                    <div class="card-header bg-white">
+                        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+                            <div>
+                                <div id="collections-title" class="fw-bold text-primary"><i class="bi bi-stars me-2"></i>{{ selectedCollectionFolder()?.name || 'Collections' }}</div>
+                                <div class="small text-muted text-lowercase">{{ collectionBreadcrumb() }}</div>
+                            </div>
+                            <button class="btn btn-sm btn-warning fw-bold" :disabled="!loadedRunRef || !collectionFolders.length" @click="openFavoriteDialogForLoadedRun">
+                                <i class="bi bi-star me-1"></i>Save loaded result
+                            </button>
+                        </div>
+                        <div class="collections-toolbar">
+                            <div class="input-group input-group-sm collection-search">
+                                <span class="input-group-text bg-white"><i class="bi bi-search"></i></span>
+                                <input class="form-control" v-model.trim="collectionSearch" placeholder="Search alias, run, sequence or note" aria-label="Search collections">
+                            </div>
+                            <select class="form-select form-select-sm" v-model="collectionTypeFilter" aria-label="Result type">
+                                <option value="all">All types</option><option value="scan">Scan</option><option value="optimization">Optimization</option>
+                            </select>
+                            <select class="form-select form-select-sm" v-model="collectionIntegrityFilter" aria-label="Integrity">
+                                <option value="all">All states</option><option value="ok">OK</option><option value="modified">Modified</option><option value="missing">Missing</option>
+                            </select>
+                            <div class="btn-group btn-group-sm" role="group" aria-label="Collection layout">
+                                <button class="btn" :class="collectionViewMode === 'grid' ? 'btn-primary' : 'btn-outline-secondary'" @click="setCollectionViewMode('grid')" title="Grid view"><i class="bi bi-grid"></i></button>
+                                <button class="btn" :class="collectionViewMode === 'list' ? 'btn-primary' : 'btn-outline-secondary'" @click="setCollectionViewMode('list')" title="List view"><i class="bi bi-list"></i></button>
+                            </div>
+                        </div>
+                    </div>
+                    <div v-if="selectedCollectionFavoriteIds.length" class="collection-batch-bar">
+                        <strong class="small">{{ selectedCollectionFavoriteIds.length }} selected</strong>
+                        <button class="btn btn-outline-primary btn-sm" @click="openBatchDialog('copy')">Copy</button>
+                        <button class="btn btn-outline-primary btn-sm" @click="openBatchDialog('move')">Move</button>
+                        <button class="btn btn-outline-danger btn-sm" @click="runCollectionBatch('remove')">Remove</button>
+                        <button class="btn btn-link btn-sm text-decoration-none ms-auto" @click="selectedCollectionFavoriteIds = []">Clear</button>
+                    </div>
+                    <div class="collections-content">
+                        <div class="collection-results">
+                            <div v-if="isLoadingCollections" class="collection-empty"><div><span class="spinner-border spinner-border-sm text-primary me-2"></span>Loading collections</div></div>
+                            <div v-else-if="!selectedCollectionFolderId" class="collection-empty"><div><i class="bi bi-folder2-open fs-2 d-block mb-2"></i>Select or create a folder</div></div>
+                            <div v-else-if="!filteredCollectionFavorites().length" class="collection-empty"><div><i class="bi bi-search fs-2 d-block mb-2"></i>No matching results</div></div>
+                            <div v-else class="collection-grid" :class="{'list-view': collectionViewMode === 'list'}">
+                                <article v-for="favorite in filteredCollectionFavorites()" :key="favorite.id" class="collection-item"
+                                    :class="{active: selectedCollectionFavorite?.id === favorite.id}" @click="selectedCollectionFavorite = favorite" @dblclick="loadCollectionFavorite(favorite)">
+                                    <input class="form-check-input collection-item-check" type="checkbox" :checked="selectedCollectionFavoriteIds.includes(favorite.id)"
+                                        :aria-label="'Select ' + favorite.display_name" @click.stop @change="toggleFavoriteSelection(favorite.id)">
+                                    <div class="min-w-0">
+                                        <div class="d-flex align-items-center gap-2 pe-4">
+                                            <i class="bi" :class="favorite.source_type === 'optimization' ? 'bi-diagram-3 text-primary' : 'bi-graph-up text-secondary'"></i>
+                                            <strong class="text-truncate">{{ favorite.display_name }}</strong>
+                                        </div>
+                                        <div class="small text-muted mt-1 font-monospace">{{ favorite.day }}/{{ favorite.run_id }}</div>
+                                        <div class="small text-primary text-truncate" v-if="collectionSearch"><i class="bi bi-folder2 me-1"></i>{{ collectionPathForFolder(favorite.folder_id) }}</div>
+                                        <div class="small text-muted text-truncate">{{ favorite.sequence_name || favorite.summary || 'No sequence metadata' }}</div>
+                                    </div>
+                                    <svg class="collection-mini-plot" viewBox="0 0 160 60" preserveAspectRatio="none" role="img" :aria-label="favorite.preview?.metric_label + ' preview'">
+                                        <line class="collection-mini-axis" x1="5" y1="54" x2="156" y2="54"></line>
+                                        <polyline class="collection-mini-up" :points="previewPolyline(favorite.preview?.up)"></polyline>
+                                        <polyline class="collection-mini-down" :points="previewPolyline(favorite.preview?.down)"></polyline>
+                                    </svg>
+                                    <div class="d-flex align-items-center justify-content-between gap-2 mt-2">
+                                        <span class="badge text-uppercase" :class="'collection-integrity-' + favorite.integrity">{{ favorite.integrity }}</span>
+                                        <span class="small text-muted">{{ favorite.preview?.metric_label || 'Preview unavailable' }}</span>
+                                    </div>
+                                </article>
+                            </div>
+                        </div>
+                        <aside class="collection-preview-panel" aria-label="Quick preview">
+                            <template v-if="selectedCollectionFavorite">
+                                <div class="form-label-small mb-1">Quick preview</div>
+                                <h6 class="fw-bold mb-1">{{ selectedCollectionFavorite.display_name }}</h6>
+                                <div class="small text-muted font-monospace mb-2">{{ selectedCollectionFavorite.source_ref }}</div>
+                                <div class="d-flex flex-wrap gap-1 mb-2">
+                                    <span class="badge bg-light text-dark border text-uppercase">{{ selectedCollectionFavorite.source_type }}</span>
+                                    <span class="badge text-uppercase" :class="'collection-integrity-' + selectedCollectionFavorite.integrity">{{ selectedCollectionFavorite.integrity }}</span>
+                                </div>
+                                <svg class="collection-mini-plot" viewBox="0 0 160 60" preserveAspectRatio="none" role="img" aria-label="Selected result preview">
+                                    <line class="collection-mini-axis" x1="5" y1="54" x2="156" y2="54"></line>
+                                    <polyline class="collection-mini-up" :points="previewPolyline(selectedCollectionFavorite.preview?.up)"></polyline>
+                                    <polyline class="collection-mini-down" :points="previewPolyline(selectedCollectionFavorite.preview?.down)"></polyline>
+                                </svg>
+                                <div class="small mt-2"><span class="text-danger">UP</span> <span class="text-primary ms-2">DOWN</span> · {{ selectedCollectionFavorite.preview?.metric_label }}</div>
+                                <div class="small text-muted mt-3">{{ selectedCollectionFavorite.summary }}</div>
+                                <div class="collection-note small bg-white border rounded p-2 mt-2">{{ selectedCollectionFavorite.note || 'No research note.' }}</div>
+                                <div class="d-grid gap-2 mt-3">
+                                    <button class="btn btn-primary btn-sm fw-bold" :disabled="selectedCollectionFavorite.integrity === 'missing' || isLoading" @click="loadCollectionFavorite(selectedCollectionFavorite)">
+                                        <i class="bi bi-box-arrow-in-down me-1"></i>Load full data
+                                    </button>
+                                    <div class="btn-group btn-group-sm">
+                                        <button class="btn btn-outline-secondary" @click="openFavoriteEditDialog(selectedCollectionFavorite)">Rename and note</button>
+                                        <button class="btn btn-outline-danger" @click="removeCollectionFavorite(selectedCollectionFavorite)">Remove</button>
+                                    </div>
+                                </div>
+                            </template>
+                            <div v-else class="collection-empty" style="min-height:250px"><div><i class="bi bi-cursor fs-3 d-block mb-2"></i>Select a result for quick preview</div></div>
+                        </aside>
+                    </div>
+                </section>
+
                 <section v-if="isMarkerOptimizationArchive()" class="card optimization-overview mb-4 border-0 shadow-sm" aria-labelledby="optimization-overview-title">
                     <div class="card-header bg-white d-flex flex-wrap justify-content-between align-items-start gap-2">
                         <div>
@@ -1442,6 +1632,83 @@
                 </div>
             </div>
         </div>
+
+        <div v-if="collectionDialog.type" class="collection-dialog-backdrop" @click.self="closeCollectionDialog">
+            <section class="collection-dialog" role="dialog" aria-modal="true" :aria-labelledby="'collection-dialog-title'">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span id="collection-dialog-title">
+                        {{ collectionDialog.type === 'folder' ? (collectionDialog.mode === 'rename' ? 'Edit folder' : 'New folder') : (collectionDialog.mode === 'edit' ? 'Edit favorite' : 'Add to Collections') }}
+                    </span>
+                    <button class="btn btn-sm btn-light" aria-label="Close dialog" @click="closeCollectionDialog"><i class="bi bi-x-lg"></i></button>
+                </div>
+                <div class="p-3">
+                    <div v-if="collectionDialog.type === 'folder'">
+                        <label class="form-label-small" for="collection-folder-name">Folder name</label>
+                        <input id="collection-folder-name" class="form-control form-control-sm mb-3" v-model.trim="collectionDialog.name" @keyup.enter="saveCollectionFolder">
+                        <div class="form-label-small mb-1">Parent location</div>
+                        <div class="collection-folder-picker">
+                            <button class="collection-folder-choice" :class="{active: Number(collectionDialog.parent_id) === 0}" @click="collectionDialog.parent_id = 0">
+                                <i class="bi bi-house"></i>Collections root
+                            </button>
+                            <button v-for="folder in collectionFolderOptions(collectionDialog.folder_id)" :key="folder.id" class="collection-folder-choice"
+                                :class="{active: Number(collectionDialog.parent_id) === Number(folder.id)}"
+                                :style="{paddingLeft: (10 + folder.depth * 15) + 'px'}" @click="collectionDialog.parent_id = folder.id">
+                                <i class="bi bi-folder2"></i>{{ folder.name }}
+                            </button>
+                        </div>
+                    </div>
+                    <div v-else>
+                        <div class="small text-muted font-monospace mb-3">{{ collectionDialog.source_ref }}</div>
+                        <label class="form-label-small" for="collection-alias">Favorite name</label>
+                        <input id="collection-alias" class="form-control form-control-sm mb-3" v-model.trim="collectionDialog.alias" placeholder="Uses original run label when empty">
+                        <label class="form-label-small" for="collection-note-input">Research note</label>
+                        <textarea id="collection-note-input" class="form-control form-control-sm mb-3" rows="3" v-model="collectionDialog.note" placeholder="Paper figure, purpose, conditions or follow-up"></textarea>
+                        <template v-if="collectionDialog.mode === 'create'">
+                            <label class="form-label-small" for="collection-preview-metric">Preview metric</label>
+                            <select id="collection-preview-metric" class="form-select form-select-sm mb-3" v-model="collectionDialog.preview_metric">
+                                <option v-for="tab in tabs" :key="tab.id" :value="tab.id">{{ tab.label }}</option>
+                            </select>
+                        </template>
+                        <div class="form-label-small mb-1">Save in folder</div>
+                        <div class="collection-folder-picker">
+                            <button v-for="folder in collectionFolderOptions()" :key="folder.id" class="collection-folder-choice"
+                                :class="{active: Number(collectionDialog.folder_id) === Number(folder.id)}"
+                                :style="{paddingLeft: (10 + folder.depth * 15) + 'px'}" @click="collectionDialog.folder_id = folder.id">
+                                <i class="bi bi-folder2"></i>{{ folder.name }}
+                            </button>
+                        </div>
+                    </div>
+                    <div v-if="collectionDialog.error" class="alert alert-danger small py-2 mt-3 mb-0">{{ collectionDialog.error }}</div>
+                    <div class="d-flex justify-content-end gap-2 mt-3">
+                        <button class="btn btn-outline-secondary btn-sm" @click="closeCollectionDialog">Cancel</button>
+                        <button class="btn btn-primary btn-sm fw-bold" :disabled="collectionDialog.saving" @click="saveCollectionDialog">
+                            <span v-if="collectionDialog.saving" class="spinner-border spinner-border-sm me-1"></span>Save
+                        </button>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <div v-if="collectionBatchDialog.action" class="collection-dialog-backdrop" @click.self="collectionBatchDialog.action = ''">
+            <section class="collection-dialog" role="dialog" aria-modal="true" aria-labelledby="collection-batch-title">
+                <div class="card-header" id="collection-batch-title">{{ collectionBatchDialog.action }} {{ selectedCollectionFavoriteIds.length }} favorites</div>
+                <div class="p-3">
+                    <div class="form-label-small mb-1">Destination folder</div>
+                    <div class="collection-folder-picker">
+                        <button v-for="folder in collectionFolderOptions()" :key="folder.id" class="collection-folder-choice"
+                            :class="{active: Number(collectionBatchDialog.folder_id) === Number(folder.id)}"
+                            :style="{paddingLeft: (10 + folder.depth * 15) + 'px'}" @click="collectionBatchDialog.folder_id = folder.id">
+                            <i class="bi bi-folder2"></i>{{ folder.name }}
+                        </button>
+                    </div>
+                    <div v-if="collectionBatchDialog.error" class="alert alert-danger small py-2 mt-3 mb-0">{{ collectionBatchDialog.error }}</div>
+                    <div class="d-flex justify-content-end gap-2 mt-3">
+                        <button class="btn btn-outline-secondary btn-sm" @click="collectionBatchDialog.action = ''">Cancel</button>
+                        <button class="btn btn-primary btn-sm fw-bold" :disabled="!collectionBatchDialog.folder_id" @click="runCollectionBatch(collectionBatchDialog.action)">Apply</button>
+                    </div>
+                </div>
+            </section>
+        </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/vue@3.2.31/dist/vue.global.js"></script>
@@ -1455,6 +1722,14 @@
             data() {
                 return {
                     archiveTree: {}, selectedYear: '', selectedMonth: '', selectedDay: '', selectedRun: '',
+                    archiveSourceMode: 'timeline',
+                    collectionFolders: [], collectionFavorites: [], isLoadingCollections: false, collectionError: '',
+                    selectedCollectionFolderId: null, collapsedCollectionFolderIds: [],
+                    selectedCollectionFavorite: null, selectedCollectionFavoriteIds: [],
+                    collectionSearch: '', collectionTypeFilter: 'all', collectionIntegrityFilter: 'all',
+                    collectionViewMode: localStorage.getItem('migaArchiveCollectionView') || 'grid',
+                    collectionDialog: { type: '', mode: '', name: '', parent_id: 0, folder_id: null, favorite_id: null, alias: '', note: '', preview_metric: 'prob', preview_step: null, source_ref: '', reference: null, saving: false, error: '' },
+                    collectionBatchDialog: { action: '', folder_id: null, error: '' },
                     isLoading: false, isLoadingAllan: false, isLoadingWaveforms: false, isSaving: false,
                     loadedRunId: '', loadedRunEntry: null, loadedRunRef: null, isExportingSequence: false, errorMsg: '', dataCount: 0, selectedPointKey: '', selectedPointKeys: [], selectedPointLabel: '', selectedCount: 0,
                     currentWaveforms: [],
@@ -1507,6 +1782,7 @@
             },
             mounted() {
                 this.fetchArchiveTree();
+                this.fetchCollections();
                 this.fetchDefaultFitModels();
                 this.fetchDefaultScanFitModels();
                 this.initPlots();
@@ -1516,6 +1792,309 @@
                 document.removeEventListener('click', this.handleDocumentClick, true);
             },
             methods: {
+                async fetchCollections() {
+                    this.isLoadingCollections = true;
+                    this.collectionError = '';
+                    try {
+                        const res = await axios.get('/archive/collections');
+                        this.collectionFolders = Array.isArray(res.data?.folders) ? res.data.folders : [];
+                        this.collectionFavorites = Array.isArray(res.data?.favorites) ? res.data.favorites : [];
+                        if (this.selectedCollectionFolderId && !this.collectionFolders.some(folder => Number(folder.id) === Number(this.selectedCollectionFolderId))) {
+                            this.selectedCollectionFolderId = null;
+                        }
+                        if (!this.selectedCollectionFolderId && this.collectionFolders.length) {
+                            this.selectedCollectionFolderId = this.collectionFolderRows()[0]?.id || null;
+                        }
+                        if (this.selectedCollectionFavorite) {
+                            this.selectedCollectionFavorite = this.collectionFavorites.find(item => item.id === this.selectedCollectionFavorite.id) || null;
+                        }
+                        this.selectedCollectionFavoriteIds = this.selectedCollectionFavoriteIds.filter(id => this.collectionFavorites.some(item => item.id === id));
+                    } catch (error) {
+                        this.collectionError = error.response?.data?.detail || error.message || 'Failed to load collections';
+                    } finally {
+                        this.isLoadingCollections = false;
+                    }
+                },
+                async openCollections() {
+                    this.archiveSourceMode = 'collections';
+                    await this.fetchCollections();
+                },
+                collectionFolderRows() {
+                    const folders = Array.isArray(this.collectionFolders) ? this.collectionFolders : [];
+                    const byParent = new Map();
+                    folders.forEach(folder => {
+                        const parent = Number(folder.parent_id || 0);
+                        if (!byParent.has(parent)) byParent.set(parent, []);
+                        byParent.get(parent).push(folder);
+                    });
+                    byParent.forEach(items => items.sort((a, b) => String(a.name).localeCompare(String(b.name))));
+                    const rows = [];
+                    const visit = (parentId, depth, ancestry) => {
+                        (byParent.get(Number(parentId)) || []).forEach(folder => {
+                            if (ancestry.has(Number(folder.id))) return;
+                            const children = byParent.get(Number(folder.id)) || [];
+                            rows.push({ ...folder, depth, has_children: children.length > 0 });
+                            visit(folder.id, depth + 1, new Set([...ancestry, Number(folder.id)]));
+                        });
+                    };
+                    visit(0, 0, new Set());
+                    return rows;
+                },
+                visibleCollectionFolders() {
+                    const rows = this.collectionFolderRows();
+                    const hidden = new Set();
+                    rows.forEach(folder => {
+                        if (hidden.has(Number(folder.parent_id))) hidden.add(Number(folder.id));
+                        if (this.collapsedCollectionFolderIds.includes(Number(folder.id))) {
+                            rows.filter(candidate => this.collectionIsDescendant(candidate.id, folder.id)).forEach(candidate => hidden.add(Number(candidate.id)));
+                        }
+                    });
+                    return rows.filter(folder => !hidden.has(Number(folder.id)));
+                },
+                collectionIsDescendant(candidateId, ancestorId) {
+                    const lookup = new Map(this.collectionFolders.map(folder => [Number(folder.id), Number(folder.parent_id || 0)]));
+                    let cursor = Number(candidateId);
+                    const seen = new Set();
+                    while (cursor && !seen.has(cursor)) {
+                        if (lookup.get(cursor) === Number(ancestorId)) return true;
+                        seen.add(cursor);
+                        cursor = lookup.get(cursor) || 0;
+                    }
+                    return false;
+                },
+                collectionFolderOptions(excludeId = null) {
+                    return this.collectionFolderRows().filter(folder => Number(folder.id) !== Number(excludeId) && (!excludeId || !this.collectionIsDescendant(folder.id, excludeId)));
+                },
+                toggleCollectionFolder(folderId) {
+                    const id = Number(folderId);
+                    this.collapsedCollectionFolderIds = this.collapsedCollectionFolderIds.includes(id)
+                        ? this.collapsedCollectionFolderIds.filter(value => value !== id)
+                        : [...this.collapsedCollectionFolderIds, id];
+                },
+                selectCollectionFolder(folderId) {
+                    this.selectedCollectionFolderId = Number(folderId);
+                    this.selectedCollectionFavorite = null;
+                    this.selectedCollectionFavoriteIds = [];
+                },
+                selectedCollectionFolder() {
+                    return this.collectionFolders.find(folder => Number(folder.id) === Number(this.selectedCollectionFolderId)) || null;
+                },
+                collectionPathForFolder(folderId) {
+                    const lookup = new Map(this.collectionFolders.map(folder => [Number(folder.id), folder]));
+                    const parts = [];
+                    let cursor = lookup.get(Number(folderId));
+                    const seen = new Set();
+                    while (cursor && !seen.has(Number(cursor.id))) {
+                        parts.unshift(cursor.name);
+                        seen.add(Number(cursor.id));
+                        cursor = lookup.get(Number(cursor.parent_id || 0));
+                    }
+                    return ['Collections', ...parts].join(' / ');
+                },
+                collectionBreadcrumb() {
+                    return this.collectionPathForFolder(this.selectedCollectionFolderId);
+                },
+                filteredCollectionFavorites() {
+                    const query = String(this.collectionSearch || '').trim().toLowerCase();
+                    return this.collectionFavorites.filter(item => {
+                        if (!query && Number(item.folder_id) !== Number(this.selectedCollectionFolderId)) return false;
+                        if (this.collectionTypeFilter !== 'all' && item.source_type !== this.collectionTypeFilter) return false;
+                        if (this.collectionIntegrityFilter !== 'all' && item.integrity !== this.collectionIntegrityFilter) return false;
+                        if (!query) return true;
+                        return [item.alias, item.original_label, item.run_id, item.sequence_name, item.note, item.summary, item.source_ref]
+                            .some(value => String(value || '').toLowerCase().includes(query));
+                    });
+                },
+                setCollectionViewMode(mode) {
+                    this.collectionViewMode = mode === 'list' ? 'list' : 'grid';
+                    localStorage.setItem('migaArchiveCollectionView', this.collectionViewMode);
+                },
+                previewPolyline(values) {
+                    const source = Array.isArray(values) ? values.map(Number) : [];
+                    const valid = source.filter(Number.isFinite);
+                    if (!valid.length) return '';
+                    const min = Math.min(...valid);
+                    const max = Math.max(...valid);
+                    const span = max - min || 1;
+                    const denominator = Math.max(1, source.length - 1);
+                    return source.map((value, index) => {
+                        if (!Number.isFinite(value)) return null;
+                        const x = 5 + (151 * index / denominator);
+                        const y = 52 - (46 * (value - min) / span);
+                        return `${x.toFixed(1)},${y.toFixed(1)}`;
+                    }).filter(Boolean).join(' ');
+                },
+                toggleFavoriteSelection(favoriteId) {
+                    const id = Number(favoriteId);
+                    this.selectedCollectionFavoriteIds = this.selectedCollectionFavoriteIds.includes(id)
+                        ? this.selectedCollectionFavoriteIds.filter(value => value !== id)
+                        : [...this.selectedCollectionFavoriteIds, id];
+                },
+                openFolderDialog(mode, folderId = null) {
+                    const folder = this.collectionFolders.find(item => Number(item.id) === Number(folderId));
+                    this.collectionDialog = {
+                        type: 'folder', mode, name: mode === 'rename' ? (folder?.name || '') : '',
+                        parent_id: mode === 'rename' ? Number(folder?.parent_id || 0) : Number(folderId || 0),
+                        folder_id: mode === 'rename' ? Number(folderId) : null, favorite_id: null,
+                        alias: '', note: '', preview_metric: 'prob', preview_step: null, source_ref: '',
+                        reference: null, saving: false, error: ''
+                    };
+                },
+                openFavoriteDialogForTimelineRun() {
+                    if (!this.selectedRun) return;
+                    if (!this.collectionFolders.length) {
+                        this.archiveSourceMode = 'collections';
+                        this.openFolderDialog('create');
+                        return;
+                    }
+                    const entry = this.getSelectedRunEntry();
+                    const reference = {
+                        year: this.selectedYear, month: this.selectedMonth,
+                        day: this.selectedDay, run_id: this.selectedRun
+                    };
+                    this.collectionDialog = {
+                        type: 'favorite', mode: 'create', name: '', parent_id: 0,
+                        folder_id: Number(this.selectedCollectionFolderId || this.collectionFolderRows()[0]?.id),
+                        favorite_id: null, alias: entry?.run_label || '', note: '',
+                        preview_metric: this.currentTab || 'prob', preview_step: null,
+                        source_ref: Object.values(reference).join('/'), reference,
+                        saving: false, error: ''
+                    };
+                    if (!this.collectionFolders.length) {
+                        this.archiveSourceMode = 'collections';
+                        this.openFolderDialog('create');
+                        return;
+                    }
+                    this.collectionDialog = {
+                        type: 'favorite', mode: 'create', name: '', parent_id: 0,
+                        folder_id: Number(this.selectedCollectionFolderId || this.collectionFolderRows()[0]?.id),
+                        favorite_id: null, alias: this.loadedRunEntry?.run_label || '', note: '',
+                        preview_metric: this.currentTab || 'prob', preview_step: this.selectedOptimizationStep,
+                        source_ref: Object.values(this.loadedRunRef).join('/'), reference: { ...this.loadedRunRef },
+                        saving: false, error: ''
+                    };
+                },
+                openFavoriteEditDialog(favorite) {
+                    this.collectionDialog = {
+                        type: 'favorite', mode: 'edit', name: '', parent_id: 0,
+                        folder_id: Number(favorite.folder_id), favorite_id: Number(favorite.id),
+                        alias: favorite.alias || '', note: favorite.note || '',
+                        preview_metric: favorite.preview_metric || 'prob', preview_step: favorite.preview_step,
+                        source_ref: favorite.source_ref, reference: null, saving: false, error: ''
+                    };
+                },
+                closeCollectionDialog() {
+                    if (!this.collectionDialog.saving) this.collectionDialog.type = '';
+                },
+                async saveCollectionDialog() {
+                    if (this.collectionDialog.type === 'folder') return this.saveCollectionFolder();
+                    return this.saveCollectionFavorite();
+                },
+                async saveCollectionFolder() {
+                    const dialog = this.collectionDialog;
+                    if (!String(dialog.name || '').trim()) {
+                        dialog.error = 'Folder name is required';
+                        return;
+                    }
+                    dialog.saving = true;
+                    dialog.error = '';
+                    try {
+                        if (dialog.mode === 'rename') {
+                            await axios.patch(`/archive/collections/folders/${dialog.folder_id}`, { name: dialog.name, parent_id: Number(dialog.parent_id || 0) });
+                        } else {
+                            const res = await axios.post('/archive/collections/folders', { name: dialog.name, parent_id: Number(dialog.parent_id || 0) });
+                            this.selectedCollectionFolderId = Number(res.data.id);
+                        }
+                        dialog.type = '';
+                        await this.fetchCollections();
+                    } catch (error) {
+                        dialog.error = error.response?.data?.detail || error.message || 'Unable to save folder';
+                    } finally {
+                        dialog.saving = false;
+                    }
+                },
+                async deleteCollectionFolder() {
+                    const folder = this.selectedCollectionFolder();
+                    if (!folder || !window.confirm(`Delete empty folder "${folder.name}"?`)) return;
+                    try {
+                        await axios.delete(`/archive/collections/folders/${folder.id}`);
+                        this.selectedCollectionFolderId = null;
+                        await this.fetchCollections();
+                    } catch (error) {
+                        this.collectionError = error.response?.data?.detail || error.message || 'Unable to delete folder';
+                    }
+                },
+                async saveCollectionFavorite() {
+                    const dialog = this.collectionDialog;
+                    if (!dialog.folder_id) {
+                        dialog.error = 'Select a destination folder';
+                        return;
+                    }
+                    dialog.saving = true;
+                    dialog.error = '';
+                    try {
+                        if (dialog.mode === 'edit') {
+                            await axios.patch(`/archive/collections/favorites/${dialog.favorite_id}`, {
+                                folder_id: Number(dialog.folder_id), alias: dialog.alias, note: dialog.note
+                            });
+                        } else {
+                            await axios.post('/archive/collections/favorites', {
+                                ...dialog.reference, folder_id: Number(dialog.folder_id), alias: dialog.alias,
+                                note: dialog.note, preview_metric: dialog.preview_metric, preview_step: dialog.preview_step
+                            });
+                        }
+                        const favoriteId = dialog.favorite_id;
+                        this.selectedCollectionFolderId = Number(dialog.folder_id);
+                        dialog.type = '';
+                        await this.fetchCollections();
+                        this.selectedCollectionFavorite = favoriteId
+                            ? this.collectionFavorites.find(item => item.id === favoriteId) || null
+                            : this.filteredCollectionFavorites()[0] || null;
+                    } catch (error) {
+                        dialog.error = error.response?.data?.detail || error.message || 'Unable to save favorite';
+                    } finally {
+                        dialog.saving = false;
+                    }
+                },
+                async removeCollectionFavorite(favorite) {
+                    if (!favorite || !window.confirm(`Remove "${favorite.display_name}" from this folder?`)) return;
+                    try {
+                        await axios.delete(`/archive/collections/favorites/${favorite.id}`);
+                        this.selectedCollectionFavorite = null;
+                        await this.fetchCollections();
+                    } catch (error) {
+                        this.collectionError = error.response?.data?.detail || error.message || 'Unable to remove favorite';
+                    }
+                },
+                async loadCollectionFavorite(favorite) {
+                    if (!favorite || favorite.integrity === 'missing') return;
+                    this.selectedYear = favorite.year;
+                    this.selectedMonth = favorite.month;
+                    this.selectedDay = favorite.day;
+                    this.selectedRun = favorite.run_id;
+                    await this.loadRun();
+                },
+                openBatchDialog(action) {
+                    this.collectionBatchDialog = { action, folder_id: Number(this.selectedCollectionFolderId || 0), error: '' };
+                },
+                async runCollectionBatch(action) {
+                    if (action === 'remove' && !window.confirm(`Remove ${this.selectedCollectionFavoriteIds.length} favorites from their folders?`)) return;
+                    try {
+                        const res = await axios.post('/archive/collections/favorites/batch', {
+                            action, favorite_ids: this.selectedCollectionFavoriteIds,
+                            folder_id: action === 'remove' ? null : Number(this.collectionBatchDialog.folder_id)
+                        });
+                        if (res.data?.skipped) this.collectionError = `${res.data.skipped} duplicate or unavailable items were skipped.`;
+                        this.collectionBatchDialog.action = '';
+                        this.selectedCollectionFavoriteIds = [];
+                        this.selectedCollectionFavorite = null;
+                        await this.fetchCollections();
+                    } catch (error) {
+                        const message = error.response?.data?.detail || error.message || 'Batch action failed';
+                        if (this.collectionBatchDialog.action) this.collectionBatchDialog.error = message;
+                        else this.collectionError = message;
+                    }
+                },
                 baseAnalysis() {
                     return {
                         alpha: 0.0151, beta: 0.0188, R: 1.1, K: 7000,

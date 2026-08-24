@@ -547,6 +547,53 @@ class DataLoader:
             "artifacts": artifacts,
         }
 
+    def build_collection_preview(
+        self,
+        year: str,
+        month: str,
+        day: str,
+        run_id: str,
+        metric: str = "prob",
+        workflow_step: Optional[int] = None,
+        max_points: int = 48,
+    ) -> Dict[str, Any]:
+        """Build a compact 1D statistics snapshot for the Collections browser."""
+        loaded = self.load_run(year, month, day, run_id)
+        metric = str(metric or "prob").strip().lower()
+        allowed = {"atoms", "amp", "tail", "sigma", "temp", "arrival", "prob", "intf"}
+        if metric not in allowed:
+            metric = "prob"
+        stats = loaded.get("stats") or []
+        selected_step = None
+        optimization = loaded.get("marker_optimization") or {}
+        steps = optimization.get("steps") or []
+        if steps:
+            selected_step = next(
+                (step for step in steps if int(step.get("index") or 0) == int(workflow_step or 0)),
+                steps[0],
+            )
+            stats = selected_step.get("stats") or []
+        field = "intf_p" if metric == "intf" else metric
+        rows = [row for row in stats if isinstance(row, dict)]
+        if len(rows) > max_points:
+            indices = np.linspace(0, len(rows) - 1, max_points, dtype=int)
+            rows = [rows[int(index)] for index in indices]
+        labels = {
+            "atoms": "Atom Number", "amp": "Max Voltage", "tail": "Tail Mean",
+            "sigma": "Width", "temp": "Temperature", "arrival": "Arrival Time",
+            "prob": "Transition Probability", "intf": "Interferometer",
+        }
+        return self._sanitize_structure({
+            "metric": metric,
+            "metric_label": labels[metric],
+            "x": [row.get("x") for row in rows],
+            "up": [row.get(f"{field}_up") for row in rows],
+            "down": [row.get(f"{field}_dw") for row in rows],
+            "scan_dimensions": int(loaded.get("scan_dimensions") or 1),
+            "step_index": selected_step.get("index") if selected_step else None,
+            "step_name": selected_step.get("marker_name") if selected_step else "",
+        })
+
     def load_run(self, year: str, month: str, day: str, run_id: str) -> Dict[str, Any]:
         run_dir = self._get_run_dir(year, month, day, run_id)
         config_data = self._load_config_data(run_dir)

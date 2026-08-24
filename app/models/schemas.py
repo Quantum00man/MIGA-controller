@@ -487,6 +487,38 @@ class ArchiveRunReference(BaseModel):
     run_id: str
 
 
+class ArchiveCollectionFolderCreate(BaseModel):
+    name: str
+    parent_id: int = Field(0, ge=0)
+
+
+class ArchiveCollectionFolderUpdate(BaseModel):
+    name: Optional[str] = Field(None)
+    parent_id: Optional[int] = Field(None, ge=0)
+
+
+class ArchiveFavoriteCreate(ArchiveRunReference):
+    folder_id: int = Field(..., ge=1)
+    alias: str = Field("")
+    note: str = Field("")
+    preview_metric: str = Field("prob")
+    preview_step: Optional[int] = Field(None)
+
+
+class ArchiveFavoriteUpdate(BaseModel):
+    folder_id: Optional[int] = Field(None, ge=1)
+    alias: Optional[str] = Field(None)
+    note: Optional[str] = Field(None)
+    preview_metric: Optional[str] = Field(None)
+    preview_step: Optional[int] = Field(None)
+
+
+class ArchiveFavoriteBatchRequest(BaseModel):
+    action: str
+    favorite_ids: List[int] = Field(default_factory=list)
+    folder_id: Optional[int] = Field(None, ge=1)
+
+
 class ArchiveWaveformRequest(BaseModel):
     year: str
     month: str
