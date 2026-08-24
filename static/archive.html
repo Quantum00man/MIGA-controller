@@ -1361,11 +1361,17 @@
                             <div><i class="bi bi-bounding-box-circles text-primary me-2"></i><span class="fw-bold">SYNC Analysis</span></div>
                             <div class="d-flex flex-wrap align-items-center gap-2">
                                 <span class="badge" :class="syncManifest.runtime?.status === 'done' ? 'bg-success' : 'bg-secondary'">{{ syncManifest.runtime?.status || 'saved' }}</span>
+                                <span v-if="syncManifest.archive_replication" class="badge" :class="syncManifest.archive_replication.status === 'complete' ? 'bg-success' : (syncManifest.archive_replication.status === 'incomplete' ? 'bg-warning text-dark' : 'bg-secondary')">
+                                    Archive {{ syncManifest.archive_replication.status || 'pending' }}
+                                </span>
+                                <button v-if="canSyncArchive()" type="button" class="btn btn-sm btn-outline-warning" :disabled="syncArchiveRetrying" @click="retrySyncArchive">
+                                    {{ syncArchiveRetrying ? 'Syncing…' : (isLegacySyncArchive() ? 'Sync Historical Archive' : 'Retry Sync') }}
+                                </button>
                                 <select class="form-select form-select-sm" style="width:auto" v-model="syncArchiveViewMode" @change="handleSyncArchiveViewChange">
                                     <option value="node">Node Data</option>
                                     <option value="differential">Differential Replay</option>
                                 </select>
-                                <select v-if="syncArchiveViewMode === 'node'" class="form-select form-select-sm" style="width:auto" v-model="syncArchiveNodeSource" @change="renderSyncArchiveNodePlots">
+                                <select v-if="syncArchiveViewMode === 'node'" class="form-select form-select-sm" style="width:auto" v-model="syncArchiveNodeSource" @change="handleSyncArchiveNodeSourceChange">
                                     <option value="master">Master</option>
                                     <option v-for="slaveId in syncArchiveSlaveOptions()" :key="slaveId" :value="slaveId">{{ syncArchiveNodeLabel(slaveId) }}</option>
                                 </select>
@@ -1428,6 +1434,7 @@
                                 <span v-if="loadedRunId" class="badge" :class="displayMode === 'saved' ? 'bg-secondary' : 'bg-warning text-dark'">
                                     {{ displayMode === 'saved' ? 'Saved Results' : 'Recalculated' }}
                                 </span>
+                                <span v-if="syncManifest" class="badge bg-primary">Node: {{ syncArchiveNodeLabel(loadedSyncNode || 'master') }}</span>
                                 <div class="btn-group btn-group-sm">
                                     <button class="btn btn-outline-primary fw-bold" @click="exportCSV"
                                         :disabled="!loadedRunId"><i class="bi bi-file-earmark-spreadsheet-fill"></i>
@@ -1803,6 +1810,8 @@
                     syncManifest: null,
                     syncArchiveViewMode: 'node',
                     syncArchiveNodeSource: 'master',
+                    loadedSyncNode: '',
+                    syncArchiveRetrying: false,
                     syncArchiveTab: 'atoms',
                     syncArchiveSlaveId: '',
                     syncArchiveAxisX: { metric: 'intf_p', channel: 'up' },
@@ -2431,6 +2440,7 @@
                         month: this.selectedMonth,
                         day: this.selectedDay,
                         run_id: this.selectedRun,
+                        node_id: this.loadedSyncNode || null,
                         new_settings: this.normalizeAnalysis(this.analysis),
                         ...extra
                     };
@@ -3426,7 +3436,8 @@
                     this.isExportingSequence = true;
                     this.errorMsg = '';
                     try {
-                        const res = await axios.get(`/archive/sequence/${ref.year}/${ref.month}/${ref.day}/${ref.run_id}`, {
+                        const sequenceQuery = this.loadedSyncNode ? `?node_id=${encodeURIComponent(this.loadedSyncNode)}` : '';
+                        const res = await axios.get(`/archive/sequence/${ref.year}/${ref.month}/${ref.day}/${ref.run_id}${sequenceQuery}`, {
                             responseType: 'blob'
                         });
                         const blob = res.data instanceof Blob ? res.data : new Blob([res.data], { type: 'text/plain;charset=utf-8;' });
@@ -3631,8 +3642,9 @@
                     await this.loadRun();
                 },
 
-                async loadRun() {
+                async loadRun(requestedNodeId = '') {
                     if (!this.selectedRun) return;
+                    const requestedSyncNode = typeof requestedNodeId === 'string' ? requestedNodeId : '';
                     this.isLoading = true;
                     this.historyMap = {};
                     this.currentCalculatedPoints = [];
@@ -3651,7 +3663,8 @@
                     this.markerOptimization = null;
                     this.syncManifest = null;
                     this.syncArchiveViewMode = 'node';
-                    this.syncArchiveNodeSource = 'master';
+                    this.syncArchiveNodeSource = requestedSyncNode || 'master';
+                    this.loadedSyncNode = requestedSyncNode;
                     this.syncArchiveSlaveId = '';
                     if (this.syncArchiveReplayTimer) clearInterval(this.syncArchiveReplayTimer);
                     this.syncArchiveReplayTimer = null;
@@ -3667,7 +3680,9 @@
                     Plotly.react('waveformPlotDw', [], this.layoutOscDw);
 
                     try {
-                        const url = `/archive/load/${this.selectedYear}/${this.selectedMonth}/${this.selectedDay}/${this.selectedRun}?t=${Date.now()}`;
+                        const query = new URLSearchParams({ t: String(Date.now()) });
+                        if (requestedSyncNode) query.set('node_id', requestedSyncNode);
+                        const url = `/archive/load/${this.selectedYear}/${this.selectedMonth}/${this.selectedDay}/${this.selectedRun}?${query.toString()}`;
                         const res = await axios.get(url);
 
                         // [修复] 安全检查：确保返回的数据是合法的数组
@@ -3682,6 +3697,9 @@
                             : null;
                         this.syncManifest = res.data.sync_manifest && typeof res.data.sync_manifest === 'object'
                             ? res.data.sync_manifest : null;
+                        const localArchiveNode = Object.entries(this.syncManifest?.archive_nodes || {}).find(([, entry]) => entry?.local === true)?.[0] || '';
+                        this.loadedSyncNode = String(res.data.selected_sync_node || requestedSyncNode || localArchiveNode || '');
+                        this.syncArchiveNodeSource = this.loadedSyncNode || 'master';
                         this.syncArchiveSlaveId = this.syncArchiveSlaveOptions()[0] || '';
                         this.syncArchiveReplayCount = this.syncArchivePairs().length;
                         this.selectedOptimizationStep = this.markerOptimization?.steps?.length
@@ -3933,7 +3951,8 @@
                             const res = await axios.post('/archive/waveforms/recalculate', this.buildArchivePayload({ step_indices: indices }));
                             responses = Array.isArray(res.data?.data) ? res.data.data : [];
                         } else {
-                            const requests = indices.map(idx => axios.get(`/archive/waveform/${this.selectedYear}/${this.selectedMonth}/${this.selectedDay}/${this.selectedRun}/${idx}`));
+                            const waveformQuery = this.loadedSyncNode ? `?node_id=${encodeURIComponent(this.loadedSyncNode)}` : '';
+                            const requests = indices.map(idx => axios.get(`/archive/waveform/${this.selectedYear}/${this.selectedMonth}/${this.selectedDay}/${this.selectedRun}/${idx}${waveformQuery}`));
                             const fetched = await Promise.all(requests);
                             responses = fetched.map((res, index) => ({ step: indices[index], ...res.data }));
                         }
@@ -4099,10 +4118,49 @@
                 syncArchiveSlaveOptions() {
                     const pairs = Array.isArray(this.syncManifest?.pairs) ? this.syncManifest.pairs : [];
                     const savedSlaves = Object.keys(this.syncManifest?.node_results?.slaves || {});
+                    const replicatedSlaves = Object.keys(this.syncManifest?.archive_nodes || {}).filter(nodeId => nodeId !== 'master');
                     return [...new Set([
+                        ...replicatedSlaves,
                         ...savedSlaves,
                         ...pairs.map(pair => String(pair.slave_node_id || '')).filter(Boolean),
                     ])];
+                },
+                async handleSyncArchiveNodeSourceChange() {
+                    const source = this.syncArchiveNodeSource || 'master';
+                    const archiveEntry = this.syncManifest?.archive_nodes?.[source];
+                    if (archiveEntry) {
+                        await this.loadRun(source);
+                        return;
+                    }
+                    this.renderSyncArchiveNodePlots();
+                },
+                isLegacySyncArchive() {
+                    if (!this.syncManifest) return false;
+                    const archiveNodes = this.syncManifest.archive_nodes;
+                    return (!archiveNodes || Object.keys(archiveNodes).length === 0)
+                        && Boolean(this.syncManifest.runtime?.sync_run_id)
+                        && Array.isArray(this.syncManifest.runtime?.slaves)
+                        && this.syncManifest.runtime.slaves.length > 0;
+                },
+                canSyncArchive() {
+                    if (!this.syncManifest || this.syncManifest.runtime?.active) return false;
+                    if (this.isLegacySyncArchive()) return true;
+                    return this.syncManifest.archive_nodes?.master?.local === true
+                        && this.syncManifest.archive_replication
+                        && this.syncManifest.archive_replication.status !== 'complete';
+                },
+                async retrySyncArchive() {
+                    if (this.syncArchiveRetrying || !this.selectedRun) return;
+                    this.syncArchiveRetrying = true;
+                    this.errorMsg = '';
+                    try {
+                        await axios.post(`/archive/sync/retry/${this.selectedYear}/${this.selectedMonth}/${this.selectedDay}/${this.selectedRun}`);
+                        await this.loadRun(this.loadedSyncNode || 'master');
+                    } catch (e) {
+                        this.errorMsg = 'Archive sync retry failed: ' + (e.response?.data?.detail || e.message || 'Unknown error');
+                    } finally {
+                        this.syncArchiveRetrying = false;
+                    }
                 },
                 syncArchiveNodeRows(source = this.syncArchiveNodeSource) {
                     const nodes = this.syncManifest?.node_results;
@@ -5196,6 +5254,11 @@
 
                 async saveOverwrite() {
                     if (!this.selectedRun) return;
+                    const selectedNodeEntry = this.loadedSyncNode ? this.syncManifest?.archive_nodes?.[this.loadedSyncNode] : null;
+                    if (selectedNodeEntry && selectedNodeEntry.local === false) {
+                        alert("Replicated node archives are read-only on this controller. Overwrite them on their originating controller.");
+                        return;
+                    }
                     if (!confirm("OVERWRITE results?")) return;
                     this.isSaving = true;
                     try {

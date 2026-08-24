@@ -1,24 +1,35 @@
 import base64
+import hashlib
 import json
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import numpy as np
+
 from app.core.experiment_manager import ExperimentManager
+from app.core.data_loader import DataLoader
 from app.core.sync_manager import SyncManager
 
 
 class FakeResponse:
-    def __init__(self, payload=None):
+    def __init__(self, payload=None, content=b"", headers=None):
         self.payload = payload or {"ready": True}
+        self.content = content
+        self.headers = headers or {}
 
     def raise_for_status(self):
         return None
 
     def json(self):
         return self.payload
+
+    def iter_content(self, chunk_size=1024 * 1024):
+        for offset in range(0, len(self.content), chunk_size):
+            yield self.content[offset:offset + chunk_size]
 
 
 class FakeManager:
@@ -271,6 +282,156 @@ class SyncManagerTests(unittest.TestCase):
                 sync.authorize("wrong", "192.168.1.10")
             with self.assertRaises(PermissionError):
                 sync.authorize("secret", "192.168.1.11")
+
+    def test_full_archive_bundle_is_installed_under_sync_node(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "2026" / "08" / "24" / "run01_20260824"
+            (run_dir / "waveforms").mkdir(parents=True)
+            (run_dir / "config.json").write_text(json.dumps({"sync_run_id": "sync_test"}), encoding="utf-8")
+            (run_dir / "results.csv").write_text("Step,Parameter_P0\n0,1\n", encoding="utf-8")
+            (run_dir / "sequence.mot").write_text("+10us WAIT = OFF (1)\n", encoding="utf-8")
+            np.savez_compressed(
+                run_dir / "waveforms" / "step_0000.npz",
+                raw_up=[1.0, 2.0], raw_dw=[3.0, 4.0], fit_up=[1.1, 2.1], fit_dw=[3.1, 4.1],
+                time_axis=[0.0, 0.1], window_up=[0.0, 0.1], window_dw=[0.0, 0.1],
+            )
+            manager = FakeManager(run_dir)
+            sync = SyncManager(manager)
+            sync._runtime.update({"sync_run_id": "sync_test", "master_run_dir": str(run_dir)})
+
+            bundle, metadata = sync.build_archive_bundle("sync_test")
+            try:
+                installed = sync._install_archive_bundle(run_dir, "slave_b", bundle, metadata["sha256"])
+            finally:
+                bundle.unlink(missing_ok=True)
+
+            replica = run_dir / installed["path"]
+            self.assertEqual((replica / "results.csv").read_text(encoding="utf-8"), "Step,Parameter_P0\n0,1\n")
+            self.assertTrue((replica / "waveforms" / "step_0000.npz").is_file())
+            self.assertFalse((replica / "sync_nodes").exists())
+
+            manifest = {
+                "archive_nodes": {
+                    "master": {"path": "."},
+                    "slave_b": {"path": installed["path"]},
+                }
+            }
+            (run_dir / "sync_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+            loader = DataLoader()
+            loader.base_dir = Path(tmp)
+            sequence_path, _ = loader.get_archived_sequence_file(
+                "2026", "08", "24", "run01_20260824", node_id="slave_b"
+            )
+            self.assertEqual(sequence_path.read_text(encoding="utf-8"), "+10us WAIT = OFF (1)\n")
+            waveform = loader.load_waveform(
+                "2026", "08", "24", "run01_20260824", 0, node_id="slave_b"
+            )
+            self.assertEqual(waveform["raw_up"], [1.0, 2.0])
+
+    def test_archive_extraction_rejects_parent_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            archive_path = Path(tmp) / "unsafe.zip"
+            target = Path(tmp) / "target"
+            target.mkdir()
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                archive.writestr("../escaped.txt", "unsafe")
+            with self.assertRaises(ValueError):
+                SyncManager._extract_archive_safely(archive_path, target)
+            self.assertFalse((Path(tmp) / "escaped.txt").exists())
+
+    def test_successful_replication_pulls_slave_and_pushes_master(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run01_20260824"
+            (run_dir / "waveforms").mkdir(parents=True)
+            (run_dir / "config.json").write_text(json.dumps({"sync_run_id": "sync_test"}), encoding="utf-8")
+            (run_dir / "results.csv").write_text("master", encoding="utf-8")
+            slave_zip = Path(tmp) / "slave.zip"
+            with zipfile.ZipFile(slave_zip, "w") as archive:
+                archive.writestr("config.json", json.dumps({"sync_run_id": "sync_test"}))
+                archive.writestr("results.csv", "slave")
+                archive.writestr("waveforms/step_0000.npz", "slave-waveform")
+            slave_bytes = slave_zip.read_bytes()
+            slave_sha = hashlib.sha256(slave_bytes).hexdigest()
+
+            manager = FakeManager(run_dir)
+            sync = SyncManager(manager)
+            sync._runtime.update({
+                "sync_run_id": "sync_test",
+                "master_run_dir": str(run_dir),
+                "slaves": [{"node_id": "slave_b", "name": "Node B", "base_url": "http://slave"}],
+            })
+            calls = []
+
+            def get(url, **kwargs):
+                return FakeResponse(
+                    content=slave_bytes,
+                    headers={"X-MIGA-Archive-SHA256": slave_sha, "X-MIGA-Archive-Run-Id": "run07_20260824"},
+                )
+
+            def post(url, **kwargs):
+                calls.append(url)
+                return FakeResponse(payload={"node_id": "master", "status": "installed"})
+
+            with patch("app.core.sync_manager.requests.get", side_effect=get), patch(
+                "app.core.sync_manager.requests.post", side_effect=post
+            ):
+                replication = sync._replicate_archives()
+
+            self.assertEqual(replication["status"], "complete")
+            self.assertEqual((run_dir / "sync_nodes" / "slave_b" / "results.csv").read_text(encoding="utf-8"), "slave")
+            self.assertEqual(calls, ["http://slave/sync/node/archive/sync_test/master"])
+
+    def test_replication_status_update_preserves_saved_pairs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            original = {
+                "runtime": {"sync_run_id": "sync_test", "status": "done"},
+                "pairs": [{"sync_shot_index": 0}],
+                "node_results": {"master": [{"sync_shot_index": 0}]},
+            }
+            (run_dir / "sync_manifest.json").write_text(json.dumps(original), encoding="utf-8")
+            sync = SyncManager(FakeManager(run_dir))
+            sync._update_replication_manifest(
+                run_dir,
+                {"sync_run_id": "sync_test", "slaves": []},
+                {"status": "incomplete", "nodes": {}},
+            )
+            saved = json.loads((run_dir / "sync_manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(saved["pairs"], original["pairs"])
+            self.assertEqual(saved["node_results"], original["node_results"])
+            self.assertEqual(saved["archive_replication"]["status"], "incomplete")
+
+    def test_legacy_master_manifest_can_start_historical_replication(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            legacy = {
+                "runtime": {
+                    "sync_run_id": "sync_legacy",
+                    "status": "done",
+                    "slaves": [{"node_id": "slave_b", "base_url": "http://slave"}],
+                },
+                "pairs": [{"sync_shot_index": 0}],
+            }
+            (run_dir / "sync_manifest.json").write_text(json.dumps(legacy), encoding="utf-8")
+            sync = SyncManager(FakeManager(run_dir))
+            with patch.object(sync, "_replicate_archives", return_value={"status": "complete"}) as replicate:
+                result = sync.retry_archive_replication(run_dir)
+            self.assertEqual(result["status"], "complete")
+            passed_runtime = replicate.call_args.args[1]
+            self.assertEqual(passed_runtime["sync_run_id"], "sync_legacy")
+            self.assertEqual(passed_runtime["master_run_dir"], str(run_dir.resolve()))
+
+    def test_replica_manifest_cannot_start_master_replication(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            replica = {
+                "runtime": {"sync_run_id": "sync_test", "slaves": [{"node_id": "slave_b"}]},
+                "archive_nodes": {"master": {"local": False, "path": "sync_nodes/master"}},
+            }
+            (run_dir / "sync_manifest.json").write_text(json.dumps(replica), encoding="utf-8")
+            sync = SyncManager(FakeManager(run_dir, role="slave"))
+            with self.assertRaises(ValueError):
+                sync.retry_archive_replication(run_dir)
 
 
 if __name__ == "__main__":

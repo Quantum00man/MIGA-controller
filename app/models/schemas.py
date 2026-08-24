@@ -503,6 +503,7 @@ class SyncStartRequest(BaseModel):
 class SyncNodePrepareRequest(BaseModel):
     sync_run_id: str
     master_node_id: str
+    slave_node_id: str = Field("")
     scan_config: ScanConfig
     shot_plan: List[List[Any]] = Field(default_factory=list)
     sequence_name: str = Field("slave.mot")
@@ -529,6 +530,7 @@ class ReAnalysisRequest(BaseModel):
     month: str
     day: str
     run_id: str
+    node_id: Optional[str] = Field(None)
     new_settings: ArchiveAnalysisSettings
     updated_data: Optional[List[Dict[str, Any]]] = None
 
@@ -577,6 +579,7 @@ class ArchiveWaveformRequest(BaseModel):
     month: str
     day: str
     run_id: str
+    node_id: Optional[str] = Field(None)
     step_indices: List[int]
     new_settings: ArchiveAnalysisSettings
 
@@ -586,6 +589,7 @@ class ArchiveAllanRequest(BaseModel):
     month: str
     day: str
     run_id: str
+    node_id: Optional[str] = Field(None)
     order: int = Field(1, ge=1)
     display_mode: str = Field("saved")
     p0_min: Optional[float] = Field(None)

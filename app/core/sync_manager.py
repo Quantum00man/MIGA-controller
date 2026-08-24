@@ -5,8 +5,12 @@ from copy import deepcopy
 from datetime import datetime
 import base64
 import binascii
+import hashlib
 import json
 from pathlib import Path
+import re
+import shutil
+import tempfile
 import threading
 import time
 from typing import Any, Deque, Dict, List, Optional, Tuple
@@ -14,6 +18,7 @@ from urllib.parse import urlparse
 from uuid import uuid4
 
 import requests
+import zipfile
 
 import config
 from app.core.experiment_manager import ExperimentManager
@@ -68,7 +73,168 @@ class SyncManager:
             "started_at_ms": None,
             "finished_at_ms": None,
             "stop_requested": False,
+            "archive_replication": {"status": "idle", "nodes": {}},
         }
+
+    @staticmethod
+    def _safe_node_id(value: Any) -> str:
+        normalized = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value or "").strip()).strip("._")
+        if not normalized:
+            raise ValueError("Sync archive node id is empty")
+        return normalized[:96]
+
+    def _find_sync_run_dir(self, sync_run_id: str) -> Path:
+        with self._lock:
+            prepared = self._prepared.get(sync_run_id) or {}
+            prepared_dir = prepared.get("run_dir")
+            runtime_dir = self._runtime.get("master_run_dir") if self._runtime.get("sync_run_id") == sync_run_id else None
+        for candidate in (prepared_dir, runtime_dir):
+            if candidate and Path(candidate).is_dir():
+                return Path(candidate).resolve()
+
+        base_dir = Path(config.DATA_BASE_DIR).resolve()
+        for config_path in base_dir.glob("*/*/*/run*/config.json"):
+            try:
+                payload = json.loads(config_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if str(payload.get("sync_run_id") or "") == str(sync_run_id):
+                return config_path.parent.resolve()
+        raise FileNotFoundError(f"Archive for Sync run {sync_run_id} was not found")
+
+    @staticmethod
+    def _archive_checksum(path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    def build_archive_bundle(self, sync_run_id: str) -> Tuple[Path, Dict[str, Any]]:
+        run_dir = self._find_sync_run_dir(sync_run_id)
+        temp = tempfile.NamedTemporaryFile(prefix="miga_sync_archive_", suffix=".zip", delete=False)
+        temp_path = Path(temp.name)
+        temp.close()
+        try:
+            with zipfile.ZipFile(temp_path, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True) as archive:
+                for source in sorted(run_dir.rglob("*")):
+                    relative = source.relative_to(run_dir)
+                    if not source.is_file() or "sync_nodes" in relative.parts:
+                        continue
+                    if source.name.endswith((".tmp", ".part")):
+                        continue
+                    archive.write(source, relative.as_posix())
+            checksum = self._archive_checksum(temp_path)
+            return temp_path, {
+                "sync_run_id": sync_run_id,
+                "run_id": run_dir.name,
+                "sha256": checksum,
+                "size_bytes": temp_path.stat().st_size,
+            }
+        except Exception:
+            temp_path.unlink(missing_ok=True)
+            raise
+
+    @staticmethod
+    def _extract_archive_safely(archive_path: Path, target: Path) -> None:
+        target_root = target.resolve()
+        with zipfile.ZipFile(archive_path, "r") as archive:
+            for member in archive.infolist():
+                destination = (target / member.filename).resolve()
+                if destination != target_root and target_root not in destination.parents:
+                    raise ValueError("Sync archive contains an unsafe path")
+                if member.is_dir():
+                    destination.mkdir(parents=True, exist_ok=True)
+                    continue
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                with archive.open(member, "r") as source, destination.open("wb") as output:
+                    shutil.copyfileobj(source, output, length=1024 * 1024)
+
+    def _install_archive_bundle(
+        self,
+        run_dir: Path,
+        source_node_id: str,
+        archive_path: Path,
+        expected_sha256: str = "",
+    ) -> Dict[str, Any]:
+        source_id = self._safe_node_id(source_node_id)
+        checksum = self._archive_checksum(archive_path)
+        if expected_sha256 and checksum.lower() != str(expected_sha256).strip().lower():
+            raise ValueError("Sync archive checksum mismatch")
+        sync_root = run_dir / "sync_nodes"
+        sync_root.mkdir(parents=True, exist_ok=True)
+        staging = Path(tempfile.mkdtemp(prefix=f".{source_id}_", dir=sync_root))
+        target = sync_root / source_id
+        backup = sync_root / f".{source_id}.previous"
+        try:
+            self._extract_archive_safely(archive_path, staging)
+            if not (staging / "results.csv").is_file() or not (staging / "config.json").is_file():
+                raise ValueError("Sync archive is missing results.csv or config.json")
+            if backup.exists():
+                shutil.rmtree(backup)
+            if target.exists():
+                target.replace(backup)
+            staging.replace(target)
+            if backup.exists():
+                shutil.rmtree(backup)
+        except Exception:
+            if staging.exists():
+                shutil.rmtree(staging)
+            if backup.exists() and not target.exists():
+                backup.replace(target)
+            raise
+        return {
+            "node_id": source_id,
+            "path": f"sync_nodes/{source_id}",
+            "sha256": checksum,
+            "size_bytes": archive_path.stat().st_size,
+            "received_at_ms": int(time.time() * 1000),
+        }
+
+    def install_node_archive(
+        self,
+        sync_run_id: str,
+        source_node_id: str,
+        archive_path: Path,
+        expected_sha256: str = "",
+    ) -> Dict[str, Any]:
+        run_dir = self._find_sync_run_dir(sync_run_id)
+        installed = self._install_archive_bundle(run_dir, source_node_id, archive_path, expected_sha256)
+        if self._safe_node_id(source_node_id) == "master":
+            source_manifest_path = run_dir / installed["path"] / "sync_manifest.json"
+            try:
+                manifest = json.loads(source_manifest_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                manifest = {"runtime": {"sync_run_id": sync_run_id}, "pairs": [], "node_results": {}}
+            with self._lock:
+                prepared = self._prepared.get(sync_run_id) or {}
+            local_id = self._safe_node_id(prepared.get("slave_node_id") or self.manager.get_settings().get("sync_node_name") or "slave")
+            source_replication = manifest.get("archive_replication") or {}
+            master_copy_of_local = (source_replication.get("nodes") or {}).get(local_id) or {}
+            bidirectional_complete = master_copy_of_local.get("pull_status") == "complete"
+            manifest["archive_nodes"] = {
+                "master": {**installed, "role": "master", "local": False},
+                local_id: {"node_id": local_id, "role": "slave", "local": True, "path": ".", "run_id": run_dir.name},
+            }
+            manifest["archive_replication"] = {
+                "status": "complete" if bidirectional_complete else "incomplete",
+                "updated_at_ms": int(time.time() * 1000),
+                "nodes": {
+                    "master": {"status": "complete", "push_status": "complete", **installed},
+                    local_id: {
+                        "status": "complete" if bidirectional_complete else "incomplete",
+                        "pull_status": master_copy_of_local.get("pull_status") or "unknown",
+                    },
+                },
+            }
+            self._atomic_write_json(run_dir / "sync_manifest.json", manifest)
+        return installed
+
+    @staticmethod
+    def _atomic_write_json(path: Path, payload: Dict[str, Any]) -> None:
+        temp_path = path.with_suffix(path.suffix + ".tmp")
+        temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        temp_path.replace(path)
 
     def settings_snapshot(self) -> Dict[str, Any]:
         settings = self.manager.get_settings()
@@ -207,6 +373,9 @@ class SyncManager:
             raise ValueError(result.get("message") or "Slave scan failed to start")
         with self._lock:
             self._node_active_sync_run_id = sync_run_id
+            if sync_run_id in self._prepared:
+                self._prepared[sync_run_id]["run_id"] = self.manager.data_manager.current_run_id_str
+                self._prepared[sync_run_id]["run_dir"] = str(self.manager.data_manager.current_run_dir)
         return {
             **result,
             "sync_run_id": sync_run_id,
@@ -297,7 +466,7 @@ class SyncManager:
         seen_urls = set()
 
         for raw_slave in slaves:
-            node_id = str(raw_slave.get("node_id") or raw_slave.get("name") or "slave").strip()
+            node_id = self._safe_node_id(raw_slave.get("node_id") or raw_slave.get("name") or "slave")
             base_url = self._normalize_url(raw_slave.get("base_url"))
             if node_id in seen_node_ids:
                 raise ValueError(f"Duplicate Slave node id: {node_id}")
@@ -308,6 +477,7 @@ class SyncManager:
             prepare_payload = {
                 "sync_run_id": sync_run_id,
                 "master_node_id": node_name,
+                "slave_node_id": node_id,
                 "scan_config": scan_config,
                 "shot_plan": shot_plan,
                 "sequence_name": raw_slave.get("sequence_name") or "slave.mot",
@@ -374,6 +544,8 @@ class SyncManager:
                     "finished_at_ms": None,
                     "stop_requested": False,
                     "master_run_id": "",
+                    "master_run_dir": "",
+                    "archive_replication": {"status": "pending", "nodes": {}},
                 }
             result = self.manager.start_scan(scan_config, parameters_override=master_parameters)
             if result.get("status") == "error":
@@ -399,6 +571,7 @@ class SyncManager:
             self._runtime["message"] = "SYNC RUNNING"
             self._runtime["slaves"] = slave_states
             self._runtime["master_run_id"] = self.manager.data_manager.current_run_id_str
+            self._runtime["master_run_dir"] = str(self.manager.data_manager.current_run_dir)
         self._write_archive_snapshot()
         self._monitor_thread = threading.Thread(target=self._monitor_master, name="miga-sync-monitor", daemon=True)
         self._monitor_thread.start()
@@ -576,9 +749,158 @@ class SyncManager:
             self._runtime["message"] = failed_reason or ("SYNC STOPPED" if was_stopped else "SYNC DONE")
             self._runtime["finished_at_ms"] = int(time.time() * 1000)
         self._write_archive_snapshot()
+        if not failed_reason and not was_stopped:
+            self._replicate_archives()
+
+    def _replicate_archives(self, run_dir: Optional[Path] = None, runtime: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        with self._lock:
+            state = deepcopy(runtime or self._runtime)
+        sync_run_id = str(state.get("sync_run_id") or "")
+        if not sync_run_id:
+            raise ValueError("Sync run id is missing")
+        master_run_dir = Path(run_dir or state.get("master_run_dir") or self._find_sync_run_dir(sync_run_id)).resolve()
+        replication = {
+            "status": "running",
+            "started_at_ms": int(time.time() * 1000),
+            "updated_at_ms": int(time.time() * 1000),
+            "nodes": {},
+        }
+        with self._lock:
+            self._runtime["archive_replication"] = deepcopy(replication)
+        self._update_replication_manifest(master_run_dir, state, replication)
+
+        for slave in state.get("slaves") or []:
+            node_id = self._safe_node_id(slave.get("node_id") or slave.get("name"))
+            node_state = {
+                "status": "running", "pull_status": "pulling", "push_status": "pending",
+                "name": slave.get("name") or node_id,
+            }
+            replication["nodes"][node_id] = node_state
+            temp_path = None
+            try:
+                response = requests.get(
+                    f"{slave['base_url']}/sync/node/archive/{sync_run_id}",
+                    headers=self._headers(), timeout=(8.0, 300.0), stream=True,
+                )
+                response.raise_for_status()
+                with tempfile.NamedTemporaryFile(prefix=f"miga_{node_id}_", suffix=".zip", delete=False) as handle:
+                    temp_path = Path(handle.name)
+                    for chunk in response.iter_content(chunk_size=1024 * 1024):
+                        if chunk:
+                            handle.write(chunk)
+                installed = self._install_archive_bundle(
+                    master_run_dir,
+                    node_id,
+                    temp_path,
+                    response.headers.get("X-MIGA-Archive-SHA256", ""),
+                )
+                node_state.update({"pull_status": "complete", "remote_run_id": response.headers.get("X-MIGA-Archive-Run-Id", ""), **installed})
+            except Exception as exc:
+                node_state.update({"pull_status": "failed", "pull_error": str(exc)})
+            finally:
+                if temp_path:
+                    temp_path.unlink(missing_ok=True)
+
+        replication["updated_at_ms"] = int(time.time() * 1000)
+        with self._lock:
+            self._runtime["archive_replication"] = deepcopy(replication)
+        self._update_replication_manifest(master_run_dir, state, replication)
+
+        master_bundle = None
+        try:
+            master_bundle, master_meta = self.build_archive_bundle(sync_run_id)
+            for slave in state.get("slaves") or []:
+                node_id = self._safe_node_id(slave.get("node_id") or slave.get("name"))
+                node_state = replication["nodes"].setdefault(node_id, {})
+                node_state["push_status"] = "pushing"
+                try:
+                    with master_bundle.open("rb") as handle:
+                        response = requests.post(
+                            f"{slave['base_url']}/sync/node/archive/{sync_run_id}/master",
+                            headers={**self._headers(), "X-MIGA-Archive-SHA256": master_meta["sha256"]},
+                            files={"archive": ("master.zip", handle, "application/zip")},
+                            timeout=(8.0, 300.0),
+                        )
+                    response.raise_for_status()
+                    node_state["push_status"] = "complete"
+                    node_state["master_push"] = response.json()
+                except Exception as exc:
+                    node_state.update({"push_status": "failed", "push_error": str(exc)})
+        except Exception as exc:
+            for node_state in replication["nodes"].values():
+                if node_state.get("push_status") != "complete":
+                    node_state.update({"push_status": "failed", "push_error": str(exc)})
+        finally:
+            if master_bundle:
+                master_bundle.unlink(missing_ok=True)
+
+        for node_state in replication["nodes"].values():
+            node_state["status"] = "complete" if (
+                node_state.get("pull_status") == "complete" and node_state.get("push_status") == "complete"
+            ) else "incomplete"
+        replication["status"] = "complete" if replication["nodes"] and all(
+            item.get("status") == "complete" for item in replication["nodes"].values()
+        ) else "incomplete"
+        replication["updated_at_ms"] = int(time.time() * 1000)
+        with self._lock:
+            self._runtime["archive_replication"] = deepcopy(replication)
+        self._update_replication_manifest(master_run_dir, state, replication)
+        return deepcopy(replication)
+
+    def _update_replication_manifest(
+        self,
+        run_dir: Path,
+        runtime: Dict[str, Any],
+        replication: Dict[str, Any],
+    ) -> None:
+        manifest_path = Path(run_dir) / "sync_manifest.json"
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            manifest = {"runtime": deepcopy(runtime), "pairs": [], "node_results": {}}
+        saved_runtime = dict(manifest.get("runtime") or runtime)
+        saved_runtime["archive_replication"] = deepcopy(replication)
+        manifest["runtime"] = saved_runtime
+        manifest["archive_replication"] = deepcopy(replication)
+        archive_nodes = dict(manifest.get("archive_nodes") or {})
+        archive_nodes["master"] = {
+            "node_id": "master", "role": "master", "local": True,
+            "path": ".", "run_id": Path(run_dir).name,
+        }
+        for slave in runtime.get("slaves") or []:
+            node_id = self._safe_node_id(slave.get("node_id") or slave.get("name"))
+            node_state = replication.get("nodes", {}).get(node_id) or {}
+            replica_path = Path(run_dir) / "sync_nodes" / node_id
+            if replica_path.is_dir():
+                archive_nodes[node_id] = {
+                    "node_id": node_id, "role": "slave", "local": False,
+                    "path": f"sync_nodes/{node_id}",
+                    "run_id": node_state.get("remote_run_id") or node_id,
+                    "name": slave.get("name") or node_id,
+                    "sha256": node_state.get("sha256"),
+                }
+        manifest["archive_nodes"] = archive_nodes
+        self._atomic_write_json(manifest_path, manifest)
+
+    def retry_archive_replication(self, run_dir: Path) -> Dict[str, Any]:
+        manifest_path = Path(run_dir) / "sync_manifest.json"
+        if not manifest_path.is_file():
+            raise FileNotFoundError("Sync manifest not found")
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        archive_nodes = manifest.get("archive_nodes") or {}
+        runtime = dict(manifest.get("runtime") or {})
+        is_legacy_master_archive = not archive_nodes and bool(
+            runtime.get("sync_run_id") and runtime.get("slaves")
+        )
+        if not is_legacy_master_archive and archive_nodes.get("master", {}).get("local") is not True:
+            raise ValueError("Archive replication can only be retried from the Master controller")
+        runtime["master_run_dir"] = str(Path(run_dir).resolve())
+        return self._replicate_archives(Path(run_dir), runtime)
 
     def _write_archive_snapshot(self) -> None:
-        run_dir = self.manager.data_manager.current_run_dir
+        with self._lock:
+            configured_run_dir = self._runtime.get("master_run_dir")
+        run_dir = Path(configured_run_dir) if configured_run_dir else self.manager.data_manager.current_run_dir
         if not run_dir:
             return
         with self._lock:
@@ -611,10 +933,26 @@ class SyncManager:
                     for slave_id, results in self._slave_results.items()
                 },
             }
+            archive_nodes = {
+                "master": {
+                    "node_id": "master", "role": "master", "local": True,
+                    "path": ".", "run_id": Path(run_dir).name,
+                }
+            }
+            for slave in runtime.get("slaves") or []:
+                node_id = self._safe_node_id(slave.get("node_id") or slave.get("name"))
+                replica_path = Path(run_dir) / "sync_nodes" / node_id
+                if replica_path.is_dir():
+                    archive_nodes[node_id] = {
+                        "node_id": node_id, "role": "slave", "local": False,
+                        "path": f"sync_nodes/{node_id}", "run_id": replica_path.name,
+                        "name": slave.get("name") or node_id,
+                    }
         target = Path(run_dir) / "sync_manifest.json"
-        tmp = target.with_suffix(".json.tmp")
-        tmp.write_text(
-            json.dumps({"runtime": runtime, "pairs": pairs, "node_results": node_results}, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        tmp.replace(target)
+        self._atomic_write_json(target, {
+            "runtime": runtime,
+            "pairs": pairs,
+            "node_results": node_results,
+            "archive_nodes": archive_nodes,
+            "archive_replication": runtime.get("archive_replication") or {"status": "idle", "nodes": {}},
+        })

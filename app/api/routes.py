@@ -2,15 +2,18 @@ import ipaddress
 import json
 import os
 import shutil
+import tempfile
 import time
 from copy import deepcopy
 from pathlib import Path
 from urllib.parse import quote
+import zipfile
 
 import numpy as np
 from fastapi import APIRouter, HTTPException, UploadFile, File, Request
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
+from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 from typing import Dict, Any, List
 from app.analysis import fitting
@@ -345,6 +348,62 @@ async def get_sync_node_status(sync_run_id: str, request: Request, after: int = 
         return sync_manager.node_status(sync_run_id, after=after)
     except ValueError as exc:
         raise HTTPException(400, str(exc))
+
+
+@router.get("/sync/node/archive/{sync_run_id}")
+async def download_sync_node_archive(sync_run_id: str, request: Request):
+    _authorize_sync_node(request)
+    try:
+        archive_path, metadata = await run_in_threadpool(sync_manager.build_archive_bundle, sync_run_id)
+        return FileResponse(
+            path=archive_path,
+            media_type="application/zip",
+            filename=f"{metadata['run_id']}.zip",
+            headers={
+                "X-MIGA-Archive-SHA256": metadata["sha256"],
+                "X-MIGA-Archive-Run-Id": metadata["run_id"],
+            },
+            background=BackgroundTask(archive_path.unlink, missing_ok=True),
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.post("/sync/node/archive/{sync_run_id}/{source_node_id}")
+async def upload_sync_node_archive(
+    sync_run_id: str,
+    source_node_id: str,
+    request: Request,
+    archive: UploadFile = File(...),
+):
+    _authorize_sync_node(request)
+    expected_sha256 = request.headers.get("X-MIGA-Archive-SHA256", "")
+    temp = tempfile.NamedTemporaryFile(prefix="miga_sync_upload_", suffix=".zip", delete=False)
+    temp_path = Path(temp.name)
+    try:
+        while True:
+            chunk = await archive.read(1024 * 1024)
+            if not chunk:
+                break
+            temp.write(chunk)
+        temp.close()
+        return await run_in_threadpool(
+            sync_manager.install_node_archive,
+            sync_run_id,
+            source_node_id,
+            temp_path,
+            expected_sha256,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except (ValueError, zipfile.BadZipFile) as exc:
+        raise HTTPException(400, str(exc))
+    finally:
+        if not temp.closed:
+            temp.close()
+        temp_path.unlink(missing_ok=True)
 
 
 @router.post("/schedule/start", response_model=ExperimentResponse)
@@ -1140,15 +1199,27 @@ async def batch_archive_favorites(req: ArchiveFavoriteBatchRequest):
         raise HTTPException(400, str(exc))
 
 @router.get("/archive/load/{year}/{month}/{day}/{run_id}")
-async def load_archived_run(year: str, month: str, day: str, run_id: str):
-    try: return data_loader.load_run(year, month, day, run_id)
+async def load_archived_run(year: str, month: str, day: str, run_id: str, node_id: str = ""):
+    try: return data_loader.load_run(year, month, day, run_id, node_id=node_id or None)
     except FileNotFoundError: raise HTTPException(404, "Run not found")
     except Exception as e: raise HTTPException(500, str(e))
 
-@router.get("/archive/sequence/{year}/{month}/{day}/{run_id}")
-async def download_archived_sequence(year: str, month: str, day: str, run_id: str):
+
+@router.post("/archive/sync/retry/{year}/{month}/{day}/{run_id}")
+async def retry_sync_archive(year: str, month: str, day: str, run_id: str):
     try:
-        sequence_path, download_name = data_loader.get_archived_sequence_file(year, month, day, run_id)
+        run_dir = data_loader.get_run_dir(year, month, day, run_id)
+        result = await run_in_threadpool(sync_manager.retry_archive_replication, run_dir)
+        return {"status": "success", "archive_replication": result}
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+@router.get("/archive/sequence/{year}/{month}/{day}/{run_id}")
+async def download_archived_sequence(year: str, month: str, day: str, run_id: str, node_id: str = ""):
+    try:
+        sequence_path, download_name = data_loader.get_archived_sequence_file(year, month, day, run_id, node_id=node_id or None)
         return FileResponse(path=sequence_path, media_type="text/plain", filename=download_name)
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc))
@@ -1170,8 +1241,8 @@ async def download_archived_marker_optimization_artifact(
         raise HTTPException(500, str(exc))
 @router.get("/archive/waveform/{year}/{month}/{day}/{run_id}/{step_index}")
 
-async def load_archived_waveform(year: str, month: str, day: str, run_id: str, step_index: int):
-    try: return data_loader.load_waveform(year, month, day, run_id, step_index)
+async def load_archived_waveform(year: str, month: str, day: str, run_id: str, step_index: int, node_id: str = ""):
+    try: return data_loader.load_waveform(year, month, day, run_id, step_index, node_id=node_id or None)
     except FileNotFoundError: raise HTTPException(404, "Waveform not found")
     except Exception as e: raise HTTPException(500, str(e))
 
@@ -1184,6 +1255,7 @@ async def recalculate_archived_run(req: ReAnalysisRequest):
             req.day,
             req.run_id,
             req.new_settings.dict(),
+            node_id=req.node_id,
         )
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc))
@@ -1205,6 +1277,7 @@ async def calculate_archived_allan(req: ArchiveAllanRequest):
             req.new_settings.dict(),
             p0_min=req.p0_min,
             p0_max=req.p0_max,
+            node_id=req.node_id,
         )
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc))
@@ -1223,6 +1296,7 @@ async def recalculate_archived_waveforms(req: ArchiveWaveformRequest):
             req.run_id,
             req.step_indices,
             req.new_settings.dict(),
+            node_id=req.node_id,
         )
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc))

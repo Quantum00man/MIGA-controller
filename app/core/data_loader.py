@@ -83,8 +83,11 @@ class DataLoader:
         prefix = f"{run_id}_"
         return raw_name if raw_name.startswith(prefix) else f"{prefix}{raw_name}"
 
-    def get_archived_sequence_file(self, year: str, month: str, day: str, run_id: str) -> Tuple[Path, str]:
-        run_dir = self._get_run_dir(year, month, day, run_id)
+    def get_archived_sequence_file(
+        self, year: str, month: str, day: str, run_id: str, node_id: Optional[str] = None
+    ) -> Tuple[Path, str]:
+        root_run_dir = self._get_run_dir(year, month, day, run_id)
+        run_dir = self._resolve_archive_node_dir(root_run_dir, node_id)
         sequence_path = run_dir / "sequence.mot"
         if not sequence_path.exists():
             raise FileNotFoundError(f"Sequence file not found for run {run_id}")
@@ -124,6 +127,32 @@ class DataLoader:
         if not run_dir.exists():
             raise FileNotFoundError(f"Run not found: {run_dir}")
         return run_dir
+
+    def get_run_dir(self, year: str, month: str, day: str, run_id: str) -> Path:
+        return self._get_run_dir(year, month, day, run_id)
+
+    def _resolve_archive_node_dir(self, run_dir: Path, node_id: Optional[str] = None) -> Path:
+        requested = str(node_id or "").strip()
+        if not requested:
+            return run_dir
+        manifest_path = run_dir / "sync_manifest.json"
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            manifest = {}
+        entry = (manifest.get("archive_nodes") or {}).get(requested)
+        if not isinstance(entry, dict):
+            if requested == "master":
+                return run_dir
+            raise FileNotFoundError(f"Replicated archive for node {requested} was not found")
+        relative = str(entry.get("path") or ".")
+        target = (run_dir / relative).resolve()
+        root = run_dir.resolve()
+        if target != root and root not in target.parents:
+            raise ValueError("Invalid replicated archive path")
+        if not target.is_dir():
+            raise FileNotFoundError(f"Replicated archive for node {requested} was not found")
+        return target
 
     def _load_config_data(self, run_dir: Path) -> Dict[str, Any]:
         config_path = run_dir / "config.json"
@@ -596,8 +625,11 @@ class DataLoader:
             "step_name": selected_step.get("marker_name") if selected_step else "",
         })
 
-    def load_run(self, year: str, month: str, day: str, run_id: str) -> Dict[str, Any]:
-        run_dir = self._get_run_dir(year, month, day, run_id)
+    def load_run(
+        self, year: str, month: str, day: str, run_id: str, node_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        root_run_dir = self._get_run_dir(year, month, day, run_id)
+        run_dir = self._resolve_archive_node_dir(root_run_dir, node_id)
         config_data = self._load_config_data(run_dir)
         scan_dimensions = self._resolve_scan_dimensions(config_data)
         full_points = self._read_results_csv(run_dir, max_points=None)
@@ -618,7 +650,7 @@ class DataLoader:
         expected_lock_in_blocks = self._parse_int(config_data.get("averages"), 0) if is_lock_in else 0
         lock_in_analysis = build_lock_in_analysis(full_points, expected_blocks=expected_lock_in_blocks) if is_lock_in else {}
         sync_manifest = None
-        sync_manifest_path = run_dir / "sync_manifest.json"
+        sync_manifest_path = root_run_dir / "sync_manifest.json"
         if sync_manifest_path.is_file():
             try:
                 sync_manifest = json.loads(sync_manifest_path.read_text(encoding="utf-8"))
@@ -626,7 +658,7 @@ class DataLoader:
                 sync_manifest = {"runtime": {"status": "invalid", "message": "Sync manifest could not be read"}, "pairs": []}
         return {
             "config": config_data,
-            "run_entry": self._build_run_entry(run_dir),
+            "run_entry": self._build_run_entry(root_run_dir),
             "scan_dimensions": scan_dimensions,
             "data": sampled_points,
             "stats": (
@@ -644,6 +676,7 @@ class DataLoader:
             "total_points": len(full_points),
             "marker_optimization": marker_optimization if is_marker_optimization else None,
             "sync_manifest": sync_manifest,
+            "selected_sync_node": str(node_id or ""),
         }
 
 
@@ -862,8 +895,10 @@ class DataLoader:
         new_settings: Optional[Dict[str, Any]] = None,
         p0_min: Optional[float] = None,
         p0_max: Optional[float] = None,
+        node_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        run_dir = self._get_run_dir(year, month, day, run_id)
+        root_run_dir = self._get_run_dir(year, month, day, run_id)
+        run_dir = self._resolve_archive_node_dir(root_run_dir, node_id)
         config_data = self._load_config_data(run_dir)
         scan_dimensions = self._resolve_scan_dimensions(config_data)
         randomized = bool(config_data.get("randomize", False))
@@ -934,8 +969,11 @@ class DataLoader:
         except Exception as exc:
             raise RuntimeError(f"Failed to load waveform: {str(exc)}")
 
-    def load_waveform(self, year: str, month: str, day: str, run_id: str, step_index: int) -> Dict[str, Any]:
-        run_dir = self._get_run_dir(year, month, day, run_id)
+    def load_waveform(
+        self, year: str, month: str, day: str, run_id: str, step_index: int, node_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        root_run_dir = self._get_run_dir(year, month, day, run_id)
+        run_dir = self._resolve_archive_node_dir(root_run_dir, node_id)
         waveform = self._load_waveform_arrays(run_dir, step_index)
         return {
             "time_axis": waveform["time_axis"].tolist(),
@@ -1219,8 +1257,10 @@ class DataLoader:
         run_id: str,
         new_settings: Dict[str, Any],
         max_points: Optional[int] = MAX_DISPLAY_POINTS,
+        node_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        run_dir = self._get_run_dir(year, month, day, run_id)
+        root_run_dir = self._get_run_dir(year, month, day, run_id)
+        run_dir = self._resolve_archive_node_dir(root_run_dir, node_id)
         config_data = self._load_config_data(run_dir)
         scan_dimensions = self._resolve_scan_dimensions(config_data)
         original_settings = (
@@ -1263,8 +1303,10 @@ class DataLoader:
         run_id: str,
         step_indices: List[int],
         new_settings: Dict[str, Any],
+        node_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        run_dir = self._get_run_dir(year, month, day, run_id)
+        root_run_dir = self._get_run_dir(year, month, day, run_id)
+        run_dir = self._resolve_archive_node_dir(root_run_dir, node_id)
         config_data = self._load_config_data(run_dir)
         original_settings = (
             config_data.get("_system_settings_snapshot")
