@@ -4334,10 +4334,17 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     if (existing >= 0) rows.splice(existing, 1, data); else rows.push(data);
                     rows.sort((a, b) => Number(a.sync_shot_index) - Number(b.sync_shot_index));
                     if (!data.error) {
-                        const params = Array.isArray(data.sync_parameters) && data.sync_parameters.length
-                            ? data.sync_parameters.map(Number)
+                        // Link/Timing/Rabi modes may carry derived sequence parameters in
+                        // sync_parameters, but they are still one-dimensional scans. Only
+                        // use the configured scan axes when grouping and choosing the plot.
+                        const scanDimensions = Math.max(1, Math.min(3, Number(
+                            data.scan_dimensions || this.currentScanDimensions || this.getConfiguredScanDimensions()
+                        ) || 1));
+                        const rawParams = Array.isArray(data.sync_parameters) && data.sync_parameters.length
+                            ? data.sync_parameters
                             : (Array.isArray(data.all_parameters) && data.all_parameters.length
-                                ? data.all_parameters.map(Number) : [Number(data.sync_p0)]);
+                                ? data.all_parameters : [data.sync_p0]);
+                        const params = rawParams.slice(0, scanDimensions).map(Number);
                         if (params.length && params.every(Number.isFinite)) {
                             this.accumulateHistoryResult(this.syncHistoryMaps[source], data, params);
                         }
