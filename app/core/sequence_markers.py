@@ -667,10 +667,11 @@ def add_sequence_marker(
             (record for record in inspection["lines"] if record["line_number"] == compensation_line_number),
             None,
         )
-        if compensation_record and compensation_record.get("marked") and not any(
-            marker["role"] == "comp" for marker in compensation_record.get("markers", [])
+        if compensation_record and any(
+            marker["role"] in {"scan", "state"} and marker.get("kind") == "duration"
+            for marker in compensation_record.get("markers", [])
         ):
-            raise ValueError("Selected compensation instruction already has a non-compensation marker")
+            raise ValueError("Selected duration is already used by another scan marker")
         insertions.append((compensation_line_number - 1, f"###COMP:{marker_id}###"))
 
     lines = str(content).splitlines(keepends=True)
@@ -864,7 +865,10 @@ def render_auto_marker_sequence(
             target_candidate = marker.get("candidate") or {}
             comp_candidate = compensation.get("candidate") or {}
             comp_line = int(compensation["target_line_number"])
-            if comp_line in replacements or comp_line == target_line:
+            if comp_line == target_line or any(
+                replacement_kind == "duration"
+                for replacement_kind, _, _ in replacements.get(comp_line, [])
+            ):
                 raise ValueError(f"Compensation target for {marker_id} conflicts with another scan marker")
             comp_definition = {**definition, "kind": "duration", "decimals": 0}
             adjustment = compensation_adjustments.setdefault(comp_line, {
@@ -879,7 +883,10 @@ def render_auto_marker_sequence(
             raise ValueError(f"Marker {marker_id} has a compensation marker but compensation is disabled by the active definition")
 
     for comp_line, adjustment in compensation_adjustments.items():
-        if comp_line in replacements:
+        if any(
+            replacement_kind == "duration"
+            for replacement_kind, _, _ in replacements.get(comp_line, [])
+        ):
             marker_names = ", ".join(adjustment["marker_ids"])
             raise ValueError(f"Compensation target for {marker_names} conflicts with another scan marker")
         new_compensation = adjustment["initial"] + adjustment["delta"]

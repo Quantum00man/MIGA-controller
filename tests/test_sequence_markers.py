@@ -183,8 +183,8 @@ class MarkerRenderingTests(unittest.TestCase):
     def test_existing_compensation_role_makes_marked_duration_reusable(self):
         source = (
             "###COMP:EXISTING_DURATION###\n"
-            "###SCAN:COMPENSATION_DURATION###\n"
-            "+1000us WAIT = OFF (3)\n"
+            "###SCAN:COMPENSATION_DDS###\n"
+            "+1000us DDS1 [1] (3)\n"
             "+200us PULSE_B = ON (2)\n"
         )
         inspection = inspect_sequence_markers(source)
@@ -198,12 +198,34 @@ class MarkerRenderingTests(unittest.TestCase):
 
         shared_markers = next(
             line["markers"] for line in inspect_sequence_markers(updated)["lines"]
-            if "WAIT" in line["source"] and any(marker["id"] == "EXISTING_DURATION" for marker in line["markers"])
+            if "DDS1" in line["source"] and any(marker["id"] == "EXISTING_DURATION" for marker in line["markers"])
         )
         self.assertEqual(
             {marker["id"] for marker in shared_markers if marker["role"] == "comp"},
             {"EXISTING_DURATION", "DURATION_B"},
         )
+
+    def test_duration_can_compensate_on_instruction_with_dds_scan_marker(self):
+        source = (
+            "###SCAN:DETUNING###\n"
+            "+333495us DDS1 [392] (2)\n"
+            "+20us DDS1 ramp = ON (5)\n"
+        )
+        marked = add_sequence_marker(source, "RAMP_DURATION", 3, "duration", 2)
+        definitions = [
+            definition("DETUNING", "dds_element", hard_min=0, hard_max=1023),
+            definition("RAMP_DURATION", "duration", hard_min=1, hard_max=100, has_compensation=True),
+        ]
+
+        rendered = render_auto_marker_sequence(
+            marked,
+            ["DETUNING", "RAMP_DURATION"],
+            [400, 30],
+            definitions,
+        )
+
+        self.assertIn("+333485us DDS1 [400]", rendered)
+        self.assertIn("+30us DDS1 ramp", rendered)
 
     def test_dds_element_replacement_does_not_change_command_suffix(self):
         content = "###SCAN:FREQ###\n+1us DDS1 [1] (2)\n"

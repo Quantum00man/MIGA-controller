@@ -1482,7 +1482,12 @@
                         (line.candidates || [])
                             .filter(candidate => candidate.kind === 'duration'
                                 && Number(line.line_number) !== selectedLine
-                                && (!line.marked || reusableCompensationLines.has(Number(line.line_number))))
+                                && (
+                                    reusableCompensationLines.has(Number(line.line_number))
+                                    || !(line.markers || []).some(marker =>
+                                        ['scan', 'state'].includes(marker.role) && marker.kind === 'duration'
+                                    )
+                                ))
                             .map(candidate => ({ line_number: line.line_number, source: line.source, candidate }))
                     );
                 },
