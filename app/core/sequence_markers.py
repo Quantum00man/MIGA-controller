@@ -667,8 +667,8 @@ def add_sequence_marker(
             (record for record in inspection["lines"] if record["line_number"] == compensation_line_number),
             None,
         )
-        if compensation_record and any(
-            marker["role"] != "comp" for marker in compensation_record.get("markers", [])
+        if compensation_record and compensation_record.get("marked") and not any(
+            marker["role"] == "comp" for marker in compensation_record.get("markers", [])
         ):
             raise ValueError("Selected compensation instruction already has a non-compensation marker")
         insertions.append((compensation_line_number - 1, f"###COMP:{marker_id}###"))

@@ -180,6 +180,31 @@ class MarkerRenderingTests(unittest.TestCase):
         self.assertIn("+260us PULSE_B", rendered)
         self.assertIn("+890us WAIT", rendered)
 
+    def test_existing_compensation_role_makes_marked_duration_reusable(self):
+        source = (
+            "###COMP:EXISTING_DURATION###\n"
+            "###SCAN:COMPENSATION_DURATION###\n"
+            "+1000us WAIT = OFF (3)\n"
+            "+200us PULSE_B = ON (2)\n"
+        )
+        inspection = inspect_sequence_markers(source)
+        shared_line = next(
+            line["line_number"] for line in inspection["lines"]
+            if any(marker["role"] == "comp" for marker in line["markers"])
+        )
+        pulse_b_line = next(line["line_number"] for line in inspection["lines"] if "PULSE_B" in line["source"])
+
+        updated = add_sequence_marker(source, "DURATION_B", pulse_b_line, "duration", shared_line)
+
+        shared_markers = next(
+            line["markers"] for line in inspect_sequence_markers(updated)["lines"]
+            if "WAIT" in line["source"] and any(marker["id"] == "EXISTING_DURATION" for marker in line["markers"])
+        )
+        self.assertEqual(
+            {marker["id"] for marker in shared_markers if marker["role"] == "comp"},
+            {"EXISTING_DURATION", "DURATION_B"},
+        )
+
     def test_dds_element_replacement_does_not_change_command_suffix(self):
         content = "###SCAN:FREQ###\n+1us DDS1 [1] (2)\n"
         definition = {

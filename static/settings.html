@@ -1473,11 +1473,16 @@
                 },
                 markerCompensationCandidates() {
                     const selectedLine = Number(this.markerSelectedCandidate?.line_number || 0);
+                    const reusableCompensationLines = new Set(
+                        (this.markerInspection.markers || [])
+                            .filter(marker => marker.role === 'comp' && Number.isFinite(Number(marker.target_line_number)))
+                            .map(marker => Number(marker.target_line_number))
+                    );
                     return (this.markerInspection.lines || []).flatMap(line =>
                         (line.candidates || [])
                             .filter(candidate => candidate.kind === 'duration'
-                                && line.line_number !== selectedLine
-                                && (!line.marked || (line.markers || []).every(marker => marker.role === 'comp')))
+                                && Number(line.line_number) !== selectedLine
+                                && (!line.marked || reusableCompensationLines.has(Number(line.line_number))))
                             .map(candidate => ({ line_number: line.line_number, source: line.source, candidate }))
                     );
                 },
