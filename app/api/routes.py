@@ -11,6 +11,7 @@ import numpy as np
 from fastapi import APIRouter, HTTPException, UploadFile, File, Request
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 from typing import Dict, Any, List
 from app.analysis import fitting
 from app.core.experiment_manager import ExperimentManager
@@ -34,6 +35,7 @@ from app.core.sequence_markers import (
 from app.core.optimization_manager import OBJECTIVE_METRICS, OptimizationManager
 from app.core.marker_optimization_manager import MARKER_OBJECTIVES, MarkerOptimizationManager
 from app.core.marker_document_store import SequenceMarkerDocumentStore
+from app.core.sync_manager import SyncManager
 from app.drivers.dds_table import DdsTableError, validate_dds_table
 from app.models.schemas import (
     AnalysisSettings,
@@ -65,6 +67,10 @@ from app.models.schemas import (
     ScheduleRequest,
     SystemSettings,
     SystemUpdateRequest,
+    SyncNodeCommandRequest,
+    SyncNodePrepareRequest,
+    SyncNodeTestRequest,
+    SyncStartRequest,
 )
 import config
 
@@ -78,6 +84,7 @@ from app.core.schedule_manager import ScheduleManager
 schedule_manager = ScheduleManager(manager)
 data_loader = DataLoader()
 archive_collection_store = ArchiveCollectionStore(config.DATA_BASE_DIR)
+sync_manager = SyncManager(manager)
 
 
 def _bragg_export_template_path(settings: Dict[str, Any]) -> Path:
@@ -133,7 +140,7 @@ def _sanitize_index_ui_state(payload: Dict[str, Any]) -> Dict[str, Any]:
         return sanitized
 
     run_mode = str(payload.get("runMode") or defaults["runMode"]).strip().lower()
-    sanitized["runMode"] = run_mode if run_mode in {"live", "scheduled"} else defaults["runMode"]
+    sanitized["runMode"] = run_mode if run_mode in {"live", "scheduled", "sync"} else defaults["runMode"]
 
     current_sequence_name = str(payload.get("currentSequenceName") or defaults["currentSequenceName"]).strip()
     sanitized["currentSequenceName"] = current_sequence_name or defaults["currentSequenceName"]
@@ -225,8 +232,15 @@ def _save_index_ui_state_record(state: Dict[str, Any], source_id: str | None = N
     }
     path = config.INDEX_UI_STATE_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as handle:
-        json.dump(record, handle, ensure_ascii=False, indent=2)
+    temp_path = path.with_name(f".{path.name}.{os.getpid()}.{time.time_ns()}.tmp")
+    try:
+        with open(temp_path, "w", encoding="utf-8") as handle:
+            json.dump(record, handle, ensure_ascii=False, indent=2)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, path)
+    finally:
+        temp_path.unlink(missing_ok=True)
     return record
 
 # --- 1. Experiment Control ---
@@ -240,6 +254,97 @@ async def start_experiment(config: ScanConfig):
 async def stop_experiment():
     result = manager.stop_scan()
     return ExperimentResponse(status=result["status"], message=result["message"])
+
+
+def _authorize_sync_node(request: Request) -> None:
+    try:
+        sync_manager.authorize(
+            request.headers.get("X-MIGA-Sync-Token", ""),
+            request.client.host if request.client else "",
+        )
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc))
+
+
+@router.get("/sync/config", response_model=ExperimentResponse)
+async def get_sync_config():
+    return ExperimentResponse(status="success", message="Sync configuration loaded", data=sync_manager.settings_snapshot())
+
+
+@router.post("/sync/test", response_model=ExperimentResponse)
+async def test_sync_node(req: SyncNodeTestRequest):
+    try:
+        data = await run_in_threadpool(sync_manager.test_node, req.base_url)
+        return ExperimentResponse(status="success", message="Sync node reachable", data=data)
+    except Exception as exc:
+        raise HTTPException(400, f"Sync node test failed: {exc}")
+
+
+@router.post("/sync/start", response_model=ExperimentResponse)
+async def start_sync_run(req: SyncStartRequest):
+    try:
+        data = await run_in_threadpool(sync_manager.start_master, req.dict())
+        return ExperimentResponse(status="success", message="Sync run started", data=data)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(502, f"Sync start failed: {exc}")
+
+
+@router.post("/sync/stop", response_model=ExperimentResponse)
+async def stop_sync_run():
+    try:
+        data = await run_in_threadpool(sync_manager.stop_master)
+        return ExperimentResponse(status="success", message="Sync stop requested", data=data)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.get("/sync/status", response_model=ExperimentResponse)
+async def get_sync_status():
+    return ExperimentResponse(status="success", message="Sync status loaded", data=sync_manager.status())
+
+
+@router.get("/sync/node/health")
+async def get_sync_node_health(request: Request):
+    _authorize_sync_node(request)
+    return sync_manager.health()
+
+
+@router.post("/sync/node/prepare")
+async def prepare_sync_node(req: SyncNodePrepareRequest, request: Request):
+    _authorize_sync_node(request)
+    try:
+        return await run_in_threadpool(sync_manager.prepare_node, req.dict())
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.post("/sync/node/start")
+async def start_sync_node(req: SyncNodeCommandRequest, request: Request):
+    _authorize_sync_node(request)
+    try:
+        return await run_in_threadpool(sync_manager.start_node, req.sync_run_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.post("/sync/node/stop")
+async def stop_sync_node(req: SyncNodeCommandRequest, request: Request):
+    _authorize_sync_node(request)
+    try:
+        return await run_in_threadpool(sync_manager.stop_node, req.sync_run_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.get("/sync/node/status/{sync_run_id}")
+async def get_sync_node_status(sync_run_id: str, request: Request, after: int = 0):
+    _authorize_sync_node(request)
+    try:
+        return sync_manager.node_status(sync_run_id, after=after)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
 
 
 @router.post("/schedule/start", response_model=ExperimentResponse)

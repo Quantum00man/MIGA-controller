@@ -405,6 +405,13 @@ class ArchiveAnalysisSettings(AnalysisSettings):
     fit_models: List[FitModelDefinition] = Field(default_factory=list)
 
 
+class SyncSlaveSettings(BaseModel):
+    id: str
+    name: str = Field("")
+    base_url: str = Field("")
+    enabled: bool = Field(True)
+
+
 class SystemSettings(BaseModel):
     """Comprehensive System Settings."""
     hardware_platform: str = Field("redpitaya")
@@ -458,11 +465,57 @@ class SystemSettings(BaseModel):
     bragg_power_calibration: BraggPowerCalibration = Field(default_factory=BraggPowerCalibration)
     sequence_marker_definitions: List[SequenceMarkerDefinition] = Field(default_factory=list)
     sequence_marker_profiles: Dict[str, List[SequenceMarkerDefinition]] = Field(default_factory=dict)
+    sync_role: str = Field("standalone")
+    sync_node_name: str = Field("Local controller")
+    sync_shared_token: str = Field("")
+    sync_allowed_master_ip: str = Field("")
+    sync_slaves: List[SyncSlaveSettings] = Field(default_factory=list)
+
+    @validator("sync_role")
+    def validate_sync_role(cls, value):
+        normalized = str(value or "standalone").strip().lower()
+        if normalized not in {"standalone", "master", "slave"}:
+            raise ValueError("Sync role must be standalone, master, or slave")
+        return normalized
 
 
 class SystemUpdateRequest(BaseModel):
     repo_url: Optional[str] = Field(None)
     branch: Optional[str] = Field(None)
+
+
+class SyncSlaveRunConfig(BaseModel):
+    node_id: str
+    name: str = Field("")
+    base_url: str
+    sequence_name: str = Field("slave.mot")
+    sequence_content: str = Field("")
+    sequence_content_base64: str = Field("")
+    enabled: bool = Field(True)
+
+
+class SyncStartRequest(BaseModel):
+    scan_config: ScanConfig
+    master_delay_ms: float = Field(100.0, ge=0.0, le=60000.0)
+    slaves: List[SyncSlaveRunConfig] = Field(default_factory=list)
+
+
+class SyncNodePrepareRequest(BaseModel):
+    sync_run_id: str
+    master_node_id: str
+    scan_config: ScanConfig
+    shot_plan: List[List[Any]] = Field(default_factory=list)
+    sequence_name: str = Field("slave.mot")
+    sequence_content: str = Field("")
+    sequence_content_base64: str = Field("")
+
+
+class SyncNodeCommandRequest(BaseModel):
+    sync_run_id: str
+
+
+class SyncNodeTestRequest(BaseModel):
+    base_url: str
 
 
 class ExperimentResponse(BaseModel):

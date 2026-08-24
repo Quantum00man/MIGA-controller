@@ -448,6 +448,52 @@
                 </div>
 
 
+                <div v-if="tab==='sync'">
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold">Controller Role</label>
+                            <select class="form-select" v-model="s.sync_role">
+                                <option value="standalone">Standalone</option>
+                                <option value="master">Master</option>
+                                <option value="slave">Slave</option>
+                            </select>
+                        </div>
+                        <div class="col-md-8">
+                            <label class="form-label fw-bold">Node Name</label>
+                            <input class="form-control" v-model.trim="s.sync_node_name" placeholder="Interferometer A">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Shared Token <span class="text-muted">(optional)</span></label>
+                            <input type="password" class="form-control font-monospace" v-model="s.sync_shared_token" autocomplete="new-password">
+                            <div class="form-text">Use the same token on Master and every Slave.</div>
+                        </div>
+                        <div class="col-md-6" v-if="s.sync_role === 'slave'">
+                            <label class="form-label">Allowed Master IP <span class="text-muted">(optional)</span></label>
+                            <input class="form-control font-monospace" v-model.trim="s.sync_allowed_master_ip" placeholder="192.168.1.10">
+                        </div>
+                    </div>
+                    <div v-if="s.sync_role === 'master'" class="mt-4 pt-3 border-top">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <div>
+                                <h6 class="fw-bold mb-0">Slave Controllers</h6>
+                                <div class="form-text">Every enabled Slave must be Ready before the synchronized run starts.</div>
+                            </div>
+                            <button class="btn btn-outline-primary btn-sm" @click="addSyncSlave"><i class="bi bi-plus-lg me-1"></i>Add Slave</button>
+                        </div>
+                        <div v-if="!(s.sync_slaves || []).length" class="alert alert-light border small">No Slave configured.</div>
+                        <div v-for="(slave, index) in (s.sync_slaves || [])" :key="slave.id" class="border rounded p-3 mb-2 bg-light">
+                            <div class="row g-2 align-items-end">
+                                <div class="col-md-3"><label class="form-label small">Name</label><input class="form-control form-control-sm" v-model.trim="slave.name" placeholder="Interferometer B"></div>
+                                <div class="col-md-6"><label class="form-label small">Controller URL</label><input class="form-control form-control-sm font-monospace" v-model.trim="slave.base_url" placeholder="http://192.168.1.20:8000"></div>
+                                <div class="col-md-3 d-flex gap-2">
+                                    <button class="btn btn-outline-secondary btn-sm flex-grow-1" @click="testSyncSlave(slave)" :disabled="slave.testing"><span v-if="slave.testing" class="spinner-border spinner-border-sm"></span><span v-else>Test</span></button>
+                                    <button class="btn btn-outline-danger btn-sm" @click="removeSyncSlave(index)"><i class="bi bi-trash"></i></button>
+                                </div>
+                            </div>
+                            <div class="small mt-2" :class="slave.test_error ? 'text-danger' : 'text-success'" v-if="slave.test_message">{{ slave.test_message }}</div>
+                        </div>
+                    </div>
+                </div>
 
                 <div v-if="tab==='net'">
                     <div class="row g-3">
@@ -1393,6 +1439,7 @@
                         { id: 'bragg', label: 'Bragg Pulse', icon: 'bi-broadcast', description: 'Configure the channel-32 voltage-to-normalized-power curve and its linear operating interval.' },
                         { id: 'markers', label: 'Sequence Markers', icon: 'bi-tags', description: 'Mark DDS, DAC, duration and ON/OFF values visually, then define their execution rules.' },
                         { id: 'fitting', label: 'Fitting Models', icon: 'bi-bezier2', description: 'Manage atom-area calculation and the models used for time-of-flight fitting.' },
+                        { id: 'sync', label: 'SYNC', icon: 'bi-bounding-box-circles', description: 'Configure Standalone, Master or Slave operation for synchronized differential measurements.' },
                         { id: 'net', label: 'Network', icon: 'bi-hdd-network', description: 'Select the acquisition platform and configure device connection limits.' },
                         { id: 'logic', label: 'Logic & Channels', icon: 'bi-diagram-3', description: 'Set launch, trigger and linked-mode channel timing.' },
                         { id: 'paths', label: 'System Paths', icon: 'bi-folder2-open', description: 'Configure executable and default template locations used by the controller.' },
@@ -2204,6 +2251,36 @@
                     this.isError = false;
                     this.msg = 'writetable.py selected. Click Apply & Save to store the path.';
                 },
+                addSyncSlave() {
+                    if (!Array.isArray(this.s.sync_slaves)) this.s.sync_slaves = [];
+                    this.s.sync_slaves.push({
+                        id: `slave_${Date.now()}_${this.s.sync_slaves.length + 1}`,
+                        name: `Slave ${this.s.sync_slaves.length + 1}`,
+                        base_url: '',
+                        enabled: true,
+                        testing: false,
+                        test_message: '',
+                        test_error: false,
+                    });
+                },
+                removeSyncSlave(index) {
+                    this.s.sync_slaves.splice(index, 1);
+                },
+                async testSyncSlave(slave) {
+                    slave.testing = true;
+                    slave.test_message = '';
+                    slave.test_error = false;
+                    try {
+                        const res = await axios.post('/sync/test', { base_url: slave.base_url });
+                        const data = res.data?.data || {};
+                        slave.test_message = `Connected: ${data.node_name || slave.name} (${data.role || 'unknown role'})`;
+                    } catch (error) {
+                        slave.test_error = true;
+                        slave.test_message = error.response?.data?.detail || error.message || 'Connection failed';
+                    } finally {
+                        slave.testing = false;
+                    }
+                },
                 async fetchSettings() {
                     try {
                         const res = await axios.get('/settings/all');
@@ -2470,6 +2547,21 @@
                         ? Object.fromEntries(Object.entries(normalized.sequence_marker_profiles).map(([key, items]) => [key, Array.isArray(items) ? items.map(item => ({ ...item })) : []]))
                         : {};
                     normalized.update_branch = String(normalized.update_branch || 'main').trim() || 'main';
+                    normalized.sync_role = ['standalone', 'master', 'slave'].includes(normalized.sync_role) ? normalized.sync_role : 'standalone';
+                    normalized.sync_node_name = String(normalized.sync_node_name || 'Local controller').trim() || 'Local controller';
+                    normalized.sync_shared_token = String(normalized.sync_shared_token || '');
+                    normalized.sync_allowed_master_ip = String(normalized.sync_allowed_master_ip || '').trim();
+                    normalized.sync_slaves = Array.isArray(normalized.sync_slaves)
+                        ? normalized.sync_slaves.map((slave, index) => ({
+                            id: String(slave?.id || `slave_${index + 1}`),
+                            name: String(slave?.name || `Slave ${index + 1}`),
+                            base_url: String(slave?.base_url || '').trim(),
+                            enabled: slave?.enabled !== false,
+                            testing: false,
+                            test_message: '',
+                            test_error: false,
+                        }))
+                        : [];
                     return normalized;
                 },
                 getUpdateBranches() {

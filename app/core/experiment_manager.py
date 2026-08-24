@@ -62,6 +62,7 @@ class ExperimentManager:
         self.acq_thread: Optional[threading.Thread] = None
         self.proc_thread: Optional[threading.Thread] = None
         self.on_data_ready: Optional[Callable[[Dict[str, Any]], None]] = None
+        self._data_listeners: List[Callable[[Dict[str, Any]], None]] = []
         self._activity_lock = threading.Lock()
         self._active_mode: Optional[str] = None
         self._scan_finalize_error: Optional[str] = None
@@ -441,6 +442,11 @@ class ExperimentManager:
             "bragg_power_calibration": dict(config.DEFAULT_BRAGG_POWER_CALIBRATION),
             "sequence_marker_definitions": [],
             "sequence_marker_profiles": {},
+            "sync_role": "standalone",
+            "sync_node_name": "Local controller",
+            "sync_shared_token": "",
+            "sync_allowed_master_ip": "",
+            "sync_slaves": [],
             
             # --- [关键修复] 显式添加这三个参数的默认值 ---
             "intf_alpha": 0.35,
@@ -486,12 +492,23 @@ class ExperimentManager:
         return self._normalize_k_calibration_settings(normalized)
 
     def _save_settings_to_disk(self):
+        target = Path(config.SETTINGS_FILE_PATH)
+        temp_path = target.with_name(f".{target.name}.{os.getpid()}.{threading.get_ident()}.tmp")
         try:
-            with open(config.SETTINGS_FILE_PATH, 'w') as f:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with open(temp_path, 'w', encoding='utf-8') as f:
                 json.dump(self.settings, f, indent=4)
-            print(f"[Settings] Saved to {config.SETTINGS_FILE_PATH}")
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temp_path, target)
+            print(f"[Settings] Saved to {target}")
         except Exception as e:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
             print(f"[Settings] Save failed: {e}")
+            raise
 
     def _load_user_json_payload(self) -> Dict[str, Any]:
         payload_path = Path(config.USER_JSON_PATH)
@@ -681,6 +698,20 @@ class ExperimentManager:
 
     def get_analysis_config(self) -> Dict[str, Any]:
         return self.settings
+
+    def add_data_listener(self, listener: Callable[[Dict[str, Any]], None]) -> None:
+        if listener not in self._data_listeners:
+            self._data_listeners.append(listener)
+
+    def publish_data(self, payload: Dict[str, Any], *, notify_listeners: bool = True) -> None:
+        if notify_listeners:
+            for listener in list(self._data_listeners):
+                try:
+                    listener(payload)
+                except Exception as exc:
+                    print(f"[Data Listener] {exc}")
+        if self.on_data_ready:
+            self.on_data_ready(payload)
 
     def update_analysis_config(self, new_config: Dict[str, Any]):
         self.update_settings(new_config)
@@ -950,7 +981,21 @@ class ExperimentManager:
         validate_auto_marker_scan(template_content, axes, parameters, definitions)
         scan_config["marker_axes"] = axes
 
-    def start_scan(self, scan_config: Dict[str, Any]) -> Dict[str, str]:
+    def build_scan_parameter_plan(self, scan_config: Dict[str, Any]) -> List[Any]:
+        payload = dict(scan_config or {})
+        mode = str(payload.get('mode') or 'standard').strip().lower()
+        supported_modes = {'standard', 'timing', 'rabi', 'half', 'link', 'bragg_rabi'}
+        if mode not in supported_modes:
+            raise ValueError(
+                "Sync mode supports Standard, Timing, Rabi, Half, Link and Bragg Rabi scan logic"
+            )
+        return self._generate_parameters(payload)
+
+    def start_scan(
+        self,
+        scan_config: Dict[str, Any],
+        parameters_override: Optional[List[Any]] = None,
+    ) -> Dict[str, str]:
         if not hasattr(self, 'status'):
             self.status = ExperimentStatus()
 
@@ -961,13 +1006,22 @@ class ExperimentManager:
         self.refresh_runtime_settings_from_disk()
         ac_stark_context: Optional[Dict[str, Any]] = None
         try:
-            if scan_config.get('mode') == 'ac_stark':
+            if parameters_override is not None:
+                parameters = list(parameters_override)
+            elif scan_config.get('mode') == 'ac_stark':
                 parameters, ac_stark_context = self._build_ac_stark_execution(scan_config)
             elif scan_config.get('mode') == 'lock_in':
                 parameters = self._build_lock_in_execution(scan_config)
             else:
                 parameters = self._generate_parameters(scan_config)
-            self._validate_auto_marker_execution(scan_config, parameters)
+            if parameters_override is None or not scan_config.get('_sync_slave'):
+                validation_parameters = [
+                    item.get("sequence_parameters")
+                    if isinstance(item, dict) and "sequence_parameters" in item
+                    else item
+                    for item in parameters
+                ]
+                self._validate_auto_marker_execution(scan_config, validation_parameters)
         except Exception as exc:
             self.release_run_slot('scan')
             return {'status': 'error', 'message': f'Param generation failed: {str(exc)}'}
@@ -1657,7 +1711,8 @@ class ExperimentManager:
         params = job.get('params') or []
         metadata = job.get('metadata') or {}
         scan_dimensions = int(job.get('scan_dimensions', 1) or 1)
-        primary_param = params[0] if params else None
+        display_params = metadata.get('sync_parameters') if isinstance(metadata.get('sync_parameters'), list) else params
+        primary_param = display_params[0] if display_params else None
         start_delay = float(job.get('start_delay', 0.0) or 0.0)
         volt_up_raw = job.get('volt_up') or []
         volt_dw_raw = job.get('volt_dw') or []
@@ -1816,7 +1871,7 @@ class ExperimentManager:
                 fit_data_up=fit_up_store,
                 fit_data_dw=fit_dw_store,
                 time_axis=time_axis_store,
-                all_parameters=params,
+                all_parameters=display_params,
                 ac_stark_ratio=metadata.get('ac_stark_ratio'),
                 ac_stark_side=metadata.get('ac_stark_side'),
                 ac_stark_dds_element=metadata.get('ac_stark_dds_element'),
@@ -2035,8 +2090,7 @@ class ExperimentManager:
                     ac_stark_results.append(result)
                 if result is not None and result.lock_in_block_index is not None:
                     lock_in_results.append(result)
-                if self.on_data_ready:
-                    self.on_data_ready(payload)
+                self.publish_data(payload)
         finally:
             if ac_stark_results:
                 try:

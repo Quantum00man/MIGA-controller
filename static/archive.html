@@ -1355,6 +1355,37 @@
                         <div v-if="markerOptimization.error" class="alert alert-danger small py-2 mt-3 mb-0">{{ markerOptimization.error }}</div>
                     </div>
                 </section>
+                <section v-if="syncManifest" class="card mb-4 border-0 shadow-sm">
+                    <div class="card-header bg-white py-3">
+                        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+                            <div><i class="bi bi-bounding-box-circles text-primary me-2"></i><span class="fw-bold">SYNC Differential Replay</span></div>
+                            <span class="badge" :class="syncManifest.runtime?.status === 'done' ? 'bg-success' : 'bg-secondary'">{{ syncManifest.runtime?.status || 'saved' }}</span>
+                        </div>
+                        <div class="row g-2 mt-1">
+                            <div class="col-lg-6 d-flex gap-2">
+                                <span class="badge bg-primary align-self-center">X Master</span>
+                                <select class="form-select form-select-sm" v-model="syncArchiveAxisX.metric" @change="renderSyncArchivePlot"><option v-for="item in syncArchiveMetricOptions" :key="item.key" :value="item.key">{{ item.label }}</option></select>
+                                <select class="form-select form-select-sm" v-model="syncArchiveAxisX.channel" @change="renderSyncArchivePlot"><option value="up">UP</option><option value="dw">DOWN</option></select>
+                            </div>
+                            <div class="col-lg-6 d-flex gap-2">
+                                <span class="badge bg-secondary align-self-center">Y Slave</span>
+                                <select class="form-select form-select-sm" v-model="syncArchiveSlaveId" @change="resetSyncArchiveReplay">
+                                    <option v-for="slaveId in syncArchiveSlaveOptions()" :key="slaveId" :value="slaveId">{{ slaveId }}</option>
+                                </select>
+                                <select class="form-select form-select-sm" v-model="syncArchiveAxisY.metric" @change="renderSyncArchivePlot"><option v-for="item in syncArchiveMetricOptions" :key="item.key" :value="item.key">{{ item.label }}</option></select>
+                                <select class="form-select form-select-sm" v-model="syncArchiveAxisY.channel" @change="renderSyncArchivePlot"><option value="up">UP</option><option value="dw">DOWN</option></select>
+                            </div>
+                            <div class="col-12 d-flex flex-wrap align-items-center gap-2">
+                                <button class="btn btn-outline-secondary btn-sm" @click="toggleSyncArchiveReplay">{{ syncArchiveReplayPlaying ? 'Pause' : 'Play' }}</button>
+                                <button class="btn btn-outline-secondary btn-sm" @click="restartSyncArchiveReplay">Restart</button>
+                                <select class="form-select form-select-sm" style="width:auto" v-model.number="syncArchiveReplaySpeed"><option :value="0.5">0.5×</option><option :value="1">1×</option><option :value="2">2×</option><option :value="5">5×</option></select>
+                                <input type="range" class="form-range flex-grow-1" style="min-width:180px" min="0" :max="syncArchivePairs().length" v-model.number="syncArchiveReplayCount" @input="renderSyncArchivePlot">
+                                <span class="small text-muted">{{ syncArchiveReplayCount }}/{{ syncArchivePairs().length }} paired shots</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="syncArchivePlot" style="height:520px"></div>
+                </section>
                 <div class="card mb-4 border-0 shadow-sm" :class="{'maximized': maximizedView === 'analysis'}">
                     <div class="analysis-header card-header bg-white">
                         <div class="analysis-header-top">
@@ -1743,6 +1774,17 @@
                     selectedAllanWindow: null,
                     loadedPoints: [], currentCalculatedPoints: [], originalSettings: {}, loadedConfig: {}, currentScanDimensions: 1,
                     markerOptimization: null, selectedOptimizationStep: null,
+                    syncManifest: null,
+                    syncArchiveSlaveId: '',
+                    syncArchiveAxisX: { metric: 'intf_p', channel: 'up' },
+                    syncArchiveAxisY: { metric: 'intf_p', channel: 'up' },
+                    syncArchiveMetricOptions: [
+                        { key: 'atom_number', label: 'Atom Number' },
+                        { key: 'amplitude', label: 'Max Voltage' },
+                        { key: 'transition_probability', label: 'Transition Probability' },
+                        { key: 'intf_p', label: 'Interferometer P' }
+                    ],
+                    syncArchiveReplayCount: 0, syncArchiveReplaySpeed: 1, syncArchiveReplayPlaying: false, syncArchiveReplayTimer: null,
                     displayMode: 'saved',
                     savedDataCount: 0, displayedStats: [], savedStats: [], recalculatedStats: [],
                     savedPreviewMap: {}, recalculatedPreviewMap: {},
@@ -1782,7 +1824,7 @@
             },
             watch: {
                 currentTab() { this.handlePlotContextChange(); },
-                showRawData() { this.handlePlotContextChange(); },
+                showRawData() { this.handlePlotContextChange(); if (this.syncManifest) this.renderSyncArchivePlot(); },
                 showTofFitCurve() { this.handleCurveVisibilityChange(); },
                 showTofRawCurve() { this.handleCurveVisibilityChange(); },
                 showScanFitCurve() { this.handleScanFitVisibilityChange(); }
@@ -1797,6 +1839,7 @@
             },
             beforeUnmount() {
                 document.removeEventListener('click', this.handleDocumentClick, true);
+                if (this.syncArchiveReplayTimer) clearInterval(this.syncArchiveReplayTimer);
             },
             methods: {
                 async fetchCollections() {
@@ -3506,7 +3549,7 @@
                 getDays() { return (this.selectedYear && this.selectedMonth) ? Object.keys(this.archiveTree[this.selectedYear][this.selectedMonth] || {}).sort() : []; },
                 normalizeRunEntry(entry) {
                     if (typeof entry === 'string') {
-                        return { id: entry, run_id: entry, run_label: '', display_name: entry, summary: '', sequence_name: '', has_sequence_file: false, mode: 'standard', has_marker_optimization: false };
+                        return { id: entry, run_id: entry, run_label: '', display_name: entry, summary: '', sequence_name: '', has_sequence_file: false, mode: 'standard', has_marker_optimization: false, has_sync: false };
                     }
                     const runId = String(entry?.id || entry?.run_id || '').trim();
                     const runLabel = String(entry?.run_label || '').trim();
@@ -3520,6 +3563,7 @@
                         has_sequence_file: Boolean(entry?.has_sequence_file),
                         mode: String(entry?.mode || 'standard').trim().toLowerCase(),
                         has_marker_optimization: Boolean(entry?.has_marker_optimization),
+                        has_sync: Boolean(entry?.has_sync),
                     };
                 },
                 getRuns() {
@@ -3566,6 +3610,12 @@
                     this.selectedAllanWindow = null;
                     this.currentWaveforms = [];
                     this.markerOptimization = null;
+                    this.syncManifest = null;
+                    this.syncArchiveSlaveId = '';
+                    if (this.syncArchiveReplayTimer) clearInterval(this.syncArchiveReplayTimer);
+                    this.syncArchiveReplayTimer = null;
+                    this.syncArchiveReplayPlaying = false;
+                    this.syncArchiveReplayCount = 0;
                     this.selectedOptimizationStep = null;
                     this.clearAllanCache();
                     this.errorMsg = '';
@@ -3589,6 +3639,10 @@
                         this.markerOptimization = res.data.marker_optimization && typeof res.data.marker_optimization === 'object'
                             ? res.data.marker_optimization
                             : null;
+                        this.syncManifest = res.data.sync_manifest && typeof res.data.sync_manifest === 'object'
+                            ? res.data.sync_manifest : null;
+                        this.syncArchiveSlaveId = this.syncArchiveSlaveOptions()[0] || '';
+                        this.syncArchiveReplayCount = this.syncArchivePairs().length;
                         this.selectedOptimizationStep = this.markerOptimization?.steps?.length
                             ? Number(this.markerOptimization.steps[0].index) : null;
                         if (this.isAcStarkArchive() && !["atoms", "prob"].includes(this.currentTab)) this.currentTab = "atoms";
@@ -3619,6 +3673,7 @@
                         }
                         this.isLoading = false;
                         await this.$nextTick();
+                        if (this.syncManifest) this.renderSyncArchivePlot();
                         await this.applyDisplayedPoints(this.loadedPoints, this.savedStats, this.savedPreviewMap, true);
                         if (this.plotMode === 'allan') {
                             await this.refreshAllanIfNeeded(false);
@@ -3990,6 +4045,66 @@
                     const abs = Math.abs(numeric);
                     if ((abs > 0 && abs < 0.001) || abs >= 10000) return numeric.toExponential(3);
                     return numeric.toPrecision(4);
+                },
+                syncArchivePairs() {
+                    const pairs = Array.isArray(this.syncManifest?.pairs) ? this.syncManifest.pairs : [];
+                    return this.syncArchiveSlaveId
+                        ? pairs.filter(pair => String(pair.slave_node_id || '') === this.syncArchiveSlaveId)
+                        : pairs;
+                },
+                syncArchiveSlaveOptions() {
+                    const pairs = Array.isArray(this.syncManifest?.pairs) ? this.syncManifest.pairs : [];
+                    return [...new Set(pairs.map(pair => String(pair.slave_node_id || '')).filter(Boolean))];
+                },
+                resetSyncArchiveReplay() {
+                    if (this.syncArchiveReplayPlaying) this.toggleSyncArchiveReplay();
+                    this.syncArchiveReplayCount = this.syncArchivePairs().length;
+                    this.renderSyncArchivePlot();
+                },
+                syncArchiveMetricField(axis) {
+                    const suffix = this.showRawData ? '_nofit' : '';
+                    if (axis.metric === 'intf_p') return `intf_p${axis.channel === 'dw' ? '2' : '1'}${suffix}`;
+                    return `${axis.metric}_${axis.channel === 'dw' ? 'dw' : 'up'}${suffix}`;
+                },
+                renderSyncArchivePlot() {
+                    const element = document.getElementById('syncArchivePlot');
+                    if (!element || typeof Plotly === 'undefined') return;
+                    const fieldX = this.syncArchiveMetricField(this.syncArchiveAxisX);
+                    const fieldY = this.syncArchiveMetricField(this.syncArchiveAxisY);
+                    const rows = this.syncArchivePairs().slice(0, Math.max(0, Number(this.syncArchiveReplayCount) || 0));
+                    const points = rows.map(row => ({
+                        x: Number(row.master?.[fieldX]), y: Number(row.slave?.[fieldY]),
+                        shot: Number(row.sync_shot_index) + 1, p0: row.sync_p0,
+                    })).filter(point => Number.isFinite(point.x) && Number.isFinite(point.y));
+                    Plotly.react(element, [{
+                        x: points.map(p => p.x), y: points.map(p => p.y), text: points.map(p => `Shot ${p.shot}<br>P0=${p.p0}`),
+                        type: 'scatter', mode: 'lines+markers', line: { color: 'rgba(13,110,253,.35)', width: 1.5 },
+                        marker: { size: 8, color: points.map(p => p.shot), colorscale: 'Viridis', showscale: true, colorbar: { title: 'Shot' } }
+                    }], {
+                        margin: { l: 75, r: 70, t: 45, b: 70 }, title: 'Saved differential Lissajous',
+                        xaxis: { title: `Master · ${this.syncArchiveAxisX.metric} · ${this.syncArchiveAxisX.channel.toUpperCase()}` },
+                        yaxis: { title: `Slave · ${this.syncArchiveAxisY.metric} · ${this.syncArchiveAxisY.channel.toUpperCase()}` }, hovermode: 'closest'
+                    }, { responsive: true, displaylogo: false });
+                },
+                toggleSyncArchiveReplay() {
+                    this.syncArchiveReplayPlaying = !this.syncArchiveReplayPlaying;
+                    if (!this.syncArchiveReplayPlaying) {
+                        if (this.syncArchiveReplayTimer) clearInterval(this.syncArchiveReplayTimer);
+                        this.syncArchiveReplayTimer = null;
+                        return;
+                    }
+                    if (this.syncArchiveReplayCount >= this.syncArchivePairs().length) this.syncArchiveReplayCount = 0;
+                    const interval = Math.max(40, 500 / Math.max(0.1, Number(this.syncArchiveReplaySpeed) || 1));
+                    this.syncArchiveReplayTimer = setInterval(() => {
+                        if (this.syncArchiveReplayCount >= this.syncArchivePairs().length) return this.toggleSyncArchiveReplay();
+                        this.syncArchiveReplayCount += 1;
+                        this.renderSyncArchivePlot();
+                    }, interval);
+                },
+                restartSyncArchiveReplay() {
+                    if (this.syncArchiveReplayPlaying) this.toggleSyncArchiveReplay();
+                    this.syncArchiveReplayCount = 0;
+                    this.renderSyncArchivePlot();
                 },
                 getAllanStatisticsRows() {
                     if (!this.currentAllanData) return [];

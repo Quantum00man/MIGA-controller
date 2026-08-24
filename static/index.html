@@ -690,11 +690,16 @@
                         <input type="radio" class="btn-check" name="runMode" id="runModeScheduled" value="scheduled"
                             v-model="runMode" :disabled="isRunning || isScheduleActive() || config.mode === 'ac_stark'">
                         <label class="btn btn-outline-secondary" for="runModeScheduled">Scheduled</label>
+                        <input type="radio" class="btn-check" name="runMode" id="runModeSync" value="sync"
+                            v-model="runMode" :disabled="isRunning || isScheduleActive() || ['lock_in', 'ac_stark'].includes(config.mode)">
+                        <label class="btn btn-outline-primary" for="runModeSync">SYNC</label>
                     </div>
                     <div class="form-text mt-2" style="font-size: 0.72rem;">
                         {{ runMode === 'scheduled'
                         ? 'Scheduled mode lets you queue multiple sequence-specific scans, reorder them, and run them sequentially or at specific times.'
-                        : 'Live mode runs the current sequence and scan settings immediately on the main control page.' }}
+                        : (runMode === 'sync'
+                            ? 'SYNC uses one Master-generated P0 shot plan and starts every Slave before the Master.'
+                            : 'Live mode runs the current sequence and scan settings immediately on the main control page.') }}
                     </div>
                 </div>
             </div>
@@ -733,6 +738,33 @@
                     </div>
                 </div>
             </div>
+
+            <template v-if="isSyncMode()">
+                <span class="section-label">SYNC Nodes</span>
+                <div class="card p-3 mb-3">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <div><span class="badge bg-primary me-2">MASTER</span>{{ syncConfig.node_name || 'Local controller' }}</div>
+                        <a href="/settings.html" target="_blank" class="small">Configure</a>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small text-muted">Master delay after Slave start (ms)</label>
+                        <input type="number" class="form-control form-control-sm" v-model.number="syncMasterDelayMs" min="0" max="60000" step="10">
+                    </div>
+                    <div v-if="syncConfig.role !== 'master'" class="alert alert-warning small py-2">Set this controller to Master in Settings → SYNC.</div>
+                    <div v-for="slave in syncSlaves" :key="slave.id" class="border rounded p-2 mb-2 bg-light">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <span><span class="badge bg-secondary me-2">SLAVE</span>{{ slave.name }}</span>
+                            <span class="badge" :class="syncSlaveStatusClass(slave)">{{ slave.runtime_status || 'configured' }}</span>
+                        </div>
+                        <div class="input-group input-group-sm">
+                            <input class="form-control bg-white" readonly :value="slave.sequence_name || 'Select Slave .mot'">
+                            <button type="button" class="btn btn-outline-primary" @click="openSyncSlaveFile(slave.id)"><i class="bi bi-folder2-open"></i></button>
+                        </div>
+                        <input type="file" :ref="`syncSlaveFile_${slave.id}`" style="display:none" accept=".mot" @change="selectSyncSlaveSequence($event, slave)">
+                        <div class="form-text font-monospace">{{ slave.base_url }}</div>
+                    </div>
+                </div>
+            </template>
 
             <span class="section-label">Parameter Source</span>
             <div class="card p-3 mb-3">
@@ -990,9 +1022,10 @@
                             <option value="half">Half (P0/2)</option>
                             <option value="link">Link (Custom Formula)</option>
                             <option value="bragg_rabi">Bragg Rabi</option>
-                            <option value="lock_in">Lock-in Measurement</option>
-                            <option value="ac_stark">AC Stark Centering</option>
+                            <option value="lock_in" :disabled="isSyncMode()">Lock-in Measurement</option>
+                            <option value="ac_stark" :disabled="isSyncMode()">AC Stark Centering</option>
                         </select>
+                        <div v-if="isSyncMode()" class="form-text">SYNC supports Standard, Timing, Rabi, Half, Link and Bragg Rabi.</div>
                     </div>
                     <div v-if="['timing', 'rabi'].includes(config.mode)">
                         <label class="form-label small text-muted mb-1">Total Parameter</label>
@@ -1288,9 +1321,9 @@
                     </div>
                     <div class="d-grid gap-2">
                         <button class="btn btn-success py-2 fs-6 fw-bold shadow-sm" @click="startScan"
-                            :disabled="isStartDisabled()"><i class="bi bi-play-fill me-1 fs-5"></i> {{ isScheduledMode() ? 'START SCHEDULE' : 'START EXPERIMENT' }}</button>
+                            :disabled="isStartDisabled()"><i class="bi bi-play-fill me-1 fs-5"></i> {{ isScheduledMode() ? 'START SCHEDULE' : (isSyncMode() ? 'START SYNC' : 'START EXPERIMENT') }}</button>
                         <button class="btn btn-danger py-2 fs-6 fw-bold shadow-sm" @click="stopScan"
-                            :disabled="isStopDisabled()"><i class="bi bi-stop-fill me-1 fs-5"></i> {{ isScheduledMode() ? 'STOP SCHEDULE' : 'STOP' }}</button>
+                            :disabled="isStopDisabled()"><i class="bi bi-stop-fill me-1 fs-5"></i> {{ isScheduledMode() ? 'STOP SCHEDULE' : (isSyncMode() ? 'STOP SYNC' : 'STOP') }}</button>
                     </div>
                     <div class="form-text mt-2" style="font-size:0.72rem;" v-if="isScheduledMode()">
                         The header shows current task progress/ETA and total queue progress/ETA after the schedule starts.
@@ -1301,7 +1334,52 @@
         <div class="sidebar-resizer" @pointerdown.prevent="startSidebarResize" title="Drag to resize panels"></div>
 
         <main class="main-content">
-            <div class="card mb-4 border-0 shadow-sm" :class="{'maximized': maximizedView === 'analysis'}">
+            <div v-if="isSyncMode()" class="card mb-4 border-0 shadow-sm">
+                <div class="card-header bg-white py-3">
+                    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+                        <div><i class="bi bi-bounding-box-circles text-primary me-2"></i><span class="fw-bold">SYNC Analysis</span></div>
+                        <div class="d-flex flex-wrap gap-2 align-items-center">
+                            <select class="form-select form-select-sm" style="width:auto" v-model="syncViewMode" @change="renderSyncPlot">
+                                <option value="node">Node series</option>
+                                <option value="lissajous">Lissajous</option>
+                            </select>
+                            <select v-if="syncViewMode === 'node'" class="form-select form-select-sm" style="width:auto" v-model="syncDisplaySource" @change="renderSyncPlot">
+                                <option value="master">Master</option>
+                                <option v-for="slave in syncSlaves" :key="slave.id" :value="slave.id">{{ slave.name }}</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div v-if="syncViewMode === 'node'" class="d-flex flex-wrap gap-2 mt-2">
+                        <select class="form-select form-select-sm" style="width:auto" v-model="syncNodeMetric" @change="renderSyncPlot">
+                            <option v-for="item in syncMetricOptions" :key="item.key" :value="item.key">{{ item.label }}</option>
+                        </select>
+                    </div>
+                    <div v-else class="row g-2 mt-1">
+                        <div class="col-lg-6 d-flex gap-2">
+                            <span class="badge bg-primary align-self-center">X</span>
+                            <select class="form-select form-select-sm" v-model="syncAxisX.source" @change="syncAxesChanged"><option value="master">Master</option><option v-for="slave in syncSlaves" :key="slave.id" :value="slave.id">{{ slave.name }}</option></select>
+                            <select class="form-select form-select-sm" v-model="syncAxisX.metric" @change="syncAxesChanged"><option v-for="item in syncMetricOptions" :key="item.key" :value="item.key">{{ item.label }}</option></select>
+                            <select class="form-select form-select-sm" v-model="syncAxisX.channel" @change="syncAxesChanged"><option value="up">UP</option><option value="dw">DOWN</option></select>
+                        </div>
+                        <div class="col-lg-6 d-flex gap-2">
+                            <span class="badge bg-secondary align-self-center">Y</span>
+                            <select class="form-select form-select-sm" v-model="syncAxisY.source" @change="syncAxesChanged"><option value="master">Master</option><option v-for="slave in syncSlaves" :key="slave.id" :value="slave.id">{{ slave.name }}</option></select>
+                            <select class="form-select form-select-sm" v-model="syncAxisY.metric" @change="syncAxesChanged"><option v-for="item in syncMetricOptions" :key="item.key" :value="item.key">{{ item.label }}</option></select>
+                            <select class="form-select form-select-sm" v-model="syncAxisY.channel" @change="syncAxesChanged"><option value="up">UP</option><option value="dw">DOWN</option></select>
+                        </div>
+                        <div class="col-12 d-flex flex-wrap align-items-center gap-2">
+                            <button class="btn btn-outline-secondary btn-sm" @click="toggleSyncReplay">{{ syncReplayPlaying ? 'Pause' : 'Play' }}</button>
+                            <button class="btn btn-outline-secondary btn-sm" @click="restartSyncReplay">Restart</button>
+                            <select class="form-select form-select-sm" style="width:auto" v-model.number="syncReplaySpeed"><option :value="0.5">0.5×</option><option :value="1">1×</option><option :value="2">2×</option><option :value="5">5×</option></select>
+                            <input type="range" class="form-range flex-grow-1" style="min-width:180px" min="0" :max="syncLissajousRows().length" v-model.number="syncReplayCount" @input="renderSyncPlot">
+                            <span class="small text-muted">{{ syncReplayCount }}/{{ syncLissajousRows().length }} aligned shots</span>
+                        </div>
+                    </div>
+                </div>
+                <div id="syncPlot" style="height:560px"></div>
+            </div>
+
+            <div v-else class="card mb-4 border-0 shadow-sm" :class="{'maximized': maximizedView === 'analysis'}">
                 <div class="analysis-header card-header bg-white">
                     <div class="analysis-header-top">
                     <div class="analysis-header-title">
@@ -1491,6 +1569,28 @@
                     sharedStateBootstrapComplete: false,
                     sharedStateSyncPendingBeforeBootstrap: false,
                     runMode: 'live',
+                    syncConfig: { role: 'standalone', node_name: 'Local controller', slaves: [] },
+                    syncSlaves: [],
+                    syncMasterDelayMs: 100,
+                    syncRuntime: { active: false, status: 'idle', slaves: [], paired_count: 0 },
+                    syncNodeResults: { master: [] },
+                    syncPairs: [],
+                    syncViewMode: 'lissajous',
+                    syncDisplaySource: 'master',
+                    syncNodeMetric: 'intf_p',
+                    syncAxisX: { source: 'master', metric: 'intf_p', channel: 'up' },
+                    syncAxisY: { source: '', metric: 'intf_p', channel: 'up' },
+                    syncMetricOptions: [
+                        { key: 'atom_number', label: 'Atom Number' },
+                        { key: 'amplitude', label: 'Max Voltage' },
+                        { key: 'transition_probability', label: 'Transition Probability' },
+                        { key: 'intf_p', label: 'Interferometer P' }
+                    ],
+                    syncReplayCount: 0,
+                    syncReplaySpeed: 1,
+                    syncReplayPlaying: false,
+                    syncReplayTimer: null,
+                    syncStatusPollTimer: null,
                     scheduleSettings: { singlePointDurationSec: 1.615, timingMode: 'sequential', sequentialGapSec: 60 },
                     scheduledTasks: [],
                     selectedScheduledTaskId: null,
@@ -1541,7 +1641,7 @@
             },
             watch: {
                 currentTab() { this.plotRevision++; this.renderMainPlot(); },
-                showRawData() { this.plotRevision++; this.renderMainPlot(); },
+                showRawData() { this.plotRevision++; this.isSyncMode() ? this.renderSyncPlot() : this.renderMainPlot(); },
                 useList1(val) { this.config.dim1_type = val ? 'list' : 'range'; this.saveState(); },
                 useList2(val) { this.config.dim2_type = val ? 'list' : 'range'; this.saveState(); },
                 useList3(val) { this.config.dim3_type = val ? 'list' : 'range'; this.saveState(); },
@@ -1553,6 +1653,10 @@
                     }
                 },
                 'config.mode'(mode) {
+                    if (this.runMode === 'sync' && ['lock_in', 'ac_stark'].includes(mode)) {
+                        this.config.mode = 'standard';
+                        return;
+                    }
                     if (this.config.parameter_source === 'markers' && mode !== 'standard') {
                         this.config.mode = 'standard';
                         return;
@@ -1573,12 +1677,16 @@
                 },
                 runMode(value) {
                     if (value === 'scheduled' && this.config.parameter_source === 'markers') this.config.parameter_source = 'classic';
+                    if (value === 'sync') {
+                        if (['lock_in', 'ac_stark'].includes(this.config.mode)) this.config.mode = 'standard';
+                        this.fetchSyncConfig();
+                    }
                     this.saveState();
                     this.requestPlotResize();
                 },
                 'config.parameter_source'(source) {
                     if (source === 'markers') {
-                        this.runMode = 'live';
+                        if (this.runMode === 'scheduled') this.runMode = 'live';
                         this.config.mode = 'standard';
                         this.fetchSequenceMarkers();
                     } else {
@@ -1626,6 +1734,7 @@
                 this.fetchStatus();
                 this.fetchDdsXmlStatus();
                 this.fetchSequenceMarkers();
+                this.fetchSyncConfig();
                     // Editable scan/queue state is local to this browser. Only the
                     // server-owned execution status is shared between clients.
                     this.sharedStateBootstrapComplete = true;
@@ -1633,6 +1742,7 @@
                 this.windowResizeHandler = () => this.handleWindowResize();
                 window.addEventListener('resize', this.windowResizeHandler);
                 this.statusPollTimer = setInterval(() => this.fetchStatus(), 2000);
+                this.syncStatusPollTimer = setInterval(() => this.fetchSyncStatus(), 1000);
                 this.clockPollTimer = setInterval(() => this.updateScheduledClock(), 1000);
                     this.sharedStatePollTimer = setInterval(() => this.fetchScheduledStatus(), 2000);
                 this.addLog("System initialized ready.");
@@ -1643,6 +1753,8 @@
                     window.removeEventListener('resize', this.windowResizeHandler);
                     this.windowResizeHandler = null;
                 }
+                if (this.syncStatusPollTimer) clearInterval(this.syncStatusPollTimer);
+                if (this.syncReplayTimer) clearInterval(this.syncReplayTimer);
                 if (this.statusPollTimer) {
                     clearInterval(this.statusPollTimer);
                     this.statusPollTimer = null;
@@ -1779,6 +1891,74 @@
                         return null;
                     }
                 },
+                async fetchSyncConfig() {
+                    try {
+                        const res = await axios.get('/sync/config');
+                        this.syncConfig = res.data?.data || this.syncConfig;
+                        const previous = new Map(this.syncSlaves.map(item => [item.id, item]));
+                        this.syncSlaves = (this.syncConfig.slaves || []).filter(item => item.enabled !== false).map((item, index) => ({
+                            ...item,
+                            id: String(item.id || `slave_${index + 1}`),
+                            sequence_name: previous.get(String(item.id))?.sequence_name || '',
+                            sequence_content: previous.get(String(item.id))?.sequence_content || '',
+                            sequence_content_base64: previous.get(String(item.id))?.sequence_content_base64 || '',
+                            runtime_status: previous.get(String(item.id))?.runtime_status || 'configured',
+                        }));
+                        if (!this.syncAxisY.source && this.syncSlaves.length) this.syncAxisY.source = this.syncSlaves[0].id;
+                    } catch (error) {
+                        this.addLog('SYNC configuration failed: ' + this.formatRequestError(error));
+                    }
+                },
+                openSyncSlaveFile(slaveId) {
+                    const ref = this.$refs[`syncSlaveFile_${slaveId}`];
+                    const input = Array.isArray(ref) ? ref[0] : ref;
+                    if (input) input.click();
+                },
+                async selectSyncSlaveSequence(event, slave) {
+                    const file = event.target.files?.[0];
+                    event.target.value = '';
+                    if (!file) return;
+                    slave.sequence_name = file.name;
+                    const bytes = new Uint8Array(await file.arrayBuffer());
+                    let binary = '';
+                    for (let offset = 0; offset < bytes.length; offset += 32768) {
+                        binary += String.fromCharCode(...bytes.subarray(offset, offset + 32768));
+                    }
+                    slave.sequence_content = '';
+                    slave.sequence_content_base64 = btoa(binary);
+                    this.addLog(`SYNC ${slave.name} sequence selected: ${file.name}`);
+                },
+                syncSlaveStatusClass(slave) {
+                    const status = String(slave.runtime_status || '').toLowerCase();
+                    if (['running', 'ready'].includes(status)) return 'bg-success';
+                    if (['unreachable', 'error'].includes(status)) return 'bg-danger';
+                    if (['stopping'].includes(status)) return 'bg-warning text-dark';
+                    return 'bg-secondary';
+                },
+                async fetchSyncStatus() {
+                    if (!this.isSyncMode() && !this.syncRuntime.active) return;
+                    try {
+                        const res = await axios.get('/sync/status');
+                        this.syncRuntime = res.data?.data || this.syncRuntime;
+                        const stateById = new Map((this.syncRuntime.slaves || []).map(item => [String(item.node_id), item]));
+                        this.syncSlaves.forEach(slave => {
+                            const state = stateById.get(String(slave.id));
+                            if (state) slave.runtime_status = state.status || slave.runtime_status;
+                        });
+                        if (this.syncRuntime.active) {
+                            this.isRunning = true;
+                            this.statusMessage = this.syncRuntime.message || 'SYNC RUNNING';
+                            this.currentStep = Number(this.syncRuntime.master_step) || 0;
+                            const total = Number(this.syncRuntime.expected_shots) || 1;
+                            this.progressPercent = Math.round(100 * this.currentStep / total);
+                        } else if (this.isRunning && this.isSyncMode() && ['done', 'error', 'stopped'].includes(this.syncRuntime.status)) {
+                            this.isRunning = false;
+                            this.statusMessage = this.syncRuntime.status === 'error' ? this.syncRuntime.message : 'IDLE';
+                        }
+                    } catch (error) {
+                        if (this.syncRuntime.active) this.addLog('SYNC status error: ' + this.formatRequestError(error));
+                    }
+                },
                 createClientId() {
                     return `client_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
                 },
@@ -1871,7 +2051,7 @@
                         const restoredConfig = Object.fromEntries(
                             Object.entries(state.config || {}).filter(([key]) => knownConfigKeys.includes(key))
                         );
-                        this.runMode = state.runMode === 'scheduled' ? 'scheduled' : 'live';
+                        this.runMode = ['live', 'scheduled', 'sync'].includes(state.runMode) ? state.runMode : 'live';
                         this.config = { ...this.config, ...restoredConfig };
                             this.config.parameter_source = this.config.parameter_source === 'markers' ? 'markers' : 'classic';
                             this.config.marker_axes = Array.isArray(this.config.marker_axes)
@@ -2238,7 +2418,7 @@
                             if (Number.isFinite(Number(state.sidebarWidth))) {
                                 this.sidebarWidth = Number(state.sidebarWidth);
                             }
-                            if (state.runMode === 'live' || state.runMode === 'scheduled') {
+                            if (['live', 'scheduled', 'sync'].includes(state.runMode)) {
                                 this.runMode = state.runMode;
                             }
                             if (state.scheduleSettings && typeof state.scheduleSettings === 'object') {
@@ -2515,16 +2695,24 @@ handleWindowResize() {
 isScheduledMode() {
     return this.runMode === 'scheduled';
 },
+isSyncMode() {
+    return this.runMode === 'sync';
+},
 isScheduleActive() {
     return Boolean(this.scheduleRuntime?.active);
 },
 isStatusActive() {
-    return this.isRunning || this.isScheduleActive();
+    return this.isRunning || this.isScheduleActive() || Boolean(this.syncRuntime?.active);
 },
 isStartDisabled() {
     const acStarkMissingXml = this.config.mode === 'ac_stark' && !String(this.currentDdsXmlName || '').trim();
     const acStarkScheduled = this.config.mode === 'ac_stark' && this.isScheduledMode();
-    return this.isRunning || this.isScheduleActive() || acStarkMissingXml || acStarkScheduled || (this.isScheduledMode() && !this.scheduledTasks.length);
+    const syncInvalid = this.isSyncMode() && (
+        this.syncConfig.role !== 'master'
+        || !this.syncSlaves.length
+        || this.syncSlaves.some(slave => !String(slave.sequence_content || '').trim())
+    );
+    return this.isRunning || this.isScheduleActive() || acStarkMissingXml || acStarkScheduled || syncInvalid || (this.isScheduledMode() && !this.scheduledTasks.length);
 },
 getVisibleTabs() {
     return this.config.mode === 'ac_stark'
@@ -2532,7 +2720,7 @@ getVisibleTabs() {
         : this.tabs;
 },
 isStopDisabled() {
-    return !this.isRunning && !this.isScheduleActive();
+    return !this.isRunning && !this.isScheduleActive() && !this.syncRuntime?.active;
 },
 getRunHeaderLabel() {
     if (this.isRunning) return 'CURRENT RUN';
@@ -3197,11 +3385,13 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     this.layoutResBase = commonLayout;
                     this.layoutResUp = { ...commonLayout };
                     this.layoutResDw = { ...commonLayout };
-                    Plotly.newPlot('resultsPlotUp', [], this.layoutResUp); Plotly.newPlot('resultsPlotDw', [], this.layoutResDw);
+                    if (document.getElementById('resultsPlotUp')) Plotly.newPlot('resultsPlotUp', [], this.layoutResUp);
+                    if (document.getElementById('resultsPlotDw')) Plotly.newPlot('resultsPlotDw', [], this.layoutResDw);
                     this.layoutOscUp = { ...commonLayout, margin: { t: 25, b: 5, l: 50, r: 10 }, yaxis: { ...commonLayout.yaxis, title: 'UP (V)' }, xaxis: { ...commonLayout.xaxis, visible: false }, title: { text: 'UP Signal', font: { size: 10 }, x: 0.05, y: 0.85 }, paper_bgcolor: 'white', plot_bgcolor: 'white' };
                     this.layoutOscDw = { ...commonLayout, margin: { t: 5, b: 30, l: 50, r: 10 }, yaxis: { ...commonLayout.yaxis, title: 'DW (V)' }, xaxis: { ...commonLayout.xaxis, title: 'Time (ms)' }, title: { text: 'DOWN Signal', font: { size: 10 }, x: 0.05, y: 0.85 }, paper_bgcolor: 'white', plot_bgcolor: 'white' };
-                    Plotly.newPlot('waveformPlotUp', [], this.layoutOscUp); Plotly.newPlot('waveformPlotDw', [], this.layoutOscDw);
-                    this.renderMainPlot();
+                    if (document.getElementById('waveformPlotUp')) Plotly.newPlot('waveformPlotUp', [], this.layoutOscUp);
+                    if (document.getElementById('waveformPlotDw')) Plotly.newPlot('waveformPlotDw', [], this.layoutOscDw);
+                    if (this.isSyncMode()) this.renderSyncPlot(); else this.renderMainPlot();
                 },
                 parseNumericInput(value) {
                     if (value === null || value === undefined || value === '') return null;
@@ -4056,6 +4246,11 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     Plotly.react('resultsPlotDw', down.traces, down.layout);
                 },
                 renderMainPlot() {
+                    if (this.isSyncMode()) {
+                        this.renderSyncPlot();
+                        return;
+                    }
+                    if (!document.getElementById('resultsPlotUp') || !document.getElementById('resultsPlotDw')) return;
                     if (this.config.mode === 'ac_stark') {
                         this.renderAcStarkPlot();
                         return;
@@ -4085,6 +4280,123 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     this.ws.onclose = () => setTimeout(this.connectWebSocket, 3000);
                     this.ws.onmessage = (event) => this.handleData(JSON.parse(event.data));
                 },
+                handleSyncNodeData(data) {
+                    const source = data.sync_role === 'master' ? 'master' : String(data.sync_node_id || 'slave');
+                    if (!Array.isArray(this.syncNodeResults[source])) this.syncNodeResults[source] = [];
+                    const shotIndex = Number(data.sync_shot_index);
+                    const rows = this.syncNodeResults[source];
+                    const existing = rows.findIndex(item => Number(item.sync_shot_index) === shotIndex);
+                    if (existing >= 0) rows.splice(existing, 1, data); else rows.push(data);
+                    rows.sort((a, b) => Number(a.sync_shot_index) - Number(b.sync_shot_index));
+                    if (source === 'master') {
+                        this.currentStep = Math.max(this.currentStep, shotIndex + 1);
+                        const total = Number(data.total_steps) || 1;
+                        this.progressPercent = Math.round(100 * this.currentStep / total);
+                    }
+                    if (!this.syncReplayPlaying) this.syncReplayCount = this.syncLissajousRows().length;
+                    this.$nextTick(() => this.renderSyncPlot());
+                    return source;
+                },
+                handleSyncPair(data) {
+                    const key = `${data.slave_node_id}:${data.sync_shot_index}`;
+                    const existing = this.syncPairs.findIndex(item => `${item.slave_node_id}:${item.sync_shot_index}` === key);
+                    if (existing >= 0) this.syncPairs.splice(existing, 1, data); else this.syncPairs.push(data);
+                    this.syncPairs.sort((a, b) => Number(a.sync_shot_index) - Number(b.sync_shot_index));
+                    if (!this.syncReplayPlaying) this.syncReplayCount = this.syncLissajousRows().length;
+                    this.$nextTick(() => this.renderSyncPlot());
+                },
+                syncMetricField(metric, channel) {
+                    const suffix = this.showRawData ? '_nofit' : '';
+                    if (metric === 'intf_p') return `intf_p${channel === 'dw' ? '2' : '1'}${suffix}`;
+                    return `${metric}_${channel === 'dw' ? 'dw' : 'up'}${suffix}`;
+                },
+                syncAxisValue(record, axis) {
+                    if (!record || record.error) return null;
+                    const value = Number(record[this.syncMetricField(axis.metric, axis.channel)]);
+                    return Number.isFinite(value) ? value : null;
+                },
+                syncLissajousRows() {
+                    const xRows = Array.isArray(this.syncNodeResults[this.syncAxisX.source])
+                        ? this.syncNodeResults[this.syncAxisX.source] : [];
+                    const yRows = Array.isArray(this.syncNodeResults[this.syncAxisY.source])
+                        ? this.syncNodeResults[this.syncAxisY.source] : [];
+                    const yByShot = new Map(yRows.map(row => [Number(row.sync_shot_index), row]));
+                    return xRows.map(xRecord => {
+                        const shotIndex = Number(xRecord.sync_shot_index);
+                        return { shotIndex, xRecord, yRecord: yByShot.get(shotIndex) };
+                    }).filter(row => Number.isInteger(row.shotIndex) && row.shotIndex >= 0
+                        && row.yRecord && !row.xRecord.error && !row.yRecord.error)
+                        .sort((a, b) => a.shotIndex - b.shotIndex);
+                },
+                syncAxesChanged() {
+                    if (this.syncReplayPlaying) this.toggleSyncReplay();
+                    this.syncReplayCount = this.syncLissajousRows().length;
+                    this.renderSyncPlot();
+                },
+                renderSyncPlot() {
+                    const element = document.getElementById('syncPlot');
+                    if (!element || typeof Plotly === 'undefined') return;
+                    if (this.syncViewMode === 'node') {
+                        const rows = this.syncNodeResults[this.syncDisplaySource] || [];
+                        const makeTrace = (channel, color) => {
+                            const field = this.syncMetricField(this.syncNodeMetric, channel);
+                            const valid = rows.map(row => ({ x: Number(row.sync_p0), y: Number(row[field]), shot: Number(row.sync_shot_index) + 1 }))
+                                .filter(point => Number.isFinite(point.x) && Number.isFinite(point.y));
+                            return { x: valid.map(p => p.x), y: valid.map(p => p.y), text: valid.map(p => `Shot ${p.shot}`), type: 'scatter', mode: 'lines+markers', name: channel === 'up' ? 'UP' : 'DOWN', line: { color }, marker: { size: 7 } };
+                        };
+                        Plotly.react(element, [makeTrace('up', '#dc3545'), makeTrace('dw', '#0d6efd')], {
+                            margin: { l: 70, r: 25, t: 45, b: 60 },
+                            title: `${this.syncDisplaySource === 'master' ? 'Master' : (this.syncSlaves.find(s => s.id === this.syncDisplaySource)?.name || this.syncDisplaySource)} · ${this.syncMetricOptions.find(m => m.key === this.syncNodeMetric)?.label || this.syncNodeMetric}`,
+                            xaxis: { title: 'P0' }, yaxis: { title: this.syncNodeMetric }, legend: { orientation: 'h' }, hovermode: 'closest'
+                        }, { responsive: true, displaylogo: false });
+                        return;
+                    }
+                    const rows = this.syncLissajousRows().slice(0, Math.max(0, Number(this.syncReplayCount) || 0));
+                    const valid = rows.map(row => ({
+                        x: this.syncAxisValue(row.xRecord, this.syncAxisX),
+                        y: this.syncAxisValue(row.yRecord, this.syncAxisY),
+                        shot: row.shotIndex + 1,
+                        p0: row.xRecord.sync_p0 ?? row.yRecord.sync_p0,
+                    }))
+                        .filter(point => point.x !== null && point.y !== null);
+                    Plotly.react(element, [{
+                        x: valid.map(p => p.x), y: valid.map(p => p.y),
+                        text: valid.map(p => `Shot ${p.shot}<br>P0=${p.p0}`),
+                        type: 'scatter', mode: 'lines+markers',
+                        line: { color: 'rgba(13,110,253,.35)', width: 1.5 },
+                        marker: { size: 8, color: valid.map(p => p.shot), colorscale: 'Viridis', showscale: true, colorbar: { title: 'Shot' } },
+                        name: 'Paired shots'
+                    }], {
+                        margin: { l: 75, r: 70, t: 45, b: 70 }, title: 'Differential Lissajous',
+                        xaxis: { title: `${this.syncAxisX.source} · ${this.syncAxisX.metric} · ${this.syncAxisX.channel.toUpperCase()}` },
+                        yaxis: { title: `${this.syncAxisY.source} · ${this.syncAxisY.metric} · ${this.syncAxisY.channel.toUpperCase()}`, scaleanchor: null },
+                        hovermode: 'closest'
+                    }, { responsive: true, displaylogo: false });
+                },
+                toggleSyncReplay() {
+                    this.syncReplayPlaying = !this.syncReplayPlaying;
+                    if (!this.syncReplayPlaying) {
+                        if (this.syncReplayTimer) clearInterval(this.syncReplayTimer);
+                        this.syncReplayTimer = null;
+                        return;
+                    }
+                    const total = this.syncLissajousRows().length;
+                    if (this.syncReplayCount >= total) this.syncReplayCount = 0;
+                    const interval = Math.max(40, 500 / Math.max(0.1, Number(this.syncReplaySpeed) || 1));
+                    this.syncReplayTimer = setInterval(() => {
+                        if (this.syncReplayCount >= this.syncLissajousRows().length) {
+                            this.toggleSyncReplay();
+                            return;
+                        }
+                        this.syncReplayCount += 1;
+                        this.renderSyncPlot();
+                    }, interval);
+                },
+                restartSyncReplay() {
+                    if (this.syncReplayPlaying) this.toggleSyncReplay();
+                    this.syncReplayCount = 0;
+                    this.renderSyncPlot();
+                },
                 finalizeImmediateScanCompletion(totalSteps = this.currentStep) {
                     if (this.isScheduleActive()) return;
                     this.currentStep = Math.max(Number(this.currentStep) || 0, Number(totalSteps) || 0);
@@ -4100,7 +4412,16 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     }, 500);
                 },
                 handleData(data) {
+                    if (data?.stream_type === 'sync_pair') {
+                        this.handleSyncPair(data);
+                        return;
+                    }
                     if (data?.stream_type && data.stream_type !== 'scan_point') return;
+                    if (this.isSyncMode() && data?.sync_run_id) {
+                        const source = this.handleSyncNodeData(data);
+                        const waveformSource = this.syncDisplaySource === 'master' ? 'master' : this.syncDisplaySource;
+                        if (source !== waveformSource) return;
+                    }
                     this.currentStep = data.current_step || 0;
                     const total = data.total_steps || 1;
                     this.progressPercent = total > 0 ? Math.round((this.currentStep / total) * 100) : 0;
@@ -4112,7 +4433,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     const scannedParams = this.getScannedParameters(data, scanDimensions);
                     const isAcStarkPoint = Number.isFinite(Number(data.ac_stark_ratio)) && ['left', 'right'].includes(String(data.ac_stark_side || '').toLowerCase());
                     const isLockInPoint = Number.isInteger(Number(data.lock_in_block_index)) && Number(data.lock_in_block_index) > 0;
-                    const isFinalImmediateStep = !this.isScheduleActive() && total > 0 && this.currentStep >= total;
+                    const isFinalImmediateStep = !this.isScheduleActive() && !this.isSyncMode() && total > 0 && this.currentStep >= total;
                     this.currentScanDimensions = scanDimensions;
                     this.statusMessage = isAcStarkPoint
                         ? `AC Stark: ratio=${Number(data.ac_stark_ratio).toFixed(6)} | ${String(data.ac_stark_side).toUpperCase()}`
@@ -4235,7 +4556,52 @@ finishScheduledRun(finalStatus = 'IDLE') {
                 await this.startScheduledRun();
                 return;
             }
+            if (this.isSyncMode()) {
+                await this.startSyncRun();
+                return;
+            }
             await this.startImmediateScan();
+        },
+        async startSyncRun() {
+            if (this.isRunning || this.syncRuntime.active) return;
+            try {
+                await this.ensureRealHardwareMode();
+                await this.fetchSyncConfig();
+                if (this.syncConfig.role !== 'master') throw new Error('This controller is not configured as Master.');
+                if (!this.syncSlaves.length) throw new Error('No enabled Slave is configured.');
+                const missing = this.syncSlaves.find(slave => !String(slave.sequence_content_base64 || slave.sequence_content || '').trim());
+                if (missing) throw new Error(`Select a .mot file for ${missing.name}.`);
+                const uploadSuccess = await this.uploadSequenceFile();
+                if (!uploadSuccess) throw new Error('Master sequence upload failed.');
+
+                this.syncNodeResults = { master: [] };
+                this.syncSlaves.forEach(slave => { this.syncNodeResults[slave.id] = []; });
+                this.syncPairs = [];
+                this.syncReplayCount = 0;
+                this.syncReplayPlaying = false;
+                this.resetHistory();
+                const scanConfig = this.prepareScanPayload(this.config, this.currentSequenceName);
+                const res = await axios.post('/sync/start', {
+                    scan_config: scanConfig,
+                    master_delay_ms: Number(this.syncMasterDelayMs) || 0,
+                    slaves: this.syncSlaves.map(slave => ({
+                        node_id: slave.id,
+                        name: slave.name,
+                        base_url: slave.base_url,
+                        sequence_name: slave.sequence_name,
+                        sequence_content: slave.sequence_content,
+                        sequence_content_base64: slave.sequence_content_base64,
+                        enabled: true,
+                    })),
+                });
+                this.syncRuntime = res.data?.data || this.syncRuntime;
+                this.isRunning = true;
+                this.statusMessage = 'SYNC RUNNING';
+                this.$nextTick(() => this.renderSyncPlot());
+            } catch (error) {
+                this.isRunning = false;
+                this.addLog('SYNC start failed: ' + (error?.message || this.formatRequestError(error)));
+            }
         },
         async startImmediateScan() {
             if (this.isRunning || this.isScheduleActive()) return;
@@ -4341,6 +4707,15 @@ finishScheduledRun(finalStatus = 'IDLE') {
             }
         },
         async stopScan() {
+            if (this.isSyncMode() || this.syncRuntime?.active) {
+                try {
+                    await axios.post('/sync/stop');
+                    this.statusMessage = 'SYNC STOPPING';
+                } catch (error) {
+                    this.addLog('SYNC stop failed: ' + this.formatRequestError(error));
+                }
+                return;
+            }
             if (this.isScheduleActive()) {
                 this.scheduleRuntime.stopRequested = true;
                 this.statusMessage = this.isRunning ? 'STOPPING' : 'STOPPED';

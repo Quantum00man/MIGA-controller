@@ -47,6 +47,7 @@ class DataLoader:
     def _build_run_entry(self, run_dir: Path) -> Dict[str, Any]:
         config_data = self._load_config_data(run_dir)
         has_marker_optimization = (run_dir / "marker_optimization_report.json").is_file()
+        has_sync = (run_dir / "sync_manifest.json").is_file()
         if has_marker_optimization:
             config_data = {**config_data, "mode": "marker_optimization"}
         run_id = run_dir.name
@@ -66,6 +67,7 @@ class DataLoader:
             "randomize": bool(config_data.get("randomize", False)),
             "mode": str(config_data.get("mode") or "standard").strip().lower() or "standard",
             "has_marker_optimization": has_marker_optimization,
+            "has_sync": has_sync,
         }
 
     def get_run_entry(self, year: str, month: str, day: str, run_id: str) -> Dict[str, Any]:
@@ -615,6 +617,13 @@ class DataLoader:
         is_lock_in = str(config_data.get("mode") or "").strip().lower() == "lock_in"
         expected_lock_in_blocks = self._parse_int(config_data.get("averages"), 0) if is_lock_in else 0
         lock_in_analysis = build_lock_in_analysis(full_points, expected_blocks=expected_lock_in_blocks) if is_lock_in else {}
+        sync_manifest = None
+        sync_manifest_path = run_dir / "sync_manifest.json"
+        if sync_manifest_path.is_file():
+            try:
+                sync_manifest = json.loads(sync_manifest_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                sync_manifest = {"runtime": {"status": "invalid", "message": "Sync manifest could not be read"}, "pairs": []}
         return {
             "config": config_data,
             "run_entry": self._build_run_entry(run_dir),
@@ -634,6 +643,7 @@ class DataLoader:
             ),
             "total_points": len(full_points),
             "marker_optimization": marker_optimization if is_marker_optimization else None,
+            "sync_manifest": sync_manifest,
         }
 
 

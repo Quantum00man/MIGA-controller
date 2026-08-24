@@ -97,7 +97,9 @@ class DataManager:
         with open(self.current_run_dir / "config.json", 'w') as f:
             json.dump(scan_config, f, indent=4)
             
-        src_seq = config.SEQUENCE_TEMPLATE_PATH_WIN if config.USE_SIMULATION else config.SEQUENCE_TEMPLATE_PATH_LINUX
+        src_seq = scan_config.get('_template_path_override') or (
+            config.SEQUENCE_TEMPLATE_PATH_WIN if config.USE_SIMULATION else config.SEQUENCE_TEMPLATE_PATH_LINUX
+        )
         if os.path.exists(src_seq):
             shutil.copy(src_seq, self.current_run_dir / "sequence.mot")
             
