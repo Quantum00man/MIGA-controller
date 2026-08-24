@@ -1192,7 +1192,14 @@
                                     <strong>{{ formatMetricValue(value) }}</strong>
                                 </div>
                             </div>
+                            <div class="scan-fit-param-row mt-2">
+                                <span>Curve area <span class="text-muted">(baseline removed)</span></span>
+                                <strong>{{ formatMetricValue(scanFitResult.area) }}</strong>
+                            </div>
                             <div class="small text-muted mt-2">Residual variance: {{ formatMetricValue(scanFitResult.residual_variance) }}</div>
+                            <div class="small text-muted mt-1">
+                                Area integrated from P0 {{ formatScanFitBound(scanFitResult.fit_min) }} to {{ formatScanFitBound(scanFitResult.fit_max) }}.
+                            </div>
                         </div>
                     </div>
                 </div>

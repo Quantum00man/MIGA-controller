@@ -1185,6 +1185,7 @@ async def fit_archive_scan(req: ArchiveScanFitRequest):
         "width": fit_result.width,
         "center": fit_result.center,
         "offset": fit_result.offset,
+        "area": fit_result.area,
     }
 
 
