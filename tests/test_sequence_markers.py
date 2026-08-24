@@ -149,6 +149,37 @@ class MarkerUpdateTests(unittest.TestCase):
         self.assertEqual(line["markers"][0]["role"], "scan")
 
 class MarkerRenderingTests(unittest.TestCase):
+    def test_multiple_duration_markers_can_share_compensation_instruction(self):
+        source = (
+            "+100us PULSE_A = ON (1)\n"
+            "+200us PULSE_B = ON (2)\n"
+            "+1000us WAIT = OFF (3)\n"
+        )
+        marked = add_sequence_marker(source, "DURATION_A", 1, "duration", 3)
+        inspection = inspect_sequence_markers(marked)
+        pulse_b_line = next(line["line_number"] for line in inspection["lines"] if "PULSE_B" in line["source"])
+        wait_line = next(line["line_number"] for line in inspection["lines"] if "WAIT" in line["source"])
+        marked = add_sequence_marker(marked, "DURATION_B", pulse_b_line, "duration", wait_line)
+
+        definitions = [
+            definition("DURATION_A", "duration", hard_min=1, hard_max=1000, has_compensation=True),
+            definition("DURATION_B", "duration", hard_min=1, hard_max=1000, has_compensation=True),
+        ]
+        inspection = inspect_sequence_markers(marked, definitions)
+        compensation_markers = [item for item in inspection["markers"] if item["role"] == "comp"]
+        self.assertEqual({item["id"] for item in compensation_markers}, {"DURATION_A", "DURATION_B"})
+        self.assertEqual(len({item["target_line_number"] for item in compensation_markers}), 1)
+
+        rendered = render_auto_marker_sequence(
+            marked,
+            ["DURATION_A", "DURATION_B"],
+            [150, 260],
+            definitions,
+        )
+        self.assertIn("+150us PULSE_A", rendered)
+        self.assertIn("+260us PULSE_B", rendered)
+        self.assertIn("+890us WAIT", rendered)
+
     def test_dds_element_replacement_does_not_change_command_suffix(self):
         content = "###SCAN:FREQ###\n+1us DDS1 [1] (2)\n"
         definition = {

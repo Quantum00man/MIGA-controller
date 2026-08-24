@@ -663,8 +663,14 @@ def add_sequence_marker(
             raise ValueError("Duration and compensation must use different instructions")
         if f"{compensation_line_number}:duration" not in candidate_map:
             raise ValueError("Selected compensation is not a duration instruction")
-        if any(record["line_number"] == compensation_line_number and record["marked"] for record in inspection["lines"]):
-            raise ValueError("Selected compensation instruction already has a marker")
+        compensation_record = next(
+            (record for record in inspection["lines"] if record["line_number"] == compensation_line_number),
+            None,
+        )
+        if compensation_record and any(
+            marker["role"] != "comp" for marker in compensation_record.get("markers", [])
+        ):
+            raise ValueError("Selected compensation instruction already has a non-compensation marker")
         insertions.append((compensation_line_number - 1, f"###COMP:{marker_id}###"))
 
     lines = str(content).splitlines(keepends=True)
@@ -834,6 +840,7 @@ def render_auto_marker_sequence(
     comp_markers = {marker["id"]: marker for marker in inspection["markers"] if marker["role"] == "comp"}
     lines = str(content).splitlines(keepends=True)
     replacements: Dict[int, List[Tuple[str, float, Dict[str, Any]]]] = {}
+    compensation_adjustments: Dict[int, Dict[str, Any]] = {}
 
     for marker_id, raw_value in zip(axes, values):
         definition = definition_map.get(marker_id)
@@ -856,19 +863,34 @@ def render_auto_marker_sequence(
                 raise ValueError(f"Duration marker {marker_id} requires a valid compensation marker")
             target_candidate = marker.get("candidate") or {}
             comp_candidate = compensation.get("candidate") or {}
-            initial_total = float(target_candidate.get("value_us")) + float(comp_candidate.get("value_us"))
-            new_compensation = initial_total - value
-            if new_compensation <= 0:
-                raise ValueError(
-                    f"Marker {marker_id} value {value:g} us produces compensation {new_compensation:g} us; compensation must be greater than 0"
-                )
             comp_line = int(compensation["target_line_number"])
             if comp_line in replacements or comp_line == target_line:
                 raise ValueError(f"Compensation target for {marker_id} conflicts with another scan marker")
             comp_definition = {**definition, "kind": "duration", "decimals": 0}
-            replacements.setdefault(comp_line, []).append(("duration", new_compensation, comp_definition))
+            adjustment = compensation_adjustments.setdefault(comp_line, {
+                "initial": float(comp_candidate.get("value_us")),
+                "delta": 0.0,
+                "definition": comp_definition,
+                "marker_ids": [],
+            })
+            adjustment["delta"] += float(target_candidate.get("value_us")) - value
+            adjustment["marker_ids"].append(marker_id)
         elif compensation:
             raise ValueError(f"Marker {marker_id} has a compensation marker but compensation is disabled by the active definition")
+
+    for comp_line, adjustment in compensation_adjustments.items():
+        if comp_line in replacements:
+            marker_names = ", ".join(adjustment["marker_ids"])
+            raise ValueError(f"Compensation target for {marker_names} conflicts with another scan marker")
+        new_compensation = adjustment["initial"] + adjustment["delta"]
+        if new_compensation <= 0:
+            marker_names = ", ".join(adjustment["marker_ids"])
+            raise ValueError(
+                f"Markers {marker_names} produce compensation {new_compensation:g} us; compensation must be greater than 0"
+            )
+        replacements.setdefault(comp_line, []).append(
+            ("duration", new_compensation, adjustment["definition"])
+        )
 
     for line_number, line_replacements in replacements.items():
         updated = lines[line_number - 1]
@@ -941,4 +963,3 @@ def validate_auto_marker_scan(
         checked += 1
     if checked == 0:
         raise ValueError("Auto Marker scan contains no parameter points")
-

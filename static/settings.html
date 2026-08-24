@@ -1477,7 +1477,7 @@
                         (line.candidates || [])
                             .filter(candidate => candidate.kind === 'duration'
                                 && line.line_number !== selectedLine
-                                && (!line.marked || (line.markers || []).some(marker => marker.id === this.markerEditingId && marker.role === 'comp')))
+                                && (!line.marked || (line.markers || []).every(marker => marker.role === 'comp')))
                             .map(candidate => ({ line_number: line.line_number, source: line.source, candidate }))
                     );
                 },
