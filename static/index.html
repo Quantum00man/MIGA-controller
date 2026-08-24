@@ -2710,7 +2710,7 @@ isStartDisabled() {
     const syncInvalid = this.isSyncMode() && (
         this.syncConfig.role !== 'master'
         || !this.syncSlaves.length
-        || this.syncSlaves.some(slave => !String(slave.sequence_content || '').trim())
+        || this.syncSlaves.some(slave => !String(slave.sequence_content_base64 || slave.sequence_content || '').trim())
     );
     return this.isRunning || this.isScheduleActive() || acStarkMissingXml || acStarkScheduled || syncInvalid || (this.isScheduledMode() && !this.scheduledTasks.length);
 },
