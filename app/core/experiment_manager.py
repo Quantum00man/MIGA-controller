@@ -1,4 +1,5 @@
 import time
+import base64
 import threading
 import traceback
 import json
@@ -332,7 +333,91 @@ class ExperimentManager:
         restored["dim3_enabled"] = restored["scan_dimensions"] >= 3
         return restored
 
-    def load_run_preset(self, year: str, month: str, day: str, run_id: str) -> Dict[str, Any]:
+    def _load_sync_run_preset(self, run_dir: Path) -> Dict[str, Any]:
+        manifest_path = run_dir / "sync_manifest.json"
+        if not manifest_path.is_file():
+            raise ValueError("Selected run is not a SYNC run")
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise ValueError("Selected SYNC run has an invalid sync_manifest.json") from exc
+
+        if str(self.settings.get("sync_role") or "standalone").strip().lower() != "master":
+            raise ValueError("SYNC presets can only be loaded on a controller configured as Master")
+
+        runtime = manifest.get("runtime") if isinstance(manifest.get("runtime"), dict) else {}
+        archive_nodes = manifest.get("archive_nodes") if isinstance(manifest.get("archive_nodes"), dict) else {}
+        runtime_slaves = runtime.get("slaves") if isinstance(runtime.get("slaves"), list) else []
+        historical_nodes: Dict[str, Dict[str, Any]] = {}
+        for item in runtime_slaves:
+            if not isinstance(item, dict):
+                continue
+            node_id = str(item.get("node_id") or "").strip()
+            if node_id:
+                historical_nodes[node_id] = dict(item)
+        for node_id, item in archive_nodes.items():
+            if node_id == "master" or not isinstance(item, dict):
+                continue
+            historical_nodes.setdefault(str(node_id), dict(item))
+        if not historical_nodes:
+            raise ValueError("Selected SYNC run does not contain any archived Slave nodes")
+
+        configured_slaves = {
+            str(item.get("id") or "").strip(): item
+            for item in (self.settings.get("sync_slaves") or [])
+            if isinstance(item, dict) and item.get("enabled", True) and str(item.get("id") or "").strip()
+        }
+        historical_ids = set(historical_nodes)
+        configured_ids = set(configured_slaves)
+        if historical_ids != configured_ids:
+            missing = sorted(historical_ids - configured_ids)
+            extra = sorted(configured_ids - historical_ids)
+            details = []
+            if missing:
+                details.append("missing current Slave IDs: " + ", ".join(missing))
+            if extra:
+                details.append("current Slave IDs not present in the run: " + ", ".join(extra))
+            raise ValueError("SYNC Slave configuration does not match the archived run (" + "; ".join(details) + ")")
+
+        run_root = run_dir.resolve()
+        restored_slaves = []
+        missing_sequences = []
+        for node_id in sorted(historical_nodes):
+            archive_entry = archive_nodes.get(node_id) if isinstance(archive_nodes.get(node_id), dict) else {}
+            relative_path = str(archive_entry.get("path") or f"sync_nodes/{node_id}")
+            node_run_dir = (run_dir / relative_path).resolve()
+            if node_run_dir != run_root and run_root not in node_run_dir.parents:
+                raise ValueError(f"Archived path for Slave {node_id} is invalid")
+            sequence_path = node_run_dir / "sequence.mot"
+            if not sequence_path.is_file():
+                missing_sequences.append(node_id)
+                continue
+            node_config = {}
+            try:
+                node_config = json.loads((node_run_dir / "config.json").read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                pass
+            configured = configured_slaves[node_id]
+            restored_slaves.append({
+                "node_id": node_id,
+                "name": configured.get("name") or historical_nodes[node_id].get("name") or node_id,
+                "sequence_name": str(node_config.get("sequence_name") or sequence_path.name),
+                "sequence_content_base64": base64.b64encode(sequence_path.read_bytes()).decode("ascii"),
+            })
+        if missing_sequences:
+            raise ValueError(
+                "Archived Slave sequence.mot is missing for: " + ", ".join(missing_sequences)
+                + ". Run Sync Historical Archive first."
+            )
+        return {
+            "sync_run_id": str(runtime.get("sync_run_id") or ""),
+            "master_delay_ms": max(0.0, float(runtime.get("master_delay_ms") or 0.0)),
+            "slaves": restored_slaves,
+        }
+
+    def load_run_preset(
+        self, year: str, month: str, day: str, run_id: str, include_sync: bool = False
+    ) -> Dict[str, Any]:
         if getattr(self.status, "is_running", False):
             raise ValueError("Cannot load a previous run while an experiment is running")
 
@@ -342,6 +427,9 @@ class ExperimentManager:
 
         restored_config = self._load_run_preset_config(run_dir)
         source_sequence = run_dir / "sequence.mot"
+        if include_sync and not source_sequence.is_file():
+            raise ValueError("Archived Master sequence.mot is missing")
+        sync_preset = self._load_sync_run_preset(run_dir) if include_sync else None
         target_sequence = Path(config.SEQUENCE_TEMPLATE_PATH_WIN if config.IS_WINDOWS else config.SEQUENCE_TEMPLATE_PATH_LINUX)
         sequence_loaded = False
         sequence_name = restored_config.get("sequence_name") or source_sequence.name
@@ -360,6 +448,7 @@ class ExperimentManager:
             "run_id": run_id,
             "run_label": run_label,
             "display_name": self._build_run_display_name(run_id, run_label),
+            "sync_preset": sync_preset,
         }
 
     def _normalize_tmot_settings(self, settings: Dict[str, Any]) -> Dict[str, Any]:

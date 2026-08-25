@@ -840,7 +840,7 @@
                 </div>
                 <button class="btn btn-outline-primary btn-sm w-100 fw-bold" @click="loadRunPreset" :disabled="isRunning || isScheduleActive() || isPresetLoading || !repeatRun">
                     <span v-if="isPresetLoading" class="spinner-border spinner-border-sm me-1"></span>
-                    {{ isPresetLoading ? 'Loading Preset...' : 'Load Config & Sequence' }}
+                    {{ isPresetLoading ? 'Loading Preset...' : (isSyncMode() ? 'Load Master & Slave Preset' : 'Load Config & Sequence') }}
                 </button>
                 <div v-if="loadedPresetInfo?.display_name" class="mt-3 p-2 bg-light rounded border text-center">
                     <div class="small fw-bold text-primary">{{ loadedPresetInfo.display_name }}</div>
@@ -2538,6 +2538,38 @@
                     }
                 },
                 applyLoadedRunPreset(payload = {}) {
+                    let restoredSyncSlaves = null;
+                    if (this.isSyncMode()) {
+                        const syncPreset = payload.sync_preset;
+                        if (!syncPreset || !Array.isArray(syncPreset.slaves)) {
+                            throw new Error('Selected run does not contain a complete SYNC preset.');
+                        }
+                        const archivedById = new Map(syncPreset.slaves.map(item => [String(item.node_id || ''), item]));
+                        const currentIds = this.syncSlaves.map(item => String(item.id || ''));
+                        const archivedIds = [...archivedById.keys()];
+                        const missing = archivedIds.filter(nodeId => !currentIds.includes(nodeId));
+                        const extra = currentIds.filter(nodeId => !archivedById.has(nodeId));
+                        if (missing.length || extra.length) {
+                            const details = [];
+                            if (missing.length) details.push(`missing: ${missing.join(', ')}`);
+                            if (extra.length) details.push(`not archived: ${extra.join(', ')}`);
+                            throw new Error(`SYNC Slave configuration mismatch (${details.join('; ')}).`);
+                        }
+                        const incomplete = syncPreset.slaves.filter(item => !String(item.sequence_content_base64 || '').trim());
+                        if (incomplete.length) {
+                            throw new Error(`Archived Slave sequence is missing for: ${incomplete.map(item => item.node_id).join(', ')}.`);
+                        }
+                        restoredSyncSlaves = this.syncSlaves.map(slave => {
+                            const archived = archivedById.get(String(slave.id));
+                            return {
+                                ...slave,
+                                sequence_name: archived.sequence_name || 'sequence.mot',
+                                sequence_content: '',
+                                sequence_content_base64: archived.sequence_content_base64,
+                                runtime_status: 'preset loaded',
+                            };
+                        });
+                    }
                     const knownConfigKeys = Object.keys(this.config);
                     const restoredConfig = Object.fromEntries(
                         Object.entries(payload.config || {}).filter(([key]) => knownConfigKeys.includes(key))
@@ -2554,6 +2586,10 @@
                     this.isExternalSequenceFile = false;
                     this.currentSequenceName = payload.sequence_name || this.config.sequence_name || this.currentSequenceName;
                     this.config.sequence_name = this.currentSequenceName;
+                    if (restoredSyncSlaves) {
+                        this.syncSlaves = restoredSyncSlaves;
+                        this.syncMasterDelayMs = Math.max(0, Number(payload.sync_preset.master_delay_ms) || 0);
+                    }
                     this.loadedPresetInfo = {
                         ...this.normalizeRunEntry({
                             id: payload.run_id,
@@ -2572,11 +2608,13 @@
                     if (!this.repeatRun || this.isRunning) return;
                     this.isPresetLoading = true;
                     try {
+                        if (this.isSyncMode()) await this.fetchSyncConfig();
                         const res = await axios.post('/experiment/load-run-preset', {
                             year: this.repeatYear,
                             month: this.repeatMonth,
                             day: this.repeatDay,
                             run_id: this.repeatRun,
+                            include_sync: this.isSyncMode(),
                         });
                         const payload = res.data?.data || {};
                         this.applyLoadedRunPreset(payload);
@@ -2586,6 +2624,12 @@
                             this.addLog(`Sequence restored: ${payload.sequence_name || 'sequence.mot'}.`);
                         } else {
                             this.addLog('Preset loaded, but archived sequence.mot was not found.');
+                        }
+                        if (this.isSyncMode() && payload.sync_preset) {
+                            this.addLog(`SYNC preset restored: Master + ${payload.sync_preset.slaves.length} Slave sequence(s), delay ${Number(payload.sync_preset.master_delay_ms || 0)} ms.`);
+                            payload.sync_preset.slaves.forEach(slave => {
+                                this.addLog(`SYNC ${slave.name || slave.node_id} sequence restored: ${slave.sequence_name}.`);
+                            });
                         }
                     } catch (e) {
                         this.addLog('Preset load failed: ' + this.formatRequestError(e));

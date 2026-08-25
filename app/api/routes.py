@@ -1005,7 +1005,9 @@ async def get_sequence_template_snapshot():
 @router.post("/experiment/load-run-preset", response_model=ExperimentResponse)
 async def load_run_preset(req: ArchiveRunReference):
     try:
-        data = manager.load_run_preset(req.year, req.month, req.day, req.run_id)
+        data = manager.load_run_preset(
+            req.year, req.month, req.day, req.run_id, include_sync=req.include_sync
+        )
         return ExperimentResponse(status="success", message="Run preset loaded", data=data)
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc))
