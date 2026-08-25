@@ -490,6 +490,32 @@
             font-size: 0.78rem;
         }
 
+        .sync-archive-plot-wrap {
+            display: flex;
+            justify-content: center;
+            width: 100%;
+            padding: 12px;
+            overflow: hidden;
+        }
+
+        .sync-archive-square-plot {
+            width: min(100%, clamp(320px, calc(100vh - 220px), 900px));
+            aspect-ratio: 1 / 1;
+            flex: 0 0 auto;
+        }
+
+        .sync-axis-range-panel {
+            border: 1px solid var(--archive-border-soft);
+            border-radius: 8px;
+            background: var(--archive-surface-subtle);
+            padding: 10px;
+        }
+
+        @media (max-width: 575px) {
+            .sync-archive-plot-wrap { padding: 6px; }
+            .sync-archive-square-plot { width: 100%; }
+        }
+
         .archive-display-menu {
         .optimization-overview { border-left: 4px solid var(--archive-accent); }
         .optimization-step-nav { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 3px; }
@@ -1461,16 +1487,16 @@
                         <div v-else class="row g-2 mt-2">
                             <div class="col-lg-6 d-flex gap-2">
                                 <span class="badge bg-primary align-self-center">X Master</span>
-                                <select class="form-select form-select-sm" v-model="syncArchiveAxisX.metric" @change="renderSyncArchivePlot"><option v-for="item in syncArchiveMetricOptions" :key="item.key" :value="item.key">{{ item.label }}</option></select>
-                                <select class="form-select form-select-sm" v-model="syncArchiveAxisX.channel" @change="renderSyncArchivePlot"><option value="up">UP</option><option value="dw">DOWN</option></select>
+                                <select class="form-select form-select-sm" v-model="syncArchiveAxisX.metric" @change="resetSyncArchiveAxisRange"><option v-for="item in syncArchiveMetricOptions" :key="item.key" :value="item.key">{{ item.label }}</option></select>
+                                <select class="form-select form-select-sm" v-model="syncArchiveAxisX.channel" @change="resetSyncArchiveAxisRange"><option value="up">UP</option><option value="dw">DOWN</option></select>
                             </div>
                             <div class="col-lg-6 d-flex gap-2">
                                 <span class="badge bg-secondary align-self-center">Y Slave</span>
                                 <select class="form-select form-select-sm" v-model="syncArchiveSlaveId" @change="resetSyncArchiveReplay">
                                     <option v-for="slaveId in syncArchiveSlaveOptions()" :key="slaveId" :value="slaveId">{{ syncArchiveNodeLabel(slaveId) }}</option>
                                 </select>
-                                <select class="form-select form-select-sm" v-model="syncArchiveAxisY.metric" @change="renderSyncArchivePlot"><option v-for="item in syncArchiveMetricOptions" :key="item.key" :value="item.key">{{ item.label }}</option></select>
-                                <select class="form-select form-select-sm" v-model="syncArchiveAxisY.channel" @change="renderSyncArchivePlot"><option value="up">UP</option><option value="dw">DOWN</option></select>
+                                <select class="form-select form-select-sm" v-model="syncArchiveAxisY.metric" @change="resetSyncArchiveAxisRange"><option v-for="item in syncArchiveMetricOptions" :key="item.key" :value="item.key">{{ item.label }}</option></select>
+                                <select class="form-select form-select-sm" v-model="syncArchiveAxisY.channel" @change="resetSyncArchiveAxisRange"><option value="up">UP</option><option value="dw">DOWN</option></select>
                             </div>
                             <div class="col-12 d-flex flex-wrap align-items-center gap-2">
                                 <button class="btn btn-outline-secondary btn-sm" @click="toggleSyncArchiveReplay">{{ syncArchiveReplayPlaying ? 'Pause' : 'Play' }}</button>
@@ -1479,13 +1505,41 @@
                                 <input type="range" class="form-range flex-grow-1" style="min-width:180px" min="0" :max="syncArchivePairs().length" v-model.number="syncArchiveReplayCount" @input="renderSyncArchivePlot">
                                 <span class="small text-muted">{{ syncArchiveReplayCount }}/{{ syncArchivePairs().length }} paired shots</span>
                             </div>
+                            <div class="col-12">
+                                <div class="sync-axis-range-panel">
+                                    <div class="d-flex flex-wrap align-items-end gap-2">
+                                        <div>
+                                            <label class="form-label-small">X MIN</label>
+                                            <input type="number" step="any" class="form-control form-control-sm" style="width:130px" v-model="syncArchiveAxisRange.xMin">
+                                        </div>
+                                        <div>
+                                            <label class="form-label-small">X MAX</label>
+                                            <input type="number" step="any" class="form-control form-control-sm" style="width:130px" v-model="syncArchiveAxisRange.xMax">
+                                        </div>
+                                        <div>
+                                            <label class="form-label-small">Y MIN</label>
+                                            <input type="number" step="any" class="form-control form-control-sm" style="width:130px" v-model="syncArchiveAxisRange.yMin">
+                                        </div>
+                                        <div>
+                                            <label class="form-label-small">Y MAX</label>
+                                            <input type="number" step="any" class="form-control form-control-sm" style="width:130px" v-model="syncArchiveAxisRange.yMax">
+                                        </div>
+                                        <button class="btn btn-primary btn-sm" @click="applySyncArchiveAxisRange">Apply Range</button>
+                                        <button class="btn btn-outline-secondary btn-sm" @click="resetSyncArchiveAxisRange">Full Data Range</button>
+                                        <span class="small text-muted align-self-center">Fixed during replay · based on all paired shots</span>
+                                    </div>
+                                    <div v-if="syncArchiveAxisRangeError" class="small text-danger mt-2">{{ syncArchiveAxisRangeError }}</div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                     <div v-if="syncArchiveViewMode === 'node'" class="card-body p-0">
                         <div id="syncArchiveNodePlotUp" class="analysis-plot-panel" style="height:360px"></div>
                         <div id="syncArchiveNodePlotDw" class="analysis-plot-panel analysis-plot-panel-divider" style="height:360px"></div>
                     </div>
-                    <div v-else id="syncArchivePlot" style="height:520px"></div>
+                    <div v-else class="sync-archive-plot-wrap">
+                        <div id="syncArchivePlot" class="sync-archive-square-plot"></div>
+                    </div>
                 </section>
                 <div class="card mb-4 border-0 shadow-sm" :class="{'maximized': maximizedView === 'analysis'}">
                     <div class="analysis-header card-header bg-white">
@@ -1885,6 +1939,8 @@
                     syncArchiveSlaveId: '',
                     syncArchiveAxisX: { metric: 'intf_p', channel: 'up' },
                     syncArchiveAxisY: { metric: 'intf_p', channel: 'up' },
+                    syncArchiveAxisRange: { xMin: '', xMax: '', yMin: '', yMax: '', contextKey: '' },
+                    syncArchiveAxisRangeError: '',
                     syncArchiveMetricOptions: [
                         { key: 'atom_number', label: 'Atom Number' },
                         { key: 'amplitude', label: 'Max Voltage' },
@@ -1941,7 +1997,7 @@
                     this.handlePlotContextChange();
                     if (this.syncManifest) this.$nextTick(() => {
                         if (this.syncArchiveViewMode === 'node') this.renderSyncArchiveNodePlots();
-                        else this.renderSyncArchivePlot();
+                        else this.resetSyncArchiveAxisRange();
                     });
                 },
                 showTofFitCurve() { this.handleCurveVisibilityChange(); },
@@ -1955,12 +2011,19 @@
                 this.fetchDefaultScanFitModels();
                 this.initPlots();
                 document.addEventListener('click', this.handleDocumentClick, true);
+                window.addEventListener('resize', this.handleArchiveWindowResize);
             },
             beforeUnmount() {
                 document.removeEventListener('click', this.handleDocumentClick, true);
+                window.removeEventListener('resize', this.handleArchiveWindowResize);
                 if (this.syncArchiveReplayTimer) clearInterval(this.syncArchiveReplayTimer);
             },
             methods: {
+                handleArchiveWindowResize() {
+                    if (this.syncArchiveViewMode === 'differential') {
+                        this.resizePlot('syncArchivePlot');
+                    }
+                },
                 async fetchCollections() {
                     this.isLoadingCollections = true;
                     this.collectionError = '';
@@ -3797,6 +3860,8 @@
                     this.syncArchiveNodeSource = requestedSyncNode || 'master';
                     this.loadedSyncNode = requestedSyncNode;
                     this.syncArchiveSlaveId = '';
+                    this.syncArchiveAxisRange = { xMin: '', xMax: '', yMin: '', yMax: '', contextKey: '' };
+                    this.syncArchiveAxisRangeError = '';
                     if (this.syncArchiveReplayTimer) clearInterval(this.syncArchiveReplayTimer);
                     this.syncArchiveReplayTimer = null;
                     this.syncArchiveReplayPlaying = false;
@@ -4351,7 +4416,7 @@
                     if (this.syncArchiveReplayPlaying) this.toggleSyncArchiveReplay();
                     this.$nextTick(() => {
                         if (this.syncArchiveViewMode === 'node') this.renderSyncArchiveNodePlots();
-                        else this.renderSyncArchivePlot();
+                        else this.resetSyncArchiveAxisRange();
                     });
                 },
                 renderSyncArchiveNodePlots() {
@@ -4394,7 +4459,7 @@
                 resetSyncArchiveReplay() {
                     if (this.syncArchiveReplayPlaying) this.toggleSyncArchiveReplay();
                     this.syncArchiveReplayCount = this.syncArchivePairs().length;
-                    this.renderSyncArchivePlot();
+                    this.resetSyncArchiveAxisRange();
                 },
                 syncArchiveMetricField(axis) {
                     if (axis.metric === 'tail_mean') return `tail_mean_${axis.channel === 'dw' ? 'dw' : 'up'}_raw`;
@@ -4402,24 +4467,129 @@
                     if (axis.metric === 'intf_p') return `intf_p${axis.channel === 'dw' ? '2' : '1'}${suffix}`;
                     return `${axis.metric}_${axis.channel === 'dw' ? 'dw' : 'up'}${suffix}`;
                 },
+                syncArchiveAxisContextKey() {
+                    return [
+                        this.syncArchiveSlaveId || '',
+                        this.syncArchiveMetricField(this.syncArchiveAxisX),
+                        this.syncArchiveMetricField(this.syncArchiveAxisY),
+                    ].join('|');
+                },
+                syncArchiveDifferentialPoints(limit = null) {
+                    const fieldX = this.syncArchiveMetricField(this.syncArchiveAxisX);
+                    const fieldY = this.syncArchiveMetricField(this.syncArchiveAxisY);
+                    const allRows = this.syncArchivePairs();
+                    const rows = limit == null
+                        ? allRows
+                        : allRows.slice(0, Math.max(0, Number(limit) || 0));
+                    return rows.map(row => ({
+                        x: Number(row.master?.[fieldX]),
+                        y: Number(row.slave?.[fieldY]),
+                        shot: Number(row.sync_shot_index) + 1,
+                        p0: row.sync_p0,
+                    })).filter(point => Number.isFinite(point.x) && Number.isFinite(point.y));
+                },
+                paddedSyncArchiveRange(values) {
+                    const finite = (Array.isArray(values) ? values : []).map(Number).filter(Number.isFinite);
+                    if (!finite.length) return null;
+                    let minimum = finite[0];
+                    let maximum = finite[0];
+                    finite.slice(1).forEach(value => {
+                        minimum = Math.min(minimum, value);
+                        maximum = Math.max(maximum, value);
+                    });
+                    const span = maximum - minimum;
+                    const padding = span > 0
+                        ? span * 0.05
+                        : Math.max(Math.abs(minimum) * 0.05, 0.05);
+                    return [minimum - padding, maximum + padding];
+                },
+                calculateSyncArchiveFullRanges() {
+                    const points = this.syncArchiveDifferentialPoints();
+                    const xRange = this.paddedSyncArchiveRange(points.map(point => point.x));
+                    const yRange = this.paddedSyncArchiveRange(points.map(point => point.y));
+                    return xRange && yRange ? { xRange, yRange } : null;
+                },
+                resetSyncArchiveAxisRange() {
+                    this.syncArchiveAxisRangeError = '';
+                    const ranges = this.calculateSyncArchiveFullRanges();
+                    const contextKey = this.syncArchiveAxisContextKey();
+                    this.syncArchiveAxisRange = ranges ? {
+                        xMin: ranges.xRange[0],
+                        xMax: ranges.xRange[1],
+                        yMin: ranges.yRange[0],
+                        yMax: ranges.yRange[1],
+                        contextKey,
+                    } : { xMin: '', xMax: '', yMin: '', yMax: '', contextKey };
+                    this.$nextTick(() => this.renderSyncArchivePlot());
+                },
+                applySyncArchiveAxisRange() {
+                    const rawLimits = [
+                        this.syncArchiveAxisRange.xMin, this.syncArchiveAxisRange.xMax,
+                        this.syncArchiveAxisRange.yMin, this.syncArchiveAxisRange.yMax,
+                    ];
+                    if (rawLimits.some(value => String(value ?? '').trim() === '')) {
+                        this.syncArchiveAxisRangeError = 'All four axis limits are required.';
+                        return;
+                    }
+                    const [xMin, xMax, yMin, yMax] = rawLimits.map(Number);
+                    if (![xMin, xMax, yMin, yMax].every(Number.isFinite)) {
+                        this.syncArchiveAxisRangeError = 'All four axis limits must be finite numbers.';
+                        return;
+                    }
+                    if (xMin >= xMax || yMin >= yMax) {
+                        this.syncArchiveAxisRangeError = 'Each minimum must be smaller than its maximum.';
+                        return;
+                    }
+                    this.syncArchiveAxisRange = {
+                        xMin, xMax, yMin, yMax,
+                        contextKey: this.syncArchiveAxisContextKey(),
+                    };
+                    this.syncArchiveAxisRangeError = '';
+                    this.renderSyncArchivePlot();
+                },
+                ensureSyncArchiveAxisRange() {
+                    const range = this.syncArchiveAxisRange || {};
+                    const valid = range.contextKey === this.syncArchiveAxisContextKey()
+                        && [range.xMin, range.xMax, range.yMin, range.yMax].map(Number).every(Number.isFinite)
+                        && Number(range.xMin) < Number(range.xMax)
+                        && Number(range.yMin) < Number(range.yMax);
+                    if (valid) return {
+                        xRange: [Number(range.xMin), Number(range.xMax)],
+                        yRange: [Number(range.yMin), Number(range.yMax)],
+                    };
+                    const calculated = this.calculateSyncArchiveFullRanges();
+                    if (!calculated) return null;
+                    this.syncArchiveAxisRange = {
+                        xMin: calculated.xRange[0], xMax: calculated.xRange[1],
+                        yMin: calculated.yRange[0], yMax: calculated.yRange[1],
+                        contextKey: this.syncArchiveAxisContextKey(),
+                    };
+                    return calculated;
+                },
                 renderSyncArchivePlot() {
                     const element = document.getElementById('syncArchivePlot');
                     if (!element || typeof Plotly === 'undefined') return;
-                    const fieldX = this.syncArchiveMetricField(this.syncArchiveAxisX);
-                    const fieldY = this.syncArchiveMetricField(this.syncArchiveAxisY);
-                    const rows = this.syncArchivePairs().slice(0, Math.max(0, Number(this.syncArchiveReplayCount) || 0));
-                    const points = rows.map(row => ({
-                        x: Number(row.master?.[fieldX]), y: Number(row.slave?.[fieldY]),
-                        shot: Number(row.sync_shot_index) + 1, p0: row.sync_p0,
-                    })).filter(point => Number.isFinite(point.x) && Number.isFinite(point.y));
+                    const points = this.syncArchiveDifferentialPoints(this.syncArchiveReplayCount);
+                    const fixedRanges = this.ensureSyncArchiveAxisRange();
                     Plotly.react(element, [{
                         x: points.map(p => p.x), y: points.map(p => p.y), text: points.map(p => `Shot ${p.shot}<br>P0=${p.p0}`),
                         type: 'scatter', mode: 'lines+markers', line: { color: 'rgba(13,110,253,.35)', width: 1.5 },
                         marker: { size: 8, color: points.map(p => p.shot), colorscale: 'Viridis', showscale: true, colorbar: { title: 'Shot' } }
                     }], {
                         margin: { l: 75, r: 70, t: 45, b: 70 }, title: 'Saved differential Lissajous',
-                        xaxis: { title: `Master | ${this.syncArchiveAxisX.metric} | ${this.syncArchiveAxisX.channel.toUpperCase()}` },
-                        yaxis: { title: `Slave | ${this.syncArchiveAxisY.metric} | ${this.syncArchiveAxisY.channel.toUpperCase()}` }, hovermode: 'closest'
+                        xaxis: {
+                            title: `Master | ${this.syncArchiveAxisX.metric} | ${this.syncArchiveAxisX.channel.toUpperCase()}`,
+                            range: fixedRanges?.xRange,
+                            autorange: !fixedRanges,
+                        },
+                        yaxis: {
+                            title: `Slave | ${this.syncArchiveAxisY.metric} | ${this.syncArchiveAxisY.channel.toUpperCase()}`,
+                            range: fixedRanges?.yRange,
+                            autorange: !fixedRanges,
+                        },
+                        hovermode: 'closest',
+                        paper_bgcolor: 'rgba(0,0,0,0)',
+                        plot_bgcolor: 'rgba(0,0,0,0)',
                     }, { responsive: true, displaylogo: false });
                 },
                 toggleSyncArchiveReplay() {
