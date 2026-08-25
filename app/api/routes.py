@@ -1348,6 +1348,40 @@ async def fit_archive_scan(req: ArchiveScanFitRequest):
     else:
         eval_x = np.linspace(float(x_data[0]), float(x_data[-1]), eval_points)
 
+    if model_definition.get("key") == "bragg_fringes":
+        fringe_result = fitting.perform_bragg_fringe_fit(
+            x_data,
+            y_data,
+            wavelength_nm=req.bragg_wavelength_nm,
+            bragg_order=req.bragg_order,
+            eval_x=eval_x,
+        )
+        if fringe_result is None:
+            raise HTTPException(400, "Bragg fringe fit failed. At least 4 distinct P0 points are required.")
+        return {
+            "model_key": "bragg_fringes",
+            "model_label": "Bragg Fringes",
+            "point_count": len(filtered_pairs),
+            "fit_min": float(x_data[0]),
+            "fit_max": float(x_data[-1]),
+            "fit_x": eval_x.tolist(),
+            "fit_y": fringe_result.fit_curve.tolist(),
+            "parameter_values": fringe_result.parameter_values,
+            "residual_variance": fringe_result.residual_variance,
+            "amplitude": fringe_result.parameter_values["A"],
+            "width": None,
+            "center": None,
+            "offset": fringe_result.parameter_values["C"],
+            "area": None,
+            "bragg": {
+                "wavelength_nm": float(req.bragg_wavelength_nm),
+                "order": int(req.bragg_order),
+                "effective_wavevector_rad_m": fringe_result.effective_wavevector_rad_m,
+                "angular_frequency_rad_per_us2": fringe_result.angular_frequency_rad_per_us2,
+                "gravity_m_s2": 9.80665,
+            },
+        }
+
     fit_result = fitting.perform_configured_fit(model_definition, x_data, y_data, eval_x=eval_x)
     if fit_result is None:
         raise HTTPException(400, "Fit failed. Try a different model, scan range, or initial guesses.")

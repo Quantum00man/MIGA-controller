@@ -1115,6 +1115,25 @@
                             Available P0 range: {{ formatScanFitBound(getScanFitBounds().min) }} to {{ formatScanFitBound(getScanFitBounds().max) }}
                         </div>
 
+                        <div v-if="isBraggFringeFit()" class="border rounded bg-white p-2 mb-3">
+                            <div class="row g-2">
+                                <div class="col-7">
+                                    <label class="form-label-small">WAVELENGTH (nm)</label>
+                                    <input type="number" min="0" step="any" class="form-control form-control-sm"
+                                        v-model.number="scanFit.bragg_wavelength_nm" @change="deactivateScanFitOverlay(true)">
+                                </div>
+                                <div class="col-5">
+                                    <label class="form-label-small">BRAGG ORDER</label>
+                                    <input type="number" min="1" step="1" class="form-control form-control-sm"
+                                        v-model.number="scanFit.bragg_order" @change="deactivateScanFitOverlay(true)">
+                                </div>
+                            </div>
+                            <div class="form-text mt-2">
+                                P0 is interpreted as T² in (μs)². k<sub>eff</sub> = 4πn/λ.
+                            </div>
+                        </div>
+
+                        <template v-else>
                         <div class="mb-2">
                             <div class="d-flex justify-content-between align-items-center mb-1">
                                 <label class="form-label-small mb-0">FORMULA</label>
@@ -1172,6 +1191,7 @@
                             </div>
                         </div>
                         <div v-if="scanFitSaveMsg" class="small text-success mb-2">{{ scanFitSaveMsg }}</div>
+                        </template>
 
                         <div class="d-grid gap-2 mt-3">
                             <button class="btn btn-info btn-sm fw-bold text-white shadow-sm" @click="runScanFit()"
@@ -1186,19 +1206,53 @@
                         <div v-else-if="scanFitResult" class="scan-fit-result mt-3">
                             <div class="small fw-bold text-dark mb-1">Overlay Active</div>
                             <div class="small text-muted mb-2">{{ getScanFitResultSummary() }}</div>
-                            <div class="scan-fit-param-grid">
+                            <div v-if="scanFitResult.model_key === 'bragg_fringes'" class="scan-fit-param-grid">
+                                <div class="scan-fit-param-row">
+                                    <span>a</span>
+                                    <strong>{{ formatMetricValue(scanFitResult.parameter_values?.a) }} m/s²</strong>
+                                </div>
+                                <div class="scan-fit-param-row">
+                                    <span>a</span>
+                                    <strong>{{ formatMetricValue(Number(scanFitResult.parameter_values?.a) * 1e8) }} μGal</strong>
+                                </div>
+                                <div class="scan-fit-param-row">
+                                    <span>α</span>
+                                    <strong>{{ formatMetricValue(scanFitResult.parameter_values?.alpha) }} mrad</strong>
+                                </div>
+                                <div class="scan-fit-param-row">
+                                    <span>φ₀</span>
+                                    <strong>{{ formatMetricValue(scanFitResult.parameter_values?.phi0) }} rad</strong>
+                                </div>
+                                <div class="scan-fit-param-row">
+                                    <span>φ₀</span>
+                                    <strong>{{ formatMetricValue(Number(scanFitResult.parameter_values?.phi0) * 180 / Math.PI) }}°</strong>
+                                </div>
+                                <div class="scan-fit-param-row">
+                                    <span>A</span>
+                                    <strong>{{ formatMetricValue(scanFitResult.parameter_values?.A) }}</strong>
+                                </div>
+                                <div class="scan-fit-param-row">
+                                    <span>C</span>
+                                    <strong>{{ formatMetricValue(scanFitResult.parameter_values?.C) }}</strong>
+                                </div>
+                            </div>
+                            <div v-else class="scan-fit-param-grid">
                                 <div class="scan-fit-param-row" v-for="(value, name) in (scanFitResult.parameter_values || {})" :key="name">
                                     <span>{{ name }}</span>
                                     <strong>{{ formatMetricValue(value) }}</strong>
                                 </div>
                             </div>
-                            <div class="scan-fit-param-row mt-2">
+                            <div v-if="scanFitResult.model_key !== 'bragg_fringes'" class="scan-fit-param-row mt-2">
                                 <span>Curve area <span class="text-muted">(baseline removed)</span></span>
                                 <strong>{{ formatMetricValue(scanFitResult.area) }}</strong>
                             </div>
                             <div class="small text-muted mt-2">Residual variance: {{ formatMetricValue(scanFitResult.residual_variance) }}</div>
-                            <div class="small text-muted mt-1">
+                            <div v-if="scanFitResult.model_key !== 'bragg_fringes'" class="small text-muted mt-1">
                                 Area integrated from P0 {{ formatScanFitBound(scanFitResult.fit_min) }} to {{ formatScanFitBound(scanFitResult.fit_max) }}.
+                            </div>
+                            <div v-else class="small text-muted mt-1">
+                                λ={{ formatMetricValue(scanFitResult.bragg?.wavelength_nm) }} nm · n={{ scanFitResult.bragg?.order }} ·
+                                k<sub>eff</sub>={{ formatMetricValue(scanFitResult.bragg?.effective_wavevector_rad_m) }} rad/m
                             </div>
                         </div>
                     </div>
@@ -1851,6 +1905,8 @@
                         channel: 'up',
                         range_min: '',
                         range_max: '',
+                        bragg_wavelength_nm: 780.0,
+                        bragg_order: 1,
                         model_key: 'gaussian',
                         save_name: '',
                         model_definition: { key: 'gaussian', label: 'Gaussian', formula: '', parameters: [], roles: {}, area_mode: 'window_integral' }
@@ -2219,6 +2275,8 @@
                         channel: 'up',
                         range_min: '',
                         range_max: '',
+                        bragg_wavelength_nm: 780.0,
+                        bragg_order: 1,
                         model_key: this.defaultScanFitModels[0]?.key || 'gaussian',
                         save_name: '',
                         model_definition: this.cloneFitModel(this.defaultScanFitModels[0] || this.baseFitModel('gaussian'))
@@ -2288,7 +2346,14 @@
                     normalized.save_name = explicitSaveName || this.defaultScanFitSaveName(normalized.model_definition);
                     normalized.range_min = normalized.range_min === '' || normalized.range_min == null ? '' : Number(normalized.range_min);
                     normalized.range_max = normalized.range_max === '' || normalized.range_max == null ? '' : Number(normalized.range_max);
+                    const wavelength = Number(normalized.bragg_wavelength_nm);
+                    const braggOrder = Number.parseInt(normalized.bragg_order, 10);
+                    normalized.bragg_wavelength_nm = Number.isFinite(wavelength) && wavelength > 0 ? wavelength : 780.0;
+                    normalized.bragg_order = Number.isFinite(braggOrder) && braggOrder >= 1 ? braggOrder : 1;
                     return normalized;
+                },
+                isBraggFringeFit() {
+                    return this.scanFit.model_key === 'bragg_fringes';
                 },
                 async handlePlotContextChange() {
                     if (this.scanFit.active) {
@@ -2836,6 +2901,8 @@
                             fit_min: range.min,
                             fit_max: range.max,
                             eval_points: 400,
+                            bragg_wavelength_nm: Number(this.scanFit.bragg_wavelength_nm),
+                            bragg_order: Number.parseInt(this.scanFit.bragg_order, 10),
                             model: this.buildScanFitRequestModel()
                         });
                         this.scanFit.active = true;

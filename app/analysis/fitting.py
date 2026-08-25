@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 from scipy.odr import ODR, Model, Data
-from scipy.optimize import curve_fit
+from scipy.optimize import curve_fit, minimize_scalar
 from scipy.special import erf
 
 # --- Fitting Model Constants ---
@@ -33,6 +33,16 @@ class FitExecutionResult:
     center: float
     offset: float
     area: float
+
+
+@dataclass
+class BraggFringeFitResult:
+    parameter_values: Dict[str, float]
+    fit_curve: np.ndarray
+    fit_window_curve: np.ndarray
+    residual_variance: Optional[float]
+    effective_wavevector_rad_m: float
+    angular_frequency_rad_per_us2: float
 
 
 DEFAULT_FIT_MODELS: List[Dict[str, Any]] = [
@@ -177,6 +187,19 @@ DEFAULT_SCAN_FIT_MODELS: List[Dict[str, Any]] = [
             {"name": "offset", "guess": "y_mean", "fixed": False},
         ],
         "roles": {"amplitude": "amp", "width": "period", "offset": "offset"},
+        "area_mode": "window_integral",
+    },
+    {
+        "key": "bragg_fringes",
+        "label": "Bragg Fringes",
+        "formula": "C + A * cos(omega * x + phi0)",
+        "parameters": [
+            {"name": "A", "guess": "max(y_range / 2, 1e-6)", "fixed": False},
+            {"name": "omega", "guess": "2 * pi / max(x_span, 1e-4)", "fixed": False},
+            {"name": "phi0", "guess": "0.0", "fixed": False},
+            {"name": "C", "guess": "y_mean", "fixed": False},
+        ],
+        "roles": {"amplitude": "A", "width": "omega", "offset": "C"},
         "area_mode": "window_integral",
     },
     {
@@ -390,6 +413,135 @@ def get_default_fit_models() -> List[Dict[str, Any]]:
 
 def get_default_scan_fit_models() -> List[Dict[str, Any]]:
     return copy.deepcopy(DEFAULT_SCAN_FIT_MODELS)
+
+
+def _wrap_phase_radians(value: float) -> float:
+    wrapped = (float(value) + np.pi) % (2.0 * np.pi) - np.pi
+    return float(np.pi if np.isclose(wrapped, -np.pi) else wrapped)
+
+
+def _fringe_linear_solution(x_centered: np.ndarray, y_data: np.ndarray, omega: float) -> Tuple[np.ndarray, float]:
+    design = np.column_stack(
+        (
+            np.ones_like(x_centered),
+            np.cos(omega * x_centered),
+            np.sin(omega * x_centered),
+        )
+    )
+    coefficients, _, _, _ = np.linalg.lstsq(design, y_data, rcond=None)
+    residuals = y_data - design @ coefficients
+    return coefficients, float(np.dot(residuals, residuals))
+
+
+def perform_bragg_fringe_fit(
+    x_data: np.ndarray,
+    y_data: np.ndarray,
+    wavelength_nm: float = 780.0,
+    bragg_order: int = 1,
+    eval_x: Optional[np.ndarray] = None,
+) -> Optional[BraggFringeFitResult]:
+    """Fit C + A cos(k_eff a T^2 + phi0), with x=T^2 in (microseconds)^2."""
+    if x_data is None or y_data is None or len(x_data) != len(y_data) or len(x_data) < 4:
+        return None
+    wavelength_nm = float(wavelength_nm)
+    bragg_order = int(bragg_order)
+    if not np.isfinite(wavelength_nm) or wavelength_nm <= 0 or bragg_order < 1:
+        return None
+
+    x_data = np.asarray(x_data, dtype=float)
+    y_data = np.asarray(y_data, dtype=float)
+    finite = np.isfinite(x_data) & np.isfinite(y_data)
+    x_data = x_data[finite]
+    y_data = y_data[finite]
+    if len(x_data) < 4:
+        return None
+
+    order = np.argsort(x_data)
+    x_data = x_data[order]
+    y_data = y_data[order]
+    span = float(x_data[-1] - x_data[0])
+    if span <= 0:
+        return None
+
+    unique_x = np.unique(x_data)
+    if len(unique_x) < 4:
+        return None
+    spacings = np.diff(unique_x)
+    spacings = spacings[spacings > 0]
+    if not len(spacings):
+        return None
+
+    x_reference = float(np.mean(x_data))
+    x_centered = x_data - x_reference
+    wavelength_m = wavelength_nm * 1e-9
+    effective_wavevector = 4.0 * np.pi * bragg_order / wavelength_m
+    standard_gravity = 9.80665
+    # Search down to 1/100 of a cycle across the selected window. The upper
+    # bound uses the median sampling interval so a single near-duplicate P0
+    # value cannot create an unrealistic Nyquist range. Acceleration caused by
+    # a projection of gravity cannot exceed g, which also removes unphysical
+    # high-frequency aliases from noisy scans.
+    gravity_omega = effective_wavevector * standard_gravity * 1e-12
+    min_omega = min(2.0 * np.pi / (100.0 * span), gravity_omega * 1e-4)
+    max_omega = min(np.pi / float(np.median(spacings)), gravity_omega)
+    if not np.isfinite(max_omega) or max_omega <= min_omega:
+        return None
+
+    grid_size = int(min(12000, max(2000, 24 * len(x_data))))
+    omega_grid = np.linspace(min_omega, max_omega, grid_size)
+    errors = np.empty_like(omega_grid)
+    for index, omega in enumerate(omega_grid):
+        _, errors[index] = _fringe_linear_solution(x_centered, y_data, float(omega))
+
+    candidate_indices = np.argsort(errors)[: min(12, len(errors))]
+    best_omega = float(omega_grid[int(candidate_indices[0])])
+    best_error = float(errors[int(candidate_indices[0])])
+    grid_step = float(omega_grid[1] - omega_grid[0]) if len(omega_grid) > 1 else min_omega
+    for raw_index in candidate_indices:
+        index = int(raw_index)
+        lower = max(min_omega, float(omega_grid[index] - 2.0 * grid_step))
+        upper = min(max_omega, float(omega_grid[index] + 2.0 * grid_step))
+        if upper <= lower:
+            continue
+        optimized = minimize_scalar(
+            lambda omega: _fringe_linear_solution(x_centered, y_data, float(omega))[1],
+            bounds=(lower, upper),
+            method="bounded",
+            options={"xatol": max(grid_step * 1e-5, np.finfo(float).eps)},
+        )
+        if optimized.success and float(optimized.fun) < best_error:
+            best_omega = float(optimized.x)
+            best_error = float(optimized.fun)
+
+    coefficients, best_error = _fringe_linear_solution(x_centered, y_data, best_omega)
+    offset = float(coefficients[0])
+    cosine_coefficient = float(coefficients[1])
+    sine_coefficient = float(coefficients[2])
+    amplitude = float(np.hypot(cosine_coefficient, sine_coefficient))
+    centered_phase = float(np.arctan2(-sine_coefficient, cosine_coefficient))
+    phase = _wrap_phase_radians(centered_phase - best_omega * x_reference)
+
+    acceleration = best_omega * 1e12 / effective_wavevector
+    angle_mrad = float(np.arcsin(np.clip(acceleration / standard_gravity, -1.0, 1.0)) * 1e3)
+
+    eval_x = np.asarray(eval_x if eval_x is not None else x_data, dtype=float)
+    fit_window_curve = offset + amplitude * np.cos(best_omega * x_data + phase)
+    fit_curve = offset + amplitude * np.cos(best_omega * eval_x + phase)
+    residual_variance = float(best_error / len(x_data)) if len(x_data) else None
+    return BraggFringeFitResult(
+        parameter_values={
+            "a": float(acceleration),
+            "alpha": angle_mrad,
+            "phi0": phase,
+            "A": amplitude,
+            "C": offset,
+        },
+        fit_curve=fit_curve,
+        fit_window_curve=fit_window_curve,
+        residual_variance=residual_variance,
+        effective_wavevector_rad_m=float(effective_wavevector),
+        angular_frequency_rad_per_us2=float(best_omega),
+    )
 
 
 def sanitize_model_key(value: Any) -> str:

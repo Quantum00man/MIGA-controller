@@ -604,6 +604,8 @@ class ArchiveScanFitRequest(BaseModel):
     fit_min: Optional[float] = Field(None)
     fit_max: Optional[float] = Field(None)
     eval_points: int = Field(400, ge=32, le=4000)
+    bragg_wavelength_nm: float = Field(780.0, gt=0)
+    bragg_order: int = Field(1, ge=1)
     model: FitModelDefinition
 
 
