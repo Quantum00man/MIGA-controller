@@ -46,6 +46,14 @@ class ArchiveScanFittingTests(unittest.TestCase):
         self.assertAlmostEqual(params["phi0"], expected_phase, delta=1e-3)
         self.assertAlmostEqual(params["A"], expected_amplitude, delta=1e-5)
         self.assertAlmostEqual(params["C"], expected_offset, delta=1e-5)
+        self.assertGreater(len(result.mid_fringe_x), 1)
+        self.assertTrue(all(x_values[0] <= value <= x_values[-1] for value in result.mid_fringe_x))
+        self.assertAlmostEqual(result.mid_fringe_spacing_us2, math.pi / omega, delta=(math.pi / omega) * 1e-4)
+        for value in result.mid_fringe_x:
+            fitted_value = params["C"] + params["A"] * math.cos(
+                result.angular_frequency_rad_per_us2 * value + params["phi0"]
+            )
+            self.assertAlmostEqual(fitted_value, params["C"], delta=1e-9)
 
     def test_archive_bragg_fringe_response_includes_physical_metadata(self):
         wavelength_nm = 780.0
@@ -79,6 +87,9 @@ class ArchiveScanFittingTests(unittest.TestCase):
         self.assertEqual(response["bragg"]["order"], 1)
         self.assertAlmostEqual(response["bragg"]["wavelength_nm"], wavelength_nm)
         self.assertAlmostEqual(response["parameter_values"]["alpha"], 0.8, delta=1e-3)
+        self.assertIn("symbolic_formula", response["bragg"])
+        self.assertGreater(len(response["bragg"]["mid_fringe_x"]), 1)
+        self.assertGreater(response["bragg"]["mid_fringe_spacing_us2"], 0)
 
     def test_scan_fit_returns_baseline_removed_curve_area(self):
         request = ArchiveScanFitRequest(

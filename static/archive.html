@@ -1206,6 +1206,11 @@
                         <div v-else-if="scanFitResult" class="scan-fit-result mt-3">
                             <div class="small fw-bold text-dark mb-1">Overlay Active</div>
                             <div class="small text-muted mb-2">{{ getScanFitResultSummary() }}</div>
+                            <div v-if="scanFitResult.model_key === 'bragg_fringes'" class="border rounded bg-white p-2 mb-2">
+                                <div class="form-label-small mb-1">FRINGE FORMULA</div>
+                                <div class="font-monospace small text-break">y = C + A cos[k<sub>eff</sub>a(P0 × 10<sup>−12</sup>) + φ₀]</div>
+                                <div class="font-monospace small text-break text-primary mt-1">{{ getBraggFitNumericFormula(scanFitResult) }}</div>
+                            </div>
                             <div v-if="scanFitResult.model_key === 'bragg_fringes'" class="scan-fit-param-grid">
                                 <div class="scan-fit-param-row">
                                     <span>a</span>
@@ -1253,6 +1258,16 @@
                             <div v-else class="small text-muted mt-1">
                                 λ={{ formatMetricValue(scanFitResult.bragg?.wavelength_nm) }} nm · n={{ scanFitResult.bragg?.order }} ·
                                 k<sub>eff</sub>={{ formatMetricValue(scanFitResult.bragg?.effective_wavevector_rad_m) }} rad/m
+                            </div>
+                            <div v-if="scanFitResult.model_key === 'bragg_fringes'" class="border-top mt-2 pt-2">
+                                <div class="small fw-bold text-dark">Mid-fringe P0 (T² in (μs)²)</div>
+                                <div class="small text-muted mb-1">
+                                    ΔP0 = {{ formatMetricValue(scanFitResult.bragg?.mid_fringe_spacing_us2) }} (μs)² ·
+                                    {{ (scanFitResult.bragg?.mid_fringe_x || []).length }} intersections
+                                </div>
+                                <div class="small font-monospace text-break">
+                                    {{ formatMidFringeList(scanFitResult.bragg?.mid_fringe_x) }}
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -2827,6 +2842,55 @@
                         hovertemplate: `P0=%{x:.6f}<br>Fit=%{y:.6g}<extra>${result.model_label}</extra>`,
                         meta: { nonSelectable: true }
                     };
+                },
+                buildBraggMidFringeTraces(result, color) {
+                    if (result?.model_key !== 'bragg_fringes') return [];
+                    const offset = Number(result.parameter_values?.C);
+                    const midFringes = Array.isArray(result.bragg?.mid_fringe_x)
+                        ? result.bragg.mid_fringe_x.map(Number).filter(Number.isFinite)
+                        : [];
+                    if (!Number.isFinite(offset)) return [];
+                    const fitMin = Number(result.fit_min);
+                    const fitMax = Number(result.fit_max);
+                    const traces = [{
+                        x: [fitMin, fitMax],
+                        y: [offset, offset],
+                        type: 'scatter',
+                        mode: 'lines',
+                        name: `C = ${this.formatMetricValue(offset)}`,
+                        line: { color, width: 1.8, dash: 'dot' },
+                        hovertemplate: `Mid-fringe level C=${this.formatMetricValue(offset)}<extra></extra>`,
+                        meta: { nonSelectable: true }
+                    }];
+                    if (midFringes.length) {
+                        traces.push({
+                            x: midFringes,
+                            y: midFringes.map(() => offset),
+                            customdata: midFringes.map((x, index) => [index + 1, x]),
+                            type: 'scatter',
+                            mode: 'markers',
+                            name: 'Mid fringes',
+                            marker: { color: '#d63384', size: 9, symbol: 'diamond', line: { color: '#ffffff', width: 1 } },
+                            hovertemplate: 'Mid fringe #%{customdata[0]}<br>P0=%{customdata[1]:.8g} (μs)²<br>C=%{y:.6g}<extra></extra>',
+                            meta: { nonSelectable: true }
+                        });
+                    }
+                    return traces;
+                },
+                getBraggFitNumericFormula(result = this.scanFitResult) {
+                    if (result?.model_key !== 'bragg_fringes') return '';
+                    const params = result.parameter_values || {};
+                    const omega = Number(result.bragg?.angular_frequency_rad_per_us2);
+                    const phase = Number(params.phi0);
+                    const phaseTerm = Number.isFinite(phase)
+                        ? `${phase < 0 ? '−' : '+'} ${this.formatMetricValue(Math.abs(phase))}`
+                        : '+ n/a';
+                    return `y = ${this.formatMetricValue(params.C)} + ${this.formatMetricValue(params.A)} cos(${this.formatMetricValue(omega)} × P0 ${phaseTerm})`;
+                },
+                formatMidFringeList(values) {
+                    const points = Array.isArray(values) ? values.map(Number).filter(Number.isFinite) : [];
+                    if (!points.length) return 'No mid-fringe intersection lies inside the selected fit range.';
+                    return points.map((value, index) => `#${index + 1}: ${this.formatMetricValue(value)}`).join(' · ');
                 },
                 applyScanFitLayout(layout, result, color) {
                     if (!result) return layout;
@@ -4781,10 +4845,12 @@
 
                     if (scanFitOverlay?.channel === 'up') {
                         tracesUp.push(this.buildScanFitTrace(scanFitOverlay, '#6f42c1'));
+                        tracesUp.push(...this.buildBraggMidFringeTraces(scanFitOverlay, '#6f42c1'));
                         layoutUp = this.applyScanFitLayout(layoutUp, scanFitOverlay, '#6f42c1');
                     }
                     if (scanFitOverlay?.channel === 'dw') {
                         tracesDw.push(this.buildScanFitTrace(scanFitOverlay, '#0f766e'));
+                        tracesDw.push(...this.buildBraggMidFringeTraces(scanFitOverlay, '#0f766e'));
                         layoutDw = this.applyScanFitLayout(layoutDw, scanFitOverlay, '#0f766e');
                     }
                     const optimizationUp = this.getOptimizationFitOverlay("up");

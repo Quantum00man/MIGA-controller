@@ -43,6 +43,8 @@ class BraggFringeFitResult:
     residual_variance: Optional[float]
     effective_wavevector_rad_m: float
     angular_frequency_rad_per_us2: float
+    mid_fringe_x: List[float]
+    mid_fringe_spacing_us2: float
 
 
 DEFAULT_FIT_MODELS: List[Dict[str, Any]] = [
@@ -528,6 +530,13 @@ def perform_bragg_fringe_fit(
     fit_window_curve = offset + amplitude * np.cos(best_omega * x_data + phase)
     fit_curve = offset + amplitude * np.cos(best_omega * eval_x + phase)
     residual_variance = float(best_error / len(x_data)) if len(x_data) else None
+    first_index = int(np.ceil((best_omega * x_data[0] + phase - np.pi / 2.0) / np.pi))
+    last_index = int(np.floor((best_omega * x_data[-1] + phase - np.pi / 2.0) / np.pi))
+    mid_fringe_x = [
+        float((np.pi / 2.0 + index * np.pi - phase) / best_omega)
+        for index in range(first_index, last_index + 1)
+    ]
+    mid_fringe_spacing = float(np.pi / best_omega)
     return BraggFringeFitResult(
         parameter_values={
             "a": float(acceleration),
@@ -541,6 +550,8 @@ def perform_bragg_fringe_fit(
         residual_variance=residual_variance,
         effective_wavevector_rad_m=float(effective_wavevector),
         angular_frequency_rad_per_us2=float(best_omega),
+        mid_fringe_x=mid_fringe_x,
+        mid_fringe_spacing_us2=mid_fringe_spacing,
     )
 
 

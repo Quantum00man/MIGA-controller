@@ -1379,6 +1379,9 @@ async def fit_archive_scan(req: ArchiveScanFitRequest):
                 "effective_wavevector_rad_m": fringe_result.effective_wavevector_rad_m,
                 "angular_frequency_rad_per_us2": fringe_result.angular_frequency_rad_per_us2,
                 "gravity_m_s2": 9.80665,
+                "symbolic_formula": "y = C + A cos[k_eff a (P0 x 10^-12) + phi0]",
+                "mid_fringe_x": fringe_result.mid_fringe_x,
+                "mid_fringe_spacing_us2": fringe_result.mid_fringe_spacing_us2,
             },
         }
 
