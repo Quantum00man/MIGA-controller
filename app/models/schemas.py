@@ -126,6 +126,17 @@ class BraggScanExportRequest(BaseModel):
     scan_config: ScanConfig
 
 
+class LinkSingleExportRequest(BaseModel):
+    sequence_name: str = Field("")
+    p0: float
+    scan_config: ScanConfig
+
+
+class LinkScanExportRequest(BaseModel):
+    sequence_name: str = Field("")
+    scan_config: ScanConfig
+
+
 class SequenceMarkerDefinition(BaseModel):
     id: str
     display_name: str
@@ -607,6 +618,22 @@ class ArchiveScanFitRequest(BaseModel):
     bragg_wavelength_nm: float = Field(780.0, gt=0)
     bragg_order: int = Field(1, ge=1)
     model: FitModelDefinition
+
+
+class BraggPhaseInputPoint(BaseModel):
+    p0: float
+    value: float
+    shot: Optional[int] = Field(None)
+    key: str = Field("")
+
+
+class ArchiveBraggPhaseRequest(BaseModel):
+    points: List[BraggPhaseInputPoint] = Field(default_factory=list)
+    amplitude: float
+    offset: float
+    angular_frequency_rad_per_us2: float = Field(..., gt=0)
+    phase_offset_rad: float
+    mid_fringe_fraction: float = Field(0.5, ge=0, le=1)
 
 
 class ScanFitModelSaveRequest(BaseModel):

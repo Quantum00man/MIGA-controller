@@ -1049,6 +1049,37 @@
                         </div>
                         <button class="btn btn-sm btn-light w-100 text-muted border border-dashed" @click="addFormula">+
                             Add Parameter</button>
+                        <div class="mt-3 pt-3 border-top">
+                            <div class="row g-2 align-items-end">
+                                <div class="col-md-4">
+                                    <label class="form-label small mb-1 fw-bold text-primary">Export P0</label>
+                                    <input type="number" step="any" class="form-control form-control-sm"
+                                        v-model.number="linkExportP0" :disabled="linkExportBusy">
+                                </div>
+                                <div class="col-md-4 d-grid">
+                                    <button type="button" class="btn btn-sm btn-outline-primary" @click="downloadSingleLinkMot"
+                                        :disabled="linkExportBusy">
+                                        <span v-if="linkExportBusy && linkExportAction === 'single'" class="spinner-border spinner-border-sm me-1"></span>
+                                        <i v-else class="bi bi-file-earmark-arrow-down me-1"></i>Single MOT
+                                    </button>
+                                </div>
+                                <div class="col-md-4 d-grid">
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" @click="downloadLinkScanZip"
+                                        :disabled="linkExportBusy">
+                                        <span v-if="linkExportBusy && linkExportAction === 'scan'" class="spinner-border spinner-border-sm me-1"></span>
+                                        <i v-else class="bi bi-file-zip me-1"></i>Scan ZIP
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="form-text mt-2">
+                                Single MOT calculates all linked parameters for the selected P0. Scan ZIP follows the current Range or List;
+                                averages and randomization are ignored. Limit: 200 files and 100 MB.
+                            </div>
+                            <div v-if="linkExportMessage" class="alert py-1 px-2 mt-2 mb-0 small"
+                                :class="linkExportIsError ? 'alert-danger' : 'alert-success'">
+                                {{ linkExportMessage }}
+                            </div>
+                        </div>
                     </div>
                     <div v-if="config.mode === 'lock_in'" class="mt-1">
                         <div class="alert alert-light border py-2 px-3 small mb-3">
@@ -1547,6 +1578,11 @@
                     braggExportAction: '',
                     braggExportMessage: '',
                     braggExportIsError: false,
+                    linkExportP0: 0,
+                    linkExportBusy: false,
+                    linkExportAction: '',
+                    linkExportMessage: '',
+                    linkExportIsError: false,
                     sequenceMarkerBusy: false,
                     sequenceMarkerError: '',
                     sequenceMarkerInspection: { markers: [], lines: [], marker_count: 0, line_count: 0 },
@@ -2341,6 +2377,76 @@
                         sequence_name: this.braggExportSequenceName(),
                         scan_config: scanConfig
                     }, 'bragg_scan.zip', 'scan');
+                },
+                linkExportScanConfig() {
+                    return {
+                        ...this.config,
+                        mode: 'link',
+                        scan_dimensions: 1,
+                        averages: 1,
+                        randomize: false,
+                        dim2_enabled: false,
+                        dim3_enabled: false
+                    };
+                },
+                async requestLinkExport(url, payload, fallback, action) {
+                    this.linkExportBusy = true;
+                    this.linkExportAction = action;
+                    this.linkExportMessage = '';
+                    this.linkExportIsError = false;
+                    try {
+                        const response = await axios.post(url, payload, { responseType: 'blob' });
+                        const filename = this.saveBraggDownload(response, fallback);
+                        this.linkExportMessage = `Downloaded ${filename}.`;
+                        this.addLog(`Link export downloaded: ${filename}`);
+                    } catch (error) {
+                        const message = await this.braggExportError(error);
+                        this.linkExportIsError = true;
+                        this.linkExportMessage = String(message);
+                        this.addLog(`Link export failed: ${message}`);
+                    } finally {
+                        this.linkExportBusy = false;
+                        this.linkExportAction = '';
+                    }
+                },
+                downloadSingleLinkMot() {
+                    const p0 = Number(this.linkExportP0);
+                    if (!Number.isFinite(p0)) {
+                        this.linkExportIsError = true;
+                        this.linkExportMessage = 'P0 must be a finite number.';
+                        return;
+                    }
+                    return this.requestLinkExport('/experiment/link/export/single', {
+                        sequence_name: this.braggExportSequenceName(),
+                        p0,
+                        scan_config: this.linkExportScanConfig()
+                    }, 'link_export.mot', 'single');
+                },
+                downloadLinkScanZip() {
+                    let count;
+                    try {
+                        count = this.estimateAxisPointCount({
+                            scan_type: this.config.dim1_type,
+                            method: this.config.dim1_method,
+                            start: this.config.start,
+                            stop: this.config.stop,
+                            step: this.config.step,
+                            list: this.config.custom_list
+                        });
+                    } catch (error) {
+                        this.linkExportIsError = true;
+                        this.linkExportMessage = error.message || 'Invalid scan values.';
+                        return;
+                    }
+                    if (count > 200) {
+                        this.linkExportIsError = true;
+                        this.linkExportMessage = `The scan contains ${count} values; the export limit is 200.`;
+                        return;
+                    }
+                    return this.requestLinkExport('/experiment/link/export/scan', {
+                        sequence_name: this.braggExportSequenceName(),
+                        scan_config: this.linkExportScanConfig()
+                    }, 'link_scan.zip', 'scan');
                 },
                 async selectDdsXml(event) {
                     const file = event.target.files[0];

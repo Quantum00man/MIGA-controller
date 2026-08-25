@@ -16,12 +16,13 @@ from pydantic import BaseModel
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 from typing import Dict, Any, List
-from app.analysis import fitting
+from app.analysis import fitting, phase_space
 from app.core.experiment_manager import ExperimentManager
 from app.core.data_loader import DataLoader
 from app.core.archive_collection_store import ArchiveCollectionStore
 from app.core.data_manager import DataManager
 from app.core.bragg_export import build_bragg_zip_export, build_single_bragg_export, read_sequence_template
+from app.core.link_export import build_link_zip_export, build_single_link_export
 from app.core.sequence_markers import (
     add_sequence_marker,
     decode_mot_bytes,
@@ -49,10 +50,13 @@ from app.models.schemas import (
     ArchiveFavoriteCreate,
     ArchiveFavoriteUpdate,
     ArchiveRunReference,
+    ArchiveBraggPhaseRequest,
     ArchiveScanFitRequest,
     ArchiveWaveformRequest,
     BraggScanExportRequest,
     BraggSingleExportRequest,
+    LinkScanExportRequest,
+    LinkSingleExportRequest,
     SequenceMarkerAnnotateRequest,
     SequenceMarkerInspectRequest,
     SequenceMarkerPreviewRequest,
@@ -870,6 +874,45 @@ async def export_bragg_scan_zip(request: BraggScanExportRequest):
         raise HTTPException(400, str(exc))
 
 
+@router.post("/experiment/link/export/single")
+async def export_single_link_mot(request: LinkSingleExportRequest):
+    try:
+        export_settings = manager.load_settings_snapshot_from_disk()
+        template_path = _bragg_export_template_path(export_settings)
+        template_content, template_encoding = decode_mot_bytes(template_path.read_bytes())
+        parameter_sets = manager.build_link_export_parameter_sets(
+            request.scan_config.dict(),
+            p0=request.p0,
+        )
+        payload, filename = build_single_link_export(
+            template_content=template_content,
+            template_encoding=template_encoding,
+            sequence_name=request.sequence_name,
+            parameters=parameter_sets[0],
+        )
+        return _attachment_response(payload, filename, "text/plain")
+    except (OSError, ValueError) as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.post("/experiment/link/export/scan")
+async def export_link_scan_zip(request: LinkScanExportRequest):
+    try:
+        export_settings = manager.load_settings_snapshot_from_disk()
+        template_path = _bragg_export_template_path(export_settings)
+        template_content, template_encoding = decode_mot_bytes(template_path.read_bytes())
+        parameter_sets = manager.build_link_export_parameter_sets(request.scan_config.dict())
+        payload, filename = build_link_zip_export(
+            template_content=template_content,
+            template_encoding=template_encoding,
+            sequence_name=request.sequence_name,
+            parameter_sets=parameter_sets,
+        )
+        return _attachment_response(payload, filename, "application/zip")
+    except (OSError, ValueError) as exc:
+        raise HTTPException(400, str(exc))
+
+
 @router.post("/experiment/dds-table")
 async def upload_dds_table(file: UploadFile = File(...)):
     filename = str(file.filename or "").strip()
@@ -1405,6 +1448,21 @@ async def fit_archive_scan(req: ArchiveScanFitRequest):
         "offset": fit_result.offset,
         "area": fit_result.area,
     }
+
+
+@router.post("/archive/bragg-phase-space")
+async def convert_archive_bragg_phase_space(req: ArchiveBraggPhaseRequest):
+    try:
+        return phase_space.convert_bragg_points_to_phase_space(
+            [point.model_dump() for point in req.points],
+            amplitude=req.amplitude,
+            offset=req.offset,
+            angular_frequency_rad_per_us2=req.angular_frequency_rad_per_us2,
+            phase_offset_rad=req.phase_offset_rad,
+            mid_fringe_fraction=req.mid_fringe_fraction,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
 
 
 @router.post("/archive/overwrite", response_model=ExperimentResponse)

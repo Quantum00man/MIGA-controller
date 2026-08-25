@@ -1196,6 +1196,7 @@ class ExperimentManager:
 
     def _generate_parameters(self, config: Dict[str, Any]) -> List[Any]:
         max_base_points = int(config.get('_max_base_points', 0) or 0)
+        max_base_points_label = str(config.get('_max_base_points_label') or 'Bragg').strip() or 'Bragg'
         def normalize_single_value(value: float, target_type: str) -> Any:
             if target_type == 'int':
                 return int(round(float(value)))
@@ -1213,7 +1214,7 @@ class ExperimentManager:
                 if not raw_vals:
                     raise ValueError("Scan list cannot be empty")
                 if max_base_points and len(raw_vals) > max_base_points:
-                    raise ValueError(f"Bragg ZIP export is limited to {max_base_points} files")
+                    raise ValueError(f"{max_base_points_label} ZIP export is limited to {max_base_points} files")
                 return normalize_values(raw_vals, target_type)
 
             start = float(start)
@@ -1228,7 +1229,7 @@ class ExperimentManager:
                 if n_points <= 0:
                     raise ValueError("Point count must be positive")
                 if max_base_points and n_points > max_base_points:
-                    raise ValueError(f"Bragg ZIP export is limited to {max_base_points} files")
+                    raise ValueError(f"{max_base_points_label} ZIP export is limited to {max_base_points} files")
                 if n_points == 1:
                     raw_vals = [start]
                 else:
@@ -1246,7 +1247,7 @@ class ExperimentManager:
                     while compare(current):
                         raw_vals.append(current)
                         if max_base_points and len(raw_vals) > max_base_points:
-                            raise ValueError(f"Bragg ZIP export is limited to {max_base_points} files")
+                            raise ValueError(f"{max_base_points_label} ZIP export is limited to {max_base_points} files")
                         current += effective_step
                     if not raw_vals:
                         raw_vals = [start]
@@ -1372,6 +1373,37 @@ class ExperimentManager:
         if not values:
             raise ValueError("Bragg scan contains no FWHM values")
         return values
+
+    def build_link_export_parameter_sets(
+        self,
+        scan_config: Dict[str, Any],
+        p0: Optional[float] = None,
+    ) -> List[List[Any]]:
+        payload = dict(scan_config or {})
+        if str(payload.get('mode') or '').strip().lower() != 'link':
+            raise ValueError("Link export requires Link mode")
+        if self._resolve_scan_dimensions(payload) != 1:
+            raise ValueError("Link export only supports a 1D scan")
+        payload['averages'] = 1
+        payload['randomize'] = False
+        payload['scan_dimensions'] = 1
+        payload['dim2_enabled'] = False
+        payload['dim3_enabled'] = False
+        payload['_max_base_points'] = 200
+        payload['_max_base_points_label'] = 'Link'
+        if p0 is not None:
+            numeric_p0 = float(p0)
+            if not math.isfinite(numeric_p0):
+                raise ValueError("Link export P0 must be a finite number")
+            payload['dim1_type'] = 'list'
+            payload['custom_list'] = str(numeric_p0)
+        parameter_sets = [
+            self._normalize_parameter_list(parameter_set)
+            for parameter_set in self._generate_parameters(payload)
+        ]
+        if not parameter_sets:
+            raise ValueError("Link export contains no parameter sets")
+        return parameter_sets
 
     '''# [UPDATED] Robust VCD Parser with Debug Prints
     def _calculate_delay_from_vcd(self, vcd_path: str, launch_id: str, trigger_id: str) -> float:
