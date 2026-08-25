@@ -1,7 +1,12 @@
 import math
 import unittest
+import json
+import tempfile
+from pathlib import Path
+from unittest.mock import patch
 
 from app.analysis.phase_space import convert_bragg_points_to_phase_space
+from app.core.experiment_manager import ExperimentManager
 
 
 class BraggPhaseSpaceTests(unittest.TestCase):
@@ -68,6 +73,86 @@ class BraggPhaseSpaceTests(unittest.TestCase):
         self.assertAlmostEqual(stats["mean_rad"], 0.0, places=10)
         self.assertAlmostEqual(stats["rms_rad"], math.sqrt(0.02 / 3), places=10)
         self.assertAlmostEqual(stats["std_rad"], 0.1, places=10)
+
+    def test_reference_points_correct_offset_before_phase_conversion(self):
+        points = [
+            {"p0": math.pi / 2, "value": 0.57},
+            {"p0": 5 * math.pi / 2, "value": 0.57},
+        ]
+        result = convert_bragg_points_to_phase_space(
+            points,
+            amplitude=0.4,
+            offset=0.5,
+            angular_frequency_rad_per_us2=1.0,
+            phase_offset_rad=0.0,
+            mid_fringe_fraction=0.5,
+            offset_correction_mode="reference_first",
+            reference_point_count=2,
+        )
+        self.assertAlmostEqual(result["offset_correction"], 0.07, places=10)
+        self.assertAlmostEqual(result["applied_offset"], 0.57, places=10)
+        for point in result["points"]:
+            self.assertAlmostEqual(point["phase_deviation_rad"], 0.0, places=10)
+
+    def test_fixed_mid_fringe_ignores_target_p0_for_phase_branch(self):
+        reference_phase = 5 * math.pi / 2
+        deviations = [-0.08, 0.04, 0.11]
+        points = [
+            {"p0": scan_index, "value": 0.5 + 0.4 * math.cos(reference_phase + deviation)}
+            for scan_index, deviation in enumerate(deviations, start=101)
+        ]
+        result = convert_bragg_points_to_phase_space(
+            points,
+            amplitude=0.4,
+            offset=0.5,
+            angular_frequency_rad_per_us2=0.7,
+            phase_offset_rad=0.2,
+            mid_fringe_fraction=0.5,
+            phase_reference_mode="fixed_mid_fringe",
+            reference_phase_rad=reference_phase,
+        )
+        self.assertEqual(result["phase_reference_mode"], "fixed_mid_fringe")
+        for point, expected in zip(result["points"], deviations):
+            self.assertAlmostEqual(point["predicted_phase_rad"], reference_phase, places=10)
+            self.assertAlmostEqual(point["phase_deviation_rad"], expected, places=10)
+            self.assertTrue(point["is_mid_fringe"])
+
+    def test_saved_calibration_round_trip(self):
+        fit_result = {
+            "fit_min": 1.0,
+            "fit_max": 3.0,
+            "fit_x": [1.0, 2.0, 3.0],
+            "fit_y": [0.2, 0.5, 0.8],
+            "metric_tab": "prob",
+            "metric_label": "Transition Prob.",
+            "source_key": "fit",
+            "source_label": "Fit",
+            "channel": "up",
+            "channel_label": "Prob F2",
+            "parameter_values": {"A": 0.3, "C": 0.5, "phi0": 0.2, "a": 0.01},
+            "bragg": {
+                "angular_frequency_rad_per_us2": 0.7,
+                "wavelength_nm": 780.0,
+                "order": 1,
+                "mid_fringe_x": [1.5, 2.5],
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "settings.json"
+            target.write_text("{}", encoding="utf-8")
+            manager = ExperimentManager.__new__(ExperimentManager)
+            with patch("app.core.experiment_manager.config.USER_JSON_PATH", target):
+                saved = manager.save_bragg_phase_calibration(
+                    "Morning fringe", fit_result, {"run_id": "run12"}
+                )
+                loaded = manager.get_bragg_phase_calibrations()
+                self.assertEqual(len(loaded), 1)
+                self.assertEqual(loaded[0]["id"], saved["id"])
+                self.assertEqual(loaded[0]["source"]["run_id"], "run12")
+                self.assertEqual(loaded[0]["bragg"]["mid_fringe_x"], [1.5, 2.5])
+                self.assertTrue(manager.delete_bragg_phase_calibration(saved["id"]))
+                self.assertEqual(manager.get_bragg_phase_calibrations(), [])
+                self.assertEqual(json.loads(target.read_text())["bragg_phase_calibrations"], [])
 
 
 if __name__ == "__main__":

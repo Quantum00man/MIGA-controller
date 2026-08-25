@@ -694,6 +694,103 @@ class ExperimentManager:
         self._save_user_json_payload(payload)
         return candidate
 
+    def _normalize_bragg_phase_calibration(self, calibration: Dict[str, Any]) -> Dict[str, Any]:
+        source = dict(calibration or {})
+        if source.get('model_key') not in {None, '', 'bragg_fringes'}:
+            raise ValueError('Only Bragg fringe fits can be saved as phase calibrations')
+        parameters = dict(source.get('parameter_values') or {})
+        bragg = dict(source.get('bragg') or {})
+        required = {
+            'A': parameters.get('A'),
+            'C': parameters.get('C'),
+            'phi0': parameters.get('phi0'),
+            'omega': bragg.get('angular_frequency_rad_per_us2'),
+        }
+        try:
+            numeric = {key: float(value) for key, value in required.items()}
+        except (TypeError, ValueError) as exc:
+            raise ValueError('Bragg phase calibration is missing required parameters') from exc
+        if not all(math.isfinite(value) for value in numeric.values()):
+            raise ValueError('Bragg phase calibration contains non-finite parameters')
+        if numeric['A'] <= 0 or numeric['omega'] <= 0:
+            raise ValueError('Bragg phase calibration requires positive A and angular frequency')
+        try:
+            fit_x = [float(value) for value in source.get('fit_x') or []]
+            fit_y = [float(value) for value in source.get('fit_y') or []]
+        except (TypeError, ValueError) as exc:
+            raise ValueError('Bragg phase calibration curve must be numeric') from exc
+        if len(fit_x) != len(fit_y) or len(fit_x) < 2:
+            raise ValueError('Bragg phase calibration requires a fitted reference curve')
+        if not all(math.isfinite(value) for value in fit_x + fit_y):
+            raise ValueError('Bragg phase calibration curve contains non-finite values')
+        try:
+            fit_min = float(source.get('fit_min', min(fit_x)))
+            fit_max = float(source.get('fit_max', max(fit_x)))
+        except (TypeError, ValueError) as exc:
+            raise ValueError('Bragg phase calibration range must be numeric') from exc
+        if fit_min > fit_max:
+            fit_min, fit_max = fit_max, fit_min
+        return {
+            'id': str(source.get('id') or f"bragg_{time.time_ns()}"),
+            'name': str(source.get('name') or '').strip(),
+            'created_at': str(source.get('created_at') or time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())),
+            'model_key': 'bragg_fringes',
+            'model_label': 'Bragg Fringes',
+            'source': dict(source.get('source') or {}),
+            'metric_tab': str(source.get('metric_tab') or ''),
+            'metric_label': str(source.get('metric_label') or ''),
+            'source_key': str(source.get('source_key') or ''),
+            'source_label': str(source.get('source_label') or ''),
+            'channel': 'dw' if source.get('channel') == 'dw' else 'up',
+            'channel_label': str(source.get('channel_label') or ''),
+            'fit_min': fit_min,
+            'fit_max': fit_max,
+            'fit_x': fit_x,
+            'fit_y': fit_y,
+            'parameter_values': {**parameters, **{key: numeric[key] for key in ('A', 'C', 'phi0')}},
+            'bragg': {**bragg, 'angular_frequency_rad_per_us2': numeric['omega']},
+        }
+
+    def get_bragg_phase_calibrations(self) -> List[Dict[str, Any]]:
+        payload = self._load_user_json_payload()
+        calibrations = payload.get('bragg_phase_calibrations')
+        if not isinstance(calibrations, list):
+            return []
+        normalized = []
+        for calibration in calibrations:
+            try:
+                normalized.append(self._normalize_bragg_phase_calibration(calibration))
+            except (TypeError, ValueError) as exc:
+                print(f"[User JSON] Skipping invalid Bragg phase calibration: {exc}")
+        return sorted(normalized, key=lambda item: item['created_at'], reverse=True)
+
+    def save_bragg_phase_calibration(self, name: str, fit_result: Dict[str, Any], source: Dict[str, Any]) -> Dict[str, Any]:
+        label = str(name or '').strip()
+        if not label:
+            raise ValueError('Calibration name is required')
+        calibration = self._normalize_bragg_phase_calibration({
+            **dict(fit_result or {}),
+            'name': label,
+            'source': dict(source or {}),
+        })
+        payload = self._load_user_json_payload()
+        calibrations = self.get_bragg_phase_calibrations()
+        calibrations.append(calibration)
+        payload['bragg_phase_calibrations'] = calibrations
+        self._save_user_json_payload(payload)
+        return calibration
+
+    def delete_bragg_phase_calibration(self, calibration_id: str) -> bool:
+        target = str(calibration_id or '').strip()
+        payload = self._load_user_json_payload()
+        calibrations = self.get_bragg_phase_calibrations()
+        kept = [item for item in calibrations if item.get('id') != target]
+        if len(kept) == len(calibrations):
+            return False
+        payload['bragg_phase_calibrations'] = kept
+        self._save_user_json_payload(payload)
+        return True
+
     def get_settings(self) -> Dict[str, Any]: return self.settings
 
     def _normalize_fit_settings(self, settings: Dict[str, Any], strict: bool = False) -> Dict[str, Any]:

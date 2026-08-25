@@ -634,6 +634,16 @@ class ArchiveBraggPhaseRequest(BaseModel):
     angular_frequency_rad_per_us2: float = Field(..., gt=0)
     phase_offset_rad: float
     mid_fringe_fraction: float = Field(0.5, ge=0, le=1)
+    offset_correction_mode: str = Field("none")
+    reference_point_count: int = Field(5, ge=1, le=10000)
+    phase_reference_mode: str = Field("p0_t2")
+    reference_phase_rad: Optional[float] = Field(None)
+
+
+class BraggPhaseCalibrationSaveRequest(BaseModel):
+    name: str
+    fit_result: Dict[str, Any]
+    source: Dict[str, Any] = Field(default_factory=dict)
 
 
 class ScanFitModelSaveRequest(BaseModel):

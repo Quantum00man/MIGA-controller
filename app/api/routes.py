@@ -51,6 +51,7 @@ from app.models.schemas import (
     ArchiveFavoriteUpdate,
     ArchiveRunReference,
     ArchiveBraggPhaseRequest,
+    BraggPhaseCalibrationSaveRequest,
     ArchiveScanFitRequest,
     ArchiveWaveformRequest,
     BraggScanExportRequest,
@@ -1460,9 +1461,33 @@ async def convert_archive_bragg_phase_space(req: ArchiveBraggPhaseRequest):
             angular_frequency_rad_per_us2=req.angular_frequency_rad_per_us2,
             phase_offset_rad=req.phase_offset_rad,
             mid_fringe_fraction=req.mid_fringe_fraction,
+            offset_correction_mode=req.offset_correction_mode,
+            reference_point_count=req.reference_point_count,
+            phase_reference_mode=req.phase_reference_mode,
+            reference_phase_rad=req.reference_phase_rad,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc))
+
+
+@router.get("/archive/bragg-phase-calibrations")
+async def list_archive_bragg_phase_calibrations():
+    return manager.get_bragg_phase_calibrations()
+
+
+@router.post("/archive/bragg-phase-calibrations")
+async def save_archive_bragg_phase_calibration(req: BraggPhaseCalibrationSaveRequest):
+    try:
+        return manager.save_bragg_phase_calibration(req.name, req.fit_result, req.source)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.delete("/archive/bragg-phase-calibrations/{calibration_id}")
+async def delete_archive_bragg_phase_calibration(calibration_id: str):
+    if not manager.delete_bragg_phase_calibration(calibration_id):
+        raise HTTPException(404, "Bragg phase calibration not found")
+    return {"status": "deleted", "id": calibration_id}
 
 
 @router.post("/archive/overwrite", response_model=ExperimentResponse)
