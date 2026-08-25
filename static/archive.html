@@ -3359,16 +3359,20 @@
                         const makeMeanTrace = (selected, highQuality) => ({
                             x: selected.map(phaseX),
                             y: selected.map(group => Number(group.phase_mean_deviation_rad) * yScale),
-                            customdata: selected.map(group => [group.p0, group.sample_count, group.method, group.sensitivity]),
+                            customdata: selected.map(group => [
+                                group.p0, group.sample_count, group.method, group.sensitivity,
+                                this.formatBraggPhaseStat(group.phase_std_rad)
+                            ]),
                             error_y: {
                                 type: 'data', visible: true,
-                                array: selected.map(group => Number(group.phase_std_rad) * yScale),
+                                array: selected.map(group => Number.isFinite(Number(group.phase_std_rad))
+                                    ? Number(group.phase_std_rad) * yScale : null),
                                 color: highQuality ? '#6f42c1' : '#8c98a4'
                             },
                             type: 'scatter', mode: 'markers',
                             name: highQuality ? 'Mid-fringe mean ± jitter' : 'Low-sensitivity mean',
                             marker: { color: highQuality ? '#6f42c1' : '#8c98a4', size: highQuality ? 9 : 7, opacity: highQuality ? 0.9 : 0.22 },
-                            hovertemplate: `x=%{x:.6g}<br>mean Δφ=%{y:.6g} ${this.braggPhase.yUnit}<br>target P0=%{customdata[0]:.8g}<br>N=%{customdata[1]}<br>method=%{customdata[2]}<br>sensitivity=%{customdata[3]:.4f}<extra>%{fullData.name}</extra>`
+                            hovertemplate: `x=%{x:.6g}<br>mean Δφ=%{y:.6g} ${this.braggPhase.yUnit}<br><b>phase STD=%{customdata[4]}</b><br>target P0=%{customdata[0]:.8g}<br>N=%{customdata[1]}<br>method=%{customdata[2]}<br>sensitivity=%{customdata[3]:.4f}<extra>%{fullData.name}</extra>`
                         });
                         const finite = groups.filter(group => Number.isFinite(Number(group.phase_mean_deviation_rad)));
                         const high = finite.filter(group => group.is_mid_fringe);
