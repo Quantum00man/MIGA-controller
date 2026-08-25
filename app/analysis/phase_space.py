@@ -20,6 +20,14 @@ def nearest_cosine_phase(normalized_value: float, predicted_phase: float) -> flo
     return float(min(candidates, key=lambda value: abs(value - predicted_phase)))
 
 
+def _optional_finite_float(value: Any) -> float | None:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    return numeric if math.isfinite(numeric) else None
+
+
 def _phase_statistics(points: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
     values = np.asarray(
         [float(point["phase_deviation_rad"]) for point in points],
@@ -32,6 +40,80 @@ def _phase_statistics(points: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
         "mean_rad": float(np.mean(values)),
         "rms_rad": float(np.sqrt(np.mean(values ** 2))),
         "std_rad": float(np.std(values, ddof=1)) if len(values) > 1 else 0.0,
+    }
+
+
+def _phase_noise_groups(
+    converted: List[Dict[str, Any]],
+    *,
+    amplitude: float,
+) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    grouped: Dict[str, List[Dict[str, Any]]] = {}
+    for point in converted:
+        group_key = point["key"] or f"p0:{point['p0']:.12g}"
+        grouped.setdefault(group_key, []).append(point)
+
+    noise_groups: List[Dict[str, Any]] = []
+    pooled_numerator = 0.0
+    pooled_degrees = 0
+    for group_key, group_points in grouped.items():
+        valid = [point for point in group_points if not point["is_clipped"]]
+        first = group_points[0]
+        deviations = np.asarray([point["phase_deviation_rad"] for point in valid], dtype=float)
+        method = "shots"
+        phase_std = None
+        centered_rms = None
+        mean_deviation = None
+        rms_deviation = None
+        sample_count = len(valid)
+        if len(deviations):
+            mean_deviation = float(np.mean(deviations))
+            rms_deviation = float(np.sqrt(np.mean(deviations ** 2)))
+        if len(deviations) > 1:
+            phase_std = float(np.std(deviations, ddof=1))
+            centered_rms = float(np.sqrt(np.mean((deviations - np.mean(deviations)) ** 2)))
+            if first["is_mid_fringe"]:
+                pooled_numerator += (len(deviations) - 1) * phase_std ** 2
+                pooled_degrees += len(deviations) - 1
+        elif group_points and group_points[0].get("signal_std") is not None:
+            method = "propagated"
+            signal_std = float(group_points[0]["signal_std"])
+            derivative = amplitude * abs(math.sin(float(first["measured_phase_rad"])))
+            phase_std = signal_std / derivative if derivative > np.finfo(float).eps else None
+            centered_rms = phase_std
+            sample_count = int(group_points[0].get("sample_count") or 0)
+
+        noise_groups.append({
+            "key": group_key,
+            "p0": float(first["p0"]),
+            "predicted_phase_rad": float(first["predicted_phase_rad"]),
+            "sensitivity": float(first["sensitivity"]),
+            "is_mid_fringe": bool(first["is_mid_fringe"]),
+            "method": method,
+            "sample_count": sample_count,
+            "clipped_count": len(group_points) - len(valid),
+            "phase_mean_deviation_rad": mean_deviation,
+            "phase_rms_deviation_rad": rms_deviation,
+            "phase_std_rad": phase_std,
+            "phase_centered_rms_rad": centered_rms,
+            "signal_std": first.get("signal_std"),
+        })
+
+    noise_groups.sort(key=lambda group: (group["p0"], group["key"]))
+    finite_mid_noise = [
+        float(group["phase_std_rad"])
+        for group in noise_groups
+        if group["is_mid_fringe"] and group["phase_std_rad"] is not None
+    ]
+    return noise_groups, {
+        "group_count": len(noise_groups),
+        "mid_fringe_group_count": len(finite_mid_noise),
+        "pooled_std_rad": math.sqrt(pooled_numerator / pooled_degrees) if pooled_degrees else None,
+        "mean_group_std_rad": float(np.mean(finite_mid_noise)) if finite_mid_noise else None,
+        "median_group_std_rad": float(np.median(finite_mid_noise)) if finite_mid_noise else None,
+        "total_valid_shots": sum(
+            int(group["sample_count"]) for group in noise_groups if group["is_mid_fringe"]
+        ),
     }
 
 
@@ -126,11 +208,16 @@ def convert_bragg_points_to_phase_space(
             "is_mid_fringe": bool(is_mid_fringe),
             "is_clipped": bool(clipped),
             "is_high_quality": is_high_quality,
+            "signal_std": _optional_finite_float(raw_point.get("value_std")),
+            "sample_count": raw_point.get("sample_count"),
         })
 
     high_quality = [point for point in converted if point["is_high_quality"]]
+    noise_groups, noise_statistics = _phase_noise_groups(converted, amplitude=amplitude)
     return {
         "points": converted,
+        "noise_groups": noise_groups,
+        "noise_statistics": noise_statistics,
         "statistics": {
             "all": _phase_statistics(converted),
             "mid_fringe": _phase_statistics(high_quality),

@@ -117,6 +117,48 @@ class BraggPhaseSpaceTests(unittest.TestCase):
             self.assertAlmostEqual(point["phase_deviation_rad"], expected, places=10)
             self.assertTrue(point["is_mid_fringe"])
 
+    def test_shot_phase_noise_is_grouped_sample_standard_deviation(self):
+        reference_phase = math.pi / 2
+        deviations = [-0.1, 0.0, 0.1]
+        result = convert_bragg_points_to_phase_space(
+            [
+                {
+                    "p0": 7,
+                    "key": "scan-7",
+                    "shot": index,
+                    "value": 0.5 + 0.4 * math.cos(reference_phase + deviation),
+                }
+                for index, deviation in enumerate(deviations)
+            ],
+            amplitude=0.4,
+            offset=0.5,
+            angular_frequency_rad_per_us2=1.0,
+            phase_offset_rad=0.0,
+            phase_reference_mode="fixed_mid_fringe",
+            reference_phase_rad=reference_phase,
+        )
+        noise = result["noise_groups"][0]
+        self.assertEqual(noise["method"], "shots")
+        self.assertEqual(noise["sample_count"], 3)
+        self.assertAlmostEqual(noise["phase_std_rad"], 0.1, places=10)
+        self.assertAlmostEqual(noise["phase_centered_rms_rad"], math.sqrt(0.02 / 3), places=10)
+        self.assertAlmostEqual(result["noise_statistics"]["pooled_std_rad"], 0.1, places=10)
+
+    def test_mean_signal_deviation_propagates_to_phase_noise(self):
+        result = convert_bragg_points_to_phase_space(
+            [{"p0": 1, "value": 0.5, "value_std": 0.0394, "sample_count": 20}],
+            amplitude=0.1,
+            offset=0.5,
+            angular_frequency_rad_per_us2=1.0,
+            phase_offset_rad=0.0,
+            phase_reference_mode="fixed_mid_fringe",
+            reference_phase_rad=math.pi / 2,
+        )
+        noise = result["noise_groups"][0]
+        self.assertEqual(noise["method"], "propagated")
+        self.assertEqual(noise["sample_count"], 20)
+        self.assertAlmostEqual(noise["phase_std_rad"], 0.394, places=10)
+
     def test_saved_calibration_round_trip(self):
         fit_result = {
             "fit_min": 1.0,

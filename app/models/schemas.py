@@ -625,6 +625,8 @@ class BraggPhaseInputPoint(BaseModel):
     value: float
     shot: Optional[int] = Field(None)
     key: str = Field("")
+    value_std: Optional[float] = Field(None, ge=0)
+    sample_count: Optional[int] = Field(None, ge=0)
 
 
 class ArchiveBraggPhaseRequest(BaseModel):

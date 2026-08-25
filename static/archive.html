@@ -1624,10 +1624,18 @@
                         </div>
                         <div class="row g-2 align-items-end mb-3">
                             <div class="col-6 col-lg-3">
-                                <label class="form-label-small">POINTS</label>
+                                <label class="form-label-small">DATA SOURCE</label>
                                 <select class="form-select form-select-sm" v-model="braggPhase.mode" @change="refreshBraggPhaseSpace">
-                                    <option value="mean">Mean points</option>
-                                    <option value="shots">Individual shots</option>
+                                    <option value="shots">Individual shots (recommended)</option>
+                                    <option value="mean">Mean + deviation fallback</option>
+                                </select>
+                            </div>
+                            <div class="col-6 col-lg-3">
+                                <label class="form-label-small">PHASE QUANTITY</label>
+                                <select class="form-select form-select-sm" v-model="braggPhase.quantity" @change="renderBraggPhasePlot">
+                                    <option value="jitter">Phase jitter (STD)</option>
+                                    <option value="distribution">Shot phase distribution</option>
+                                    <option value="mean">Mean phase deviation</option>
                                 </select>
                             </div>
                             <div class="col-3 col-lg-2">
@@ -1650,7 +1658,7 @@
                                     <option value="rad">rad</option>
                                 </select>
                             </div>
-                            <div class="col-8 col-lg-3">
+                            <div class="col-8 col-lg-2">
                                 <label class="form-label-small">MID-FRINGE WINDOW · {{ braggPhase.midFringePercent }}% A</label>
                                 <input type="range" class="form-range" min="5" max="100" step="5"
                                     v-model.number="braggPhase.midFringePercent" @change="handleBraggPhaseWindowChange">
@@ -1667,16 +1675,21 @@
                             The two matching C ± {{ braggPhase.midFringePercent }}% A levels are also drawn on the fringe plot; other points remain visible with lower opacity.
                         </div>
                         <div v-if="braggPhase.error" class="alert alert-warning small py-2">{{ braggPhase.error }}</div>
+                        <div v-if="braggPhase.resolvedMode === 'mean' && braggPhase.mode === 'shots'" class="alert alert-info small py-2">
+                            Individual-shot values are unavailable; phase noise is estimated from signal deviation by local error propagation.
+                        </div>
                         <div v-if="braggPhase.result" class="scan-fit-param-grid mb-2">
-                            <div class="scan-fit-param-row"><span>Selected points</span><strong>{{ braggPhase.result.statistics?.mid_fringe?.count || 0 }}</strong></div>
-                            <div class="scan-fit-param-row"><span>Mean deviation</span><strong>{{ formatBraggPhaseStat(braggPhase.result.statistics?.mid_fringe?.mean_rad) }}</strong></div>
-                            <div class="scan-fit-param-row"><span>RMS deviation</span><strong>{{ formatBraggPhaseStat(braggPhase.result.statistics?.mid_fringe?.rms_rad) }}</strong></div>
-                            <div class="scan-fit-param-row"><span>STD deviation</span><strong>{{ formatBraggPhaseStat(braggPhase.result.statistics?.mid_fringe?.std_rad) }}</strong></div>
+                            <div class="scan-fit-param-row"><span>Mid-fringe groups</span><strong>{{ braggPhase.result.noise_statistics?.mid_fringe_group_count || 0 }}</strong></div>
+                            <div class="scan-fit-param-row"><span>Pooled phase jitter</span><strong>{{ formatBraggPhaseStat(braggPhase.result.noise_statistics?.pooled_std_rad) }}</strong></div>
+                            <div class="scan-fit-param-row"><span>Mean group jitter</span><strong>{{ formatBraggPhaseStat(braggPhase.result.noise_statistics?.mean_group_std_rad) }}</strong></div>
+                            <div class="scan-fit-param-row"><span>Median group jitter</span><strong>{{ formatBraggPhaseStat(braggPhase.result.noise_statistics?.median_group_std_rad) }}</strong></div>
+                            <div class="scan-fit-param-row"><span>Valid shots</span><strong>{{ braggPhase.result.noise_statistics?.total_valid_shots || 0 }}</strong></div>
                             <div class="scan-fit-param-row"><span>Applied A</span><strong>{{ formatMetricValue(braggPhase.result.applied_amplitude) }}</strong></div>
                             <div class="scan-fit-param-row"><span>Applied C</span><strong>{{ formatMetricValue(braggPhase.result.applied_offset) }}</strong></div>
                             <div v-if="braggPhase.applicationMode === 'reference'" class="scan-fit-param-row"><span>C correction</span><strong>{{ formatMetricValue(braggPhase.result.offset_correction) }}</strong></div>
                         </div>
                         <div id="braggPhasePlot" style="height:430px; min-height:320px;"></div>
+                        <div v-show="braggPhase.quantity === 'distribution'" id="braggPhaseHistogram" style="height:320px; min-height:260px;"></div>
                         <div class="small text-muted mt-2">
                             <span v-if="braggPhase.tSource === 'p0_t2'">The cosine inverse is branch-resolved against φ<sub>fit</sub> = ωP0 + φ₀.</span>
                             <span v-else>The cosine inverse is branch-resolved against the selected fixed φ<sub>ref</sub>.</span>
@@ -2127,7 +2140,7 @@
                     },
                     isScanFitLoading: false, isSavingScanFitModel: false, scanFitError: '', scanFitResult: null, scanFitSaveMsg: '',
                     braggPhase: {
-                        mode: 'mean', xUnit: 'cycles', yUnit: 'mrad', midFringePercent: 50,
+                        mode: 'shots', resolvedMode: 'shots', quantity: 'jitter', xUnit: 'cycles', yUnit: 'mrad', midFringePercent: 50,
                         result: null, loading: false, error: '', calibrations: [], selectedCalibrationId: 'current',
                         applicationMode: 'full', manualA: '', manualC: '', referenceCount: 5,
                         tSource: 'p0_t2', referenceMidP0: '',
@@ -2976,6 +2989,8 @@
                         .map(row => ({
                             x: Number(row.x ?? row.params?.[0] ?? 0),
                             y: Number(row[field]),
+                            std: Number(row[`${field}_std`]),
+                            count: Number(row.count ?? this.historyMap?.[row.key]?.count ?? 0),
                             key: row.key
                         }))
                         .filter(point => Number.isFinite(point.x) && Number.isFinite(point.y))
@@ -3211,16 +3226,20 @@
                         default: return `atom_number_${channel}${noFit}`;
                     }
                 },
-                getBraggPhaseInputPoints() {
+                getBraggPhaseInputPoints(mode = this.braggPhase.mode) {
                     const calibration = this.getActiveBraggCalibration();
                     if (!calibration) return [];
                     const useCalibrationRange = this.braggPhase.tSource === 'p0_t2';
                     const min = useCalibrationRange ? Number(calibration.fit_min) : -Infinity;
                     const max = useCalibrationRange ? Number(calibration.fit_max) : Infinity;
-                    if (this.braggPhase.mode === 'mean') {
+                    if (mode === 'mean') {
                         return this.getScanFitSeries().points
                             .filter(point => point.x >= min && point.x <= max)
-                            .map(point => ({ p0: point.x, value: point.y, key: String(point.key || '') }));
+                            .map(point => ({
+                                p0: point.x, value: point.y, key: String(point.key || ''),
+                                value_std: Number.isFinite(point.std) ? point.std : null,
+                                sample_count: Number.isFinite(point.count) ? point.count : null
+                            }));
                     }
                     const field = this.getBraggPhaseShotField();
                     return (this.currentCalculatedPoints || []).map((point, index) => {
@@ -3239,12 +3258,16 @@
                         this.braggPhase.result = null;
                         return;
                     }
-                    const points = this.getBraggPhaseInputPoints();
+                    let resolvedMode = this.braggPhase.mode;
+                    let points = this.getBraggPhaseInputPoints(resolvedMode);
+                    if (!points.length && resolvedMode === 'shots') {
+                        resolvedMode = 'mean';
+                        points = this.getBraggPhaseInputPoints('mean');
+                    }
+                    this.braggPhase.resolvedMode = resolvedMode;
                     if (!points.length) {
                         this.braggPhase.result = null;
-                        this.braggPhase.error = this.braggPhase.mode === 'shots'
-                            ? 'No individual-shot values are available for this metric and source.'
-                            : 'No fitted mean points are available in the selected range.';
+                        this.braggPhase.error = 'No phase-analysis values are available for this metric and source.';
                         await this.$nextTick();
                         this.renderBraggPhasePlot();
                         return;
@@ -3295,35 +3318,84 @@
                     const plot = document.getElementById('braggPhasePlot');
                     if (!plot) return;
                     const points = Array.isArray(this.braggPhase.result?.points) ? this.braggPhase.result.points : [];
+                    const groups = Array.isArray(this.braggPhase.result?.noise_groups) ? this.braggPhase.result.noise_groups : [];
                     const fixedT = this.braggPhase.tSource === 'fixed_mid_fringe';
                     const xScale = this.braggPhase.xUnit === 'cycles' ? 1 / (2 * Math.PI) : 1;
                     const yScale = this.braggPhase.yUnit === 'mrad' ? 1000 : 1;
-                    const makeTrace = (selected, highQuality) => ({
-                        x: selected.map(point => {
-                            if (!fixedT) return Number(point.predicted_phase_rad) * xScale;
-                            if (this.braggPhase.xUnit === 'shot') {
-                                return point.shot == null ? Number(point.index) + 1 : Number(point.shot);
-                            }
-                            return Number(point.p0);
-                        }),
-                        y: selected.map(point => Number(point.phase_deviation_rad) * yScale),
-                        customdata: selected.map(point => [
-                            point.p0, point.value, point.shot, point.sensitivity,
-                            point.measured_phase_rad, point.is_clipped ? 'yes' : 'no'
-                        ]),
-                        type: 'scatter',
-                        mode: 'markers',
-                        name: highQuality ? 'Mid-fringe selected' : 'Low sensitivity / clipped',
-                        marker: highQuality
-                            ? { color: '#6f42c1', size: this.braggPhase.mode === 'shots' ? 7 : 10, opacity: 0.9 }
-                            : { color: '#8c98a4', size: this.braggPhase.mode === 'shots' ? 6 : 8, opacity: 0.22 },
-                        hovertemplate: `x=%{x:.6g}<br>Δφ=%{y:.6g} ${this.braggPhase.yUnit}<br>target P0=%{customdata[0]:.8g}<br>value=%{customdata[1]:.6g}<br>shot=%{customdata[2]}<br>sensitivity=%{customdata[3]:.4f}<br>φmeas=%{customdata[4]:.6g} rad<br>clipped=%{customdata[5]}<extra>%{fullData.name}</extra>`
-                    });
-                    const high = points.filter(point => point.is_high_quality);
-                    const low = points.filter(point => !point.is_high_quality);
+                    const phaseX = item => fixedT
+                        ? Number(item.p0)
+                        : Number(item.predicted_phase_rad) * xScale;
+                    const phaseXTitle = fixedT
+                        ? 'Target P0 / scan index'
+                        : (this.braggPhase.xUnit === 'cycles' ? 'Fitted phase φfit (cycles)' : 'Fitted phase φfit (rad)');
                     const traces = [];
-                    if (low.length) traces.push(makeTrace(low, false));
-                    if (high.length) traces.push(makeTrace(high, true));
+                    let yTitle = `Phase jitter σφ (${this.braggPhase.yUnit})`;
+
+                    if (this.braggPhase.quantity === 'jitter') {
+                        const makeNoiseTrace = (selected, highQuality) => ({
+                            x: selected.map(phaseX),
+                            y: selected.map(group => Number(group.phase_std_rad) * yScale),
+                            customdata: selected.map(group => [
+                                group.p0, group.sample_count, group.method, group.sensitivity,
+                                Number(group.phase_mean_deviation_rad) * yScale, group.signal_std
+                            ]),
+                            type: 'scatter', mode: 'markers',
+                            name: highQuality ? 'Mid-fringe phase jitter' : 'Low-sensitivity jitter',
+                            marker: {
+                                color: highQuality ? '#6f42c1' : '#8c98a4',
+                                size: highQuality ? 10 : 7,
+                                opacity: highQuality ? 0.9 : 0.22,
+                                symbol: selected.map(group => group.method === 'propagated' ? 'diamond-open' : 'circle')
+                            },
+                            hovertemplate: `x=%{x:.6g}<br>phase STD=%{y:.6g} ${this.braggPhase.yUnit}<br>target P0=%{customdata[0]:.8g}<br>N=%{customdata[1]}<br>method=%{customdata[2]}<br>sensitivity=%{customdata[3]:.4f}<br>mean Δφ=%{customdata[4]:.6g} ${this.braggPhase.yUnit}<br>signal STD=%{customdata[5]:.6g}<extra>%{fullData.name}</extra>`
+                        });
+                        const finite = groups.filter(group => Number.isFinite(Number(group.phase_std_rad)));
+                        const high = finite.filter(group => group.is_mid_fringe);
+                        const low = finite.filter(group => !group.is_mid_fringe);
+                        if (low.length) traces.push(makeNoiseTrace(low, false));
+                        if (high.length) traces.push(makeNoiseTrace(high, true));
+                    } else if (this.braggPhase.quantity === 'mean') {
+                        yTitle = `Mean phase deviation Δφ (${this.braggPhase.yUnit})`;
+                        const makeMeanTrace = (selected, highQuality) => ({
+                            x: selected.map(phaseX),
+                            y: selected.map(group => Number(group.phase_mean_deviation_rad) * yScale),
+                            customdata: selected.map(group => [group.p0, group.sample_count, group.method, group.sensitivity]),
+                            error_y: {
+                                type: 'data', visible: true,
+                                array: selected.map(group => Number(group.phase_std_rad) * yScale),
+                                color: highQuality ? '#6f42c1' : '#8c98a4'
+                            },
+                            type: 'scatter', mode: 'markers',
+                            name: highQuality ? 'Mid-fringe mean ± jitter' : 'Low-sensitivity mean',
+                            marker: { color: highQuality ? '#6f42c1' : '#8c98a4', size: highQuality ? 9 : 7, opacity: highQuality ? 0.9 : 0.22 },
+                            hovertemplate: `x=%{x:.6g}<br>mean Δφ=%{y:.6g} ${this.braggPhase.yUnit}<br>target P0=%{customdata[0]:.8g}<br>N=%{customdata[1]}<br>method=%{customdata[2]}<br>sensitivity=%{customdata[3]:.4f}<extra>%{fullData.name}</extra>`
+                        });
+                        const finite = groups.filter(group => Number.isFinite(Number(group.phase_mean_deviation_rad)));
+                        const high = finite.filter(group => group.is_mid_fringe);
+                        const low = finite.filter(group => !group.is_mid_fringe);
+                        if (low.length) traces.push(makeMeanTrace(low, false));
+                        if (high.length) traces.push(makeMeanTrace(high, true));
+                    } else {
+                        yTitle = `Shot phase deviation Δφ (${this.braggPhase.yUnit})`;
+                        const pointX = point => {
+                            if (!fixedT) return phaseX(point);
+                            if (this.braggPhase.xUnit === 'shot') return point.shot == null ? Number(point.index) + 1 : Number(point.shot);
+                            return Number(point.p0);
+                        };
+                        const makeShotTrace = (selected, highQuality) => ({
+                            x: selected.map(pointX),
+                            y: selected.map(point => Number(point.phase_deviation_rad) * yScale),
+                            customdata: selected.map(point => [point.p0, point.value, point.shot, point.sensitivity, point.is_clipped ? 'yes' : 'no']),
+                            type: 'scatter', mode: 'markers',
+                            name: highQuality ? 'Mid-fringe shots' : 'Low sensitivity / clipped',
+                            marker: { color: highQuality ? '#6f42c1' : '#8c98a4', size: highQuality ? 7 : 6, opacity: highQuality ? 0.72 : 0.18 },
+                            hovertemplate: `x=%{x:.6g}<br>Δφ=%{y:.6g} ${this.braggPhase.yUnit}<br>target P0=%{customdata[0]:.8g}<br>value=%{customdata[1]:.6g}<br>shot=%{customdata[2]}<br>sensitivity=%{customdata[3]:.4f}<br>clipped=%{customdata[4]}<extra>%{fullData.name}</extra>`
+                        });
+                        const high = points.filter(point => point.is_high_quality);
+                        const low = points.filter(point => !point.is_high_quality);
+                        if (low.length) traces.push(makeShotTrace(low, false));
+                        if (high.length) traces.push(makeShotTrace(high, true));
+                    }
                     Plotly.react(plot, traces, {
                         font: { family: 'Segoe UI, Arial, sans-serif', size: 12 },
                         margin: { l: 72, r: 24, t: 25, b: 62 },
@@ -3332,17 +3404,41 @@
                         hovermode: 'closest',
                         legend: { orientation: 'h', x: 0, y: 1.14 },
                         xaxis: {
-                            title: fixedT
-                                ? (this.braggPhase.xUnit === 'shot' ? 'Shot index' : 'Target P0 / scan index')
-                                : (this.braggPhase.xUnit === 'cycles' ? 'Fitted phase φfit (cycles)' : 'Fitted phase φfit (rad)'),
+                            title: this.braggPhase.quantity === 'distribution' && fixedT && this.braggPhase.xUnit === 'shot'
+                                ? 'Shot index' : phaseXTitle,
                             showline: true, mirror: true, linecolor: '#333', gridcolor: '#dde5ee', zeroline: false
                         },
                         yaxis: {
-                            title: `Equivalent phase deviation Δφ (${this.braggPhase.yUnit})`,
+                            title: yTitle,
                             showline: true, mirror: true, linecolor: '#333', gridcolor: '#dde5ee', zeroline: true,
                             zerolinecolor: '#212529', zerolinewidth: 1.5
                         },
                         uirevision: `bragg-phase-${this.braggPhase.tSource}-${this.braggPhase.mode}-${this.braggPhase.xUnit}-${this.braggPhase.yUnit}`
+                    }, { responsive: true, displaylogo: false });
+                    this.renderBraggPhaseHistogram();
+                },
+                renderBraggPhaseHistogram() {
+                    const plot = document.getElementById('braggPhaseHistogram');
+                    if (!plot) return;
+                    const yScale = this.braggPhase.yUnit === 'mrad' ? 1000 : 1;
+                    const points = Array.isArray(this.braggPhase.result?.points)
+                        ? this.braggPhase.result.points.filter(point => point.is_high_quality)
+                        : [];
+                    const hasShots = this.braggPhase.resolvedMode === 'shots' && points.length > 1;
+                    const traces = hasShots ? [{
+                        x: points.map(point => Number(point.phase_deviation_rad) * yScale),
+                        type: 'histogram', histnorm: 'probability density',
+                        name: 'Mid-fringe shot distribution', marker: { color: '#6f42c1', opacity: 0.78 },
+                        hovertemplate: `Δφ=%{x:.6g} ${this.braggPhase.yUnit}<br>density=%{y:.6g}<extra></extra>`
+                    }] : [];
+                    Plotly.react(plot, traces, {
+                        font: { family: 'Segoe UI, Arial, sans-serif', size: 12 },
+                        margin: { l: 72, r: 24, t: 35, b: 60 },
+                        paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
+                        title: { text: hasShots ? 'Mid-fringe shot phase distribution' : 'Individual shots required for histogram', font: { size: 14 } },
+                        xaxis: { title: `Phase deviation Δφ (${this.braggPhase.yUnit})`, gridcolor: '#dde5ee', zeroline: true },
+                        yaxis: { title: 'Probability density', gridcolor: '#dde5ee' },
+                        bargap: 0.06, showlegend: false
                     }, { responsive: true, displaylogo: false });
                 },
                 buildBraggMidFringeTraces(result, color) {
@@ -4254,6 +4350,7 @@
                         this.resizePlot('resultsPlotTotal');
                     }
                     this.resizePlot('braggPhasePlot');
+                    this.resizePlot('braggPhaseHistogram');
                 },
                 async refreshAnalysisView() {
                     await this.$nextTick();
