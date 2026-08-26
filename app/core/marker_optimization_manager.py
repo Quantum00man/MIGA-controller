@@ -925,6 +925,7 @@ class MarkerOptimizationManager:
             )
             run_config["randomize"] = any(bool(step.get("randomize")) for step in steps)
             run_config["_system_settings_snapshot"] = copy.deepcopy(self.experiment_manager.settings)
+            run_config["_interferometer_phase_calibration_snapshot"] = self.experiment_manager.get_active_bragg_phase_calibration()
             data_manager.init_run(run_config)
             run_dir = data_manager.current_run_dir
             working_path = run_dir / "working_sequence.mot"

@@ -20,7 +20,7 @@ import config
 from app.drivers.hardware import SequenceEditor, ExperimentDriver, RedPitayaDriver
 from app.drivers import dds_table
 from app.drivers.vcd_parser import VCDParser
-from app.analysis import fitting, physics
+from app.analysis import fitting, physics, interferometer_phase
 from app.analysis.lock_in import build_lock_in_analysis
 from app.models.schemas import ScanConfig
 from app.core.data_manager import DataManager
@@ -67,6 +67,7 @@ class ExperimentManager:
         self._activity_lock = threading.Lock()
         self._active_mode: Optional[str] = None
         self._scan_finalize_error: Optional[str] = None
+        self._active_phase_calibration_for_run: Optional[Dict[str, Any]] = None
 
     def _default_tmot_args(self) -> str:
         return config.TMOT_EXTRA_ARGS_WIN if config.IS_WINDOWS else config.TMOT_EXTRA_ARGS_LINUX
@@ -730,25 +731,63 @@ class ExperimentManager:
             raise ValueError('Bragg phase calibration range must be numeric') from exc
         if fit_min > fit_max:
             fit_min, fit_max = fit_max, fit_min
+        source_metadata = dict(source.get('source') or {})
+        metric_tab = str(source.get('metric_tab') or source_metadata.get('metric_tab') or 'intf').strip().lower()
+        channel = 'dw' if str(source.get('channel') or source_metadata.get('channel') or 'up').strip().lower() == 'dw' else 'up'
+        source_key = str(source.get('source_key') or source_metadata.get('source_key') or 'intf_p').strip()
+        source_mode = str(source.get('source_mode') or source_metadata.get('source_mode') or '').strip().lower()
+        if source_mode not in {'fit', 'raw'}:
+            source_mode = 'raw' if source_key.startswith('nf_') or 'nofit' in source_key.lower() else 'fit'
+        mid_fringe_x = []
+        for value in bragg.get('mid_fringe_x') or []:
+            try:
+                numeric_mid = float(value)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(numeric_mid) and numeric_mid >= 0:
+                mid_fringe_x.append(numeric_mid)
+        default_reference = min(mid_fringe_x, key=lambda value: abs(value - (fit_min + fit_max) / 2.0)) if mid_fringe_x else max(0.0, (fit_min + fit_max) / 2.0)
+        reference_t2 = source.get('reference_t2_us2')
+        try:
+            reference_t2 = float(reference_t2) if reference_t2 is not None else float(default_reference)
+        except (TypeError, ValueError):
+            reference_t2 = float(default_reference)
+        if not math.isfinite(reference_t2) or reference_t2 < 0:
+            reference_t2 = float(default_reference)
+        try:
+            reference_value = float(source.get('reference_value'))
+        except (TypeError, ValueError):
+            reference_value = reference_t2
+        if not math.isfinite(reference_value) or reference_value < 0:
+            reference_value = reference_t2
         return {
             'id': str(source.get('id') or f"bragg_{time.time_ns()}"),
             'name': str(source.get('name') or '').strip(),
             'created_at': str(source.get('created_at') or time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())),
             'model_key': 'bragg_fringes',
             'model_label': 'Bragg Fringes',
-            'source': dict(source.get('source') or {}),
-            'metric_tab': str(source.get('metric_tab') or ''),
+            'source': source_metadata,
+            'metric_tab': metric_tab,
             'metric_label': str(source.get('metric_label') or ''),
-            'source_key': str(source.get('source_key') or ''),
+            'source_key': source_key,
             'source_label': str(source.get('source_label') or ''),
-            'channel': 'dw' if source.get('channel') == 'dw' else 'up',
+            'source_mode': source_mode,
+            'source_field': interferometer_phase.source_field({
+                'metric_tab': metric_tab, 'channel': channel,
+                'source_key': source_key, 'source_mode': source_mode,
+            }),
+            'channel': channel,
             'channel_label': str(source.get('channel_label') or ''),
             'fit_min': fit_min,
             'fit_max': fit_max,
             'fit_x': fit_x,
             'fit_y': fit_y,
             'parameter_values': {**parameters, **{key: numeric[key] for key in ('A', 'C', 'phi0')}},
-            'bragg': {**bragg, 'angular_frequency_rad_per_us2': numeric['omega']},
+            'bragg': {**bragg, 'angular_frequency_rad_per_us2': numeric['omega'], 'mid_fringe_x': mid_fringe_x},
+            'reference_input_mode': 't' if str(source.get('reference_input_mode') or '').lower() == 't' else 't2',
+            'reference_t_unit': 'ms' if str(source.get('reference_t_unit') or '').lower() == 'ms' else 'us',
+            'reference_value': reference_value,
+            'reference_t2_us2': reference_t2,
         }
 
     def get_bragg_phase_calibrations(self) -> List[Dict[str, Any]]:
@@ -777,6 +816,42 @@ class ExperimentManager:
         calibrations = self.get_bragg_phase_calibrations()
         calibrations.append(calibration)
         payload['bragg_phase_calibrations'] = calibrations
+        if not str(payload.get('active_bragg_phase_calibration_id') or '').strip():
+            payload['active_bragg_phase_calibration_id'] = calibration['id']
+        self._save_user_json_payload(payload)
+        return calibration
+
+    def get_active_bragg_phase_calibration(self) -> Optional[Dict[str, Any]]:
+        payload = self._load_user_json_payload()
+        target = str(payload.get('active_bragg_phase_calibration_id') or '').strip()
+        calibrations = self.get_bragg_phase_calibrations()
+        if target:
+            selected = next((item for item in calibrations if item.get('id') == target), None)
+            if selected is not None:
+                return selected
+        return calibrations[0] if calibrations else None
+
+    def update_bragg_phase_calibration(self, calibration_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
+        target = str(calibration_id or '').strip()
+        payload = self._load_user_json_payload()
+        calibrations = self.get_bragg_phase_calibrations()
+        for index, calibration in enumerate(calibrations):
+            if calibration.get('id') != target:
+                continue
+            merged = {**calibration, **dict(updates or {}), 'id': target}
+            calibrations[index] = self._normalize_bragg_phase_calibration(merged)
+            payload['bragg_phase_calibrations'] = calibrations
+            self._save_user_json_payload(payload)
+            return calibrations[index]
+        raise ValueError('Interferometer phase calibration not found')
+
+    def set_active_bragg_phase_calibration(self, calibration_id: str) -> Optional[Dict[str, Any]]:
+        target = str(calibration_id or '').strip()
+        calibration = next((item for item in self.get_bragg_phase_calibrations() if item.get('id') == target), None)
+        if target and calibration is None:
+            raise ValueError('Interferometer phase calibration not found')
+        payload = self._load_user_json_payload()
+        payload['active_bragg_phase_calibration_id'] = target
         self._save_user_json_payload(payload)
         return calibration
 
@@ -788,6 +863,8 @@ class ExperimentManager:
         if len(kept) == len(calibrations):
             return False
         payload['bragg_phase_calibrations'] = kept
+        if str(payload.get('active_bragg_phase_calibration_id') or '') == target:
+            payload['active_bragg_phase_calibration_id'] = kept[0]['id'] if kept else ''
         self._save_user_json_payload(payload)
         return True
 
@@ -1223,7 +1300,9 @@ class ExperimentManager:
         self.status = ExperimentStatus(is_running=True, total_steps=len(parameters), message='Starting...')
 
         try:
+            self._active_phase_calibration_for_run = self.get_active_bragg_phase_calibration()
             scan_config['_system_settings_snapshot'] = self.settings
+            scan_config['_interferometer_phase_calibration_snapshot'] = self._active_phase_calibration_for_run
             self.data_manager.init_run(scan_config)
             if ac_stark_context:
                 archived = self.data_manager.archive_ac_stark_plan(
@@ -2069,6 +2148,19 @@ class ExperimentManager:
                 settings.get('intf_gamma', 0.25),
             )
 
+            phase_input = {
+                'atom_number_up': n_f2, 'atom_number_dw': n_f1,
+                'atom_number_up_nofit': n_f2_nf, 'atom_number_dw_nofit': n_f1_nf,
+                'transition_probability_up': prob_up, 'transition_probability_dw': prob_dw,
+                'transition_probability_up_nofit': prob_up_nf, 'transition_probability_dw_nofit': prob_dw_nf,
+                'intf_p1': i_p1, 'intf_p2': i_p2,
+                'intf_p1_nofit': i_p1_nf, 'intf_p2_nofit': i_p2_nf,
+            }
+            phase_manager = data_manager or self.data_manager
+            phase_result = interferometer_phase.calculate_phase(
+                phase_input, getattr(phase_manager, 'phase_calibration_snapshot', None)
+            )
+
             manager_for_save = data_manager or self.data_manager
             volt_up_store = volt_up[::storage_step]
             volt_dw_store = volt_dw[::storage_step]
@@ -2145,6 +2237,12 @@ class ExperimentManager:
                 intf_n2_nofit=i_n2_nf,
                 intf_p1_nofit=i_p1_nf,
                 intf_p2_nofit=i_p2_nf,
+                interferometer_phase=phase_result['interferometer_phase'],
+                interferometer_phase_valid=phase_result['interferometer_phase_valid'],
+                interferometer_phase_source_value=phase_result['interferometer_phase_source_value'],
+                interferometer_phase_calibration_id=phase_result['interferometer_phase_calibration_id'],
+                interferometer_phase_calibration_name=phase_result['interferometer_phase_calibration_name'],
+                interferometer_phase_reference_t2_us2=phase_result['interferometer_phase_reference_t2_us2'],
             )
             if manager_for_save is not None:
                 manager_for_save.save_point(result, save_step_index or (idx + 1))

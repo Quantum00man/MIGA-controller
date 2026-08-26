@@ -101,3 +101,12 @@ class ScanResult:
     intf_n2_nofit: Optional[float] = None
     intf_p1_nofit: Optional[float] = None
     intf_p2_nofit: Optional[float] = None
+
+    # Single calibrated interferometer phase channel. Its source metric,
+    # channel and Fit/NoFit mode are stored in the calibration snapshot.
+    interferometer_phase: Optional[float] = None
+    interferometer_phase_valid: bool = False
+    interferometer_phase_source_value: Optional[float] = None
+    interferometer_phase_calibration_id: str = ""
+    interferometer_phase_calibration_name: str = ""
+    interferometer_phase_reference_t2_us2: Optional[float] = None

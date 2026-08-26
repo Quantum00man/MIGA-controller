@@ -1298,7 +1298,7 @@
                                     <input class="form-control" v-model.trim="braggPhase.calibrationName" placeholder="Calibration name">
                                     <button class="btn btn-outline-primary" @click="saveCurrentBraggCalibration"
                                         :disabled="braggPhase.saving || !braggPhase.calibrationName">
-                                        <span v-if="braggPhase.saving" class="spinner-border spinner-border-sm me-1"></span>Save calibration
+                                        <span v-if="braggPhase.saving" class="spinner-border spinner-border-sm me-1"></span>Save to Phase Settings
                                     </button>
                                 </div>
                                 <div v-if="braggPhase.calibrationMessage" class="small mt-1"
@@ -1479,6 +1479,7 @@
                                     <option value="master">Master</option>
                                     <option v-for="slaveId in syncArchiveSlaveOptions()" :key="slaveId" :value="slaveId">{{ syncArchiveNodeLabel(slaveId) }}</option>
                                 </select>
+                                <select v-if="(syncArchiveViewMode === 'node' && syncArchiveTab === 'phase') || (syncArchiveViewMode === 'differential' && (syncArchiveAxisX.metric === 'phase' || syncArchiveAxisY.metric === 'phase'))" class="form-select form-select-sm" style="width:auto" v-model="phaseUnit" aria-label="SYNC phase unit"><option value="rad">rad</option><option value="mrad">mrad</option></select>
                                 <div class="form-check form-switch mb-0">
                                     <input class="form-check-input" type="checkbox" id="syncArchiveShowRaw" v-model="showRawData">
                                     <label class="form-check-label small fw-bold text-muted" for="syncArchiveShowRaw">{{ syncArchiveViewMode === 'node' ? 'Show NoFit' : 'Use NoFit' }}</label>
@@ -1497,7 +1498,7 @@
                             <div class="col-lg-6 d-flex gap-2">
                                 <span class="badge bg-primary align-self-center">X Master</span>
                                 <select class="form-select form-select-sm" v-model="syncArchiveAxisX.metric" @change="resetSyncArchiveAxisRange"><option v-for="item in syncArchiveMetricOptions" :key="item.key" :value="item.key">{{ item.label }}</option></select>
-                                <select class="form-select form-select-sm" v-model="syncArchiveAxisX.channel" @change="resetSyncArchiveAxisRange"><option value="up">UP</option><option value="dw">DOWN</option></select>
+                                <select v-if="syncArchiveAxisX.metric !== 'phase'" class="form-select form-select-sm" v-model="syncArchiveAxisX.channel" @change="resetSyncArchiveAxisRange"><option value="up">UP</option><option value="dw">DOWN</option></select>
                             </div>
                             <div class="col-lg-6 d-flex gap-2">
                                 <span class="badge bg-secondary align-self-center">Y Slave</span>
@@ -1505,7 +1506,7 @@
                                     <option v-for="slaveId in syncArchiveSlaveOptions()" :key="slaveId" :value="slaveId">{{ syncArchiveNodeLabel(slaveId) }}</option>
                                 </select>
                                 <select class="form-select form-select-sm" v-model="syncArchiveAxisY.metric" @change="resetSyncArchiveAxisRange"><option v-for="item in syncArchiveMetricOptions" :key="item.key" :value="item.key">{{ item.label }}</option></select>
-                                <select class="form-select form-select-sm" v-model="syncArchiveAxisY.channel" @change="resetSyncArchiveAxisRange"><option value="up">UP</option><option value="dw">DOWN</option></select>
+                                <select v-if="syncArchiveAxisY.metric !== 'phase'" class="form-select form-select-sm" v-model="syncArchiveAxisY.channel" @change="resetSyncArchiveAxisRange"><option value="up">UP</option><option value="dw">DOWN</option></select>
                             </div>
                             <div class="col-12 d-flex flex-wrap align-items-center gap-2">
                                 <button class="btn btn-outline-secondary btn-sm" @click="toggleSyncArchiveReplay">{{ syncArchiveReplayPlaying ? 'Pause' : 'Play' }}</button>
@@ -1548,153 +1549,6 @@
                     </div>
                     <div v-else class="sync-archive-plot-wrap">
                         <div id="syncArchivePlot" class="sync-archive-square-plot"></div>
-                    </div>
-                </section>
-                <section v-if="hasBraggPhaseAnalysis()" class="card mb-4 border-0 shadow-sm">
-                    <div class="card-header bg-white d-flex flex-wrap justify-content-between align-items-center gap-2">
-                        <div>
-                            <div class="fw-bold text-primary"><i class="bi bi-bullseye me-2"></i>Bragg Phase Space</div>
-                            <div class="small text-muted">Equivalent phase from the active mean-fringe calibration</div>
-                        </div>
-                        <span class="badge bg-light text-dark border">{{ braggPhase.mode === 'shots' ? 'Individual shots' : 'Mean points' }}</span>
-                    </div>
-                    <div class="card-body">
-                        <div class="row g-2 align-items-end mb-3">
-                            <div class="col-lg-7">
-                                <label class="form-label-small">PHASE CALIBRATION</label>
-                                <select class="form-select form-select-sm" v-model="braggPhase.selectedCalibrationId" @change="handleBraggCalibrationChange">
-                                    <option value="current" :disabled="scanFitResult?.model_key !== 'bragg_fringes'">Current active fringe fit</option>
-                                    <option v-for="calibration in braggPhase.calibrations" :key="calibration.id" :value="calibration.id">
-                                        {{ calibration.name }} · {{ formatBraggCalibrationSource(calibration) }}
-                                    </option>
-                                </select>
-                            </div>
-                            <div class="col-lg-3">
-                                <label class="form-label-small">APPLICATION</label>
-                                <select class="form-select form-select-sm" v-model="braggPhase.applicationMode" @change="handleBraggCalibrationModeChange">
-                                    <option value="full">Full calibration</option>
-                                    <option value="manual">Manual A / C</option>
-                                    <option value="reference">Reference-corrected C</option>
-                                </select>
-                            </div>
-                            <div class="col-lg-2 d-grid">
-                                <button v-if="braggPhase.selectedCalibrationId !== 'current'" class="btn btn-outline-danger btn-sm"
-                                    @click="deleteSelectedBraggCalibration">Delete calibration</button>
-                            </div>
-                        </div>
-                        <div v-if="braggPhase.applicationMode === 'manual'" class="row g-2 mb-3 border rounded bg-light p-2">
-                            <div class="col-6">
-                                <label class="form-label-small">AMPLITUDE A</label>
-                                <input type="number" step="any" min="0" class="form-control form-control-sm" v-model.number="braggPhase.manualA">
-                            </div>
-                            <div class="col-6">
-                                <label class="form-label-small">OFFSET C</label>
-                                <input type="number" step="any" class="form-control form-control-sm" v-model.number="braggPhase.manualC">
-                            </div>
-                        </div>
-                        <div v-if="braggPhase.applicationMode === 'reference'" class="row g-2 mb-3 border rounded bg-light p-2 align-items-end">
-                            <div class="col-md-4">
-                                <label class="form-label-small">REFERENCE POINTS</label>
-                                <input type="number" min="1" step="1" class="form-control form-control-sm" v-model.number="braggPhase.referenceCount">
-                            </div>
-                            <div class="col-md-8 small text-muted">
-                                The first N displayed points are assumed to have zero phase deviation and are used only to correct C.
-                            </div>
-                        </div>
-                        <div class="row g-2 mb-3 border rounded bg-light p-2 align-items-end">
-                            <div class="col-md-4">
-                                <label class="form-label-small">T SOURCE</label>
-                                <select class="form-select form-select-sm" v-model="braggPhase.tSource" @change="handleBraggTSourceChange">
-                                    <option value="p0_t2">P0 contains T²</option>
-                                    <option value="fixed_mid_fringe">T fixed in .mot</option>
-                                </select>
-                            </div>
-                            <div v-if="braggPhase.tSource === 'fixed_mid_fringe'" class="col-md-8">
-                                <label class="form-label-small">REFERENCE MID FRINGE</label>
-                                <select class="form-select form-select-sm" v-model.number="braggPhase.referenceMidP0" @change="handleBraggReferenceMidChange">
-                                    <option v-for="option in getBraggMidFringeOptions()" :key="option.index" :value="option.p0">
-                                        #{{ option.index }} · T²={{ formatMetricValue(option.p0) }} (μs)² · {{ option.slopeLabel }}
-                                    </option>
-                                </select>
-                                <div class="form-text">You can also click a mid-fringe diamond on the reference curve. The selected point is highlighted in green.</div>
-                            </div>
-                        </div>
-                        <div v-if="getBraggCalibrationWarnings().length" class="alert alert-warning small py-2">
-                            <div v-for="warning in getBraggCalibrationWarnings()" :key="warning">{{ warning }}</div>
-                        </div>
-                        <div class="row g-2 align-items-end mb-3">
-                            <div class="col-6 col-lg-3">
-                                <label class="form-label-small">DATA SOURCE</label>
-                                <select class="form-select form-select-sm" v-model="braggPhase.mode" @change="refreshBraggPhaseSpace">
-                                    <option value="shots">Individual shots (recommended)</option>
-                                    <option value="mean">Mean + deviation fallback</option>
-                                </select>
-                            </div>
-                            <div class="col-6 col-lg-3">
-                                <label class="form-label-small">PHASE QUANTITY</label>
-                                <select class="form-select form-select-sm" v-model="braggPhase.quantity" @change="renderBraggPhasePlot">
-                                    <option value="jitter">Phase jitter (STD)</option>
-                                    <option value="distribution">Shot phase distribution</option>
-                                    <option value="mean">Mean phase deviation</option>
-                                </select>
-                            </div>
-                            <div class="col-3 col-lg-2">
-                                <label class="form-label-small">X UNIT</label>
-                                <select class="form-select form-select-sm" v-model="braggPhase.xUnit" @change="renderBraggPhasePlot">
-                                    <template v-if="braggPhase.tSource === 'p0_t2'">
-                                        <option value="cycles">Cycles</option>
-                                        <option value="rad">rad</option>
-                                    </template>
-                                    <template v-else>
-                                        <option value="target_p0">Target P0 / scan index</option>
-                                        <option value="shot">Shot index</option>
-                                    </template>
-                                </select>
-                            </div>
-                            <div class="col-3 col-lg-2">
-                                <label class="form-label-small">Y UNIT</label>
-                                <select class="form-select form-select-sm" v-model="braggPhase.yUnit" @change="renderBraggPhasePlot">
-                                    <option value="mrad">mrad</option>
-                                    <option value="rad">rad</option>
-                                </select>
-                            </div>
-                            <div class="col-8 col-lg-2">
-                                <label class="form-label-small">MID-FRINGE WINDOW · {{ braggPhase.midFringePercent }}% A</label>
-                                <input type="range" class="form-range" min="5" max="100" step="5"
-                                    v-model.number="braggPhase.midFringePercent" @change="handleBraggPhaseWindowChange">
-                            </div>
-                            <div class="col-4 col-lg-2 d-grid">
-                                <button class="btn btn-outline-primary btn-sm" @click="refreshBraggPhaseSpace" :disabled="braggPhase.loading">
-                                    <span v-if="braggPhase.loading" class="spinner-border spinner-border-sm me-1"></span>Refresh
-                                </button>
-                            </div>
-                        </div>
-                        <div class="small text-muted mb-2">
-                            <span v-if="braggPhase.tSource === 'p0_t2'">High-sensitivity points satisfy |cos(φ<sub>fit</sub>)| ≤ {{ (braggPhase.midFringePercent / 100).toFixed(2) }}.</span>
-                            <span v-else>All points use the selected fixed-T mid fringe as φ<sub>ref</sub>; target P0 is treated only as a scan coordinate.</span>
-                            The two matching C ± {{ braggPhase.midFringePercent }}% A levels are also drawn on the fringe plot; other points remain visible with lower opacity.
-                        </div>
-                        <div v-if="braggPhase.error" class="alert alert-warning small py-2">{{ braggPhase.error }}</div>
-                        <div v-if="braggPhase.resolvedMode === 'mean' && braggPhase.mode === 'shots'" class="alert alert-info small py-2">
-                            Individual-shot values are unavailable; phase noise is estimated from signal deviation by local error propagation.
-                        </div>
-                        <div v-if="braggPhase.result" class="scan-fit-param-grid mb-2">
-                            <div class="scan-fit-param-row"><span>Mid-fringe groups</span><strong>{{ braggPhase.result.noise_statistics?.mid_fringe_group_count || 0 }}</strong></div>
-                            <div class="scan-fit-param-row"><span>Pooled phase jitter</span><strong>{{ formatBraggPhaseStat(braggPhase.result.noise_statistics?.pooled_std_rad) }}</strong></div>
-                            <div class="scan-fit-param-row"><span>Mean group jitter</span><strong>{{ formatBraggPhaseStat(braggPhase.result.noise_statistics?.mean_group_std_rad) }}</strong></div>
-                            <div class="scan-fit-param-row"><span>Median group jitter</span><strong>{{ formatBraggPhaseStat(braggPhase.result.noise_statistics?.median_group_std_rad) }}</strong></div>
-                            <div class="scan-fit-param-row"><span>Valid shots</span><strong>{{ braggPhase.result.noise_statistics?.total_valid_shots || 0 }}</strong></div>
-                            <div class="scan-fit-param-row"><span>Applied A</span><strong>{{ formatMetricValue(braggPhase.result.applied_amplitude) }}</strong></div>
-                            <div class="scan-fit-param-row"><span>Applied C</span><strong>{{ formatMetricValue(braggPhase.result.applied_offset) }}</strong></div>
-                            <div v-if="braggPhase.applicationMode === 'reference'" class="scan-fit-param-row"><span>C correction</span><strong>{{ formatMetricValue(braggPhase.result.offset_correction) }}</strong></div>
-                        </div>
-                        <div id="braggPhasePlot" style="height:430px; min-height:320px;"></div>
-                        <div v-show="braggPhase.quantity === 'distribution'" id="braggPhaseHistogram" style="height:320px; min-height:260px;"></div>
-                        <div class="small text-muted mt-2">
-                            <span v-if="braggPhase.tSource === 'p0_t2'">The cosine inverse is branch-resolved against φ<sub>fit</sub> = ωP0 + φ₀.</span>
-                            <span v-else>The cosine inverse is branch-resolved against the selected fixed φ<sub>ref</sub>.</span>
-                            Points outside C ± A are clipped for display and excluded from selected statistics.
-                        </div>
                     </div>
                 </section>
                 <div class="card mb-4 border-0 shadow-sm" :class="{'maximized': maximizedView === 'analysis'}">
@@ -1770,6 +1624,9 @@
                                         :class="plotMode === 'allan' ? 'btn-dark' : 'btn-outline-dark'"
                                         @click="setPlotMode('allan')">Allan</button>
                                 </div>
+                                <select v-if="currentTab === 'phase'" class="form-select form-select-sm" style="width:auto" v-model="phaseUnit" aria-label="Phase unit">
+                                    <option value="rad">rad</option><option value="mrad">mrad</option>
+                                </select>
                             </div>
                         </div>
                         <div class="analysis-metric-nav-wrap">
@@ -1780,6 +1637,12 @@
                                         @click="currentTab = tab.id">{{ tab.label }}</button>
                                 </li>
                             </ul>
+                        </div>
+                        <div v-if="currentTab === 'phase' && loadedRunId" class="px-3 pb-2">
+                            <div class="alert alert-light border py-2 mb-0 small d-flex flex-wrap justify-content-between gap-2">
+                                <span><strong>Calibration:</strong> {{ archivePhaseCalibration?.name || 'Unavailable' }} · {{ archivePhaseCalibrationProvenanceLabel() }}</span>
+                                <span>{{ loadedPoints.filter(point => point.interferometer_phase_valid).length }} valid / {{ loadedPoints.length }} displayed shots</span>
+                            </div>
                         </div>
                         <div v-if="isLockInArchive() && loadedRunId" class="px-3 pb-3">
                             <div class="alert alert-light border mb-0 py-2 small d-flex flex-wrap gap-3 justify-content-between">
@@ -1936,7 +1799,7 @@
                             </div>
                             <div id="resultsPlotDw" class="analysis-plot-panel"
                                 :class="{'plot-split-container': showTotalPlot() && !isThreeDimensionalView()}"
-                                :style="{height: getAnalysisPlotHeight('dw')}">
+                                :style="{height: getAnalysisPlotHeight('dw'), display: currentTab === 'phase' ? 'none' : 'block'}">
                             </div>
                             <div id="resultsPlotTotal"
                                 :style="{display: showTotalPlot() ? 'block' : 'none', height: getAnalysisPlotHeight('total')}">
@@ -2085,6 +1948,7 @@
                     currentWaveforms: [],
                     selectedAllanWindow: null,
                     loadedPoints: [], currentCalculatedPoints: [], originalSettings: {}, loadedConfig: {}, currentScanDimensions: 1,
+                    archivePhaseCalibration: null, archivePhaseCalibrationProvenance: 'unavailable',
                     markerOptimization: null, selectedOptimizationStep: null,
                     syncManifest: null,
                     syncArchiveViewMode: 'node',
@@ -2105,7 +1969,8 @@
                         { key: 'temperature', label: 'Temperature' },
                         { key: 'arrival_time', label: 'Arrival Time' },
                         { key: 'transition_probability', label: 'Transition Probability' },
-                        { key: 'intf_p', label: 'Interferometer P' }
+                        { key: 'intf_p', label: 'Interferometer P' },
+                        { key: 'phase', label: 'Interferometer Phase' }
                     ],
                     syncArchiveReplayCount: 0, syncArchiveReplaySpeed: 1, syncArchiveReplayPlaying: false, syncArchiveReplayTimer: null,
                     displayMode: 'saved',
@@ -2147,8 +2012,8 @@
                         calibrationName: '', saving: false, calibrationMessage: '', calibrationError: false
                     },
                     showDisplayMenu: false, showTofFitCurve: true, showTofRawCurve: true, showScanFitCurve: true,
-                    showRawData: true, maximizedView: null, currentTab: 'atoms', plotMode: 'series', allanOrder: 1, allanScaleMode: 'absolute', allanXAxisMode: 'linear', allanP0AvailableMin: null, allanP0AvailableMax: null, allanP0Min: null, allanP0Max: null, allanP0MinInput: '', allanP0MaxInput: '', plotRevision: 0,
-                    tabs: [{ id: 'atoms', label: 'Atom Number' }, { id: 'amp', label: 'Max Voltage' }, { id: 'tail', label: 'Tail Mean' }, { id: 'sigma', label: 'Width (ms)' }, { id: 'temp', label: 'Temperature' }, { id: 'arrival', label: 'Arrival Time' }, { id: 'prob', label: 'Transition Prob.' }, { id: 'intf', label: 'Interferometer' }],
+                    showRawData: true, phaseUnit: 'rad', maximizedView: null, currentTab: 'atoms', plotMode: 'series', allanOrder: 1, allanScaleMode: 'absolute', allanXAxisMode: 'linear', allanP0AvailableMin: null, allanP0AvailableMax: null, allanP0Min: null, allanP0Max: null, allanP0MinInput: '', allanP0MaxInput: '', plotRevision: 0,
+                    tabs: [{ id: 'atoms', label: 'Atom Number' }, { id: 'amp', label: 'Max Voltage' }, { id: 'tail', label: 'Tail Mean' }, { id: 'sigma', label: 'Width (ms)' }, { id: 'temp', label: 'Temperature' }, { id: 'arrival', label: 'Arrival Time' }, { id: 'prob', label: 'Transition Prob.' }, { id: 'intf', label: 'Interferometer' }, { id: 'phase', label: 'Interferometer Phase' }],
                     historyMap: {}, layoutResBase: {}, layoutResUp: {}, layoutResDw: {}, layoutResTot: {}, layoutOscUp: {}, layoutOscDw: {},
                     heatmapColorscale: [[0, '#c62828'], [0.5, '#fff3bf'], [1, '#1565c0']],
                     dim3DisplayMode: 'slice', sliceAxis: 2, sliceIndex: 0, sliceValuesCache: []
@@ -2156,6 +2021,13 @@
             },
             watch: {
                 currentTab() { this.handlePlotContextChange(); },
+                phaseUnit() {
+                    if (this.currentTab === 'phase') this.refreshAnalysisView();
+                    if (this.syncManifest) this.$nextTick(() => {
+                        if (this.syncArchiveViewMode === 'node') this.renderSyncArchiveNodePlots();
+                        else this.resetSyncArchiveAxisRange();
+                    });
+                },
                 showRawData() {
                     this.handlePlotContextChange();
                     if (this.syncManifest) this.$nextTick(() => {
@@ -2684,6 +2556,11 @@
                     this.scanFitResult = null;
                     this.scanFitError = '';
                     this.scanFitSaveMsg = '';
+                    if (selected.key === 'bragg_fringes') {
+                        this.currentTab = 'intf';
+                        this.scanFit.channel = 'up';
+                        this.showRawData = false;
+                    }
                     this.plotRevision++;
                     this.renderMainPlot();
                 },
@@ -3253,60 +3130,9 @@
                     }).filter(point => Number.isFinite(point.p0) && Number.isFinite(point.value) && point.p0 >= min && point.p0 <= max);
                 },
                 async refreshBraggPhaseSpace() {
-                    const fit = this.getActiveBraggCalibration();
-                    if (!fit) {
-                        this.braggPhase.result = null;
-                        return;
-                    }
-                    let resolvedMode = this.braggPhase.mode;
-                    let points = this.getBraggPhaseInputPoints(resolvedMode);
-                    if (!points.length && resolvedMode === 'shots') {
-                        resolvedMode = 'mean';
-                        points = this.getBraggPhaseInputPoints('mean');
-                    }
-                    this.braggPhase.resolvedMode = resolvedMode;
-                    if (!points.length) {
-                        this.braggPhase.result = null;
-                        this.braggPhase.error = 'No phase-analysis values are available for this metric and source.';
-                        await this.$nextTick();
-                        this.renderBraggPhasePlot();
-                        return;
-                    }
-                    this.braggPhase.loading = true;
+                    this.braggPhase.result = null;
                     this.braggPhase.error = '';
-                    try {
-                        const manual = this.braggPhase.applicationMode === 'manual';
-                        const referenceMid = this.braggPhase.tSource === 'fixed_mid_fringe'
-                            ? this.getSelectedBraggReferenceMidFringe() : null;
-                        if (this.braggPhase.tSource === 'fixed_mid_fringe' && !referenceMid) {
-                            throw new Error('Select a valid reference mid fringe first.');
-                        }
-                        const response = await axios.post('/archive/bragg-phase-space', {
-                            points,
-                            amplitude: manual ? Number(this.braggPhase.manualA) : Number(fit.parameter_values?.A),
-                            offset: manual ? Number(this.braggPhase.manualC) : Number(fit.parameter_values?.C),
-                            angular_frequency_rad_per_us2: Number(fit.bragg?.angular_frequency_rad_per_us2),
-                            phase_offset_rad: Number(fit.parameter_values?.phi0),
-                            mid_fringe_fraction: Number(this.braggPhase.midFringePercent) / 100,
-                            offset_correction_mode: this.braggPhase.applicationMode === 'reference' ? 'reference_first' : 'none',
-                            reference_point_count: Number.parseInt(this.braggPhase.referenceCount, 10) || 1,
-                            phase_reference_mode: this.braggPhase.tSource,
-                            reference_phase_rad: referenceMid?.phase ?? null
-                        });
-                        this.braggPhase.result = response.data;
-                        await this.$nextTick();
-                        this.renderMainPlot();
-                        this.renderBraggPhasePlot();
-                    } catch (error) {
-                        this.braggPhase.result = null;
-                        this.braggPhase.error = 'Phase conversion failed: ' + (error.response?.data?.detail || error.message || 'Unknown error');
-                    } finally {
-                        this.braggPhase.loading = false;
-                    }
-                },
-                handleBraggPhaseWindowChange() {
-                    this.renderMainPlot();
-                    this.refreshBraggPhaseSpace();
+                    return null;
                 },
                 formatBraggPhaseStat(value) {
                     const numeric = Number(value);
@@ -3617,12 +3443,8 @@
                         this.plotRevision++;
                         await this.$nextTick();
                         this.renderMainPlot();
-                        if (this.scanFitResult.model_key === 'bragg_fringes') {
-                            await this.refreshBraggPhaseSpace();
-                        } else {
-                            this.braggPhase.result = null;
-                            this.braggPhase.error = '';
-                        }
+                        this.braggPhase.result = null;
+                        this.braggPhase.error = '';
                         await this.$nextTick();
                         this.resizeAnalysisPlots();
                         return this.scanFitResult;
@@ -4310,6 +4132,7 @@
                         vals_arrival_up: [], vals_arrival_dw: [],
                         vals_prob_up: [], vals_prob_dw: [],
                         vals_intf_p_up: [], vals_intf_p_dw: [],
+                        vals_phase_up: [], vals_phase_dw: [],
                         vals_nf_atoms_up: [], vals_nf_atoms_dw: [],
                         vals_nf_temp_up: [], vals_nf_temp_dw: [],
                         vals_nf_sigma_up: [], vals_nf_sigma_dw: [],
@@ -4343,7 +4166,7 @@
                 },
                 resizePlot(plotId) {
                     const plotEl = document.getElementById(plotId);
-                    if (!plotEl || !plotEl.data) return;
+                    if (!plotEl || !plotEl.data || getComputedStyle(plotEl).display === 'none') return;
                     Plotly.Plots.resize(plotEl);
                 },
                 resizeAnalysisPlots() {
@@ -4415,7 +4238,7 @@
                         });
                         await this.fetchBraggPhaseCalibrations();
                         this.braggPhase.calibrationName = '';
-                        this.braggPhase.calibrationMessage = `Saved calibration “${response.data.name}”.`;
+                        this.braggPhase.calibrationMessage = `Saved “${response.data.name}” to Interferometer Phase settings.`;
                     } catch (error) {
                         this.braggPhase.calibrationError = true;
                         this.braggPhase.calibrationMessage = error.response?.data?.detail || error.message || 'Unable to save calibration.';
@@ -4542,6 +4365,8 @@
 
                         const snap = res.data.config?.['_system_settings_snapshot'] || {};
                         this.loadedConfig = res.data.config || {};
+                        this.archivePhaseCalibration = res.data.interferometer_phase_calibration || null;
+                        this.archivePhaseCalibrationProvenance = String(res.data.interferometer_phase_calibration_provenance || 'unavailable');
                         this.markerOptimization = res.data.marker_optimization && typeof res.data.marker_optimization === 'object'
                             ? res.data.marker_optimization
                             : null;
@@ -4626,6 +4451,8 @@
                         if (res.data.settings) {
                             this.analysis = this.normalizeAnalysis(res.data.settings);
                         }
+                        this.archivePhaseCalibration = res.data.interferometer_phase_calibration || this.archivePhaseCalibration;
+                        this.archivePhaseCalibrationProvenance = String(res.data.interferometer_phase_calibration_provenance || this.archivePhaseCalibrationProvenance);
 
                         this.currentScanDimensions = this.resolveScanDimensions(res.data.scan_dimensions, this.loadedConfig);
                         this.recalculatedStats = this.normalizeStatsRows(res.data.stats);
@@ -4738,6 +4565,7 @@
                     if (data.intf_p2 != null) item.vals_intf_p_dw.push(data.intf_p2);
                     if (data.intf_p1_nofit != null) item.vals_nf_intf_p_up.push(data.intf_p1_nofit);
                     if (data.intf_p2_nofit != null) item.vals_nf_intf_p_dw.push(data.intf_p2_nofit);
+                    if (data.interferometer_phase_valid && data.interferometer_phase != null) item.vals_phase_up.push(data.interferometer_phase);
                 },
 
                 initPlots() {
@@ -4910,7 +4738,7 @@
                         const item = this.historyMap[key];
                         const params = this.getGroupParams(item);
                         const stats = { key, params, x: Number(params[0] ?? 0) };
-                        ['atoms', 'temp', 'sigma', 'amp', 'tail', 'arrival', 'prob', 'intf_p','nf_atoms', 'nf_temp', 'nf_sigma', 'nf_amp', 'nf_tail', 'nf_arrival', 'nf_prob', 'nf_intf_p'].forEach(m => {
+                        ['atoms', 'temp', 'sigma', 'amp', 'tail', 'arrival', 'prob', 'intf_p', 'phase', 'nf_atoms', 'nf_temp', 'nf_sigma', 'nf_amp', 'nf_tail', 'nf_arrival', 'nf_prob', 'nf_intf_p'].forEach(m => {
                             const sUp = this.calcStats(item[`vals_${m}_up`]); const sDw = this.calcStats(item[`vals_${m}_dw`]);
                             stats[`${m}_up`] = sUp.mean; stats[`${m}_up_std`] = sUp.std; stats[`${m}_dw`] = sDw.mean; stats[`${m}_dw_std`] = sDw.std;
                         });
@@ -4952,6 +4780,11 @@
                             nameUp = 'P_N1'; nameDw = 'P_N2';
                             suffixUp = ' (N1)'; suffixDw = ' (N2)';
                             break;
+                        case 'phase':
+                            fitPrefix = 'phase'; rawPrefix = 'phase'; label = `Interferometer Δφ (${this.phaseUnit})`;
+                            nameUp = 'Δφ'; nameDw = '';
+                            suffixUp = ''; suffixDw = '';
+                            break;
                     }
 
                     return { fitPrefix, rawPrefix, label, nameUp, nameDw, suffixUp, suffixDw };
@@ -4962,6 +4795,12 @@
                     const abs = Math.abs(numeric);
                     if ((abs > 0 && abs < 0.001) || abs >= 10000) return numeric.toExponential(3);
                     return numeric.toPrecision(4);
+                },
+                archivePhaseCalibrationProvenanceLabel() {
+                    if (this.archivePhaseCalibrationProvenance === 'run_snapshot') return 'run calibration snapshot';
+                    if (this.archivePhaseCalibrationProvenance === 'current_calibration_legacy_run') return 'current calibration (legacy run)';
+                    if (this.archivePhaseCalibrationProvenance === 'current_calibration_recalculation') return 'current calibration (recalculated)';
+                    return 'no calibration';
                 },
                 syncArchivePairs() {
                     const pairs = Array.isArray(this.syncManifest?.pairs) ? this.syncManifest.pairs : [];
@@ -5039,6 +4878,7 @@
                     const channelSuffix = channel === 'dw' ? 'dw' : 'up';
                     const suffix = noFit ? '_nofit' : '';
                     switch (tabId) {
+                        case 'phase': return 'interferometer_phase';
                         case 'amp': return `amplitude_${channelSuffix}${suffix}`;
                         case 'tail': return `tail_mean_${channelSuffix}_raw`;
                         case 'sigma': return `sigma_${channelSuffix}${suffix}`;
@@ -5054,8 +4894,10 @@
                     const grouped = new Map();
                     this.syncArchiveNodeRows().forEach(row => {
                         if (row?.error) return;
+                        if (this.syncArchiveTab === 'phase' && row.interferometer_phase_valid !== true) return;
                         const x = Number(row.sync_p0);
-                        const y = Number(row[field]);
+                        const rawY = Number(row[field]);
+                        const y = this.syncArchiveTab === 'phase' && this.phaseUnit === 'mrad' ? rawY * 1000 : rawY;
                         if (!Number.isFinite(x) || !Number.isFinite(y)) return;
                         const key = x.toFixed(9);
                         const item = grouped.get(key) || { x, sum: 0, count: 0 };
@@ -5091,7 +4933,7 @@
                             type: 'scatter', mode: 'lines+markers', name: this.syncArchiveTab === 'tail' ? 'Raw' : 'Fit',
                             line: { color, width: 2.5 }, marker: { size: 8 },
                         }];
-                        if (this.showRawData && this.syncArchiveTab !== 'tail') {
+                        if (this.showRawData && !['tail', 'phase'].includes(this.syncArchiveTab)) {
                             const raw = this.syncArchiveNodeSeries(channel, true);
                             traces.push({
                                 x: raw.map(point => point.x), y: raw.map(point => point.y),
@@ -5106,13 +4948,15 @@
                             margin: isUp ? { t: 42, b: 8, l: 68, r: 20 } : { t: 18, b: 48, l: 68, r: 20 },
                             title: { text: `${sourceLabel} | ${isUp ? 'UP Channel' : 'DOWN Channel'}`, font: { size: 13 }, x: 0.05 },
                             xaxis: { title: isUp ? '' : 'Parameter P0', showticklabels: !isUp, showline: true, mirror: true, ticks: 'inside', gridcolor: '#dde5ee' },
-                            yaxis: { title: metric.label + (isUp ? metric.suffixUp : metric.suffixDw), showline: true, mirror: true, ticks: 'inside', gridcolor: '#dde5ee' },
+                            yaxis: { title: this.syncArchiveTab === 'phase' ? `Interferometer Δφ (${this.phaseUnit})` : metric.label + (isUp ? metric.suffixUp : metric.suffixDw), showline: true, mirror: true, ticks: 'inside', gridcolor: '#dde5ee' },
                             legend: { orientation: 'h', x: 1, xanchor: 'right', y: 1.12 }, hovermode: 'closest',
                             paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
                         }, { responsive: true, displaylogo: false });
                     };
                     renderChannel('up', 'syncArchiveNodePlotUp', '#dc3545');
-                    renderChannel('dw', 'syncArchiveNodePlotDw', '#0d6efd');
+                    const downElement = document.getElementById('syncArchiveNodePlotDw');
+                    if (downElement) downElement.style.display = this.syncArchiveTab === 'phase' ? 'none' : 'block';
+                    if (this.syncArchiveTab !== 'phase') renderChannel('dw', 'syncArchiveNodePlotDw', '#0d6efd');
                 },
                 resetSyncArchiveReplay() {
                     if (this.syncArchiveReplayPlaying) this.toggleSyncArchiveReplay();
@@ -5120,6 +4964,7 @@
                     this.resetSyncArchiveAxisRange();
                 },
                 syncArchiveMetricField(axis) {
+                    if (axis.metric === 'phase') return 'interferometer_phase';
                     if (axis.metric === 'tail_mean') return `tail_mean_${axis.channel === 'dw' ? 'dw' : 'up'}_raw`;
                     const suffix = this.showRawData ? '_nofit' : '';
                     if (axis.metric === 'intf_p') return `intf_p${axis.channel === 'dw' ? '2' : '1'}${suffix}`;
@@ -5130,21 +4975,31 @@
                         this.syncArchiveSlaveId || '',
                         this.syncArchiveMetricField(this.syncArchiveAxisX),
                         this.syncArchiveMetricField(this.syncArchiveAxisY),
+                        this.phaseUnit,
                     ].join('|');
                 },
+                syncArchiveAxisValue(record, axis) {
+                    if (!record || record.error) return null;
+                    if (axis.metric === 'phase' && record.interferometer_phase_valid !== true) return null;
+                    const value = Number(record[this.syncArchiveMetricField(axis)]);
+                    if (!Number.isFinite(value)) return null;
+                    return axis.metric === 'phase' && this.phaseUnit === 'mrad' ? value * 1000 : value;
+                },
+                syncArchiveAxisTitle(source, axis) {
+                    if (axis.metric === 'phase') return `${source} | Interferometer Δφ (${this.phaseUnit})`;
+                    return `${source} | ${axis.metric} | ${axis.channel.toUpperCase()}`;
+                },
                 syncArchiveDifferentialPoints(limit = null) {
-                    const fieldX = this.syncArchiveMetricField(this.syncArchiveAxisX);
-                    const fieldY = this.syncArchiveMetricField(this.syncArchiveAxisY);
                     const allRows = this.syncArchivePairs();
                     const rows = limit == null
                         ? allRows
                         : allRows.slice(0, Math.max(0, Number(limit) || 0));
                     return rows.map(row => ({
-                        x: Number(row.master?.[fieldX]),
-                        y: Number(row.slave?.[fieldY]),
+                        x: this.syncArchiveAxisValue(row.master, this.syncArchiveAxisX),
+                        y: this.syncArchiveAxisValue(row.slave, this.syncArchiveAxisY),
                         shot: Number(row.sync_shot_index) + 1,
                         p0: row.sync_p0,
-                    })).filter(point => Number.isFinite(point.x) && Number.isFinite(point.y));
+                    })).filter(point => point.x !== null && point.y !== null);
                 },
                 paddedSyncArchiveRange(values) {
                     const finite = (Array.isArray(values) ? values : []).map(Number).filter(Number.isFinite);
@@ -5236,12 +5091,12 @@
                     }], {
                         margin: { l: 75, r: 70, t: 45, b: 70 }, title: 'Saved differential Lissajous',
                         xaxis: {
-                            title: `Master | ${this.syncArchiveAxisX.metric} | ${this.syncArchiveAxisX.channel.toUpperCase()}`,
+                            title: this.syncArchiveAxisTitle('Master', this.syncArchiveAxisX),
                             range: fixedRanges?.xRange,
                             autorange: !fixedRanges,
                         },
                         yaxis: {
-                            title: `Slave | ${this.syncArchiveAxisY.metric} | ${this.syncArchiveAxisY.channel.toUpperCase()}`,
+                            title: this.syncArchiveAxisTitle('Slave', this.syncArchiveAxisY),
                             range: fixedRanges?.yRange,
                             autorange: !fixedRanges,
                         },
@@ -5442,7 +5297,10 @@
                         const parsed = Number(value);
                         return value == null || !Number.isFinite(parsed) ? null : parsed;
                     }) : [];
-                    if (this.normalizeAllanScaleMode(this.allanScaleMode) !== 'relative') return baseValues;
+                    if (this.normalizeAllanScaleMode(this.allanScaleMode) !== 'relative') {
+                        const scale = this.currentTab === 'phase' && this.phaseUnit === 'mrad' ? 1000 : 1;
+                        return baseValues.map(value => value == null ? null : value * scale);
+                    }
 
                     const meanValue = Math.abs(Number(series?.mean_value));
                     if (!Number.isFinite(meanValue) || meanValue <= 1e-12) {
@@ -5629,6 +5487,15 @@
                 render1DPlot(rows, metric) {
                     const x = rows.map(row => row.x);
                     const keys = rows.map(row => row.key);
+                    if (this.currentTab === 'phase') {
+                        const scale = this.phaseUnit === 'mrad' ? 1000 : 1;
+                        const y = rows.map(row => row.phase_up == null ? null : Number(row.phase_up) * scale);
+                        const error = rows.map(row => row.phase_up_std == null ? null : Number(row.phase_up_std) * scale);
+                        const trace = { x, y, customdata: keys, mode: 'lines+markers', name: `Δφ (${this.phaseUnit})`, line: { color: '#6f42c1', width: 2 }, marker: { size: 8 }, error_y: { type: 'data', array: error, visible: true, color: '#6f42c1' } };
+                        this.layoutResUp = this.build1DLayout('up', metric);
+                        this.layoutResDw = this.build1DLayout('dw', metric);
+                        return Promise.all([Plotly.react('resultsPlotUp', [trace], this.layoutResUp), Plotly.react('resultsPlotDw', [], this.layoutResDw), Plotly.react('resultsPlotTotal', [], this.layoutResTot)]);
+                    }
                     const yUp = rows.map(row => row[`${metric.fitPrefix}_up`]);
                     const yUpStd = rows.map(row => row[`${metric.fitPrefix}_up_std`]);
                     const yDw = rows.map(row => row[`${metric.fitPrefix}_dw`]);
@@ -5772,7 +5639,7 @@
                     this.layoutResUp = this.buildAllanLayout('up', metric, sourceLabel, buildSummary(upSeries));
                     this.layoutResDw = this.buildAllanLayout('dw', metric, sourceLabel, buildSummary(dwSeries));
                     Plotly.react('resultsPlotUp', orders.length ? makeTrace(upSeries, '#dc3545', metric.nameUp) : [], this.layoutResUp);
-                    Plotly.react('resultsPlotDw', orders.length ? makeTrace(dwSeries, '#0d6efd', metric.nameDw) : [], this.layoutResDw);
+                    Plotly.react('resultsPlotDw', this.currentTab === 'phase' ? [] : (orders.length ? makeTrace(dwSeries, '#0d6efd', metric.nameDw) : []), this.layoutResDw);
 
                     if (this.showTotalPlot()) {
                         const totalSeries = metricSeries.total || { y: [], valid_window_counts: [] };
@@ -5877,6 +5744,7 @@
 
                     // [NEW] Add Interferometer headers (P1, P2)
                     header += ",Intf_P1_Fit,Intf_P1_Fit_Std,Intf_P2_Fit,Intf_P2_Fit_Std,Intf_P1_Raw,Intf_P1_Raw_Std,Intf_P2_Raw,Intf_P2_Raw_Std";
+                    header += ",Interferometer_Phase_Rad,Interferometer_Phase_Std_Rad,Phase_Calibration_ID,Phase_Calibration_Name,Phase_Reference_T2_us2,Phase_Calibration_Provenance";
                     header += "\n";
 
                     let csvContent = header;
@@ -5905,6 +5773,8 @@
                         // Raw Data (P1, P2) - NoFit
                         line += `,${(row[`nf_intf_p_up`] || 0).toFixed(4)},${(row[`nf_intf_p_up_std`] || 0).toFixed(4)}`; // P1 Raw
                         line += `,${(row[`nf_intf_p_dw`] || 0).toFixed(4)},${(row[`nf_intf_p_dw_std`] || 0).toFixed(4)}`; // P2 Raw
+                        line += `,${row.phase_up == null ? '' : Number(row.phase_up).toFixed(10)},${row.phase_up_std == null ? '' : Number(row.phase_up_std).toFixed(10)}`;
+                        line += `,${this.csvCell(this.archivePhaseCalibration?.id || '')},${this.csvCell(this.archivePhaseCalibration?.name || '')},${this.csvCell(this.archivePhaseCalibration?.reference_t2_us2 ?? '')},${this.csvCell(this.archivePhaseCalibrationProvenance)}`;
 
                         csvContent += line + "\n";
                     });

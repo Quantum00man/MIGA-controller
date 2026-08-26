@@ -19,6 +19,8 @@ RESULTS_CSV_HEADER = [
     "NF_Atom_UP", "NF_Atom_DW", "NF_Temp_UP", "NF_Temp_DW", "NF_Sigma_UP", "NF_Sigma_DW",
     "NF_Center_UP", "NF_Center_DW", "NF_Amp_UP", "NF_Amp_DW", "NF_Prob_UP", "NF_Prob_DW",
     "NF_Intf_N1", "NF_Intf_N2", "NF_Intf_P1", "NF_Intf_P2",
+    "Interferometer_Phase_Rad", "Interferometer_Phase_Valid", "Interferometer_Phase_Source_Value",
+    "Interferometer_Phase_Calibration_ID", "Interferometer_Phase_Calibration_Name", "Interferometer_Phase_Reference_T2_us2",
     "TailMean_UP", "TailMean_DW",
     "AC_Stark_Ratio", "AC_Stark_Side", "AC_Stark_DDS_Element",
     "AC_Stark_Power_R1", "AC_Stark_Power_R2",
@@ -37,6 +39,7 @@ class DataManager:
         self.csv_file: Path = None
         self.csv_writer = None
         self.csv_handle = None
+        self.phase_calibration_snapshot = None
         # [NEW] Track Current Run ID for display
         self.current_run_id_str = "run00"
     def _get_next_id(self, base_dir: Path) -> int:
@@ -84,6 +87,7 @@ class DataManager:
         run_name = f"run{run_id:02d}_{year}{month}{day}"
         
         self.current_run_dir = base_day_dir / run_name
+        self.phase_calibration_snapshot = scan_config.get('_interferometer_phase_calibration_snapshot')
         self.current_run_id_str = run_name
         
         # Ensure directory exists
@@ -227,6 +231,9 @@ class DataManager:
             f(result.amplitude_up_nofit), f(result.amplitude_dw_nofit),
             f(result.transition_probability_up_nofit,2), f(result.transition_probability_dw_nofit,2),
             f(result.intf_n1_nofit), f(result.intf_n2_nofit), f(result.intf_p1_nofit, 2), f(result.intf_p2_nofit, 2),
+            f(result.interferometer_phase, 10), 1 if result.interferometer_phase_valid else 0,
+            f(result.interferometer_phase_source_value), result.interferometer_phase_calibration_id or "",
+            result.interferometer_phase_calibration_name or "", f(result.interferometer_phase_reference_t2_us2, 6),
             f(result.tail_mean_up_raw), f(result.tail_mean_dw_raw),
             f(result.ac_stark_ratio), result.ac_stark_side or "", result.ac_stark_dds_element if result.ac_stark_dds_element is not None else "",
             f(result.ac_stark_power_r1), f(result.ac_stark_power_r2),
@@ -287,6 +294,9 @@ class DataManager:
                     f('sigma_up_nofit',6), f('sigma_dw_nofit',6), f('arrival_time_up_nofit',6), f('arrival_time_dw_nofit',6),
                     f('amplitude_up_nofit'), f('amplitude_dw_nofit'), f('transition_probability_up_nofit',2), f('transition_probability_dw_nofit',2),
                     f('intf_n1_nofit'), f('intf_n2_nofit'), f('intf_p1_nofit', 2), f('intf_p2_nofit', 2),
+                    f('interferometer_phase', 10), 1 if pt.get('interferometer_phase_valid') else 0,
+                    f('interferometer_phase_source_value'), str(pt.get('interferometer_phase_calibration_id') or ''),
+                    str(pt.get('interferometer_phase_calibration_name') or ''), f('interferometer_phase_reference_t2_us2', 6),
                     f('tail_mean_up_raw'), f('tail_mean_dw_raw'),
                     f('ac_stark_ratio'), str(pt.get('ac_stark_side') or ''),
                     pt.get('ac_stark_dds_element', ''),

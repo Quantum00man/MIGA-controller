@@ -447,6 +447,52 @@
                     </div>
                 </div>
 
+                <div v-if="tab==='phase'">
+                    <div v-if="phaseMessage" class="alert py-2" :class="phaseError ? 'alert-danger' : 'alert-success'">{{ phaseMessage }}</div>
+                    <div v-if="!phaseCalibrations.length" class="alert alert-info">
+                        No phase calibration is available. Run a Bragg Fringes fit in Archive, then save the fitted curve as a calibration.
+                    </div>
+                    <template v-else>
+                        <div class="row g-3 mb-3 align-items-end">
+                            <div class="col-lg-7"><label class="form-label small text-muted fw-bold">Calibration</label>
+                                <select class="form-select" v-model="selectedPhaseCalibrationId" @change="selectPhaseCalibration">
+                                    <option v-for="cal in phaseCalibrations" :key="cal.id" :value="cal.id">{{ cal.name }}</option>
+                                </select>
+                            </div>
+                            <div class="col-lg-5 d-flex gap-2">
+                                <button class="btn btn-primary flex-grow-1" @click="activatePhaseCalibration" :disabled="phaseBusy || isSelectedPhaseCalibrationActive">{{ isSelectedPhaseCalibrationActive ? 'Active calibration' : 'Set active' }}</button>
+                                <button class="btn btn-outline-danger" @click="deletePhaseCalibration" :disabled="phaseBusy">Delete</button>
+                            </div>
+                        </div>
+                        <div v-if="selectedPhaseCalibration" class="row g-3">
+                            <div class="col-xl-4"><div class="card border shadow-sm h-100"><div class="card-body">
+                                <h6 class="fw-bold mb-3">Calibration and data source</h6>
+                                <label class="form-label small text-muted fw-bold">Name</label><input class="form-control mb-3" v-model.trim="phaseDraft.name">
+                                <div class="row g-2 mb-3">
+                                    <div class="col-5"><label class="form-label small text-muted fw-bold">Metric</label><select class="form-select" v-model="phaseDraft.metric_tab"><option value="intf">Interferometer</option><option value="prob">Transition Probability</option><option value="atoms">Atom Number</option></select></div>
+                                    <div class="col-3"><label class="form-label small text-muted fw-bold">Channel</label><select class="form-select" v-model="phaseDraft.channel"><option value="up">UP</option><option value="dw">DOWN</option></select></div>
+                                    <div class="col-4"><label class="form-label small text-muted fw-bold">Source</label><select class="form-select" v-model="phaseDraft.source_mode"><option value="fit">Fit</option><option value="raw">NoFit</option></select></div>
+                                </div>
+                                <div class="small text-muted mb-3">A={{ formatPhaseNumber(phaseDraft.parameter_values?.A) }}, C={{ formatPhaseNumber(phaseDraft.parameter_values?.C) }}, ω={{ formatPhaseNumber(phaseDraft.bragg?.angular_frequency_rad_per_us2) }} rad/(μs)², φ₀={{ formatPhaseNumber(phaseDraft.parameter_values?.phi0) }} rad</div>
+                                <h6 class="fw-bold mb-2">Reference point</h6>
+                                <div class="row g-2 mb-2">
+                                    <div class="col-4"><label class="form-label small text-muted fw-bold">Input</label><select class="form-select" v-model="phaseDraft.reference_input_mode" @change="syncPhaseReferenceFromT2"><option value="t">T</option><option value="t2">T²</option></select></div>
+                                    <div class="col-5"><label class="form-label small text-muted fw-bold">Value</label><input type="number" min="0" step="any" class="form-control" v-model.number="phaseDraft.reference_value" @change="updatePhaseReferenceT2"></div>
+                                    <div class="col-3"><label class="form-label small text-muted fw-bold">Unit</label><select class="form-select" v-model="phaseDraft.reference_t_unit" @change="syncPhaseReferenceFromT2"><option value="us">μs</option><option value="ms">ms</option></select></div>
+                                </div>
+                                <div class="form-text mb-3">Resolved T²: {{ formatPhaseNumber(phaseDraft.reference_t2_us2) }} (μs)². Δφ is wrapped to (-π, π].</div>
+                                <label class="form-label small text-muted fw-bold">Mid fringe reference</label>
+                                <select class="form-select mb-3" :value="phaseDraft.reference_t2_us2" @change="choosePhaseMidFringe($event.target.value)"><option v-for="(value, index) in phaseMidFringes" :key="index" :value="value">#{{ index + 1 }}: {{ formatPhaseNumber(value) }} (μs)²</option></select>
+                                <button class="btn btn-success w-100" @click="savePhaseCalibration" :disabled="phaseBusy"><span v-if="phaseBusy" class="spinner-border spinner-border-sm me-1"></span>Save calibration</button>
+                            </div></div></div>
+                            <div class="col-xl-8"><div class="card border shadow-sm h-100"><div class="card-body">
+                                <div class="d-flex justify-content-between align-items-start gap-2 mb-2"><div><h6 class="fw-bold mb-1">Saved Bragg fringe curve</h6><div class="small text-muted">Click a mid-fringe marker to use it as the phase origin.</div></div><span class="badge bg-success" v-if="isSelectedPhaseCalibrationActive">Active</span></div>
+                                <div id="phaseCalibrationPlot" style="height:470px; min-height:320px;"></div>
+                            </div></div></div>
+                        </div>
+                    </template>
+                </div>
+
 
                 <div v-if="tab==='sync'">
                     <div class="row g-3">
@@ -1433,12 +1479,15 @@
                 return {
                     tab: 'phys', s: {}, msg: '', isError: false, saving: false,
                     braggPlotError: '',
+                    phaseCalibrations: [], activePhaseCalibrationId: '', selectedPhaseCalibrationId: '', phaseDraft: {},
+                    phaseBusy: false, phaseMessage: '', phaseError: false,
                     tabDefinitions: [
                         { id: 'phys', label: 'Physics & Gains', icon: 'bi-activity', description: 'Configure detector gains, signal filters and physical calibration constants.' },
                         { id: 'raman', label: 'Raman AC Stark', icon: 'bi-lightning-charge', description: 'Configure DDS writer access and four independent Raman amplitude-to-power calibration curves.' },
                         { id: 'bragg', label: 'Bragg Pulse', icon: 'bi-broadcast', description: 'Configure the channel-32 voltage-to-normalized-power curve and its linear operating interval.' },
                         { id: 'markers', label: 'Sequence Markers', icon: 'bi-tags', description: 'Mark DDS, DAC, duration and ON/OFF values visually, then define their execution rules.' },
                         { id: 'fitting', label: 'Fitting Models', icon: 'bi-bezier2', description: 'Manage atom-area calculation and the models used for time-of-flight fitting.' },
+                        { id: 'phase', label: 'Interferometer Phase', icon: 'bi-activity', description: 'Manage Bragg fringe calibrations, data sources and the fixed T or T² phase reference.' },
                         { id: 'sync', label: 'SYNC', icon: 'bi-bounding-box-circles', description: 'Configure Standalone, Master or Slave operation for synchronized differential measurements.' },
                         { id: 'net', label: 'Network', icon: 'bi-hdd-network', description: 'Select the acquisition platform and configure device connection limits.' },
                         { id: 'logic', label: 'Logic & Channels', icon: 'bi-diagram-3', description: 'Set launch, trigger and linked-mode channel timing.' },
@@ -1485,6 +1534,9 @@
                 }
             },
             computed: {
+                selectedPhaseCalibration() { return this.phaseCalibrations.find(item => item.id === this.selectedPhaseCalibrationId) || null; },
+                isSelectedPhaseCalibrationActive() { return Boolean(this.selectedPhaseCalibrationId) && this.selectedPhaseCalibrationId === this.activePhaseCalibrationId; },
+                phaseMidFringes() { return (this.phaseDraft?.bragg?.mid_fringe_x || []).map(Number).filter(Number.isFinite); },
                 selectedFitModel() {
                     const models = this.s.fit_models || [];
                     return models.find(model => model.key === this.s.fit_model_key) || models[0] || null;
@@ -1550,6 +1602,7 @@
             watch: {
                 tab(value) {
                     if (value === 'bragg') this.$nextTick(() => this.renderBraggPlots());
+                    if (value === 'phase') this.$nextTick(() => this.renderPhaseCalibrationPlot());
                 },
                 braggCalibrationSignature() {
                     if (this.tab === 'bragg') this.$nextTick(() => this.renderBraggPlots());
@@ -1946,6 +1999,103 @@
                 getActiveTabDefinition() {
                     return this.tabDefinitions.find(item => item.id === this.tab) || this.tabDefinitions[0];
                 },
+                formatPhaseNumber(value) {
+                    const numeric = Number(value);
+                    if (!Number.isFinite(numeric)) return 'n/a';
+                    return (Math.abs(numeric) >= 10000 || (Math.abs(numeric) > 0 && Math.abs(numeric) < 0.001)) ? numeric.toExponential(5) : numeric.toPrecision(7);
+                },
+                async fetchPhaseCalibrations() {
+                    try {
+                        const response = await axios.get('/settings/interferometer-phase-calibrations');
+                        this.phaseCalibrations = Array.isArray(response.data?.calibrations) ? response.data.calibrations : [];
+                        this.activePhaseCalibrationId = String(response.data?.active?.id || '');
+                        if (!this.phaseCalibrations.some(item => item.id === this.selectedPhaseCalibrationId)) {
+                            this.selectedPhaseCalibrationId = this.activePhaseCalibrationId || this.phaseCalibrations[0]?.id || '';
+                        }
+                        this.selectPhaseCalibration();
+                    } catch (error) {
+                        this.phaseError = true;
+                        this.phaseMessage = error.response?.data?.detail || error.message || 'Unable to load phase calibrations.';
+                    }
+                },
+                selectPhaseCalibration() {
+                    this.phaseDraft = this.selectedPhaseCalibration ? JSON.parse(JSON.stringify(this.selectedPhaseCalibration)) : {};
+                    this.syncPhaseReferenceFromT2();
+                    this.$nextTick(() => this.renderPhaseCalibrationPlot());
+                },
+                updatePhaseReferenceT2() {
+                    const value = Number(this.phaseDraft.reference_value);
+                    const scale = this.phaseDraft.reference_t_unit === 'ms' ? 1000 : 1;
+                    this.phaseDraft.reference_t2_us2 = this.phaseDraft.reference_input_mode === 't'
+                        ? Math.pow(value * scale, 2) : value * Math.pow(scale, 2);
+                    this.$nextTick(() => this.renderPhaseCalibrationPlot());
+                },
+                syncPhaseReferenceFromT2() {
+                    const t2 = Math.max(0, Number(this.phaseDraft.reference_t2_us2) || 0);
+                    const scale = this.phaseDraft.reference_t_unit === 'ms' ? 1000 : 1;
+                    this.phaseDraft.reference_value = this.phaseDraft.reference_input_mode === 't'
+                        ? Math.sqrt(t2) / scale : t2 / Math.pow(scale, 2);
+                    this.$nextTick(() => this.renderPhaseCalibrationPlot());
+                },
+                choosePhaseMidFringe(value) {
+                    const numeric = Number(value);
+                    if (!Number.isFinite(numeric)) return;
+                    this.phaseDraft.reference_t2_us2 = numeric;
+                    this.syncPhaseReferenceFromT2();
+                },
+                async savePhaseCalibration() {
+                    if (!this.selectedPhaseCalibrationId) return;
+                    this.phaseBusy = true; this.phaseMessage = ''; this.phaseError = false;
+                    try {
+                        this.updatePhaseReferenceT2();
+                        const response = await axios.patch(`/settings/interferometer-phase-calibrations/${encodeURIComponent(this.selectedPhaseCalibrationId)}`, { updates: this.phaseDraft });
+                        const index = this.phaseCalibrations.findIndex(item => item.id === response.data.id);
+                        if (index >= 0) this.phaseCalibrations[index] = response.data;
+                        this.phaseDraft = JSON.parse(JSON.stringify(response.data));
+                        this.phaseMessage = 'Interferometer phase calibration saved.';
+                        this.$nextTick(() => this.renderPhaseCalibrationPlot());
+                    } catch (error) { this.phaseError = true; this.phaseMessage = error.response?.data?.detail || error.message; }
+                    finally { this.phaseBusy = false; }
+                },
+                async activatePhaseCalibration() {
+                    this.phaseBusy = true; this.phaseMessage = ''; this.phaseError = false;
+                    try {
+                        await this.savePhaseCalibration();
+                        const response = await axios.post('/settings/interferometer-phase-calibrations/active', { calibration_id: this.selectedPhaseCalibrationId });
+                        this.activePhaseCalibrationId = String(response.data?.active?.id || '');
+                        this.phaseMessage = 'Active phase calibration updated. New runs will snapshot this calibration.';
+                    } catch (error) { this.phaseError = true; this.phaseMessage = error.response?.data?.detail || error.message; }
+                    finally { this.phaseBusy = false; }
+                },
+                async deletePhaseCalibration() {
+                    if (!this.selectedPhaseCalibrationId || !confirm('Delete this interferometer phase calibration?')) return;
+                    this.phaseBusy = true;
+                    try {
+                        await axios.delete(`/archive/bragg-phase-calibrations/${encodeURIComponent(this.selectedPhaseCalibrationId)}`);
+                        this.selectedPhaseCalibrationId = '';
+                        await this.fetchPhaseCalibrations();
+                        this.phaseMessage = 'Calibration deleted.'; this.phaseError = false;
+                    } catch (error) { this.phaseError = true; this.phaseMessage = error.response?.data?.detail || error.message; }
+                    finally { this.phaseBusy = false; }
+                },
+                renderPhaseCalibrationPlot() {
+                    const target = document.getElementById('phaseCalibrationPlot');
+                    if (!target || !this.phaseDraft?.fit_x?.length) return;
+                    const mid = this.phaseMidFringes;
+                    const offset = Number(this.phaseDraft.parameter_values?.C);
+                    const reference = Number(this.phaseDraft.reference_t2_us2);
+                    const traces = [
+                        { x: this.phaseDraft.fit_x, y: this.phaseDraft.fit_y, mode: 'lines', name: 'Fitted fringe', line: { color: '#0d6efd', width: 2.5 } },
+                        { x: mid, y: mid.map(() => offset), mode: 'markers', name: 'Mid fringes', customdata: mid, marker: { color: '#dc3545', size: 10, symbol: 'diamond' }, hovertemplate: 'T²=%{x:.8g} (μs)²<extra>Click to select</extra>' },
+                        { x: [reference], y: [offset], mode: 'markers', name: 'Reference', marker: { color: '#198754', size: 15, symbol: 'circle-open', line: { width: 3 } }, hovertemplate: 'Reference T²=%{x:.8g} (μs)²<extra></extra>' }
+                    ];
+                    Plotly.react(target, traces, { margin: { t: 25, r: 20, b: 55, l: 65 }, xaxis: { title: 'T² ((μs)²)', gridcolor: '#e5e9ef' }, yaxis: { title: this.phaseDraft.metric_label || 'Signal', gridcolor: '#e5e9ef' }, legend: { orientation: 'h', y: 1.12 }, hovermode: 'closest' }, { responsive: true, displaylogo: false });
+                    if (target.removeAllListeners) target.removeAllListeners('plotly_click');
+                    target.on('plotly_click', event => {
+                        const value = Number(event?.points?.[0]?.customdata);
+                        if (Number.isFinite(value)) this.choosePhaseMidFringe(value);
+                    });
+                },
                 formatBraggPlotNumber(value, digits = 4) {
                     const numeric = Number(value);
                     if (!Number.isFinite(numeric)) return 'invalid';
@@ -2285,6 +2435,7 @@
                     try {
                         const res = await axios.get('/settings/all');
                         this.s = this.normalizeSettings(res.data);
+                        await this.fetchPhaseCalibrations();
                         await this.fetchUpdateStatus(true);
                         await this.fetchSavedMarkerDocuments(!this.markerDocument);
                     } catch (e) { console.error(e); }

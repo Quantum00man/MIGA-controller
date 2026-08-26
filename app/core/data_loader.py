@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from app.analysis import fitting, physics
+from app.analysis import fitting, physics, interferometer_phase
 from app.analysis.lock_in import build_lock_in_analysis
 import config
 
@@ -231,6 +231,12 @@ class DataLoader:
             "intf_n2_nofit": self._parse_float(row.get("NF_Intf_N2")),
             "intf_p1_nofit": self._parse_float(row.get("NF_Intf_P1")),
             "intf_p2_nofit": self._parse_float(row.get("NF_Intf_P2")),
+            "interferometer_phase": self._parse_float(row.get("Interferometer_Phase_Rad")),
+            "interferometer_phase_valid": str(row.get("Interferometer_Phase_Valid") or "").strip().lower() in {"1", "true", "yes"},
+            "interferometer_phase_source_value": self._parse_float(row.get("Interferometer_Phase_Source_Value")),
+            "interferometer_phase_calibration_id": str(row.get("Interferometer_Phase_Calibration_ID") or ""),
+            "interferometer_phase_calibration_name": str(row.get("Interferometer_Phase_Calibration_Name") or ""),
+            "interferometer_phase_reference_t2_us2": self._parse_float(row.get("Interferometer_Phase_Reference_T2_us2")),
             "tail_mean_up_raw": self._parse_float(row.get("TailMean_UP")),
             "tail_mean_dw_raw": self._parse_float(row.get("TailMean_DW")),
             "ac_stark_ratio": self._parse_float(row.get("AC_Stark_Ratio")),
@@ -330,6 +336,7 @@ class DataLoader:
             "nf_prob": ("transition_probability_up_nofit", "transition_probability_dw_nofit"),
             "nf_intf_p": ("intf_p1_nofit", "intf_p2_nofit"),
             "nf_tail": ("tail_mean_up_raw", "tail_mean_dw_raw"),
+            "phase": ("interferometer_phase", "interferometer_phase"),
         }
 
         grouped: Dict[str, Dict[str, Any]] = {}
@@ -352,7 +359,7 @@ class DataLoader:
                 value_dw = point.get(field_dw)
                 if value_up is not None:
                     group[metric]["up"].append(float(value_up))
-                if value_dw is not None:
+                if value_dw is not None and metric != "phase":
                     group[metric]["dw"].append(float(value_dw))
 
         stats_rows: List[Dict[str, Any]] = []
@@ -626,13 +633,23 @@ class DataLoader:
         })
 
     def load_run(
-        self, year: str, month: str, day: str, run_id: str, node_id: Optional[str] = None
+        self, year: str, month: str, day: str, run_id: str, node_id: Optional[str] = None,
+        current_phase_calibration: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         root_run_dir = self._get_run_dir(year, month, day, run_id)
         run_dir = self._resolve_archive_node_dir(root_run_dir, node_id)
         config_data = self._load_config_data(run_dir)
         scan_dimensions = self._resolve_scan_dimensions(config_data)
         full_points = self._read_results_csv(run_dir, max_points=None)
+        has_phase_snapshot = "_interferometer_phase_calibration_snapshot" in config_data
+        snapshot_calibration = config_data.get("_interferometer_phase_calibration_snapshot")
+        phase_calibration = snapshot_calibration if has_phase_snapshot else current_phase_calibration
+        phase_provenance = "run_snapshot" if isinstance(snapshot_calibration, dict) else (
+            "current_calibration_legacy_run" if not has_phase_snapshot and isinstance(current_phase_calibration, dict) else "unavailable"
+        )
+        has_saved_phase = any(str(point.get("interferometer_phase_calibration_id") or "") for point in full_points)
+        if isinstance(phase_calibration, dict) and (not has_phase_snapshot or not has_saved_phase):
+            full_points = [interferometer_phase.apply_phase(point, phase_calibration) for point in full_points]
         marker_optimization = self._build_marker_optimization_archive(run_dir, full_points)
         is_marker_optimization = bool(marker_optimization.get("steps")) or (
             run_dir / "marker_optimization_report.json"
@@ -677,6 +694,8 @@ class DataLoader:
             "marker_optimization": marker_optimization if is_marker_optimization else None,
             "sync_manifest": sync_manifest,
             "selected_sync_node": str(node_id or ""),
+            "interferometer_phase_calibration": phase_calibration,
+            "interferometer_phase_calibration_provenance": phase_provenance,
         }
 
 
@@ -709,6 +728,10 @@ class DataLoader:
             "intf": {
                 "fit": {"up": ("intf_p1",), "dw": ("intf_p2",)},
                 "raw": {"up": ("intf_p1_nofit",), "dw": ("intf_p2_nofit",)},
+            },
+            "phase": {
+                "fit": {"up": ("interferometer_phase",)},
+                "raw": {"up": ("interferometer_phase",)},
             },
             "tail": {
                 "fit": {"up": ("tail_mean_up_raw",), "dw": ("tail_mean_dw_raw",)},
@@ -896,6 +919,7 @@ class DataLoader:
         p0_min: Optional[float] = None,
         p0_max: Optional[float] = None,
         node_id: Optional[str] = None,
+        current_phase_calibration: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         root_run_dir = self._get_run_dir(year, month, day, run_id)
         run_dir = self._resolve_archive_node_dir(root_run_dir, node_id)
@@ -909,6 +933,15 @@ class DataLoader:
 
         normalized_mode = "recalculated" if str(display_mode or "saved").strip().lower() == "recalculated" else "saved"
         all_points = self._load_allan_points(run_dir, config_data, normalized_mode, new_settings=new_settings)
+        has_phase_snapshot = "_interferometer_phase_calibration_snapshot" in config_data
+        phase_calibration = config_data.get("_interferometer_phase_calibration_snapshot")
+        if normalized_mode == "recalculated":
+            phase_calibration = (new_settings or {}).get("_interferometer_phase_calibration") or phase_calibration
+        elif not has_phase_snapshot:
+            phase_calibration = current_phase_calibration
+        has_saved_phase = any(str(point.get("interferometer_phase_calibration_id") or "") for point in all_points)
+        if isinstance(phase_calibration, dict) and (normalized_mode == "recalculated" or not has_phase_snapshot or not has_saved_phase):
+            all_points = [interferometer_phase.apply_phase(point, phase_calibration) for point in all_points]
         filtered_points, available_p0_min, available_p0_max, selected_p0_min, selected_p0_max = self._filter_allan_points_by_p0_range(
             all_points,
             p0_min=p0_min,
@@ -1213,7 +1246,7 @@ class DataLoader:
             settings.get("intf_gamma", 0.25),
         )
 
-        return {
+        recalculated = {
             **point,
             "atom_number_up": n_f2,
             "atom_number_dw": n_f1,
@@ -1248,6 +1281,8 @@ class DataLoader:
             "intf_p1_nofit": intf_p1_nf,
             "intf_p2_nofit": intf_p2_nf,
         }
+        calibration = settings.get("_interferometer_phase_calibration")
+        return interferometer_phase.apply_phase(recalculated, calibration if isinstance(calibration, dict) else None)
 
     def recalculate_run(
         self,
@@ -1293,6 +1328,8 @@ class DataLoader:
             "lock_in_analysis": lock_in_analysis,
             "preview_map": self._build_preview_map(recalculated_points, scan_dimensions=scan_dimensions),
             "total_points": len(recalculated_points),
+            "interferometer_phase_calibration": settings.get("_interferometer_phase_calibration"),
+            "interferometer_phase_calibration_provenance": "current_calibration_recalculation" if settings.get("_interferometer_phase_calibration") else "unavailable",
         }
 
     def recalculate_waveforms(

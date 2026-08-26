@@ -1378,6 +1378,7 @@
                                 <option value="master">Master</option>
                                 <option v-for="slave in syncSlaves" :key="slave.id" :value="slave.id">{{ slave.name }}</option>
                             </select>
+                            <select v-if="(syncViewMode === 'node' && currentTab === 'phase') || (syncViewMode === 'lissajous' && (syncAxisX.metric === 'phase' || syncAxisY.metric === 'phase'))" class="form-select form-select-sm" style="width:auto" v-model="phaseUnit" aria-label="Phase unit"><option value="rad">rad</option><option value="mrad">mrad</option></select>
                             <div class="form-check form-switch mb-0">
                                 <input class="form-check-input" type="checkbox" id="syncShowRaw" v-model="showRawData">
                                 <label class="form-check-label small fw-bold text-muted" for="syncShowRaw">{{ syncViewMode === 'node' ? 'Show NoFit' : 'Use NoFit' }}</label>
@@ -1397,13 +1398,13 @@
                             <span class="badge bg-primary align-self-center">X</span>
                             <select class="form-select form-select-sm" v-model="syncAxisX.source" @change="syncAxesChanged"><option value="master">Master</option><option v-for="slave in syncSlaves" :key="slave.id" :value="slave.id">{{ slave.name }}</option></select>
                             <select class="form-select form-select-sm" v-model="syncAxisX.metric" @change="syncAxesChanged"><option v-for="item in syncMetricOptions" :key="item.key" :value="item.key">{{ item.label }}</option></select>
-                            <select class="form-select form-select-sm" v-model="syncAxisX.channel" @change="syncAxesChanged"><option value="up">UP</option><option value="dw">DOWN</option></select>
+                            <select v-if="syncAxisX.metric !== 'phase'" class="form-select form-select-sm" v-model="syncAxisX.channel" @change="syncAxesChanged"><option value="up">UP</option><option value="dw">DOWN</option></select>
                         </div>
                         <div class="col-lg-6 d-flex gap-2">
                             <span class="badge bg-secondary align-self-center">Y</span>
                             <select class="form-select form-select-sm" v-model="syncAxisY.source" @change="syncAxesChanged"><option value="master">Master</option><option v-for="slave in syncSlaves" :key="slave.id" :value="slave.id">{{ slave.name }}</option></select>
                             <select class="form-select form-select-sm" v-model="syncAxisY.metric" @change="syncAxesChanged"><option v-for="item in syncMetricOptions" :key="item.key" :value="item.key">{{ item.label }}</option></select>
-                            <select class="form-select form-select-sm" v-model="syncAxisY.channel" @change="syncAxesChanged"><option value="up">UP</option><option value="dw">DOWN</option></select>
+                            <select v-if="syncAxisY.metric !== 'phase'" class="form-select form-select-sm" v-model="syncAxisY.channel" @change="syncAxesChanged"><option value="up">UP</option><option value="dw">DOWN</option></select>
                         </div>
                         <div class="col-12 d-flex flex-wrap align-items-center gap-2">
                             <button class="btn btn-outline-secondary btn-sm" @click="toggleSyncReplay">{{ syncReplayPlaying ? 'Pause' : 'Play' }}</button>
@@ -1416,7 +1417,7 @@
                 </div>
                 <div v-if="syncViewMode === 'node'" class="card-body p-0">
                     <div id="resultsPlotUp" class="analysis-plot-panel" style="height:360px"></div>
-                    <div id="resultsPlotDw" class="analysis-plot-panel analysis-plot-panel-divider" style="height:360px"></div>
+                    <div id="resultsPlotDw" class="analysis-plot-panel analysis-plot-panel-divider" :style="{height:'360px', display: currentTab === 'phase' ? 'none' : 'block'}"></div>
                 </div>
                 <div v-else id="syncPlot" style="height:560px"></div>
             </div>
@@ -1430,6 +1431,7 @@
                     </div>
 
                     <div class="analysis-header-actions">
+                        <select v-if="currentTab === 'phase'" class="form-select form-select-sm" style="width:auto" v-model="phaseUnit" aria-label="Phase unit"><option value="rad">rad</option><option value="mrad">mrad</option></select>
                         <button class="btn-icon" @click="toggleMaximize('analysis')"
                             :title="maximizedView === 'analysis' ? 'Restore analysis view' : 'Maximize analysis view'"
                             :aria-label="maximizedView === 'analysis' ? 'Restore analysis view' : 'Maximize analysis view'">
@@ -1493,7 +1495,7 @@
                             :class="{'plot-split-container': !isThreeDimensionalView()}"
                             :style="{height: getAnalysisPlotHeight()}"></div>
                         <div id="resultsPlotDw" class="analysis-plot-panel"
-                            :style="{height: getAnalysisPlotHeight()}"></div>
+                            :style="{height: getAnalysisPlotHeight(), display: currentTab === 'phase' ? 'none' : 'block'}"></div>
                     </div>
                 </div>
             </div>
@@ -1635,7 +1637,8 @@
                         { key: 'temperature', label: 'Temperature' },
                         { key: 'arrival_time', label: 'Arrival Time' },
                         { key: 'transition_probability', label: 'Transition Probability' },
-                        { key: 'intf_p', label: 'Interferometer P' }
+                        { key: 'intf_p', label: 'Interferometer P' },
+                        { key: 'phase', label: 'Interferometer Phase' }
                     ],
                     syncReplayCount: 0,
                     syncReplaySpeed: 1,
@@ -1663,8 +1666,9 @@
                     showRawData: true, // Toggle State
                     maximizedView: null,
                     currentTab: 'atoms',
+                    phaseUnit: 'rad',
                     currentScanDimensions: 1,
-                    tabs: [{ id: 'atoms', label: 'Atom Number' }, { id: 'amp', label: 'Max Voltage' }, { id: 'tail', label: 'Tail Mean' }, { id: 'sigma', label: 'Width (ms)' }, { id: 'temp', label: 'Temperature' }, { id: 'arrival', label: 'Arrival Time' }, { id: 'prob', label: 'Transition Prob.' }, { id: 'intf', label: 'Interferometer' }],
+                    tabs: [{ id: 'atoms', label: 'Atom Number' }, { id: 'amp', label: 'Max Voltage' }, { id: 'tail', label: 'Tail Mean' }, { id: 'sigma', label: 'Width (ms)' }, { id: 'temp', label: 'Temperature' }, { id: 'arrival', label: 'Arrival Time' }, { id: 'prob', label: 'Transition Prob.' }, { id: 'intf', label: 'Interferometer' }, { id: 'phase', label: 'Interferometer Phase' }],
                     historyMap: {},
                     lockInHistoryMap: {},
                     layoutResBase: {}, layoutResUp: {}, layoutResDw: {}, layoutOscUp: {}, layoutOscDw: {},
@@ -1692,6 +1696,14 @@
             },
             watch: {
                 currentTab() { this.plotRevision++; this.renderMainPlot(); },
+                phaseUnit() {
+                    const syncPhaseAxis = this.isSyncMode() && this.syncViewMode === 'lissajous'
+                        && (this.syncAxisX.metric === 'phase' || this.syncAxisY.metric === 'phase');
+                    if (this.currentTab === 'phase' || syncPhaseAxis) {
+                        this.plotRevision++;
+                        this.renderMainPlot();
+                    }
+                },
                 showRawData() { this.plotRevision++; this.isSyncMode() ? this.renderSyncPlot() : this.renderMainPlot(); },
                 useList1(val) { this.config.dim1_type = val ? 'list' : 'range'; this.saveState(); },
                 useList2(val) { this.config.dim2_type = val ? 'list' : 'range'; this.saveState(); },
@@ -2181,7 +2193,10 @@
                     if (this.maximizedView === view) { this.maximizedView = null; } else { this.maximizedView = view; }
                     this.$nextTick(() => {
                         window.dispatchEvent(new Event('resize'));
-                        if (view === 'analysis' || !view) { Plotly.Plots.resize('resultsPlotUp'); Plotly.Plots.resize('resultsPlotDw'); }
+                        if (view === 'analysis' || !view) {
+                            Plotly.Plots.resize('resultsPlotUp');
+                            if (this.currentTab !== 'phase') Plotly.Plots.resize('resultsPlotDw');
+                        }
                         if (view === 'scope' || !view) { Plotly.Plots.resize('waveformPlotUp'); Plotly.Plots.resize('waveformPlotDw'); }
                     });
                 },
@@ -2790,7 +2805,7 @@ requestPlotResize() {
         this.layoutResizeRaf = null;
         ['resultsPlotUp', 'resultsPlotDw', 'waveformPlotUp', 'waveformPlotDw'].forEach((plotId) => {
             const plotEl = document.getElementById(plotId);
-            if (plotEl) Plotly.Plots.resize(plotEl);
+            if (plotEl && getComputedStyle(plotEl).display !== 'none') Plotly.Plots.resize(plotEl);
         });
     });
 },
@@ -3769,6 +3784,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                         sum_arrival_up: 0, sum_arrival_dw: 0,
                         sum_prob_up: 0, sum_prob_dw: 0,
                         sum_intf_p_up: 0, sum_intf_p_dw: 0,
+                        sum_phase: 0, count_phase: 0,
                         sum_nf_atoms_up: 0, sum_nf_atoms_dw: 0,
                         sum_nf_temp_up: 0, sum_nf_temp_dw: 0,
                         sum_nf_sigma_up: 0, sum_nf_sigma_dw: 0,
@@ -3832,6 +3848,11 @@ finishScheduledRun(finalStatus = 'IDLE') {
                             suffixUp = ' (N1)';
                             suffixDw = ' (N2)';
                             break;
+                        case 'phase':
+                            label = `Interferometer Δφ (${this.phaseUnit})`;
+                            fitUp = 'phase_up'; fitDw = 'phase_dw'; rawUp = 'phase_up'; rawDw = 'phase_dw';
+                            nameUp = 'Δφ'; nameDw = ''; suffixUp = ''; suffixDw = '';
+                            break;
                     }
 
                     return { label, fitUp, fitDw, rawUp, rawDw, nameUp, nameDw, suffixUp, suffixDw };
@@ -3860,6 +3881,10 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     item.sum_intf_p_dw += (data.intf_p2 || 0);
                     item.sum_nf_intf_p_up += (data.intf_p1_nofit || 0);
                     item.sum_nf_intf_p_dw += (data.intf_p2_nofit || 0);
+                    if (data.interferometer_phase_valid && Number.isFinite(Number(data.interferometer_phase))) {
+                        item.sum_phase += Number(data.interferometer_phase);
+                        item.count_phase += 1;
+                    }
                 },
                 aggregateHistoryMap(historyMap) {
                     const points = Object.values(historyMap || {}).map(item => {
@@ -3876,6 +3901,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                             arrival_up: avg(item.sum_arrival_up), arrival_dw: avg(item.sum_arrival_dw),
                             prob_up: avg(item.sum_prob_up), prob_dw: avg(item.sum_prob_dw),
                             intf_p_up: avg(item.sum_intf_p_up), intf_p_dw: avg(item.sum_intf_p_dw),
+                            phase_up: item.count_phase ? item.sum_phase / item.count_phase : null, phase_dw: null,
                             nf_atoms_up: avg(item.sum_nf_atoms_up), nf_atoms_dw: avg(item.sum_nf_atoms_dw),
                             nf_temp_up: avg(item.sum_nf_temp_up), nf_temp_dw: avg(item.sum_nf_temp_dw),
                             nf_sigma_up: avg(item.sum_nf_sigma_up), nf_sigma_dw: avg(item.sum_nf_sigma_dw),
@@ -4098,6 +4124,15 @@ finishScheduledRun(finalStatus = 'IDLE') {
                 },
                 render1DPlot(points, metric) {
                     const series = this.build1DSeries(points, metric);
+                    if (this.currentTab === 'phase') {
+                        const scale = this.phaseUnit === 'mrad' ? 1000 : 1;
+                        const trace = { x: series.x, y: series.fitUp.map(value => value == null ? null : Number(value) * scale), mode: 'lines+markers', name: `Δφ (${this.phaseUnit})`, line: { color: '#6f42c1', width: 2.5 }, marker: { size: 8 } };
+                        this.layoutResUp = this.build1DLayout('up', metric);
+                        this.layoutResDw = this.build1DLayout('dw', metric);
+                        Plotly.react('resultsPlotUp', [trace], this.layoutResUp);
+                        Plotly.react('resultsPlotDw', [], this.layoutResDw);
+                        return;
+                    }
                     const tracesUp = [{
                         x: series.x, y: series.fitUp, mode: 'lines+markers', name: metric.nameUp + ' (Fit)',
                         line: { color: '#dc3545', width: 2.5 }, marker: { size: 8 }
@@ -4517,6 +4552,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     this.$nextTick(() => this.renderSyncPlot());
                 },
                 syncMetricField(metric, channel) {
+                    if (metric === 'phase') return 'interferometer_phase';
                     if (metric === 'tail_mean') return `tail_mean_${channel === 'dw' ? 'dw' : 'up'}_raw`;
                     const suffix = this.showRawData ? '_nofit' : '';
                     if (metric === 'intf_p') return `intf_p${channel === 'dw' ? '2' : '1'}${suffix}`;
@@ -4524,8 +4560,14 @@ finishScheduledRun(finalStatus = 'IDLE') {
                 },
                 syncAxisValue(record, axis) {
                     if (!record || record.error) return null;
+                    if (axis.metric === 'phase' && record.interferometer_phase_valid !== true) return null;
                     const value = Number(record[this.syncMetricField(axis.metric, axis.channel)]);
-                    return Number.isFinite(value) ? value : null;
+                    if (!Number.isFinite(value)) return null;
+                    return axis.metric === 'phase' && this.phaseUnit === 'mrad' ? value * 1000 : value;
+                },
+                syncAxisTitle(axis) {
+                    if (axis.metric === 'phase') return `${axis.source} | Interferometer Δφ (${this.phaseUnit})`;
+                    return `${axis.source} | ${axis.metric} | ${axis.channel.toUpperCase()}`;
                 },
                 syncLissajousRows() {
                     const xRows = Array.isArray(this.syncNodeResults[this.syncAxisX.source])
@@ -4593,8 +4635,8 @@ finishScheduledRun(finalStatus = 'IDLE') {
                         name: 'Paired shots'
                     }], {
                         margin: { l: 75, r: 70, t: 45, b: 70 }, title: 'Differential Lissajous',
-                        xaxis: { title: `${this.syncAxisX.source} | ${this.syncAxisX.metric} | ${this.syncAxisX.channel.toUpperCase()}` },
-                        yaxis: { title: `${this.syncAxisY.source} | ${this.syncAxisY.metric} | ${this.syncAxisY.channel.toUpperCase()}`, scaleanchor: null },
+                        xaxis: { title: this.syncAxisTitle(this.syncAxisX) },
+                        yaxis: { title: this.syncAxisTitle(this.syncAxisY), scaleanchor: null },
                         hovermode: 'closest'
                     }, { responsive: true, displaylogo: false });
                 },

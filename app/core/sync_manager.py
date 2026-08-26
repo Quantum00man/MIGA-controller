@@ -38,6 +38,10 @@ SYNC_RESULT_FIELDS = (
     "arrival_time_up_nofit", "arrival_time_dw_nofit",
     "transition_probability_up_nofit", "transition_probability_dw_nofit",
     "intf_n1_nofit", "intf_n2_nofit", "intf_p1_nofit", "intf_p2_nofit",
+    "interferometer_phase", "interferometer_phase_valid",
+    "interferometer_phase_source_value",
+    "interferometer_phase_calibration_id", "interferometer_phase_calibration_name",
+    "interferometer_phase_reference_t2_us2",
 )
 
 

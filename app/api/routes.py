@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 from typing import Dict, Any, List
-from app.analysis import fitting, phase_space
+from app.analysis import fitting
 from app.core.experiment_manager import ExperimentManager
 from app.core.data_loader import DataLoader
 from app.core.archive_collection_store import ArchiveCollectionStore
@@ -50,8 +50,9 @@ from app.models.schemas import (
     ArchiveFavoriteCreate,
     ArchiveFavoriteUpdate,
     ArchiveRunReference,
-    ArchiveBraggPhaseRequest,
     BraggPhaseCalibrationSaveRequest,
+    InterferometerPhaseCalibrationUpdateRequest,
+    InterferometerPhaseCalibrationActivateRequest,
     ArchiveScanFitRequest,
     ArchiveWaveformRequest,
     BraggScanExportRequest,
@@ -1246,7 +1247,10 @@ async def batch_archive_favorites(req: ArchiveFavoriteBatchRequest):
 
 @router.get("/archive/load/{year}/{month}/{day}/{run_id}")
 async def load_archived_run(year: str, month: str, day: str, run_id: str, node_id: str = ""):
-    try: return data_loader.load_run(year, month, day, run_id, node_id=node_id or None)
+    try: return data_loader.load_run(
+        year, month, day, run_id, node_id=node_id or None,
+        current_phase_calibration=manager.get_active_bragg_phase_calibration(),
+    )
     except FileNotFoundError: raise HTTPException(404, "Run not found")
     except Exception as e: raise HTTPException(500, str(e))
 
@@ -1295,12 +1299,14 @@ async def load_archived_waveform(year: str, month: str, day: str, run_id: str, s
 @router.post("/archive/recalculate")
 async def recalculate_archived_run(req: ReAnalysisRequest):
     try:
+        settings = req.new_settings.dict()
+        settings["_interferometer_phase_calibration"] = manager.get_active_bragg_phase_calibration()
         return data_loader.recalculate_run(
             req.year,
             req.month,
             req.day,
             req.run_id,
-            req.new_settings.dict(),
+            settings,
             node_id=req.node_id,
         )
     except FileNotFoundError as exc:
@@ -1313,6 +1319,8 @@ async def recalculate_archived_run(req: ReAnalysisRequest):
 @router.post("/archive/allan")
 async def calculate_archived_allan(req: ArchiveAllanRequest):
     try:
+        settings = req.new_settings.dict()
+        settings["_interferometer_phase_calibration"] = manager.get_active_bragg_phase_calibration()
         return data_loader.calculate_allan_run(
             req.year,
             req.month,
@@ -1320,10 +1328,11 @@ async def calculate_archived_allan(req: ArchiveAllanRequest):
             req.run_id,
             req.order,
             req.display_mode,
-            req.new_settings.dict(),
+            settings,
             p0_min=req.p0_min,
             p0_max=req.p0_max,
             node_id=req.node_id,
+            current_phase_calibration=manager.get_active_bragg_phase_calibration(),
         )
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc))
@@ -1451,34 +1460,41 @@ async def fit_archive_scan(req: ArchiveScanFitRequest):
     }
 
 
-@router.post("/archive/bragg-phase-space")
-async def convert_archive_bragg_phase_space(req: ArchiveBraggPhaseRequest):
-    try:
-        return phase_space.convert_bragg_points_to_phase_space(
-            [point.model_dump() for point in req.points],
-            amplitude=req.amplitude,
-            offset=req.offset,
-            angular_frequency_rad_per_us2=req.angular_frequency_rad_per_us2,
-            phase_offset_rad=req.phase_offset_rad,
-            mid_fringe_fraction=req.mid_fringe_fraction,
-            offset_correction_mode=req.offset_correction_mode,
-            reference_point_count=req.reference_point_count,
-            phase_reference_mode=req.phase_reference_mode,
-            reference_phase_rad=req.reference_phase_rad,
-        )
-    except ValueError as exc:
-        raise HTTPException(400, str(exc))
-
-
 @router.get("/archive/bragg-phase-calibrations")
 async def list_archive_bragg_phase_calibrations():
     return manager.get_bragg_phase_calibrations()
+
+
+@router.get("/settings/interferometer-phase-calibrations")
+async def list_interferometer_phase_calibrations():
+    return {
+        "calibrations": manager.get_bragg_phase_calibrations(),
+        "active": manager.get_active_bragg_phase_calibration(),
+    }
 
 
 @router.post("/archive/bragg-phase-calibrations")
 async def save_archive_bragg_phase_calibration(req: BraggPhaseCalibrationSaveRequest):
     try:
         return manager.save_bragg_phase_calibration(req.name, req.fit_result, req.source)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.patch("/settings/interferometer-phase-calibrations/{calibration_id}")
+async def update_interferometer_phase_calibration(
+    calibration_id: str, req: InterferometerPhaseCalibrationUpdateRequest
+):
+    try:
+        return manager.update_bragg_phase_calibration(calibration_id, req.updates)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.post("/settings/interferometer-phase-calibrations/active")
+async def activate_interferometer_phase_calibration(req: InterferometerPhaseCalibrationActivateRequest):
+    try:
+        return {"active": manager.set_active_bragg_phase_calibration(req.calibration_id)}
     except ValueError as exc:
         raise HTTPException(400, str(exc))
 

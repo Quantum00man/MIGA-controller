@@ -464,6 +464,7 @@ class OptimizationManager:
         data_manager = DataManager()
         run_config = copy.deepcopy(config_payload)
         run_config['_system_settings_snapshot'] = copy.deepcopy(self.experiment_manager.settings)
+        run_config['_interferometer_phase_calibration_snapshot'] = self.experiment_manager.get_active_bragg_phase_calibration()
         run_config['_optimization_mode'] = True
         run_config['sequence_name'] = str(config_payload.get('sequence_name') or '').strip()
         stop_reason = 'max_trials_reached'

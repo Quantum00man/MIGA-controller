@@ -648,6 +648,14 @@ class BraggPhaseCalibrationSaveRequest(BaseModel):
     source: Dict[str, Any] = Field(default_factory=dict)
 
 
+class InterferometerPhaseCalibrationUpdateRequest(BaseModel):
+    updates: Dict[str, Any] = Field(default_factory=dict)
+
+
+class InterferometerPhaseCalibrationActivateRequest(BaseModel):
+    calibration_id: str = Field("")
+
+
 class ScanFitModelSaveRequest(BaseModel):
     name: str
     model: FitModelDefinition
