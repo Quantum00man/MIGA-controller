@@ -3080,15 +3080,6 @@
                     }
                     this.refreshBraggPhaseSpace();
                 },
-                buildBraggCalibrationReferenceTrace(calibration) {
-                    return {
-                        x: calibration?.fit_x || [], y: calibration?.fit_y || [], type: 'scatter', mode: 'lines',
-                        name: `Reference: ${calibration?.name || 'saved fringe'}`,
-                        line: { color: '#fd7e14', width: 3, dash: 'longdash' },
-                        hovertemplate: `P0=%{x:.8g} (μs)²<br>Reference fit=%{y:.6g}<extra>${calibration?.name || 'Saved calibration'}</extra>`,
-                        meta: { nonSelectable: true }
-                    };
-                },
                 getBraggPhaseShotField() {
                     const channel = this.scanFit.channel === 'dw' ? 'dw' : 'up';
                     const noFit = this.showRawData ? '_nofit' : '';
@@ -3467,9 +3458,7 @@
                 clearScanFit() {
                     this.scanFit.active = false;
                     this.scanFitResult = null;
-                    if (this.braggPhase.selectedCalibrationId === 'current' && this.braggPhase.calibrations.length) {
-                        this.braggPhase.selectedCalibrationId = this.braggPhase.calibrations[0].id;
-                    }
+                    this.braggPhase.selectedCalibrationId = 'current';
                     this.braggPhase.result = null;
                     this.braggPhase.error = '';
                     this.scanFitError = '';
@@ -4211,11 +4200,7 @@
                         this.braggPhase.calibrations = Array.isArray(response.data) ? response.data : [];
                         if (this.braggPhase.selectedCalibrationId !== 'current'
                             && !this.braggPhase.calibrations.some(item => item.id === this.braggPhase.selectedCalibrationId)) {
-                            this.braggPhase.selectedCalibrationId = this.braggPhase.calibrations[0]?.id || 'current';
-                        }
-                        if (this.loadedPoints.length && this.braggPhase.selectedCalibrationId === 'current'
-                            && this.scanFitResult?.model_key !== 'bragg_fringes' && this.braggPhase.calibrations.length) {
-                            this.braggPhase.selectedCalibrationId = this.braggPhase.calibrations[0].id;
+                            this.braggPhase.selectedCalibrationId = 'current';
                         }
                     } catch (error) {
                         console.error(error);
@@ -4344,9 +4329,6 @@
                     this.clearAllanCache();
                     this.errorMsg = '';
                     this.resetScanFitSession({ clearRange: true });
-                    if (this.braggPhase.selectedCalibrationId === 'current' && this.braggPhase.calibrations.length) {
-                        this.braggPhase.selectedCalibrationId = this.braggPhase.calibrations[0].id;
-                    }
 
                     // 重置波形图
                     Plotly.react('waveformPlotUp', [], this.layoutOscUp);
@@ -5547,13 +5529,6 @@
                         tracesDw.push(this.buildScanFitTrace(scanFitOverlay, '#0f766e'));
                         tracesDw.push(...this.buildBraggMidFringeTraces(scanFitOverlay, '#0f766e'));
                         layoutDw = this.applyScanFitLayout(layoutDw, scanFitOverlay, '#0f766e');
-                    }
-                    const savedBraggReference = this.showScanFitCurve ? this.getSelectedSavedBraggCalibration() : null;
-                    if (savedBraggReference) {
-                        const referenceTrace = this.buildBraggCalibrationReferenceTrace(savedBraggReference);
-                        const boundaryTraces = this.buildBraggMidFringeTraces(savedBraggReference, '#fd7e14');
-                        if ((this.scanFit.channel === 'dw' ? 'dw' : 'up') === 'dw') tracesDw.push(referenceTrace, ...boundaryTraces);
-                        else tracesUp.push(referenceTrace, ...boundaryTraces);
                     }
                     const optimizationUp = this.getOptimizationFitOverlay("up");
                     const optimizationDw = this.getOptimizationFitOverlay("dw");

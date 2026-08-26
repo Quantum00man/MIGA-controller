@@ -1,5 +1,6 @@
 import asyncio
 import math
+from pathlib import Path
 import unittest
 
 import numpy as np
@@ -10,6 +11,12 @@ from app.models.schemas import ArchiveScanFitRequest, FitModelDefinition
 
 
 class ArchiveScanFittingTests(unittest.TestCase):
+    def test_saved_phase_calibration_is_not_overlaid_on_regular_archive_plot(self):
+        archive_html = (Path(__file__).resolve().parents[1] / "static" / "archive.html").read_text(encoding="utf-8")
+        self.assertNotIn("buildBraggCalibrationReferenceTrace", archive_html)
+        self.assertNotIn("const savedBraggReference = this.showScanFitCurve", archive_html)
+        self.assertIn("const scanFitOverlay = this.getCurrentScanFitOverlay()", archive_html)
+
     def test_default_scan_models_include_bragg_fringe_fit(self):
         models = fitting.get_default_scan_fit_models()
         bragg = next(model for model in models if model["key"] == "bragg_fringes")
