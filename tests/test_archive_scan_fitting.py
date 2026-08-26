@@ -17,6 +17,12 @@ class ArchiveScanFittingTests(unittest.TestCase):
         self.assertNotIn("const savedBraggReference = this.showScanFitCurve", archive_html)
         self.assertIn("const scanFitOverlay = this.getCurrentScanFitOverlay()", archive_html)
 
+    def test_bragg_acceleration_and_angle_display_nine_decimal_places(self):
+        archive_html = (Path(__file__).resolve().parents[1] / "static" / "archive.html").read_text(encoding="utf-8")
+        self.assertIn("formatBraggPrecision(scanFitResult.parameter_values?.a)", archive_html)
+        self.assertIn("formatBraggPrecision(scanFitResult.parameter_values?.alpha)", archive_html)
+        self.assertIn("numeric.toFixed(9)", archive_html)
+
     def test_default_scan_models_include_bragg_fringe_fit(self):
         models = fitting.get_default_scan_fit_models()
         bragg = next(model for model in models if model["key"] == "bragg_fringes")

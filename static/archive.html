@@ -1240,15 +1240,15 @@
                             <div v-if="scanFitResult.model_key === 'bragg_fringes'" class="scan-fit-param-grid">
                                 <div class="scan-fit-param-row">
                                     <span>a</span>
-                                    <strong>{{ formatMetricValue(scanFitResult.parameter_values?.a) }} m/s²</strong>
+                                    <strong>{{ formatBraggPrecision(scanFitResult.parameter_values?.a) }} m/s²</strong>
                                 </div>
                                 <div class="scan-fit-param-row">
                                     <span>a</span>
-                                    <strong>{{ formatMetricValue(Number(scanFitResult.parameter_values?.a) * 1e8) }} μGal</strong>
+                                    <strong>{{ formatBraggPrecision(Number(scanFitResult.parameter_values?.a) * 1e8) }} μGal</strong>
                                 </div>
                                 <div class="scan-fit-param-row">
                                     <span>α</span>
-                                    <strong>{{ formatMetricValue(scanFitResult.parameter_values?.alpha) }} mrad</strong>
+                                    <strong>{{ formatBraggPrecision(scanFitResult.parameter_values?.alpha) }} mrad</strong>
                                 </div>
                                 <div class="scan-fit-param-row">
                                     <span>φ₀</span>
@@ -4777,6 +4777,10 @@
                     const abs = Math.abs(numeric);
                     if ((abs > 0 && abs < 0.001) || abs >= 10000) return numeric.toExponential(3);
                     return numeric.toPrecision(4);
+                },
+                formatBraggPrecision(value) {
+                    const numeric = Number(value);
+                    return Number.isFinite(numeric) ? numeric.toFixed(9) : 'n/a';
                 },
                 archivePhaseCalibrationProvenanceLabel() {
                     if (this.archivePhaseCalibrationProvenance === 'run_snapshot') return 'run calibration snapshot';
