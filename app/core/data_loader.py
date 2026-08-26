@@ -644,11 +644,12 @@ class DataLoader:
         has_phase_snapshot = "_interferometer_phase_calibration_snapshot" in config_data
         snapshot_calibration = config_data.get("_interferometer_phase_calibration_snapshot")
         phase_calibration = snapshot_calibration if has_phase_snapshot else current_phase_calibration
-        phase_provenance = "run_snapshot" if isinstance(snapshot_calibration, dict) else (
+        legacy_snapshot_conversion = isinstance(snapshot_calibration, dict) and snapshot_calibration.get("phase_conversion_mode") != "monotonic_half_fringe"
+        phase_provenance = ("run_snapshot_migrated_monotonic" if legacy_snapshot_conversion else "run_snapshot") if isinstance(snapshot_calibration, dict) else (
             "current_calibration_legacy_run" if not has_phase_snapshot and isinstance(current_phase_calibration, dict) else "unavailable"
         )
         has_saved_phase = any(str(point.get("interferometer_phase_calibration_id") or "") for point in full_points)
-        if isinstance(phase_calibration, dict) and (not has_phase_snapshot or not has_saved_phase):
+        if isinstance(phase_calibration, dict) and (not has_phase_snapshot or not has_saved_phase or legacy_snapshot_conversion):
             full_points = [interferometer_phase.apply_phase(point, phase_calibration) for point in full_points]
         marker_optimization = self._build_marker_optimization_archive(run_dir, full_points)
         is_marker_optimization = bool(marker_optimization.get("steps")) or (
@@ -940,7 +941,8 @@ class DataLoader:
         elif not has_phase_snapshot:
             phase_calibration = current_phase_calibration
         has_saved_phase = any(str(point.get("interferometer_phase_calibration_id") or "") for point in all_points)
-        if isinstance(phase_calibration, dict) and (normalized_mode == "recalculated" or not has_phase_snapshot or not has_saved_phase):
+        legacy_snapshot_conversion = isinstance(phase_calibration, dict) and phase_calibration.get("phase_conversion_mode") != "monotonic_half_fringe"
+        if isinstance(phase_calibration, dict) and (normalized_mode == "recalculated" or not has_phase_snapshot or not has_saved_phase or legacy_snapshot_conversion):
             all_points = [interferometer_phase.apply_phase(point, phase_calibration) for point in all_points]
         filtered_points, available_p0_min, available_p0_max, selected_p0_min, selected_p0_max = self._filter_allan_points_by_p0_range(
             all_points,

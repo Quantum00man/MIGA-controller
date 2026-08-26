@@ -760,6 +760,10 @@ class ExperimentManager:
             reference_value = reference_t2
         if not math.isfinite(reference_value) or reference_value < 0:
             reference_value = reference_t2
+        monotonic_direction = str(source.get('monotonic_slope') or '').strip().lower()
+        if monotonic_direction not in {'negative', 'positive'}:
+            derivative = -numeric['A'] * numeric['omega'] * math.sin(numeric['omega'] * reference_t2 + numeric['phi0'])
+            monotonic_direction = 'positive' if derivative > 0 else 'negative'
         return {
             'id': str(source.get('id') or f"bragg_{time.time_ns()}"),
             'name': str(source.get('name') or '').strip(),
@@ -788,6 +792,8 @@ class ExperimentManager:
             'reference_t_unit': 'ms' if str(source.get('reference_t_unit') or '').lower() == 'ms' else 'us',
             'reference_value': reference_value,
             'reference_t2_us2': reference_t2,
+            'monotonic_slope': monotonic_direction,
+            'phase_conversion_mode': 'monotonic_half_fringe',
         }
 
     def get_bragg_phase_calibrations(self) -> List[Dict[str, Any]]:

@@ -192,6 +192,8 @@ class BraggPhaseSpaceTests(unittest.TestCase):
                 self.assertEqual(loaded[0]["id"], saved["id"])
                 self.assertEqual(loaded[0]["source"]["run_id"], "run12")
                 self.assertEqual(loaded[0]["bragg"]["mid_fringe_x"], [1.5, 2.5])
+                self.assertEqual(loaded[0]["monotonic_slope"], "negative")
+                self.assertEqual(loaded[0]["phase_conversion_mode"], "monotonic_half_fringe")
                 self.assertTrue(manager.delete_bragg_phase_calibration(saved["id"]))
                 self.assertEqual(manager.get_bragg_phase_calibrations(), [])
                 self.assertEqual(json.loads(target.read_text())["bragg_phase_calibrations"], [])

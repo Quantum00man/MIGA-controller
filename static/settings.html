@@ -480,9 +480,14 @@
                                     <div class="col-5"><label class="form-label small text-muted fw-bold">Value</label><input type="number" min="0" step="any" class="form-control" v-model.number="phaseDraft.reference_value" @change="updatePhaseReferenceT2"></div>
                                     <div class="col-3"><label class="form-label small text-muted fw-bold">Unit</label><select class="form-select" v-model="phaseDraft.reference_t_unit" @change="syncPhaseReferenceFromT2"><option value="us">μs</option><option value="ms">ms</option></select></div>
                                 </div>
-                                <div class="form-text mb-3">Resolved T²: {{ formatPhaseNumber(phaseDraft.reference_t2_us2) }} (μs)². Δφ is wrapped to (-π, π].</div>
+                                <label class="form-label small text-muted fw-bold">Monotonic fringe side</label>
+                                <select class="form-select mb-2" v-model="phaseDraft.monotonic_slope" @change="renderPhaseCalibrationPlot">
+                                    <option value="negative">Negative slope (acos branch)</option>
+                                    <option value="positive">Positive slope (mirrored acos branch)</option>
+                                </select>
+                                <div class="form-text mb-3">Resolved T²: {{ formatPhaseNumber(phaseDraft.reference_t2_us2) }} (μs)². Only this monotonic π-wide branch is analyzed; Δφ is not wrapped. Valid Δφ: {{ phaseDeviationRangeText() }}.</div>
                                 <label class="form-label small text-muted fw-bold">Mid fringe reference</label>
-                                <select class="form-select mb-3" :value="phaseDraft.reference_t2_us2" @change="choosePhaseMidFringe($event.target.value)"><option v-for="(value, index) in phaseMidFringes" :key="index" :value="value">#{{ index + 1 }}: {{ formatPhaseNumber(value) }} (μs)²</option></select>
+                                <select class="form-select mb-3" :value="phaseDraft.reference_t2_us2" @change="choosePhaseMidFringe($event.target.value)"><option v-for="(value, index) in phaseMidFringes" :key="index" :value="value">#{{ index + 1 }}: {{ formatPhaseNumber(value) }} (μs)² · {{ phaseSlopeLabel(phaseSlopeAtT2(value)) }}</option></select>
                                 <button class="btn btn-success w-100" @click="savePhaseCalibration" :disabled="phaseBusy"><span v-if="phaseBusy" class="spinner-border spinner-border-sm me-1"></span>Save calibration</button>
                             </div></div></div>
                             <div class="col-xl-8"><div class="card border shadow-sm h-100"><div class="card-body">
@@ -2023,11 +2028,12 @@
                     this.syncPhaseReferenceFromT2();
                     this.$nextTick(() => this.renderPhaseCalibrationPlot());
                 },
-                updatePhaseReferenceT2() {
+                updatePhaseReferenceT2(inferSlope = true) {
                     const value = Number(this.phaseDraft.reference_value);
                     const scale = this.phaseDraft.reference_t_unit === 'ms' ? 1000 : 1;
                     this.phaseDraft.reference_t2_us2 = this.phaseDraft.reference_input_mode === 't'
                         ? Math.pow(value * scale, 2) : value * Math.pow(scale, 2);
+                    if (inferSlope) this.phaseDraft.monotonic_slope = this.phaseSlopeAtT2(this.phaseDraft.reference_t2_us2);
                     this.$nextTick(() => this.renderPhaseCalibrationPlot());
                 },
                 syncPhaseReferenceFromT2() {
@@ -2041,13 +2047,56 @@
                     const numeric = Number(value);
                     if (!Number.isFinite(numeric)) return;
                     this.phaseDraft.reference_t2_us2 = numeric;
+                    this.phaseDraft.monotonic_slope = this.phaseSlopeAtT2(numeric);
                     this.syncPhaseReferenceFromT2();
+                },
+                phaseSlopeAtT2(value) {
+                    const amplitude = Number(this.phaseDraft?.parameter_values?.A);
+                    const omega = Number(this.phaseDraft?.bragg?.angular_frequency_rad_per_us2);
+                    const phi0 = Number(this.phaseDraft?.parameter_values?.phi0);
+                    const t2 = Number(value);
+                    if (![amplitude, omega, phi0, t2].every(Number.isFinite)) return 'negative';
+                    return -amplitude * omega * Math.sin(omega * t2 + phi0) > 0 ? 'positive' : 'negative';
+                },
+                phaseSlopeLabel(direction) {
+                    return direction === 'positive' ? 'positive slope' : 'negative slope';
+                },
+                phaseDeviationLimits() {
+                    const omega = Number(this.phaseDraft?.bragg?.angular_frequency_rad_per_us2);
+                    const phi0 = Number(this.phaseDraft?.parameter_values?.phi0);
+                    const t2 = Number(this.phaseDraft?.reference_t2_us2);
+                    if (![omega, phi0, t2].every(Number.isFinite) || omega <= 0) return null;
+                    const alpha = Math.acos(Math.cos(omega * t2 + phi0));
+                    return this.phaseDraft.monotonic_slope === 'positive'
+                        ? [-Math.PI + alpha, alpha]
+                        : [-alpha, Math.PI - alpha];
+                },
+                phaseDeviationRangeText() {
+                    const limits = this.phaseDeviationLimits();
+                    return limits ? `[${limits[0].toFixed(5)}, ${limits[1].toFixed(5)}] rad` : 'n/a';
+                },
+                phaseBranchT2Range() {
+                    const omega = Number(this.phaseDraft?.bragg?.angular_frequency_rad_per_us2);
+                    const phi0 = Number(this.phaseDraft?.parameter_values?.phi0);
+                    const reference = Number(this.phaseDraft?.reference_t2_us2);
+                    if (![omega, phi0, reference].every(Number.isFinite) || omega <= 0) return null;
+                    const referencePhase = omega * reference + phi0;
+                    const baseMid = this.phaseDraft.monotonic_slope === 'positive' ? -Math.PI / 2 : Math.PI / 2;
+                    const branchMid = baseMid + 2 * Math.PI * Math.round((referencePhase - baseMid) / (2 * Math.PI));
+                    const endpoints = [(branchMid - Math.PI / 2 - phi0) / omega, (branchMid + Math.PI / 2 - phi0) / omega].sort((a, b) => a - b);
+                    const fitMin = Number(this.phaseDraft.fit_min);
+                    const fitMax = Number(this.phaseDraft.fit_max);
+                    if ([fitMin, fitMax].every(Number.isFinite)) {
+                        const clipped = [Math.max(endpoints[0], Math.min(fitMin, fitMax)), Math.min(endpoints[1], Math.max(fitMin, fitMax))];
+                        return clipped[0] <= clipped[1] ? clipped : null;
+                    }
+                    return endpoints;
                 },
                 async savePhaseCalibration() {
                     if (!this.selectedPhaseCalibrationId) return;
                     this.phaseBusy = true; this.phaseMessage = ''; this.phaseError = false;
                     try {
-                        this.updatePhaseReferenceT2();
+                        this.updatePhaseReferenceT2(false);
                         const response = await axios.patch(`/settings/interferometer-phase-calibrations/${encodeURIComponent(this.selectedPhaseCalibrationId)}`, { updates: this.phaseDraft });
                         const index = this.phaseCalibrations.findIndex(item => item.id === response.data.id);
                         if (index >= 0) this.phaseCalibrations[index] = response.data;
@@ -2084,12 +2133,17 @@
                     const mid = this.phaseMidFringes;
                     const offset = Number(this.phaseDraft.parameter_values?.C);
                     const reference = Number(this.phaseDraft.reference_t2_us2);
+                    const negativeMid = mid.filter(value => this.phaseSlopeAtT2(value) === 'negative');
+                    const positiveMid = mid.filter(value => this.phaseSlopeAtT2(value) === 'positive');
+                    const branchRange = this.phaseBranchT2Range();
                     const traces = [
                         { x: this.phaseDraft.fit_x, y: this.phaseDraft.fit_y, mode: 'lines', name: 'Fitted fringe', line: { color: '#0d6efd', width: 2.5 } },
-                        { x: mid, y: mid.map(() => offset), mode: 'markers', name: 'Mid fringes', customdata: mid, marker: { color: '#dc3545', size: 10, symbol: 'diamond' }, hovertemplate: 'T²=%{x:.8g} (μs)²<extra>Click to select</extra>' },
+                        { x: negativeMid, y: negativeMid.map(() => offset), mode: 'markers', name: 'Negative-slope mid fringes', customdata: negativeMid, marker: { color: '#dc3545', size: 10, symbol: 'triangle-down' }, hovertemplate: 'T²=%{x:.8g} (μs)²<br>Negative slope<extra>Click to select</extra>' },
+                        { x: positiveMid, y: positiveMid.map(() => offset), mode: 'markers', name: 'Positive-slope mid fringes', customdata: positiveMid, marker: { color: '#fd7e14', size: 10, symbol: 'triangle-up' }, hovertemplate: 'T²=%{x:.8g} (μs)²<br>Positive slope<extra>Click to select</extra>' },
                         { x: [reference], y: [offset], mode: 'markers', name: 'Reference', marker: { color: '#198754', size: 15, symbol: 'circle-open', line: { width: 3 } }, hovertemplate: 'Reference T²=%{x:.8g} (μs)²<extra></extra>' }
                     ];
-                    Plotly.react(target, traces, { margin: { t: 25, r: 20, b: 55, l: 65 }, xaxis: { title: 'T² ((μs)²)', gridcolor: '#e5e9ef' }, yaxis: { title: this.phaseDraft.metric_label || 'Signal', gridcolor: '#e5e9ef' }, legend: { orientation: 'h', y: 1.12 }, hovermode: 'closest' }, { responsive: true, displaylogo: false });
+                    const shapes = branchRange ? [{ type: 'rect', xref: 'x', yref: 'paper', x0: branchRange[0], x1: branchRange[1], y0: 0, y1: 1, fillcolor: 'rgba(25,135,84,0.10)', line: { color: 'rgba(25,135,84,0.45)', dash: 'dot' }, layer: 'below' }] : [];
+                    Plotly.react(target, traces, { margin: { t: 25, r: 20, b: 55, l: 65 }, xaxis: { title: 'T² ((μs)²)', gridcolor: '#e5e9ef' }, yaxis: { title: this.phaseDraft.metric_label || 'Signal', gridcolor: '#e5e9ef' }, legend: { orientation: 'h', y: 1.12 }, hovermode: 'closest', shapes }, { responsive: true, displaylogo: false });
                     if (target.removeAllListeners) target.removeAllListeners('plotly_click');
                     target.on('plotly_click', event => {
                         const value = Number(event?.points?.[0]?.customdata);
