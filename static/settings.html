@@ -2133,6 +2133,12 @@
                     const mid = this.phaseMidFringes;
                     const offset = Number(this.phaseDraft.parameter_values?.C);
                     const reference = Number(this.phaseDraft.reference_t2_us2);
+                    const amplitude = Number(this.phaseDraft.parameter_values?.A);
+                    const omega = Number(this.phaseDraft.bragg?.angular_frequency_rad_per_us2);
+                    const phi0 = Number(this.phaseDraft.parameter_values?.phi0);
+                    const referenceSignal = [offset, amplitude, omega, phi0, reference].every(Number.isFinite)
+                        ? offset + amplitude * Math.cos(omega * reference + phi0)
+                        : offset;
                     const negativeMid = mid.filter(value => this.phaseSlopeAtT2(value) === 'negative');
                     const positiveMid = mid.filter(value => this.phaseSlopeAtT2(value) === 'positive');
                     const branchRange = this.phaseBranchT2Range();
@@ -2140,7 +2146,7 @@
                         { x: this.phaseDraft.fit_x, y: this.phaseDraft.fit_y, mode: 'lines', name: 'Fitted fringe', line: { color: '#0d6efd', width: 2.5 } },
                         { x: negativeMid, y: negativeMid.map(() => offset), mode: 'markers', name: 'Negative-slope mid fringes', customdata: negativeMid, marker: { color: '#dc3545', size: 10, symbol: 'triangle-down' }, hovertemplate: 'T²=%{x:.8g} (μs)²<br>Negative slope<extra>Click to select</extra>' },
                         { x: positiveMid, y: positiveMid.map(() => offset), mode: 'markers', name: 'Positive-slope mid fringes', customdata: positiveMid, marker: { color: '#fd7e14', size: 10, symbol: 'triangle-up' }, hovertemplate: 'T²=%{x:.8g} (μs)²<br>Positive slope<extra>Click to select</extra>' },
-                        { x: [reference], y: [offset], mode: 'markers', name: 'Reference', marker: { color: '#198754', size: 15, symbol: 'circle-open', line: { width: 3 } }, hovertemplate: 'Reference T²=%{x:.8g} (μs)²<extra></extra>' }
+                        { x: [reference], y: [referenceSignal], mode: 'markers', name: 'Reference', marker: { color: '#198754', size: 15, symbol: 'circle-open', line: { width: 3 } }, hovertemplate: 'Reference T²=%{x:.8g} (μs)²<br>Signal=%{y:.6g}<extra></extra>' }
                     ];
                     const shapes = branchRange ? [{ type: 'rect', xref: 'x', yref: 'paper', x0: branchRange[0], x1: branchRange[1], y0: 0, y1: 1, fillcolor: 'rgba(25,135,84,0.10)', line: { color: 'rgba(25,135,84,0.45)', dash: 'dot' }, layer: 'below' }] : [];
                     Plotly.react(target, traces, { margin: { t: 25, r: 20, b: 55, l: 65 }, xaxis: { title: 'T² ((μs)²)', gridcolor: '#e5e9ef' }, yaxis: { title: this.phaseDraft.metric_label || 'Signal', gridcolor: '#e5e9ef' }, legend: { orientation: 'h', y: 1.12 }, hovermode: 'closest', shapes }, { responsive: true, displaylogo: false });

@@ -119,6 +119,11 @@ class InterferometerPhaseTests(unittest.TestCase):
         self.assertEqual(payload["interferometer_phase_calibration_provenance"], "run_snapshot_migrated_monotonic")
         self.assertAlmostEqual(payload["data"][0]["interferometer_phase"], expected_delta, places=10)
 
+    def test_settings_reference_marker_uses_fitted_signal_not_offset(self):
+        settings_html = (Path(__file__).resolve().parents[1] / "static" / "settings.html").read_text(encoding="utf-8")
+        self.assertIn("offset + amplitude * Math.cos(omega * reference + phi0)", settings_html)
+        self.assertIn("y: [referenceSignal]", settings_html)
+
 
 if __name__ == "__main__":
     unittest.main()
