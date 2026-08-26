@@ -257,7 +257,8 @@ class SyncManagerTests(unittest.TestCase):
 
             sync._capture_local_result({
                 "stream_type": "scan_point", "sync_run_id": "sync_test", "sync_role": "master",
-                "sync_node_id": "Node A", "sync_shot_index": 0, "sync_p0": 4, "intf_p1": 0.5,
+                "sync_node_id": "Node A", "sync_shot_index": 0, "sync_p0": 4,
+                "sync_parameters": [4, 12], "intf_p1": 0.5,
                 "sigma_up": 1.1, "interferometer_phase": 0.08,
                 "interferometer_phase_valid": True,
                 "interferometer_phase_calibration_id": "master-cal",
@@ -277,11 +278,14 @@ class SyncManagerTests(unittest.TestCase):
             self.assertEqual(pairs[0]["master"]["interferometer_phase_calibration_id"], "master-cal")
             self.assertEqual(pairs[0]["slave"]["interferometer_phase"], -0.12)
             self.assertEqual(pairs[0]["slave"]["interferometer_phase_calibration_id"], "slave-cal")
+            self.assertEqual(pairs[0]["sync_parameters"], [4, 12])
+            self.assertEqual(pairs[0]["master"]["sync_parameters"], [4, 12])
             manifest = json.loads((Path(tmp) / "sync_manifest.json").read_text(encoding="utf-8"))
             self.assertEqual(manifest["node_results"]["master"][0]["sigma_up"], 1.1)
             self.assertEqual(manifest["node_results"]["slaves"]["slave_b"][0]["sigma_up"], 1.2)
             self.assertEqual(manifest["node_results"]["master"][0]["interferometer_phase_calibration_name"], "Master fringe")
             self.assertEqual(manifest["node_results"]["slaves"]["slave_b"][0]["interferometer_phase_calibration_name"], "Slave fringe")
+            self.assertEqual(manifest["pairs"][0]["sync_parameters"], [4, 12])
 
     def test_shared_token_and_allowed_master_ip_are_enforced(self):
         with tempfile.TemporaryDirectory() as tmp:

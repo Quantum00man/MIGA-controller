@@ -643,6 +643,9 @@ class SyncManager:
             "sync_role": payload.get("sync_role"),
             "sync_shot_index": payload.get("sync_shot_index"),
             "sync_p0": payload.get("sync_p0"),
+            "sync_parameters": payload.get("sync_parameters"),
+            "sync_master_parameters": payload.get("sync_master_parameters"),
+            "all_parameters": payload.get("all_parameters"),
             "timestamp": payload.get("timestamp"),
             "error": payload.get("error"),
         })
@@ -665,6 +668,9 @@ class SyncManager:
                         "sync_run_id": self._runtime.get("sync_run_id"),
                         "sync_shot_index": shot_index,
                         "sync_p0": master_payload.get("sync_p0"),
+                        "sync_parameters": master_payload.get("sync_parameters")
+                            or master_payload.get("all_parameters")
+                            or [master_payload.get("sync_p0")],
                         "slave_node_id": slave_id,
                         "master": self._compact_result(master_payload),
                         "slave": self._compact_result(slave_payload),
@@ -920,6 +926,9 @@ class SyncManager:
                 pairs.append({
                     "sync_shot_index": shot_index,
                     "sync_p0": master.get("sync_p0"),
+                    "sync_parameters": master.get("sync_parameters")
+                        or master.get("all_parameters")
+                        or [master.get("sync_p0")],
                     "slave_node_id": slave_id,
                     "master": self._compact_result(master),
                     "slave": self._compact_result(slave),

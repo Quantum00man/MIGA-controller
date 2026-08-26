@@ -1509,11 +1509,15 @@
                                 <select v-if="syncArchiveAxisY.metric !== 'phase'" class="form-select form-select-sm" v-model="syncArchiveAxisY.channel" @change="resetSyncArchiveAxisRange"><option value="up">UP</option><option value="dw">DOWN</option></select>
                             </div>
                             <div class="col-12 d-flex flex-wrap align-items-center gap-2">
+                                <select class="form-select form-select-sm" style="width:auto" v-model="syncArchiveDifferentialAggregation" @change="resetSyncArchiveReplay" aria-label="Archived differential aggregation">
+                                    <option value="shots">Every shot</option>
+                                    <option value="average">Averaged</option>
+                                </select>
                                 <button class="btn btn-outline-secondary btn-sm" @click="toggleSyncArchiveReplay">{{ syncArchiveReplayPlaying ? 'Pause' : 'Play' }}</button>
                                 <button class="btn btn-outline-secondary btn-sm" @click="restartSyncArchiveReplay">Restart</button>
                                 <select class="form-select form-select-sm" style="width:auto" v-model.number="syncArchiveReplaySpeed"><option :value="0.5">0.5×</option><option :value="1">1×</option><option :value="2">2×</option><option :value="5">5×</option></select>
-                                <input type="range" class="form-range flex-grow-1" style="min-width:180px" min="0" :max="syncArchivePairs().length" v-model.number="syncArchiveReplayCount" @input="renderSyncArchivePlot">
-                                <span class="small text-muted">{{ syncArchiveReplayCount }}/{{ syncArchivePairs().length }} paired shots</span>
+                                <input type="range" class="form-range flex-grow-1" style="min-width:180px" min="0" :max="syncArchiveDifferentialPoints().length" v-model.number="syncArchiveReplayCount" @input="renderSyncArchivePlot">
+                                <span class="small text-muted">{{ syncArchiveReplayCount }}/{{ syncArchiveDifferentialPoints().length }} {{ syncArchiveDifferentialAggregation === 'average' ? 'averaged scan points' : 'paired shots' }}</span>
                             </div>
                             <div class="col-12">
                                 <div class="sync-axis-range-panel">
@@ -1959,6 +1963,7 @@
                     syncArchiveSlaveId: '',
                     syncArchiveAxisX: { metric: 'intf_p', channel: 'up' },
                     syncArchiveAxisY: { metric: 'intf_p', channel: 'up' },
+                    syncArchiveDifferentialAggregation: 'shots',
                     syncArchiveAxisRange: { xMin: '', xMax: '', yMin: '', yMax: '', contextKey: '' },
                     syncArchiveAxisRangeError: '',
                     syncArchiveMetricOptions: [
@@ -4358,7 +4363,7 @@
                         this.loadedSyncNode = String(res.data.selected_sync_node || requestedSyncNode || localArchiveNode || '');
                         this.syncArchiveNodeSource = this.loadedSyncNode || 'master';
                         this.syncArchiveSlaveId = this.syncArchiveSlaveOptions()[0] || '';
-                        this.syncArchiveReplayCount = this.syncArchivePairs().length;
+                        this.syncArchiveReplayCount = this.syncArchiveDifferentialPoints().length;
                         this.selectedOptimizationStep = this.markerOptimization?.steps?.length
                             ? Number(this.markerOptimization.steps[0].index) : null;
                         if (this.isAcStarkArchive() && !["atoms", "prob"].includes(this.currentTab)) this.currentTab = "atoms";
@@ -4946,7 +4951,7 @@
                 },
                 resetSyncArchiveReplay() {
                     if (this.syncArchiveReplayPlaying) this.toggleSyncArchiveReplay();
-                    this.syncArchiveReplayCount = this.syncArchivePairs().length;
+                    this.syncArchiveReplayCount = this.syncArchiveDifferentialPoints().length;
                     this.resetSyncArchiveAxisRange();
                 },
                 syncArchiveMetricField(axis) {
@@ -4962,6 +4967,7 @@
                         this.syncArchiveMetricField(this.syncArchiveAxisX),
                         this.syncArchiveMetricField(this.syncArchiveAxisY),
                         this.phaseUnit,
+                        this.syncArchiveDifferentialAggregation,
                     ].join('|');
                 },
                 syncArchiveAxisValue(record, axis) {
@@ -4975,17 +4981,45 @@
                     if (axis.metric === 'phase') return `${source} | Interferometer Δφ (${this.phaseUnit})`;
                     return `${source} | ${axis.metric} | ${axis.channel.toUpperCase()}`;
                 },
+                syncArchiveAverageParameters(row) {
+                    const candidates = [
+                        row?.sync_parameters,
+                        row?.master?.sync_master_parameters,
+                        row?.slave?.sync_master_parameters,
+                        row?.master?.sync_parameters,
+                        row?.slave?.sync_parameters,
+                        row?.master?.all_parameters,
+                    ].filter(values => Array.isArray(values) && values.length);
+                    const selected = candidates.sort((left, right) => right.length - left.length)[0] || [row?.sync_p0];
+                    return selected.map(value => Number.isFinite(Number(value)) ? Number(value) : String(value));
+                },
                 syncArchiveDifferentialPoints(limit = null) {
-                    const allRows = this.syncArchivePairs();
-                    const rows = limit == null
-                        ? allRows
-                        : allRows.slice(0, Math.max(0, Number(limit) || 0));
-                    return rows.map(row => ({
+                    const raw = this.syncArchivePairs().map(row => ({
                         x: this.syncArchiveAxisValue(row.master, this.syncArchiveAxisX),
                         y: this.syncArchiveAxisValue(row.slave, this.syncArchiveAxisY),
                         shot: Number(row.sync_shot_index) + 1,
                         p0: row.sync_p0,
+                        params: this.syncArchiveAverageParameters(row),
+                        count: 1,
                     })).filter(point => point.x !== null && point.y !== null);
+                    let points = raw;
+                    if (this.syncArchiveDifferentialAggregation === 'average') {
+                        const groups = new Map();
+                        raw.forEach(point => {
+                            const key = JSON.stringify(point.params.map(value => Number.isFinite(Number(value)) ? Number(value).toPrecision(12) : String(value)));
+                            const group = groups.get(key) || { ...point, sumX: 0, sumY: 0, count: 0 };
+                            group.sumX += point.x;
+                            group.sumY += point.y;
+                            group.count += 1;
+                            groups.set(key, group);
+                        });
+                        points = [...groups.values()].sort((a, b) => a.shot - b.shot).map(group => ({
+                            ...group,
+                            x: group.sumX / group.count,
+                            y: group.sumY / group.count,
+                        }));
+                    }
+                    return limit == null ? points : points.slice(0, Math.max(0, Number(limit) || 0));
                 },
                 paddedSyncArchiveRange(values) {
                     const finite = (Array.isArray(values) ? values : []).map(Number).filter(Number.isFinite);
@@ -5071,11 +5105,14 @@
                     const points = this.syncArchiveDifferentialPoints(this.syncArchiveReplayCount);
                     const fixedRanges = this.ensureSyncArchiveAxisRange();
                     Plotly.react(element, [{
-                        x: points.map(p => p.x), y: points.map(p => p.y), text: points.map(p => `Shot ${p.shot}<br>P0=${p.p0}`),
+                        x: points.map(p => p.x), y: points.map(p => p.y), text: points.map(p => this.syncArchiveDifferentialAggregation === 'average'
+                            ? `Parameters=${p.params.join(', ')}<br>Average of ${p.count} shots`
+                            : `Shot ${p.shot}<br>P0=${p.p0}`),
                         type: 'scatter', mode: 'lines+markers', line: { color: 'rgba(13,110,253,.35)', width: 1.5 },
-                        marker: { size: 8, color: points.map(p => p.shot), colorscale: 'Viridis', showscale: true, colorbar: { title: 'Shot' } }
+                        marker: { size: 8, color: points.map((p, index) => this.syncArchiveDifferentialAggregation === 'average' ? index + 1 : p.shot), colorscale: 'Viridis', showscale: true, colorbar: { title: this.syncArchiveDifferentialAggregation === 'average' ? 'Group' : 'Shot' } },
+                        name: this.syncArchiveDifferentialAggregation === 'average' ? 'Averaged scan points' : 'Paired shots'
                     }], {
-                        margin: { l: 75, r: 70, t: 45, b: 70 }, title: 'Saved differential Lissajous',
+                        margin: { l: 75, r: 70, t: 45, b: 70 }, title: this.syncArchiveDifferentialAggregation === 'average' ? 'Saved differential Lissajous · Averaged by scan point' : 'Saved differential Lissajous · Every shot',
                         xaxis: {
                             title: this.syncArchiveAxisTitle('Master', this.syncArchiveAxisX),
                             range: fixedRanges?.xRange,
@@ -5098,10 +5135,10 @@
                         this.syncArchiveReplayTimer = null;
                         return;
                     }
-                    if (this.syncArchiveReplayCount >= this.syncArchivePairs().length) this.syncArchiveReplayCount = 0;
+                    if (this.syncArchiveReplayCount >= this.syncArchiveDifferentialPoints().length) this.syncArchiveReplayCount = 0;
                     const interval = Math.max(40, 500 / Math.max(0.1, Number(this.syncArchiveReplaySpeed) || 1));
                     this.syncArchiveReplayTimer = setInterval(() => {
-                        if (this.syncArchiveReplayCount >= this.syncArchivePairs().length) return this.toggleSyncArchiveReplay();
+                        if (this.syncArchiveReplayCount >= this.syncArchiveDifferentialPoints().length) return this.toggleSyncArchiveReplay();
                         this.syncArchiveReplayCount += 1;
                         this.renderSyncArchivePlot();
                     }, interval);

@@ -1407,11 +1407,15 @@
                             <select v-if="syncAxisY.metric !== 'phase'" class="form-select form-select-sm" v-model="syncAxisY.channel" @change="syncAxesChanged"><option value="up">UP</option><option value="dw">DOWN</option></select>
                         </div>
                         <div class="col-12 d-flex flex-wrap align-items-center gap-2">
+                            <select class="form-select form-select-sm" style="width:auto" v-model="syncDifferentialAggregation" @change="syncAggregationChanged" aria-label="Differential aggregation">
+                                <option value="shots">Every shot</option>
+                                <option value="average">Averaged</option>
+                            </select>
                             <button class="btn btn-outline-secondary btn-sm" @click="toggleSyncReplay">{{ syncReplayPlaying ? 'Pause' : 'Play' }}</button>
                             <button class="btn btn-outline-secondary btn-sm" @click="restartSyncReplay">Restart</button>
                             <select class="form-select form-select-sm" style="width:auto" v-model.number="syncReplaySpeed"><option :value="0.5">0.5×</option><option :value="1">1×</option><option :value="2">2×</option><option :value="5">5×</option></select>
-                            <input type="range" class="form-range flex-grow-1" style="min-width:180px" min="0" :max="syncLissajousRows().length" v-model.number="syncReplayCount" @input="renderSyncPlot">
-                            <span class="small text-muted">{{ syncReplayCount }}/{{ syncLissajousRows().length }} aligned shots</span>
+                            <input type="range" class="form-range flex-grow-1" style="min-width:180px" min="0" :max="syncDifferentialPoints().length" v-model.number="syncReplayCount" @input="renderSyncPlot">
+                            <span class="small text-muted">{{ syncReplayCount }}/{{ syncDifferentialPoints().length }} {{ syncDifferentialAggregation === 'average' ? 'averaged scan points' : 'aligned shots' }}</span>
                         </div>
                     </div>
                 </div>
@@ -1629,6 +1633,7 @@
                     syncDisplaySource: 'master',
                     syncAxisX: { source: 'master', metric: 'intf_p', channel: 'up' },
                     syncAxisY: { source: '', metric: 'intf_p', channel: 'up' },
+                    syncDifferentialAggregation: 'shots',
                     syncMetricOptions: [
                         { key: 'atom_number', label: 'Atom Number' },
                         { key: 'amplitude', label: 'Max Voltage' },
@@ -4539,7 +4544,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                         const total = Number(data.total_steps) || 1;
                         this.progressPercent = Math.round(100 * this.currentStep / total);
                     }
-                    if (!this.syncReplayPlaying) this.syncReplayCount = this.syncLissajousRows().length;
+                    if (!this.syncReplayPlaying) this.syncReplayCount = this.syncDifferentialPoints().length;
                     this.$nextTick(() => this.renderSyncPlot());
                     return source;
                 },
@@ -4548,7 +4553,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     const existing = this.syncPairs.findIndex(item => `${item.slave_node_id}:${item.sync_shot_index}` === key);
                     if (existing >= 0) this.syncPairs.splice(existing, 1, data); else this.syncPairs.push(data);
                     this.syncPairs.sort((a, b) => Number(a.sync_shot_index) - Number(b.sync_shot_index));
-                    if (!this.syncReplayPlaying) this.syncReplayCount = this.syncLissajousRows().length;
+                    if (!this.syncReplayPlaying) this.syncReplayCount = this.syncDifferentialPoints().length;
                     this.$nextTick(() => this.renderSyncPlot());
                 },
                 syncMetricField(metric, channel) {
@@ -4582,9 +4587,52 @@ finishScheduledRun(finalStatus = 'IDLE') {
                         && row.yRecord && !row.xRecord.error && !row.yRecord.error)
                         .sort((a, b) => a.shotIndex - b.shotIndex);
                 },
+                syncDifferentialParameters(row) {
+                    const candidates = [
+                        row?.xRecord?.sync_master_parameters,
+                        row?.yRecord?.sync_master_parameters,
+                        row?.xRecord?.sync_parameters,
+                        row?.yRecord?.sync_parameters,
+                        row?.xRecord?.all_parameters,
+                        row?.yRecord?.all_parameters,
+                    ].filter(values => Array.isArray(values) && values.length);
+                    const selected = candidates.sort((left, right) => right.length - left.length)[0]
+                        || [row?.xRecord?.sync_p0 ?? row?.yRecord?.sync_p0];
+                    return selected.map(value => Number.isFinite(Number(value)) ? Number(value) : String(value));
+                },
+                syncDifferentialPoints() {
+                    const raw = this.syncLissajousRows().map(row => ({
+                        x: this.syncAxisValue(row.xRecord, this.syncAxisX),
+                        y: this.syncAxisValue(row.yRecord, this.syncAxisY),
+                        shot: row.shotIndex + 1,
+                        p0: row.xRecord.sync_p0 ?? row.yRecord.sync_p0,
+                        params: this.syncDifferentialParameters(row),
+                        count: 1,
+                    })).filter(point => point.x !== null && point.y !== null);
+                    if (this.syncDifferentialAggregation !== 'average') return raw;
+                    const groups = new Map();
+                    raw.forEach(point => {
+                        const key = JSON.stringify(point.params.map(value => Number.isFinite(Number(value)) ? Number(value).toPrecision(12) : String(value)));
+                        const group = groups.get(key) || { ...point, sumX: 0, sumY: 0, count: 0 };
+                        group.sumX += point.x;
+                        group.sumY += point.y;
+                        group.count += 1;
+                        groups.set(key, group);
+                    });
+                    return [...groups.values()].sort((a, b) => a.shot - b.shot).map(group => ({
+                        ...group,
+                        x: group.sumX / group.count,
+                        y: group.sumY / group.count,
+                    }));
+                },
                 syncAxesChanged() {
                     if (this.syncReplayPlaying) this.toggleSyncReplay();
-                    this.syncReplayCount = this.syncLissajousRows().length;
+                    this.syncReplayCount = this.syncDifferentialPoints().length;
+                    this.renderSyncPlot();
+                },
+                syncAggregationChanged() {
+                    if (this.syncReplayPlaying) this.toggleSyncReplay();
+                    this.syncReplayCount = this.syncDifferentialPoints().length;
                     this.renderSyncPlot();
                 },
                 handleSyncViewModeChange() {
@@ -4618,23 +4666,18 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     }
                     const element = document.getElementById('syncPlot');
                     if (!element || typeof Plotly === 'undefined') return;
-                    const rows = this.syncLissajousRows().slice(0, Math.max(0, Number(this.syncReplayCount) || 0));
-                    const valid = rows.map(row => ({
-                        x: this.syncAxisValue(row.xRecord, this.syncAxisX),
-                        y: this.syncAxisValue(row.yRecord, this.syncAxisY),
-                        shot: row.shotIndex + 1,
-                        p0: row.xRecord.sync_p0 ?? row.yRecord.sync_p0,
-                    }))
-                        .filter(point => point.x !== null && point.y !== null);
+                    const valid = this.syncDifferentialPoints().slice(0, Math.max(0, Number(this.syncReplayCount) || 0));
                     Plotly.react(element, [{
                         x: valid.map(p => p.x), y: valid.map(p => p.y),
-                        text: valid.map(p => `Shot ${p.shot}<br>P0=${p.p0}`),
+                        text: valid.map(p => this.syncDifferentialAggregation === 'average'
+                            ? `Parameters=${p.params.join(', ')}<br>Average of ${p.count} shots`
+                            : `Shot ${p.shot}<br>P0=${p.p0}`),
                         type: 'scatter', mode: 'lines+markers',
                         line: { color: 'rgba(13,110,253,.35)', width: 1.5 },
-                        marker: { size: 8, color: valid.map(p => p.shot), colorscale: 'Viridis', showscale: true, colorbar: { title: 'Shot' } },
-                        name: 'Paired shots'
+                        marker: { size: 8, color: valid.map((p, index) => this.syncDifferentialAggregation === 'average' ? index + 1 : p.shot), colorscale: 'Viridis', showscale: true, colorbar: { title: this.syncDifferentialAggregation === 'average' ? 'Group' : 'Shot' } },
+                        name: this.syncDifferentialAggregation === 'average' ? 'Averaged scan points' : 'Paired shots'
                     }], {
-                        margin: { l: 75, r: 70, t: 45, b: 70 }, title: 'Differential Lissajous',
+                        margin: { l: 75, r: 70, t: 45, b: 70 }, title: this.syncDifferentialAggregation === 'average' ? 'Differential Lissajous · Averaged by scan point' : 'Differential Lissajous · Every shot',
                         xaxis: { title: this.syncAxisTitle(this.syncAxisX) },
                         yaxis: { title: this.syncAxisTitle(this.syncAxisY), scaleanchor: null },
                         hovermode: 'closest'
@@ -4647,11 +4690,11 @@ finishScheduledRun(finalStatus = 'IDLE') {
                         this.syncReplayTimer = null;
                         return;
                     }
-                    const total = this.syncLissajousRows().length;
+                    const total = this.syncDifferentialPoints().length;
                     if (this.syncReplayCount >= total) this.syncReplayCount = 0;
                     const interval = Math.max(40, 500 / Math.max(0.1, Number(this.syncReplaySpeed) || 1));
                     this.syncReplayTimer = setInterval(() => {
-                        if (this.syncReplayCount >= this.syncLissajousRows().length) {
+                        if (this.syncReplayCount >= this.syncDifferentialPoints().length) {
                             this.toggleSyncReplay();
                             return;
                         }
