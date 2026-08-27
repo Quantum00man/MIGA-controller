@@ -637,6 +637,7 @@ class ArchivePhaseReferenceOverrideRequest(BaseModel):
     day: str
     run_id: str
     node_id: Optional[str] = Field(None)
+    calibration_id: Optional[str] = Field(None)
     reference_input_mode: str = Field("t2")
     reference_value: float = Field(..., ge=0)
     reference_t_unit: str = Field("us")

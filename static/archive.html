@@ -1659,8 +1659,19 @@
                             <div class="col-xl-4">
                                 <div class="border rounded p-3 h-100">
                                     <h6 class="fw-bold mb-1">{{ archivePhaseReferenceNodeLabel() }}</h6>
+                                    <div class="alert alert-light border py-2 small mt-2 mb-3">
+                                        <strong>Currently applied fringe:</strong> {{ archivePhaseReferenceCalibration()?.name || 'unnamed' }}
+                                    </div>
+                                    <label class="form-label-small mt-2">Reference fringe</label>
+                                    <select class="form-select mb-2" v-model="archivePhaseReferenceSelectedCalibrationId" @change="selectArchivePhaseReferenceCalibration">
+                                        <option value="archive">Current archive fringe — {{ archivePhaseReferenceCalibration()?.name || 'unnamed' }}</option>
+                                        <option v-for="calibration in settingsPhaseCalibrations" :key="calibration.id" :value="`settings:${calibration.id}`">
+                                            Settings — {{ calibration.name }}{{ calibration.id === settingsActivePhaseCalibrationId ? ' (active)' : '' }}
+                                        </option>
+                                    </select>
                                     <div class="small text-muted mb-3">
-                                        {{ archivePhaseReferenceDraft.name || 'Saved fringe calibration' }}<br>
+                                        <strong>Preview fringe:</strong> {{ archivePhaseReferenceDraft.name || 'Saved fringe calibration' }}
+                                        <span v-if="archivePhaseReferenceDraft.id === settingsActivePhaseCalibrationId" class="badge bg-primary ms-1">Settings active</span><br>
                                         A={{ formatPhaseNumber(archivePhaseReferenceDraft.parameter_values?.A) }}, C={{ formatPhaseNumber(archivePhaseReferenceDraft.parameter_values?.C) }}, ω={{ formatPhaseNumber(archivePhaseReferenceDraft.bragg?.angular_frequency_rad_per_us2) }} rad/(μs)², φ₀={{ formatPhaseNumber(archivePhaseReferenceDraft.parameter_values?.phi0) }} rad
                                     </div>
                                     <h6 class="fw-bold mb-2">Reference point</h6>
@@ -2096,6 +2107,7 @@
                     archivePhaseCalibration: null, archivePhaseCalibrationProvenance: 'unavailable',
                     archivePhaseReferenceContexts: {}, archivePhaseReferenceNodeId: '', archivePhaseReferenceDraft: {},
                     archivePhaseReferenceBusy: false, archivePhaseReferenceMessage: '', archivePhaseReferenceError: false,
+                    archivePhaseReferenceSelectedCalibrationId: 'archive', settingsPhaseCalibrations: [], settingsActivePhaseCalibrationId: '',
                     markerOptimization: null, selectedOptimizationStep: null,
                     syncManifest: null,
                     syncArchiveViewMode: 'node',
@@ -4351,8 +4363,11 @@
                 },
                 async fetchBraggPhaseCalibrations() {
                     try {
-                        const response = await axios.get('/archive/bragg-phase-calibrations');
-                        this.braggPhase.calibrations = Array.isArray(response.data) ? response.data : [];
+                        const response = await axios.get('/settings/interferometer-phase-calibrations');
+                        const calibrations = Array.isArray(response.data?.calibrations) ? response.data.calibrations : [];
+                        this.braggPhase.calibrations = calibrations;
+                        this.settingsPhaseCalibrations = calibrations;
+                        this.settingsActivePhaseCalibrationId = String(response.data?.active?.id || '');
                         if (this.braggPhase.selectedCalibrationId !== 'current'
                             && !this.braggPhase.calibrations.some(item => item.id === this.braggPhase.selectedCalibrationId)) {
                             this.braggPhase.selectedCalibrationId = 'current';
@@ -4985,11 +5000,28 @@
                 initializeArchivePhaseReferenceDraft() {
                     const calibration = this.archivePhaseReferenceCalibration();
                     this.archivePhaseReferenceDraft = calibration ? JSON.parse(JSON.stringify(calibration)) : {};
+                    this.archivePhaseReferenceSelectedCalibrationId = calibration?.archive_reference_source === 'settings'
+                        && calibration?.settings_reference_calibration_id
+                        ? `settings:${calibration.settings_reference_calibration_id}` : 'archive';
                     if (!calibration) return;
+                    this.normalizeArchivePhaseReferenceDraft();
+                },
+                normalizeArchivePhaseReferenceDraft() {
                     this.archivePhaseReferenceDraft.reference_input_mode = this.archivePhaseReferenceDraft.reference_input_mode === 't' ? 't' : 't2';
                     this.archivePhaseReferenceDraft.reference_t_unit = this.archivePhaseReferenceDraft.reference_t_unit === 'ms' ? 'ms' : 'us';
                     this.archivePhaseReferenceDraft.monotonic_slope = this.archivePhaseReferenceDraft.monotonic_slope === 'positive' ? 'positive' : 'negative';
                     this.syncArchivePhaseReferenceFromT2();
+                },
+                selectArchivePhaseReferenceCalibration() {
+                    const selected = String(this.archivePhaseReferenceSelectedCalibrationId || 'archive');
+                    const calibration = selected.startsWith('settings:')
+                        ? this.settingsPhaseCalibrations.find(item => String(item.id || '') === selected.slice(9))
+                        : this.archivePhaseReferenceCalibration();
+                    if (!calibration) return;
+                    this.archivePhaseReferenceDraft = JSON.parse(JSON.stringify(calibration));
+                    this.normalizeArchivePhaseReferenceDraft();
+                    this.archivePhaseReferenceMessage = '';
+                    this.archivePhaseReferenceError = false;
                 },
                 archivePhaseMidFringes() {
                     return (this.archivePhaseReferenceDraft?.bragg?.mid_fringe_x || []).map(Number).filter(Number.isFinite);
@@ -5087,7 +5119,7 @@
                     });
                 },
                 async saveArchivePhaseReference() {
-                    if (!this.archivePhaseReferenceCalibration() || this.archivePhaseReferenceBusy) return;
+                    if (!this.archivePhaseReferenceDraft?.parameter_values || this.archivePhaseReferenceBusy) return;
                     this.updateArchivePhaseReferenceT2(false);
                     const value = Number(this.archivePhaseReferenceDraft.reference_value);
                     if (!Number.isFinite(value) || value < 0) {
@@ -5103,6 +5135,8 @@
                         await axios.post('/archive/phase-reference-override', {
                             year: this.selectedYear, month: this.selectedMonth, day: this.selectedDay, run_id: this.selectedRun,
                             node_id: node || null,
+                            calibration_id: this.archivePhaseReferenceSelectedCalibrationId.startsWith('settings:')
+                                ? this.archivePhaseReferenceSelectedCalibrationId.slice(9) : null,
                             reference_input_mode: this.archivePhaseReferenceDraft.reference_input_mode,
                             reference_value: value,
                             reference_t_unit: this.archivePhaseReferenceDraft.reference_t_unit,

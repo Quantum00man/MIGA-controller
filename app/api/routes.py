@@ -1260,6 +1260,15 @@ async def load_archived_run(year: str, month: str, day: str, run_id: str, node_i
 @router.post("/archive/phase-reference-override")
 async def save_archive_phase_reference_override(req: ArchivePhaseReferenceOverrideRequest):
     try:
+        selected_calibration = None
+        calibration_id = str(req.calibration_id or "").strip()
+        if calibration_id:
+            selected_calibration = next(
+                (item for item in manager.get_bragg_phase_calibrations() if str(item.get("id") or "") == calibration_id),
+                None,
+            )
+            if selected_calibration is None:
+                raise ValueError("Selected Settings fringe calibration was not found")
         context = data_loader.save_archive_phase_reference_override(
             req.year,
             req.month,
@@ -1271,6 +1280,7 @@ async def save_archive_phase_reference_override(req: ArchivePhaseReferenceOverri
             req.reference_t_unit,
             req.monotonic_slope,
             current_phase_calibration=manager.get_active_bragg_phase_calibration(),
+            selected_phase_calibration=selected_calibration,
         )
         return {"status": "success", "context": context}
     except FileNotFoundError as exc:

@@ -198,12 +198,40 @@ class InterferometerPhaseTests(unittest.TestCase):
         self.assertTrue(payload["archive_phase_reference_contexts"]["master"]["has_override"])
         self.assertTrue(payload["archive_phase_reference_contexts"]["slave-a"]["has_override"])
 
+    def test_archive_override_can_use_a_different_settings_fringe(self):
+        original = calibration(phase_conversion_mode="monotonic_half_fringe")
+        selected = calibration(
+            id="settings-phase-2",
+            name="Settings fringe B",
+            phase_conversion_mode="monotonic_half_fringe",
+            parameter_values={"A": 10.0, "C": 30.0, "phi0": 0.1},
+            bragg={"angular_frequency_rad_per_us2": 0.02},
+            reference_t2_us2=50.0,
+        )
+        loader = DataLoader()
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run01_20260826"
+            run_dir.mkdir()
+            (run_dir / "config.json").write_text(json.dumps({"scan_dimensions": 1, "_interferometer_phase_calibration_snapshot": original}), encoding="utf-8")
+            with patch.object(loader, "_get_run_dir", return_value=run_dir):
+                context = loader.save_archive_phase_reference_override(
+                    "2026", "08", "26", run_dir.name, None, "t2", 60.0, "us", "negative",
+                    selected_phase_calibration=selected,
+                )
+        self.assertEqual(context["original_calibration"]["id"], "phase-1")
+        self.assertEqual(context["effective_calibration"]["id"], "settings-phase-2")
+        self.assertEqual(context["effective_calibration"]["name"], "Settings fringe B")
+        self.assertEqual(context["effective_calibration"]["settings_reference_calibration_id"], "settings-phase-2")
+        self.assertEqual(context["effective_calibration"]["reference_t2_us2"], 60.0)
+
     def test_archive_phase_reference_editor_supports_arbitrary_t2_and_curve_marker(self):
         archive_html = (Path(__file__).resolve().parents[1] / "static" / "archive.html").read_text(encoding="utf-8")
         self.assertIn("Archive Phase Reference", archive_html)
         self.assertIn("Manual T² may be any position on the fitted curve", archive_html)
         self.assertIn("offset + amplitude * Math.cos(omega * reference + phi0)", archive_html)
         self.assertIn("/archive/phase-reference-override", archive_html)
+        self.assertIn("Currently applied fringe:", archive_html)
+        self.assertIn("Settings — {{ calibration.name }}", archive_html)
 
 
 if __name__ == "__main__":

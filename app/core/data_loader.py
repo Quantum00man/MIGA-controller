@@ -284,6 +284,7 @@ class DataLoader:
         reference_t_unit: str,
         monotonic_slope_value: str,
         current_phase_calibration: Optional[Dict[str, Any]] = None,
+        selected_phase_calibration: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         root_run_dir = self._get_run_dir(year, month, day, run_id)
         sync_manifest = self._load_sync_manifest_payload(root_run_dir)
@@ -307,7 +308,7 @@ class DataLoader:
         numeric_value = float(reference_value)
         if not math.isfinite(numeric_value) or numeric_value < 0:
             raise ValueError("Reference value must be a non-negative finite number")
-        calibration = deepcopy(original)
+        calibration = deepcopy(selected_phase_calibration) if isinstance(selected_phase_calibration, dict) else deepcopy(original)
         calibration.update({
             "reference_input_mode": mode,
             "reference_value": numeric_value,
@@ -323,6 +324,10 @@ class DataLoader:
         calibration["reference_t2_us2"] = resolved_t2
         calibration["archive_reference_override"] = True
         calibration["archive_reference_node_id"] = node_key
+        calibration["archive_reference_source"] = "settings" if isinstance(selected_phase_calibration, dict) else "archive"
+        if isinstance(selected_phase_calibration, dict):
+            calibration["settings_reference_calibration_id"] = str(selected_phase_calibration.get("id") or "")
+            calibration["settings_reference_calibration_name"] = str(selected_phase_calibration.get("name") or "")
         updated_at = datetime.now(timezone.utc).isoformat()
         store = self._read_archive_phase_reference_store(root_run_dir)
         store.setdefault("original_calibrations", {}).setdefault(node_key, original)
