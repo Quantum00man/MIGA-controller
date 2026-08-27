@@ -1513,6 +1513,9 @@
                                     <option value="shots">Every shot</option>
                                     <option value="average">Averaged</option>
                                 </select>
+                                <button class="btn btn-outline-success btn-sm" @click="downloadSyncArchiveDifferentialCSV" :disabled="!syncArchiveDifferentialPoints().length" title="Download all differential data as CSV">
+                                    <i class="bi bi-download me-1"></i>CSV
+                                </button>
                                 <button class="btn btn-outline-secondary btn-sm" @click="toggleSyncArchiveReplay">{{ syncArchiveReplayPlaying ? 'Pause' : 'Play' }}</button>
                                 <button class="btn btn-outline-secondary btn-sm" @click="restartSyncArchiveReplay">Restart</button>
                                 <select class="form-select form-select-sm" style="width:auto" v-model.number="syncArchiveReplaySpeed"><option :value="0.5">0.5×</option><option :value="1">1×</option><option :value="2">2×</option><option :value="5">5×</option></select>
@@ -5020,6 +5023,41 @@
                         }));
                     }
                     return limit == null ? points : points.slice(0, Math.max(0, Number(limit) || 0));
+                },
+                async downloadSyncArchiveDifferentialCSV() {
+                    const points = this.syncArchiveDifferentialPoints();
+                    if (!points.length) {
+                        this.errorMsg = 'SYNC differential CSV export failed: no valid paired data.';
+                        return;
+                    }
+                    this.errorMsg = '';
+                    const parameterCount = Math.max(1, ...points.map(point => point.params?.length || 0));
+                    const parameterHeaders = Array.from({ length: parameterCount }, (_, index) => `P${index}`);
+                    const header = [
+                        'aggregation', 'point_index', 'first_shot', 'shot_count', ...parameterHeaders,
+                        'data_mode', 'phase_unit',
+                        'x_source', 'x_field', 'x_label', 'x_value',
+                        'y_source', 'y_field', 'y_label', 'y_value'
+                    ];
+                    const xLabel = this.syncArchiveAxisTitle('Master', this.syncArchiveAxisX);
+                    const yLabel = this.syncArchiveAxisTitle(this.syncArchiveNodeLabel(this.syncArchiveSlaveId), this.syncArchiveAxisY);
+                    const dataMode = this.showRawData ? 'nofit' : 'fit';
+                    const rows = points.map((point, index) => [
+                        this.syncArchiveDifferentialAggregation, index + 1, point.shot, point.count,
+                        ...Array.from({ length: parameterCount }, (_, parameterIndex) => point.params?.[parameterIndex] ?? ''),
+                        dataMode, this.phaseUnit,
+                        'master', this.syncArchiveMetricField(this.syncArchiveAxisX), xLabel, point.x,
+                        this.syncArchiveSlaveId, this.syncArchiveMetricField(this.syncArchiveAxisY), yLabel, point.y
+                    ]);
+                    const csvContent = '\uFEFF' + [header, ...rows]
+                        .map(row => row.map(value => this.csvCell(value)).join(','))
+                        .join('\n');
+                    const runPart = this.sanitizeFilenamePart(this.selectedRun || this.loadedRunId || 'run');
+                    const slavePart = this.sanitizeFilenamePart(this.syncArchiveNodeLabel(this.syncArchiveSlaveId), 'slave');
+                    await this.downloadCsvContent(
+                        csvContent,
+                        `sync_differential_${runPart}_${slavePart}_${this.syncArchiveDifferentialAggregation}.csv`
+                    );
                 },
                 paddedSyncArchiveRange(values) {
                     const finite = (Array.isArray(values) ? values : []).map(Number).filter(Number.isFinite);

@@ -1411,6 +1411,9 @@
                                 <option value="shots">Every shot</option>
                                 <option value="average">Averaged</option>
                             </select>
+                            <button class="btn btn-outline-success btn-sm" @click="downloadSyncDifferentialCSV" :disabled="!syncDifferentialPoints().length" title="Download all differential data as CSV">
+                                <i class="bi bi-download me-1"></i>CSV
+                            </button>
                             <button class="btn btn-outline-secondary btn-sm" @click="toggleSyncReplay">{{ syncReplayPlaying ? 'Pause' : 'Play' }}</button>
                             <button class="btn btn-outline-secondary btn-sm" @click="restartSyncReplay">Restart</button>
                             <select class="form-select form-select-sm" style="width:auto" v-model.number="syncReplaySpeed"><option :value="0.5">0.5×</option><option :value="1">1×</option><option :value="2">2×</option><option :value="5">5×</option></select>
@@ -4624,6 +4627,66 @@ finishScheduledRun(finalStatus = 'IDLE') {
                         x: group.sumX / group.count,
                         y: group.sumY / group.count,
                     }));
+                },
+                syncCsvCell(value) {
+                    if (value === null || value === undefined) return '';
+                    if (typeof value === 'number') return Number.isFinite(value) ? String(value) : '';
+                    const cell = String(value);
+                    return /[",\n]/.test(cell) ? `"${cell.replace(/"/g, '""')}"` : cell;
+                },
+                async downloadSyncDifferentialCSV() {
+                    const points = this.syncDifferentialPoints();
+                    if (!points.length) {
+                        this.addLog('SYNC differential CSV export skipped: no valid paired data.');
+                        return;
+                    }
+                    const parameterCount = Math.max(1, ...points.map(point => point.params?.length || 0));
+                    const parameterHeaders = Array.from({ length: parameterCount }, (_, index) => `P${index}`);
+                    const header = [
+                        'aggregation', 'point_index', 'first_shot', 'shot_count', ...parameterHeaders,
+                        'data_mode', 'phase_unit',
+                        'x_source', 'x_field', 'x_label', 'x_value',
+                        'y_source', 'y_field', 'y_label', 'y_value'
+                    ];
+                    const xLabel = this.syncAxisTitle(this.syncAxisX);
+                    const yLabel = this.syncAxisTitle(this.syncAxisY);
+                    const dataMode = this.showRawData ? 'nofit' : 'fit';
+                    const rows = points.map((point, index) => [
+                        this.syncDifferentialAggregation, index + 1, point.shot, point.count,
+                        ...Array.from({ length: parameterCount }, (_, parameterIndex) => point.params?.[parameterIndex] ?? ''),
+                        dataMode, this.phaseUnit,
+                        this.syncAxisX.source, this.syncMetricField(this.syncAxisX.metric, this.syncAxisX.channel), xLabel, point.x,
+                        this.syncAxisY.source, this.syncMetricField(this.syncAxisY.metric, this.syncAxisY.channel), yLabel, point.y
+                    ]);
+                    const csvContent = '\uFEFF' + [header, ...rows]
+                        .map(row => row.map(value => this.syncCsvCell(value)).join(','))
+                        .join('\n');
+                    const runPart = String(this.syncRuntime?.sync_run_id || this.currentRunId || 'live')
+                        .replace(/[^a-zA-Z0-9._-]+/g, '_');
+                    const suggestedName = `sync_differential_${runPart}_${this.syncDifferentialAggregation}.csv`;
+                    if (window.showSaveFilePicker) {
+                        try {
+                            const handle = await window.showSaveFilePicker({
+                                suggestedName,
+                                types: [{ description: 'CSV File', accept: { 'text/csv': ['.csv'] } }]
+                            });
+                            const writable = await handle.createWritable();
+                            await writable.write(csvContent);
+                            await writable.close();
+                            return;
+                        } catch (error) {
+                            if (error?.name === 'AbortError') return;
+                        }
+                    }
+                    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = suggestedName;
+                    document.body.appendChild(link);
+                    link.click();
+                    link.remove();
+                    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
                 },
                 syncAxesChanged() {
                     if (this.syncReplayPlaying) this.toggleSyncReplay();
