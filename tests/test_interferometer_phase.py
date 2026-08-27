@@ -1,4 +1,5 @@
 import math
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -123,6 +124,86 @@ class InterferometerPhaseTests(unittest.TestCase):
         settings_html = (Path(__file__).resolve().parents[1] / "static" / "settings.html").read_text(encoding="utf-8")
         self.assertIn("offset + amplitude * Math.cos(omega * reference + phi0)", settings_html)
         self.assertIn("y: [referenceSignal]", settings_html)
+
+    def test_archive_reference_override_is_sidecar_and_restorable(self):
+        cal = calibration(phase_conversion_mode="monotonic_half_fringe")
+        original_config = {"scan_dimensions": 1, "_interferometer_phase_calibration_snapshot": cal}
+        reference_phase = 0.01 * 120.0 + 0.2
+        signal = 50.0 + 20.0 * math.cos(reference_phase + 0.06)
+        saved_point = {
+            "parameter": 1.0,
+            "all_parameters": [1.0],
+            "intf_p1": signal,
+            "interferometer_phase": -0.75,
+            "interferometer_phase_valid": True,
+            "interferometer_phase_calibration_id": "phase-1",
+        }
+        loader = DataLoader()
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run01_20260826"
+            run_dir.mkdir()
+            (run_dir / "config.json").write_text(json.dumps(original_config), encoding="utf-8")
+            with patch.object(loader, "_get_run_dir", return_value=run_dir), \
+                    patch.object(loader, "_read_results_csv", return_value=[saved_point]):
+                context = loader.save_archive_phase_reference_override(
+                    "2026", "08", "26", run_dir.name, None, "t2", 120.0, "us", "negative"
+                )
+                overridden = loader.load_run("2026", "08", "26", run_dir.name)
+                self.assertTrue(context["has_override"])
+                self.assertEqual(overridden["interferometer_phase_calibration_provenance"], "archive_reference_override")
+                self.assertAlmostEqual(overridden["data"][0]["interferometer_phase"], 0.06, places=10)
+                self.assertEqual(json.loads((run_dir / "config.json").read_text(encoding="utf-8")), original_config)
+                self.assertTrue((run_dir / "archive_phase_reference_overrides.json").is_file())
+                self.assertTrue(loader.delete_archive_phase_reference_override("2026", "08", "26", run_dir.name, None))
+                restored = loader.load_run("2026", "08", "26", run_dir.name)
+                self.assertAlmostEqual(restored["data"][0]["interferometer_phase"], -0.75)
+                self.assertFalse(restored["archive_phase_reference_contexts"]["archive"]["has_override"])
+
+    def test_sync_archive_uses_independent_master_and_slave_references(self):
+        master_cal = calibration(phase_conversion_mode="monotonic_half_fringe")
+        slave_cal = calibration(
+            id="slave-phase",
+            phase_conversion_mode="monotonic_half_fringe",
+            parameter_values={"A": 10.0, "C": 30.0, "phi0": 0.1},
+            bragg={"angular_frequency_rad_per_us2": 0.02},
+            reference_t2_us2=50.0,
+        )
+        master_signal = 50.0 + 20.0 * math.cos(0.01 * 110.0 + 0.2 + 0.05)
+        slave_signal = 30.0 + 10.0 * math.cos(0.02 * 60.0 + 0.1 - 0.03)
+        loader = DataLoader()
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run01_20260826"
+            slave_dir = run_dir / "sync_nodes" / "slave-a"
+            slave_dir.mkdir(parents=True)
+            (run_dir / "config.json").write_text(json.dumps({"scan_dimensions": 1, "_interferometer_phase_calibration_snapshot": master_cal}), encoding="utf-8")
+            (slave_dir / "config.json").write_text(json.dumps({"scan_dimensions": 1, "_interferometer_phase_calibration_snapshot": slave_cal}), encoding="utf-8")
+            manifest = {
+                "archive_nodes": {"master": {"path": ".", "local": True}, "slave-a": {"path": "sync_nodes/slave-a", "local": False}},
+                "pairs": [{
+                    "slave_node_id": "slave-a",
+                    "master": {"intf_p1": master_signal, "sync_shot_index": 1},
+                    "slave": {"intf_p1": slave_signal, "sync_shot_index": 1},
+                }],
+                "node_results": {"master": [], "slaves": {"slave-a": []}},
+            }
+            (run_dir / "sync_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+            with patch.object(loader, "_get_run_dir", return_value=run_dir), \
+                    patch.object(loader, "_read_results_csv", return_value=[]):
+                loader.save_archive_phase_reference_override("2026", "08", "26", run_dir.name, "master", "t2", 110.0, "us", "negative")
+                loader.save_archive_phase_reference_override("2026", "08", "26", run_dir.name, "slave-a", "t2", 60.0, "us", "negative")
+                payload = loader.load_run("2026", "08", "26", run_dir.name, node_id="master")
+        pair = payload["sync_manifest"]["pairs"][0]
+        self.assertAlmostEqual(pair["master"]["interferometer_phase"], 0.05, places=10)
+        self.assertAlmostEqual(pair["slave"]["interferometer_phase"], -0.03, places=10)
+        self.assertTrue(payload["archive_phase_reference_contexts"]["master"]["has_override"])
+        self.assertTrue(payload["archive_phase_reference_contexts"]["slave-a"]["has_override"])
+
+    def test_archive_phase_reference_editor_supports_arbitrary_t2_and_curve_marker(self):
+        archive_html = (Path(__file__).resolve().parents[1] / "static" / "archive.html").read_text(encoding="utf-8")
+        self.assertIn("Archive Phase Reference", archive_html)
+        self.assertIn("Manual T² may be any position on the fitted curve", archive_html)
+        self.assertIn("offset + amplitude * Math.cos(omega * reference + phi0)", archive_html)
+        self.assertIn("/archive/phase-reference-override", archive_html)
 
 
 if __name__ == "__main__":

@@ -1,4 +1,5 @@
 import csv
+from copy import deepcopy
 from datetime import datetime, timezone
 import json
 import math
@@ -165,6 +166,242 @@ class DataLoader:
                 return self._sanitize_structure(json.load(handle))
         except Exception:
             return {}
+
+    def _load_sync_manifest_payload(self, run_dir: Path) -> Optional[Dict[str, Any]]:
+        path = run_dir / "sync_manifest.json"
+        if not path.is_file():
+            return None
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            return payload if isinstance(payload, dict) else None
+        except (OSError, ValueError):
+            return {"runtime": {"status": "invalid", "message": "Sync manifest could not be read"}, "pairs": []}
+
+    def _read_archive_phase_reference_store(self, run_dir: Path) -> Dict[str, Any]:
+        path = run_dir / "archive_phase_reference_overrides.json"
+        if not path.is_file():
+            return {"version": 1, "original_calibrations": {}, "overrides": {}}
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            payload = {}
+        return {
+            "version": 1,
+            "original_calibrations": dict(payload.get("original_calibrations") or {}) if isinstance(payload, dict) else {},
+            "overrides": dict(payload.get("overrides") or {}) if isinstance(payload, dict) else {},
+        }
+
+    def _write_archive_phase_reference_store(self, run_dir: Path, payload: Dict[str, Any]) -> None:
+        path = run_dir / "archive_phase_reference_overrides.json"
+        temporary = path.with_suffix(path.suffix + ".tmp")
+        temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        temporary.replace(path)
+
+    @staticmethod
+    def _archive_phase_node_key(sync_manifest: Optional[Dict[str, Any]], node_id: Optional[str]) -> str:
+        if not sync_manifest:
+            return "archive"
+        requested = str(node_id or "").strip()
+        if requested:
+            return requested
+        archive_nodes = sync_manifest.get("archive_nodes") or {}
+        for key, entry in archive_nodes.items():
+            if isinstance(entry, dict) and entry.get("local") is True:
+                return str(key)
+        return "master"
+
+    def _archive_phase_node_calibration(
+        self,
+        root_run_dir: Path,
+        sync_manifest: Optional[Dict[str, Any]],
+        node_key: str,
+        current_phase_calibration: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        if sync_manifest:
+            try:
+                node_dir = self._resolve_archive_node_dir(root_run_dir, node_key)
+            except (FileNotFoundError, ValueError):
+                return None
+            calibration = self._load_config_data(node_dir).get("_interferometer_phase_calibration_snapshot")
+            archive_entry = (sync_manifest.get("archive_nodes") or {}).get(node_key) or {}
+            if not isinstance(calibration, dict) and archive_entry.get("local") is True:
+                calibration = current_phase_calibration
+        else:
+            calibration = self._load_config_data(root_run_dir).get("_interferometer_phase_calibration_snapshot")
+            if not isinstance(calibration, dict):
+                calibration = current_phase_calibration
+        return deepcopy(calibration) if isinstance(calibration, dict) else None
+
+    def archive_phase_reference_contexts(
+        self,
+        year: str,
+        month: str,
+        day: str,
+        run_id: str,
+        current_phase_calibration: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Dict[str, Any]]:
+        root_run_dir = self._get_run_dir(year, month, day, run_id)
+        sync_manifest = self._load_sync_manifest_payload(root_run_dir)
+        store = self._read_archive_phase_reference_store(root_run_dir)
+        if sync_manifest:
+            archive_nodes = sync_manifest.get("archive_nodes") or {}
+            node_keys = list(archive_nodes.keys()) or ["master"]
+            for pair in sync_manifest.get("pairs") or []:
+                slave_id = str(pair.get("slave_node_id") or "")
+                if slave_id and slave_id not in node_keys:
+                    node_keys.append(slave_id)
+        else:
+            node_keys = ["archive"]
+
+        contexts: Dict[str, Dict[str, Any]] = {}
+        for node_key in node_keys:
+            stored_original = (store.get("original_calibrations") or {}).get(node_key)
+            original = deepcopy(stored_original) if isinstance(stored_original, dict) else self._archive_phase_node_calibration(
+                root_run_dir, sync_manifest, node_key, current_phase_calibration
+            )
+            override = (store.get("overrides") or {}).get(node_key)
+            override_calibration = override.get("calibration") if isinstance(override, dict) else None
+            effective = deepcopy(override_calibration) if isinstance(override_calibration, dict) else deepcopy(original)
+            contexts[node_key] = {
+                "node_id": node_key,
+                "original_calibration": original,
+                "effective_calibration": effective,
+                "original_is_preserved": isinstance(stored_original, dict),
+                "has_override": isinstance(override_calibration, dict),
+                "override": deepcopy(override) if isinstance(override, dict) else None,
+            }
+        return contexts
+
+    def save_archive_phase_reference_override(
+        self,
+        year: str,
+        month: str,
+        day: str,
+        run_id: str,
+        node_id: Optional[str],
+        reference_input_mode: str,
+        reference_value: float,
+        reference_t_unit: str,
+        monotonic_slope_value: str,
+        current_phase_calibration: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        root_run_dir = self._get_run_dir(year, month, day, run_id)
+        sync_manifest = self._load_sync_manifest_payload(root_run_dir)
+        node_key = self._archive_phase_node_key(sync_manifest, node_id)
+        contexts = self.archive_phase_reference_contexts(
+            year, month, day, run_id, current_phase_calibration=current_phase_calibration
+        )
+        context = contexts.get(node_key)
+        original = deepcopy(context.get("original_calibration")) if context else None
+        if not isinstance(original, dict):
+            raise ValueError(f"No saved fringe calibration is available for node {node_key}")
+        mode = str(reference_input_mode or "t2").strip().lower()
+        unit = str(reference_t_unit or "us").strip().lower()
+        slope = str(monotonic_slope_value or "negative").strip().lower()
+        if mode not in {"t", "t2"}:
+            raise ValueError("Reference input mode must be T or T²")
+        if unit not in {"us", "ms"}:
+            raise ValueError("Reference T unit must be μs or ms")
+        if slope not in {"negative", "positive"}:
+            raise ValueError("Monotonic slope must be negative or positive")
+        numeric_value = float(reference_value)
+        if not math.isfinite(numeric_value) or numeric_value < 0:
+            raise ValueError("Reference value must be a non-negative finite number")
+        calibration = deepcopy(original)
+        calibration.update({
+            "reference_input_mode": mode,
+            "reference_value": numeric_value,
+            "reference_t_unit": unit,
+            "monotonic_slope": slope,
+            "phase_conversion_mode": "monotonic_half_fringe",
+        })
+        # Resolve from the newly submitted T/T² input, not the copied calibration's old cached value.
+        calibration.pop("reference_t2_us2", None)
+        resolved_t2 = interferometer_phase.reference_t2_us2(calibration)
+        if resolved_t2 is None:
+            raise ValueError("Reference T² could not be resolved")
+        calibration["reference_t2_us2"] = resolved_t2
+        calibration["archive_reference_override"] = True
+        calibration["archive_reference_node_id"] = node_key
+        updated_at = datetime.now(timezone.utc).isoformat()
+        store = self._read_archive_phase_reference_store(root_run_dir)
+        store.setdefault("original_calibrations", {}).setdefault(node_key, original)
+        store.setdefault("overrides", {})[node_key] = {
+            "node_id": node_key,
+            "updated_at": updated_at,
+            "calibration": calibration,
+        }
+        self._write_archive_phase_reference_store(root_run_dir, store)
+        return {
+            "node_id": node_key,
+            "original_calibration": original,
+            "effective_calibration": calibration,
+            "has_override": True,
+            "override": store["overrides"][node_key],
+        }
+
+    def delete_archive_phase_reference_override(
+        self, year: str, month: str, day: str, run_id: str, node_id: Optional[str]
+    ) -> bool:
+        root_run_dir = self._get_run_dir(year, month, day, run_id)
+        sync_manifest = self._load_sync_manifest_payload(root_run_dir)
+        node_key = self._archive_phase_node_key(sync_manifest, node_id)
+        store = self._read_archive_phase_reference_store(root_run_dir)
+        overrides = store.setdefault("overrides", {})
+        if node_key not in overrides:
+            return False
+        overrides.pop(node_key, None)
+        self._write_archive_phase_reference_store(root_run_dir, store)
+        return True
+
+    def _apply_sync_phase_reference_overrides(
+        self,
+        sync_manifest: Optional[Dict[str, Any]],
+        contexts: Dict[str, Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        if not sync_manifest:
+            return sync_manifest
+        output = deepcopy(sync_manifest)
+
+        def convert(record: Any, node_key: str) -> Any:
+            context = contexts.get(node_key) or {}
+            calibration = context.get("effective_calibration")
+            if not context.get("has_override") or not isinstance(record, dict) or not isinstance(calibration, dict):
+                return record
+            return interferometer_phase.apply_phase(record, calibration)
+
+        for pair in output.get("pairs") or []:
+            pair["master"] = convert(pair.get("master"), "master")
+            slave_key = str(pair.get("slave_node_id") or "")
+            pair["slave"] = convert(pair.get("slave"), slave_key)
+        node_results = output.get("node_results") or {}
+        if isinstance(node_results.get("master"), list):
+            node_results["master"] = [convert(record, "master") for record in node_results["master"]]
+        for slave_key, records in (node_results.get("slaves") or {}).items():
+            if isinstance(records, list):
+                node_results["slaves"][slave_key] = [convert(record, str(slave_key)) for record in records]
+        return output
+
+    def _archive_phase_reference_context(
+        self,
+        year: str,
+        month: str,
+        day: str,
+        run_id: str,
+        node_id: Optional[str],
+        current_phase_calibration: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[str, Dict[str, Any], Dict[str, Dict[str, Any]]]:
+        root_run_dir = self._get_run_dir(year, month, day, run_id)
+        sync_manifest = self._load_sync_manifest_payload(root_run_dir)
+        node_key = self._archive_phase_node_key(sync_manifest, node_id)
+        contexts = self.archive_phase_reference_contexts(
+            year,
+            month,
+            day,
+            run_id,
+            current_phase_calibration=current_phase_calibration,
+        )
+        return node_key, contexts.get(node_key) or {}, contexts
 
     def load_sync_differential_fits(
         self, year: str, month: str, day: str, run_id: str
@@ -701,15 +938,24 @@ class DataLoader:
         config_data = self._load_config_data(run_dir)
         scan_dimensions = self._resolve_scan_dimensions(config_data)
         full_points = self._read_results_csv(run_dir, max_points=None)
+        sync_manifest = self._load_sync_manifest_payload(root_run_dir)
+        phase_node_key, phase_context, phase_contexts = self._archive_phase_reference_context(
+            year, month, day, run_id, node_id, current_phase_calibration
+        )
+        has_phase_override = bool(phase_context.get("has_override"))
         has_phase_snapshot = "_interferometer_phase_calibration_snapshot" in config_data
         snapshot_calibration = config_data.get("_interferometer_phase_calibration_snapshot")
-        phase_calibration = snapshot_calibration if has_phase_snapshot else current_phase_calibration
+        phase_calibration = phase_context.get("effective_calibration")
+        if not isinstance(phase_calibration, dict):
+            phase_calibration = snapshot_calibration if has_phase_snapshot else current_phase_calibration
         legacy_snapshot_conversion = isinstance(snapshot_calibration, dict) and snapshot_calibration.get("phase_conversion_mode") != "monotonic_half_fringe"
-        phase_provenance = ("run_snapshot_migrated_monotonic" if legacy_snapshot_conversion else "run_snapshot") if isinstance(snapshot_calibration, dict) else (
-            "current_calibration_legacy_run" if not has_phase_snapshot and isinstance(current_phase_calibration, dict) else "unavailable"
+        phase_provenance = "archive_reference_override" if has_phase_override else (
+            ("run_snapshot_migrated_monotonic" if legacy_snapshot_conversion else "run_snapshot")
+            if isinstance(snapshot_calibration, dict)
+            else ("current_calibration_legacy_run" if not has_phase_snapshot and isinstance(current_phase_calibration, dict) else "unavailable")
         )
         has_saved_phase = any(str(point.get("interferometer_phase_calibration_id") or "") for point in full_points)
-        if isinstance(phase_calibration, dict) and (not has_phase_snapshot or not has_saved_phase or legacy_snapshot_conversion):
+        if isinstance(phase_calibration, dict) and (has_phase_override or not has_phase_snapshot or not has_saved_phase or legacy_snapshot_conversion):
             full_points = [interferometer_phase.apply_phase(point, phase_calibration) for point in full_points]
         marker_optimization = self._build_marker_optimization_archive(run_dir, full_points)
         is_marker_optimization = bool(marker_optimization.get("steps")) or (
@@ -727,13 +973,7 @@ class DataLoader:
         is_lock_in = str(config_data.get("mode") or "").strip().lower() == "lock_in"
         expected_lock_in_blocks = self._parse_int(config_data.get("averages"), 0) if is_lock_in else 0
         lock_in_analysis = build_lock_in_analysis(full_points, expected_blocks=expected_lock_in_blocks) if is_lock_in else {}
-        sync_manifest = None
-        sync_manifest_path = root_run_dir / "sync_manifest.json"
-        if sync_manifest_path.is_file():
-            try:
-                sync_manifest = json.loads(sync_manifest_path.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                sync_manifest = {"runtime": {"status": "invalid", "message": "Sync manifest could not be read"}, "pairs": []}
+        sync_manifest = self._apply_sync_phase_reference_overrides(sync_manifest, phase_contexts)
         return {
             "config": config_data,
             "run_entry": self._build_run_entry(root_run_dir),
@@ -757,7 +997,10 @@ class DataLoader:
             "sync_differential_fits": self.load_sync_differential_fits(year, month, day, run_id) if sync_manifest else [],
             "selected_sync_node": str(node_id or ""),
             "interferometer_phase_calibration": phase_calibration,
+            "interferometer_phase_original_calibration": phase_context.get("original_calibration"),
             "interferometer_phase_calibration_provenance": phase_provenance,
+            "archive_phase_reference_node_id": phase_node_key,
+            "archive_phase_reference_contexts": phase_contexts,
         }
 
 
@@ -995,15 +1238,21 @@ class DataLoader:
 
         normalized_mode = "recalculated" if str(display_mode or "saved").strip().lower() == "recalculated" else "saved"
         all_points = self._load_allan_points(run_dir, config_data, normalized_mode, new_settings=new_settings)
+        _phase_node_key, phase_context, _phase_contexts = self._archive_phase_reference_context(
+            year, month, day, run_id, node_id, current_phase_calibration
+        )
+        has_phase_override = bool(phase_context.get("has_override"))
         has_phase_snapshot = "_interferometer_phase_calibration_snapshot" in config_data
         phase_calibration = config_data.get("_interferometer_phase_calibration_snapshot")
-        if normalized_mode == "recalculated":
+        if has_phase_override or phase_context.get("original_is_preserved"):
+            phase_calibration = phase_context.get("effective_calibration")
+        elif normalized_mode == "recalculated":
             phase_calibration = (new_settings or {}).get("_interferometer_phase_calibration") or phase_calibration
         elif not has_phase_snapshot:
             phase_calibration = current_phase_calibration
         has_saved_phase = any(str(point.get("interferometer_phase_calibration_id") or "") for point in all_points)
         legacy_snapshot_conversion = isinstance(phase_calibration, dict) and phase_calibration.get("phase_conversion_mode") != "monotonic_half_fringe"
-        if isinstance(phase_calibration, dict) and (normalized_mode == "recalculated" or not has_phase_snapshot or not has_saved_phase or legacy_snapshot_conversion):
+        if isinstance(phase_calibration, dict) and (has_phase_override or normalized_mode == "recalculated" or not has_phase_snapshot or not has_saved_phase or legacy_snapshot_conversion):
             all_points = [interferometer_phase.apply_phase(point, phase_calibration) for point in all_points]
         filtered_points, available_p0_min, available_p0_max, selected_p0_min, selected_p0_max = self._filter_allan_points_by_p0_range(
             all_points,
@@ -1367,6 +1616,16 @@ class DataLoader:
             or {}
         )
         settings = self._normalize_archive_settings(new_settings, fallback=original_settings)
+        _phase_node_key, phase_context, _phase_contexts = self._archive_phase_reference_context(
+            year,
+            month,
+            day,
+            run_id,
+            node_id,
+            settings.get("_interferometer_phase_calibration"),
+        )
+        if (phase_context.get("has_override") or phase_context.get("original_is_preserved")) and isinstance(phase_context.get("effective_calibration"), dict):
+            settings["_interferometer_phase_calibration"] = phase_context["effective_calibration"]
         points = self._read_results_csv(run_dir, max_points=None)
 
         recalculated_points: List[Dict[str, Any]] = []
@@ -1392,7 +1651,12 @@ class DataLoader:
             "preview_map": self._build_preview_map(recalculated_points, scan_dimensions=scan_dimensions),
             "total_points": len(recalculated_points),
             "interferometer_phase_calibration": settings.get("_interferometer_phase_calibration"),
-            "interferometer_phase_calibration_provenance": "current_calibration_recalculation" if settings.get("_interferometer_phase_calibration") else "unavailable",
+            "interferometer_phase_calibration_provenance": (
+                "archive_reference_override"
+                if phase_context.get("has_override")
+                else "current_calibration_recalculation" if settings.get("_interferometer_phase_calibration") else "unavailable"
+            ),
+            "archive_phase_reference_node_id": _phase_node_key,
         }
 
     def recalculate_waveforms(

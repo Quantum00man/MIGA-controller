@@ -1645,6 +1645,57 @@
                         <div id="syncArchivePlot" class="sync-archive-square-plot"></div>
                     </div>
                 </section>
+                <section v-if="archivePhaseReferenceEditorVisible()" class="card mb-4 border-0 shadow-sm">
+                    <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+                        <span><i class="bi bi-crosshair text-success me-2"></i>Archive Phase Reference</span>
+                        <span v-if="archivePhaseReferenceContext()?.has_override" class="badge bg-success">Archive override</span>
+                    </div>
+                    <div class="card-body">
+                        <div v-if="archivePhaseReferenceMessage" class="alert py-2" :class="archivePhaseReferenceError ? 'alert-danger' : 'alert-success'">{{ archivePhaseReferenceMessage }}</div>
+                        <div v-if="!archivePhaseReferenceCalibration()" class="alert alert-info mb-0">
+                            No saved fringe function is available for {{ archivePhaseReferenceNodeLabel() }}. Save a Bragg fringe calibration first.
+                        </div>
+                        <div v-else class="row g-3">
+                            <div class="col-xl-4">
+                                <div class="border rounded p-3 h-100">
+                                    <h6 class="fw-bold mb-1">{{ archivePhaseReferenceNodeLabel() }}</h6>
+                                    <div class="small text-muted mb-3">
+                                        {{ archivePhaseReferenceDraft.name || 'Saved fringe calibration' }}<br>
+                                        A={{ formatPhaseNumber(archivePhaseReferenceDraft.parameter_values?.A) }}, C={{ formatPhaseNumber(archivePhaseReferenceDraft.parameter_values?.C) }}, ω={{ formatPhaseNumber(archivePhaseReferenceDraft.bragg?.angular_frequency_rad_per_us2) }} rad/(μs)², φ₀={{ formatPhaseNumber(archivePhaseReferenceDraft.parameter_values?.phi0) }} rad
+                                    </div>
+                                    <h6 class="fw-bold mb-2">Reference point</h6>
+                                    <div class="row g-2 mb-2">
+                                        <div class="col-4"><label class="form-label-small">Input</label><select class="form-select" v-model="archivePhaseReferenceDraft.reference_input_mode" @change="syncArchivePhaseReferenceFromT2"><option value="t">T</option><option value="t2">T²</option></select></div>
+                                        <div class="col-5"><label class="form-label-small">Value</label><input type="number" min="0" step="any" class="form-control" v-model.number="archivePhaseReferenceDraft.reference_value" @input="updateArchivePhaseReferenceT2"></div>
+                                        <div class="col-3"><label class="form-label-small">Unit</label><select class="form-select" v-model="archivePhaseReferenceDraft.reference_t_unit" @change="syncArchivePhaseReferenceFromT2"><option value="us">μs</option><option value="ms">ms</option></select></div>
+                                    </div>
+                                    <label class="form-label-small">Monotonic fringe side</label>
+                                    <select class="form-select mb-2" v-model="archivePhaseReferenceDraft.monotonic_slope" @change="renderArchivePhaseReferencePlot">
+                                        <option value="negative">Negative slope (acos branch)</option>
+                                        <option value="positive">Positive slope (mirrored acos branch)</option>
+                                    </select>
+                                    <div class="form-text mb-3">Resolved T²: {{ formatPhaseNumber(archivePhaseReferenceDraft.reference_t2_us2) }} (μs)². Manual T² may be any position on the fitted curve. Valid Δφ: {{ archivePhaseDeviationRangeText() }}.</div>
+                                    <label class="form-label-small">Mid fringe reference</label>
+                                    <select class="form-select mb-3" :value="''" @change="chooseArchivePhaseMidFringe($event.target.value); $event.target.value = ''">
+                                        <option value="">Choose a marked mid fringe…</option>
+                                        <option v-for="(value, index) in archivePhaseMidFringes()" :key="index" :value="value">#{{ index + 1 }}: {{ formatPhaseNumber(value) }} (μs)² · {{ phaseSlopeLabel(archivePhaseSlopeAtT2(value)) }}</option>
+                                    </select>
+                                    <div class="d-grid gap-2">
+                                        <button class="btn btn-success" @click="saveArchivePhaseReference" :disabled="archivePhaseReferenceBusy"><span v-if="archivePhaseReferenceBusy" class="spinner-border spinner-border-sm me-1"></span>Apply &amp; recalculate</button>
+                                        <button class="btn btn-outline-secondary" @click="restoreArchivePhaseReference" :disabled="archivePhaseReferenceBusy || !archivePhaseReferenceContext()?.has_override">Restore experiment reference</button>
+                                    </div>
+                                    <div class="form-text mt-2">This override is saved only with this Archive run; raw CSV and global Settings are unchanged.</div>
+                                </div>
+                            </div>
+                            <div class="col-xl-8">
+                                <div class="border rounded p-3 h-100">
+                                    <div class="d-flex justify-content-between align-items-start gap-2 mb-2"><div><h6 class="fw-bold mb-1">Saved Bragg fringe curve</h6><div class="small text-muted">Click a triangle marker to select that mid fringe.</div></div></div>
+                                    <div id="archivePhaseReferencePlot" style="height:470px; min-height:320px;"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
                 <div class="card mb-4 border-0 shadow-sm" :class="{'maximized': maximizedView === 'analysis'}">
                     <div class="analysis-header card-header bg-white">
                         <div class="analysis-header-top">
@@ -2043,6 +2094,8 @@
                     selectedAllanWindow: null,
                     loadedPoints: [], currentCalculatedPoints: [], originalSettings: {}, loadedConfig: {}, currentScanDimensions: 1,
                     archivePhaseCalibration: null, archivePhaseCalibrationProvenance: 'unavailable',
+                    archivePhaseReferenceContexts: {}, archivePhaseReferenceNodeId: '', archivePhaseReferenceDraft: {},
+                    archivePhaseReferenceBusy: false, archivePhaseReferenceMessage: '', archivePhaseReferenceError: false,
                     markerOptimization: null, selectedOptimizationStep: null,
                     syncManifest: null,
                     syncArchiveViewMode: 'node',
@@ -2118,7 +2171,10 @@
                 }
             },
             watch: {
-                currentTab() { this.handlePlotContextChange(); },
+                currentTab() {
+                    this.handlePlotContextChange();
+                    this.$nextTick(() => this.renderArchivePhaseReferencePlot());
+                },
                 phaseUnit() {
                     if (this.currentTab === 'phase') this.refreshAnalysisView();
                     if (this.syncManifest) this.$nextTick(() => {
@@ -2157,6 +2213,7 @@
                     if (this.syncArchiveViewMode === 'differential') {
                         this.resizePlot('syncArchivePlot');
                     }
+                    this.resizePlot('archivePhaseReferencePlot');
                 },
                 async fetchCollections() {
                     this.isLoadingCollections = true;
@@ -4413,6 +4470,11 @@
                     this.currentWaveforms = [];
                     this.markerOptimization = null;
                     this.syncManifest = null;
+                    this.archivePhaseReferenceContexts = {};
+                    this.archivePhaseReferenceNodeId = '';
+                    this.archivePhaseReferenceDraft = {};
+                    this.archivePhaseReferenceMessage = '';
+                    this.archivePhaseReferenceError = false;
                     this.syncArchiveViewMode = 'node';
                     this.syncArchiveNodeSource = requestedSyncNode || 'master';
                     this.loadedSyncNode = requestedSyncNode;
@@ -4450,6 +4512,9 @@
                         this.loadedConfig = res.data.config || {};
                         this.archivePhaseCalibration = res.data.interferometer_phase_calibration || null;
                         this.archivePhaseCalibrationProvenance = String(res.data.interferometer_phase_calibration_provenance || 'unavailable');
+                        this.archivePhaseReferenceContexts = res.data.archive_phase_reference_contexts && typeof res.data.archive_phase_reference_contexts === 'object'
+                            ? res.data.archive_phase_reference_contexts : {};
+                        this.archivePhaseReferenceNodeId = String(res.data.archive_phase_reference_node_id || '');
                         this.markerOptimization = res.data.marker_optimization && typeof res.data.marker_optimization === 'object'
                             ? res.data.marker_optimization
                             : null;
@@ -4462,6 +4527,7 @@
                         const localArchiveNode = Object.entries(this.syncManifest?.archive_nodes || {}).find(([, entry]) => entry?.local === true)?.[0] || '';
                         this.loadedSyncNode = String(res.data.selected_sync_node || requestedSyncNode || localArchiveNode || '');
                         this.syncArchiveNodeSource = this.loadedSyncNode || 'master';
+                        this.initializeArchivePhaseReferenceDraft();
                         this.syncArchiveSlaveId = this.syncArchiveSlaveOptions()[0] || '';
                         if (this.syncDifferentialFitSelectedId) this.restoreSyncDifferentialFit(false);
                         this.syncArchiveReplayCount = this.syncArchiveDifferentialPoints().length;
@@ -4499,6 +4565,7 @@
                             if (this.syncArchiveViewMode === 'node') this.renderSyncArchiveNodePlots();
                             else this.renderSyncArchivePlot();
                         }
+                        this.renderArchivePhaseReferencePlot();
                         await this.applyDisplayedPoints(this.loadedPoints, this.savedStats, this.savedPreviewMap, true);
                         if (this.plotMode === 'allan') {
                             await this.refreshAllanIfNeeded(false);
@@ -4888,7 +4955,189 @@
                     const numeric = Number(value);
                     return Number.isFinite(numeric) ? numeric.toFixed(9) : 'n/a';
                 },
+                formatPhaseNumber(value) {
+                    const numeric = Number(value);
+                    if (!Number.isFinite(numeric)) return 'n/a';
+                    const abs = Math.abs(numeric);
+                    return (abs >= 10000 || (abs > 0 && abs < 0.001)) ? numeric.toExponential(5) : numeric.toPrecision(7);
+                },
+                archivePhaseReferenceEditorVisible() {
+                    if (!this.loadedRunId) return false;
+                    return this.syncManifest
+                        ? this.syncArchiveViewMode === 'node' && this.syncArchiveTab === 'phase'
+                        : this.currentTab === 'phase';
+                },
+                archivePhaseReferenceNodeKey() {
+                    return this.syncManifest
+                        ? String(this.syncArchiveNodeSource || this.loadedSyncNode || this.archivePhaseReferenceNodeId || 'master')
+                        : 'archive';
+                },
+                archivePhaseReferenceNodeLabel() {
+                    const key = this.archivePhaseReferenceNodeKey();
+                    return this.syncManifest ? this.syncArchiveNodeLabel(key) : 'This archive';
+                },
+                archivePhaseReferenceContext() {
+                    return this.archivePhaseReferenceContexts?.[this.archivePhaseReferenceNodeKey()] || null;
+                },
+                archivePhaseReferenceCalibration() {
+                    return this.archivePhaseReferenceContext()?.effective_calibration || null;
+                },
+                initializeArchivePhaseReferenceDraft() {
+                    const calibration = this.archivePhaseReferenceCalibration();
+                    this.archivePhaseReferenceDraft = calibration ? JSON.parse(JSON.stringify(calibration)) : {};
+                    if (!calibration) return;
+                    this.archivePhaseReferenceDraft.reference_input_mode = this.archivePhaseReferenceDraft.reference_input_mode === 't' ? 't' : 't2';
+                    this.archivePhaseReferenceDraft.reference_t_unit = this.archivePhaseReferenceDraft.reference_t_unit === 'ms' ? 'ms' : 'us';
+                    this.archivePhaseReferenceDraft.monotonic_slope = this.archivePhaseReferenceDraft.monotonic_slope === 'positive' ? 'positive' : 'negative';
+                    this.syncArchivePhaseReferenceFromT2();
+                },
+                archivePhaseMidFringes() {
+                    return (this.archivePhaseReferenceDraft?.bragg?.mid_fringe_x || []).map(Number).filter(Number.isFinite);
+                },
+                updateArchivePhaseReferenceT2(inferSlope = true) {
+                    const value = Number(this.archivePhaseReferenceDraft.reference_value);
+                    const scale = this.archivePhaseReferenceDraft.reference_t_unit === 'ms' ? 1000 : 1;
+                    this.archivePhaseReferenceDraft.reference_t2_us2 = this.archivePhaseReferenceDraft.reference_input_mode === 't'
+                        ? Math.pow(value * scale, 2) : value * Math.pow(scale, 2);
+                    if (inferSlope) this.archivePhaseReferenceDraft.monotonic_slope = this.archivePhaseSlopeAtT2(this.archivePhaseReferenceDraft.reference_t2_us2);
+                    this.$nextTick(() => this.renderArchivePhaseReferencePlot());
+                },
+                syncArchivePhaseReferenceFromT2() {
+                    const t2 = Math.max(0, Number(this.archivePhaseReferenceDraft.reference_t2_us2) || 0);
+                    const scale = this.archivePhaseReferenceDraft.reference_t_unit === 'ms' ? 1000 : 1;
+                    this.archivePhaseReferenceDraft.reference_value = this.archivePhaseReferenceDraft.reference_input_mode === 't'
+                        ? Math.sqrt(t2) / scale : t2 / Math.pow(scale, 2);
+                    this.$nextTick(() => this.renderArchivePhaseReferencePlot());
+                },
+                chooseArchivePhaseMidFringe(value) {
+                    const numeric = Number(value);
+                    if (!Number.isFinite(numeric)) return;
+                    this.archivePhaseReferenceDraft.reference_t2_us2 = numeric;
+                    this.archivePhaseReferenceDraft.monotonic_slope = this.archivePhaseSlopeAtT2(numeric);
+                    this.syncArchivePhaseReferenceFromT2();
+                },
+                archivePhaseSlopeAtT2(value) {
+                    const amplitude = Number(this.archivePhaseReferenceDraft?.parameter_values?.A);
+                    const omega = Number(this.archivePhaseReferenceDraft?.bragg?.angular_frequency_rad_per_us2);
+                    const phi0 = Number(this.archivePhaseReferenceDraft?.parameter_values?.phi0);
+                    const t2 = Number(value);
+                    if (![amplitude, omega, phi0, t2].every(Number.isFinite)) return 'negative';
+                    return -amplitude * omega * Math.sin(omega * t2 + phi0) > 0 ? 'positive' : 'negative';
+                },
+                phaseSlopeLabel(direction) {
+                    return direction === 'positive' ? 'positive slope' : 'negative slope';
+                },
+                archivePhaseDeviationLimits() {
+                    const omega = Number(this.archivePhaseReferenceDraft?.bragg?.angular_frequency_rad_per_us2);
+                    const phi0 = Number(this.archivePhaseReferenceDraft?.parameter_values?.phi0);
+                    const t2 = Number(this.archivePhaseReferenceDraft?.reference_t2_us2);
+                    if (![omega, phi0, t2].every(Number.isFinite) || omega <= 0) return null;
+                    const alpha = Math.acos(Math.cos(omega * t2 + phi0));
+                    return this.archivePhaseReferenceDraft.monotonic_slope === 'positive'
+                        ? [-Math.PI + alpha, alpha] : [-alpha, Math.PI - alpha];
+                },
+                archivePhaseDeviationRangeText() {
+                    const limits = this.archivePhaseDeviationLimits();
+                    return limits ? `[${limits[0].toFixed(5)}, ${limits[1].toFixed(5)}] rad` : 'n/a';
+                },
+                archivePhaseBranchT2Range() {
+                    const omega = Number(this.archivePhaseReferenceDraft?.bragg?.angular_frequency_rad_per_us2);
+                    const phi0 = Number(this.archivePhaseReferenceDraft?.parameter_values?.phi0);
+                    const reference = Number(this.archivePhaseReferenceDraft?.reference_t2_us2);
+                    if (![omega, phi0, reference].every(Number.isFinite) || omega <= 0) return null;
+                    const referencePhase = omega * reference + phi0;
+                    const baseMid = this.archivePhaseReferenceDraft.monotonic_slope === 'positive' ? -Math.PI / 2 : Math.PI / 2;
+                    const branchMid = baseMid + 2 * Math.PI * Math.round((referencePhase - baseMid) / (2 * Math.PI));
+                    const endpoints = [(branchMid - Math.PI / 2 - phi0) / omega, (branchMid + Math.PI / 2 - phi0) / omega].sort((a, b) => a - b);
+                    const fitMin = Number(this.archivePhaseReferenceDraft.fit_min);
+                    const fitMax = Number(this.archivePhaseReferenceDraft.fit_max);
+                    if ([fitMin, fitMax].every(Number.isFinite)) {
+                        const clipped = [Math.max(endpoints[0], Math.min(fitMin, fitMax)), Math.min(endpoints[1], Math.max(fitMin, fitMax))];
+                        return clipped[0] <= clipped[1] ? clipped : null;
+                    }
+                    return endpoints;
+                },
+                renderArchivePhaseReferencePlot() {
+                    const target = document.getElementById('archivePhaseReferencePlot');
+                    const draft = this.archivePhaseReferenceDraft;
+                    if (!target || !draft?.fit_x?.length || typeof Plotly === 'undefined') return;
+                    const mid = this.archivePhaseMidFringes();
+                    const offset = Number(draft.parameter_values?.C);
+                    const amplitude = Number(draft.parameter_values?.A);
+                    const omega = Number(draft.bragg?.angular_frequency_rad_per_us2);
+                    const phi0 = Number(draft.parameter_values?.phi0);
+                    const reference = Number(draft.reference_t2_us2);
+                    const referenceSignal = [offset, amplitude, omega, phi0, reference].every(Number.isFinite)
+                        ? offset + amplitude * Math.cos(omega * reference + phi0) : offset;
+                    const negativeMid = mid.filter(value => this.archivePhaseSlopeAtT2(value) === 'negative');
+                    const positiveMid = mid.filter(value => this.archivePhaseSlopeAtT2(value) === 'positive');
+                    const branchRange = this.archivePhaseBranchT2Range();
+                    const traces = [
+                        { x: draft.fit_x, y: draft.fit_y, mode: 'lines', name: 'Fitted fringe', line: { color: '#0d6efd', width: 2.5 } },
+                        { x: negativeMid, y: negativeMid.map(() => offset), mode: 'markers', name: 'Negative-slope mid fringes', customdata: negativeMid, marker: { color: '#dc3545', size: 10, symbol: 'triangle-down' }, hovertemplate: 'T²=%{x:.8g} (μs)²<br>Negative slope<extra>Click to select</extra>' },
+                        { x: positiveMid, y: positiveMid.map(() => offset), mode: 'markers', name: 'Positive-slope mid fringes', customdata: positiveMid, marker: { color: '#fd7e14', size: 10, symbol: 'triangle-up' }, hovertemplate: 'T²=%{x:.8g} (μs)²<br>Positive slope<extra>Click to select</extra>' },
+                        { x: [reference], y: [referenceSignal], mode: 'markers', name: 'Reference', marker: { color: '#198754', size: 15, symbol: 'circle-open', line: { width: 3 } }, hovertemplate: 'Reference T²=%{x:.8g} (μs)²<br>Signal=%{y:.6g}<extra></extra>' }
+                    ];
+                    const shapes = branchRange ? [{ type: 'rect', xref: 'x', yref: 'paper', x0: branchRange[0], x1: branchRange[1], y0: 0, y1: 1, fillcolor: 'rgba(25,135,84,0.10)', line: { color: 'rgba(25,135,84,0.45)', dash: 'dot' }, layer: 'below' }] : [];
+                    Plotly.react(target, traces, { margin: { t: 35, r: 20, b: 55, l: 65 }, xaxis: { title: 'T² ((μs)²)', gridcolor: '#e5e9ef' }, yaxis: { title: draft.metric_label || 'Signal', gridcolor: '#e5e9ef' }, legend: { orientation: 'h', y: 1.15 }, hovermode: 'closest', shapes }, { responsive: true, displaylogo: false });
+                    if (target.removeAllListeners) target.removeAllListeners('plotly_click');
+                    target.on('plotly_click', event => {
+                        const value = Number(event?.points?.[0]?.customdata);
+                        if (Number.isFinite(value)) this.chooseArchivePhaseMidFringe(value);
+                    });
+                },
+                async saveArchivePhaseReference() {
+                    if (!this.archivePhaseReferenceCalibration() || this.archivePhaseReferenceBusy) return;
+                    this.updateArchivePhaseReferenceT2(false);
+                    const value = Number(this.archivePhaseReferenceDraft.reference_value);
+                    if (!Number.isFinite(value) || value < 0) {
+                        this.archivePhaseReferenceError = true;
+                        this.archivePhaseReferenceMessage = 'Reference value must be a non-negative number.';
+                        return;
+                    }
+                    this.archivePhaseReferenceBusy = true;
+                    this.archivePhaseReferenceMessage = '';
+                    this.archivePhaseReferenceError = false;
+                    const node = this.syncManifest ? this.archivePhaseReferenceNodeKey() : '';
+                    try {
+                        await axios.post('/archive/phase-reference-override', {
+                            year: this.selectedYear, month: this.selectedMonth, day: this.selectedDay, run_id: this.selectedRun,
+                            node_id: node || null,
+                            reference_input_mode: this.archivePhaseReferenceDraft.reference_input_mode,
+                            reference_value: value,
+                            reference_t_unit: this.archivePhaseReferenceDraft.reference_t_unit,
+                            monotonic_slope: this.archivePhaseReferenceDraft.monotonic_slope,
+                        });
+                        await this.loadRun(node);
+                        this.archivePhaseReferenceMessage = `Archive phase reference applied to ${this.archivePhaseReferenceNodeLabel()}.`;
+                    } catch (error) {
+                        this.archivePhaseReferenceError = true;
+                        this.archivePhaseReferenceMessage = error.response?.data?.detail || error.message || 'Unable to apply archive phase reference.';
+                    } finally {
+                        this.archivePhaseReferenceBusy = false;
+                    }
+                },
+                async restoreArchivePhaseReference() {
+                    if (!this.archivePhaseReferenceContext()?.has_override || this.archivePhaseReferenceBusy) return;
+                    if (!confirm(`Restore the original experiment phase reference for ${this.archivePhaseReferenceNodeLabel()}?`)) return;
+                    this.archivePhaseReferenceBusy = true;
+                    this.archivePhaseReferenceMessage = '';
+                    this.archivePhaseReferenceError = false;
+                    const node = this.syncManifest ? this.archivePhaseReferenceNodeKey() : '';
+                    try {
+                        const query = node ? `?node_id=${encodeURIComponent(node)}` : '';
+                        await axios.delete(`/archive/phase-reference-override/${this.selectedYear}/${this.selectedMonth}/${this.selectedDay}/${this.selectedRun}${query}`);
+                        await this.loadRun(node);
+                        this.archivePhaseReferenceMessage = `Original experiment phase reference restored for ${this.archivePhaseReferenceNodeLabel()}.`;
+                    } catch (error) {
+                        this.archivePhaseReferenceError = true;
+                        this.archivePhaseReferenceMessage = error.response?.data?.detail || error.message || 'Unable to restore the experiment reference.';
+                    } finally {
+                        this.archivePhaseReferenceBusy = false;
+                    }
+                },
                 archivePhaseCalibrationProvenanceLabel() {
+                    if (this.archivePhaseCalibrationProvenance === 'archive_reference_override') return 'archive reference override';
                     if (this.archivePhaseCalibrationProvenance === 'run_snapshot') return 'run calibration snapshot';
                     if (this.archivePhaseCalibrationProvenance === 'current_calibration_legacy_run') return 'current calibration (legacy run)';
                     if (this.archivePhaseCalibrationProvenance === 'current_calibration_recalculation') return 'current calibration (recalculated)';
@@ -4917,7 +5166,9 @@
                         await this.loadRun(source);
                         return;
                     }
+                    this.initializeArchivePhaseReferenceDraft();
                     this.renderSyncArchiveNodePlots();
+                    this.$nextTick(() => this.renderArchivePhaseReferencePlot());
                 },
                 isLegacySyncArchive() {
                     if (!this.syncManifest) return false;
@@ -5002,12 +5253,18 @@
                 },
                 setSyncArchiveTab(tabId) {
                     this.syncArchiveTab = tabId;
-                    this.renderSyncArchiveNodePlots();
+                    this.$nextTick(() => {
+                        this.renderSyncArchiveNodePlots();
+                        this.renderArchivePhaseReferencePlot();
+                    });
                 },
                 handleSyncArchiveViewChange() {
                     if (this.syncArchiveReplayPlaying) this.toggleSyncArchiveReplay();
                     this.$nextTick(() => {
-                        if (this.syncArchiveViewMode === 'node') this.renderSyncArchiveNodePlots();
+                        if (this.syncArchiveViewMode === 'node') {
+                            this.renderSyncArchiveNodePlots();
+                            this.renderArchivePhaseReferencePlot();
+                        }
                         else this.resetSyncArchiveAxisRange();
                     });
                 },

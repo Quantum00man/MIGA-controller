@@ -631,6 +631,18 @@ class ArchiveSyncDifferentialFitRequest(BaseModel):
     source: Dict[str, Any] = Field(default_factory=dict)
 
 
+class ArchivePhaseReferenceOverrideRequest(BaseModel):
+    year: str
+    month: str
+    day: str
+    run_id: str
+    node_id: Optional[str] = Field(None)
+    reference_input_mode: str = Field("t2")
+    reference_value: float = Field(..., ge=0)
+    reference_t_unit: str = Field("us")
+    monotonic_slope: str = Field("negative")
+
+
 class BraggPhaseInputPoint(BaseModel):
     p0: float
     value: float

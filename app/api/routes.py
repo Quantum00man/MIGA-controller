@@ -50,6 +50,7 @@ from app.models.schemas import (
     ArchiveFavoriteCreate,
     ArchiveFavoriteUpdate,
     ArchiveRunReference,
+    ArchivePhaseReferenceOverrideRequest,
     BraggPhaseCalibrationSaveRequest,
     InterferometerPhaseCalibrationUpdateRequest,
     InterferometerPhaseCalibrationActivateRequest,
@@ -1254,6 +1255,47 @@ async def load_archived_run(year: str, month: str, day: str, run_id: str, node_i
     )
     except FileNotFoundError: raise HTTPException(404, "Run not found")
     except Exception as e: raise HTTPException(500, str(e))
+
+
+@router.post("/archive/phase-reference-override")
+async def save_archive_phase_reference_override(req: ArchivePhaseReferenceOverrideRequest):
+    try:
+        context = data_loader.save_archive_phase_reference_override(
+            req.year,
+            req.month,
+            req.day,
+            req.run_id,
+            req.node_id,
+            req.reference_input_mode,
+            req.reference_value,
+            req.reference_t_unit,
+            req.monotonic_slope,
+            current_phase_calibration=manager.get_active_bragg_phase_calibration(),
+        )
+        return {"status": "success", "context": context}
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@router.delete("/archive/phase-reference-override/{year}/{month}/{day}/{run_id}")
+async def delete_archive_phase_reference_override(
+    year: str, month: str, day: str, run_id: str, node_id: str = ""
+):
+    try:
+        deleted = data_loader.delete_archive_phase_reference_override(
+            year, month, day, run_id, node_id or None
+        )
+        return {"status": "success", "deleted": deleted}
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
 
 
 @router.post("/archive/sync/retry/{year}/{month}/{day}/{run_id}")
