@@ -7,7 +7,8 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 from scipy.odr import ODR, Model, Data
-from scipy.optimize import curve_fit, minimize_scalar
+from scipy.optimize import curve_fit, least_squares, minimize_scalar
+from scipy.sparse import lil_matrix
 from scipy.special import erf
 
 # --- Fitting Model Constants ---
@@ -45,6 +46,22 @@ class BraggFringeFitResult:
     angular_frequency_rad_per_us2: float
     mid_fringe_x: List[float]
     mid_fringe_spacing_us2: float
+
+
+@dataclass
+class DifferentialEllipseFitResult:
+    parameter_values: Dict[str, float]
+    parameter_uncertainties: Dict[str, Optional[float]]
+    fit_x: np.ndarray
+    fit_y: np.ndarray
+    point_fit_x: np.ndarray
+    point_fit_y: np.ndarray
+    normalized_rms_residual: float
+    residual_variance: Optional[float]
+    r_squared: Optional[float]
+    phase_coverage_rad: float
+    condition_number: Optional[float]
+    warnings: List[str]
 
 
 DEFAULT_FIT_MODELS: List[Dict[str, Any]] = [
@@ -420,6 +437,246 @@ def get_default_scan_fit_models() -> List[Dict[str, Any]]:
 def _wrap_phase_radians(value: float) -> float:
     wrapped = (float(value) + np.pi) % (2.0 * np.pi) - np.pi
     return float(np.pi if np.isclose(wrapped, -np.pi) else wrapped)
+
+
+def _ellipse_theta_initial(
+    x_data: np.ndarray,
+    y_data: np.ndarray,
+    center_x: float,
+    center_y: float,
+    amplitude_x: float,
+    amplitude_y: float,
+    phase_difference: float,
+) -> np.ndarray:
+    normalized_x = np.clip((x_data - center_x) / amplitude_x, -1.0, 1.0)
+    normalized_y = (y_data - center_y) / amplitude_y
+    positive = np.arccos(normalized_x)
+    negative = -positive
+    positive_error = np.abs(np.cos(positive + phase_difference) - normalized_y)
+    negative_error = np.abs(np.cos(negative + phase_difference) - normalized_y)
+    return np.where(positive_error <= negative_error, positive, negative)
+
+
+def _ellipse_global_covariance(
+    theta: np.ndarray,
+    amplitude_x: float,
+    amplitude_y: float,
+    phase_difference: float,
+    scale_x: float,
+    scale_y: float,
+    residual_variance: float,
+) -> Tuple[np.ndarray, float]:
+    information = np.zeros((5, 5), dtype=float)
+    for angle in theta:
+        cos_x = float(np.cos(angle))
+        sin_x = float(np.sin(angle))
+        cos_y = float(np.cos(angle + phase_difference))
+        sin_y = float(np.sin(angle + phase_difference))
+        global_jacobian = np.asarray([
+            [1.0 / scale_x, 0.0, amplitude_x * cos_x / scale_x, 0.0, 0.0],
+            [0.0, 1.0 / scale_y, 0.0, amplitude_y * cos_y / scale_y, -amplitude_y * sin_y / scale_y],
+        ])
+        theta_jacobian = np.asarray([
+            -amplitude_x * sin_x / scale_x,
+            -amplitude_y * sin_y / scale_y,
+        ])
+        denominator = float(np.dot(theta_jacobian, theta_jacobian))
+        projection = np.eye(2)
+        if denominator > np.finfo(float).eps:
+            projection -= np.outer(theta_jacobian, theta_jacobian) / denominator
+        information += global_jacobian.T @ projection @ global_jacobian
+    condition_number = float(np.linalg.cond(information))
+    covariance = np.linalg.pinv(information) * float(residual_variance)
+    return covariance, condition_number
+
+
+def perform_sync_differential_ellipse_fit(
+    x_data: np.ndarray,
+    y_data: np.ndarray,
+    eval_points: int = 361,
+) -> Optional[DifferentialEllipseFitResult]:
+    """Fit X=Cx+Ax*cos(theta), Y=Cy+Ay*cos(theta+delta), with delta in [0, pi]."""
+    if x_data is None or y_data is None or len(x_data) != len(y_data):
+        return None
+    x_data = np.asarray(x_data, dtype=float)
+    y_data = np.asarray(y_data, dtype=float)
+    finite = np.isfinite(x_data) & np.isfinite(y_data)
+    x_data = x_data[finite]
+    y_data = y_data[finite]
+    point_count = len(x_data)
+    if point_count < 8 or len(np.unique(x_data)) < 4 or len(np.unique(y_data)) < 4:
+        return None
+
+    x_range = float(np.ptp(x_data))
+    y_range = float(np.ptp(y_data))
+    if x_range <= np.finfo(float).eps or y_range <= np.finfo(float).eps:
+        return None
+    if point_count >= 20:
+        x_low, x_high = np.percentile(x_data, [2.0, 98.0])
+        y_low, y_high = np.percentile(y_data, [2.0, 98.0])
+    else:
+        x_low, x_high = float(np.min(x_data)), float(np.max(x_data))
+        y_low, y_high = float(np.min(y_data)), float(np.max(y_data))
+    center_x_initial = float((x_low + x_high) / 2.0)
+    center_y_initial = float((y_low + y_high) / 2.0)
+    amplitude_x_initial = max(float((x_high - x_low) / 2.0), x_range * 0.1)
+    amplitude_y_initial = max(float((y_high - y_low) / 2.0), y_range * 0.1)
+    scale_x = max(float(np.std(x_data)), x_range / 6.0, np.finfo(float).eps)
+    scale_y = max(float(np.std(y_data)), y_range / 6.0, np.finfo(float).eps)
+
+    correlation = float(np.corrcoef(x_data, y_data)[0, 1])
+    if not np.isfinite(correlation):
+        correlation = 0.0
+    correlation_phase = float(np.arccos(np.clip(correlation, -0.98, 0.98)))
+    phase_starts = []
+    for candidate in (correlation_phase, np.pi / 2.0, np.pi / 4.0, 3.0 * np.pi / 4.0):
+        if all(abs(candidate - existing) > 0.05 for existing in phase_starts):
+            phase_starts.append(float(candidate))
+
+    parameter_count = 5 + point_count
+    sparsity = lil_matrix((2 * point_count, parameter_count), dtype=int)
+    for index in range(point_count):
+        sparsity[2 * index, 0] = 1
+        sparsity[2 * index, 2] = 1
+        sparsity[2 * index, 5 + index] = 1
+        sparsity[2 * index + 1, 1] = 1
+        sparsity[2 * index + 1, 3] = 1
+        sparsity[2 * index + 1, 4] = 1
+        sparsity[2 * index + 1, 5 + index] = 1
+
+    minimum_amplitude_x = max(x_range * 1e-3, np.finfo(float).eps)
+    minimum_amplitude_y = max(y_range * 1e-3, np.finfo(float).eps)
+    lower = np.concatenate((
+        [float(np.min(x_data) - 2.0 * x_range), float(np.min(y_data) - 2.0 * y_range),
+         np.log(minimum_amplitude_x), np.log(minimum_amplitude_y), 1e-5],
+        np.full(point_count, -np.inf),
+    ))
+    upper = np.concatenate((
+        [float(np.max(x_data) + 2.0 * x_range), float(np.max(y_data) + 2.0 * y_range),
+         np.log(x_range * 20.0), np.log(y_range * 20.0), np.pi - 1e-5],
+        np.full(point_count, np.inf),
+    ))
+
+    def residuals(parameters: np.ndarray) -> np.ndarray:
+        center_x, center_y, log_amplitude_x, log_amplitude_y, phase_difference = parameters[:5]
+        theta = parameters[5:]
+        amplitude_x = float(np.exp(log_amplitude_x))
+        amplitude_y = float(np.exp(log_amplitude_y))
+        output = np.empty(2 * point_count, dtype=float)
+        output[0::2] = (center_x + amplitude_x * np.cos(theta) - x_data) / scale_x
+        output[1::2] = (center_y + amplitude_y * np.cos(theta + phase_difference) - y_data) / scale_y
+        return output
+
+    best_result = None
+    best_sum_squares = float("inf")
+    for phase_start in phase_starts:
+        theta_initial = _ellipse_theta_initial(
+            x_data, y_data,
+            center_x_initial, center_y_initial,
+            amplitude_x_initial, amplitude_y_initial,
+            phase_start,
+        )
+        initial = np.concatenate(([
+            center_x_initial,
+            center_y_initial,
+            np.log(amplitude_x_initial),
+            np.log(amplitude_y_initial),
+            phase_start,
+        ], theta_initial))
+        try:
+            candidate = least_squares(
+                residuals,
+                initial,
+                bounds=(lower, upper),
+                jac_sparsity=sparsity,
+                loss="soft_l1",
+                f_scale=0.1,
+                max_nfev=500,
+                xtol=1e-10,
+                ftol=1e-10,
+                gtol=1e-10,
+            )
+        except (ValueError, FloatingPointError):
+            continue
+        sum_squares = float(np.dot(residuals(candidate.x), residuals(candidate.x)))
+        if candidate.success and sum_squares < best_sum_squares:
+            best_result = candidate
+            best_sum_squares = sum_squares
+    if best_result is None:
+        return None
+
+    center_x, center_y, log_amplitude_x, log_amplitude_y, phase_difference = best_result.x[:5]
+    theta = best_result.x[5:]
+    amplitude_x = float(np.exp(log_amplitude_x))
+    amplitude_y = float(np.exp(log_amplitude_y))
+    phase_difference = float(np.clip(phase_difference, 0.0, np.pi))
+    point_fit_x = center_x + amplitude_x * np.cos(theta)
+    point_fit_y = center_y + amplitude_y * np.cos(theta + phase_difference)
+    normalized_residuals = residuals(best_result.x)
+    degrees_of_freedom = max(1, point_count - 5)
+    residual_variance = float(np.dot(normalized_residuals, normalized_residuals) / degrees_of_freedom)
+    normalized_rms = float(np.sqrt(np.mean(
+        normalized_residuals[0::2] ** 2 + normalized_residuals[1::2] ** 2
+    )))
+    centered_total = float(np.sum(((x_data - np.mean(x_data)) / scale_x) ** 2)
+                           + np.sum(((y_data - np.mean(y_data)) / scale_y) ** 2))
+    r_squared = float(1.0 - best_sum_squares / centered_total) if centered_total > 0 else None
+
+    wrapped_theta = np.sort(np.mod(theta, 2.0 * np.pi))
+    gaps = np.diff(np.concatenate((wrapped_theta, [wrapped_theta[0] + 2.0 * np.pi])))
+    phase_coverage = float(2.0 * np.pi - np.max(gaps))
+    covariance, condition_number = _ellipse_global_covariance(
+        theta,
+        amplitude_x,
+        amplitude_y,
+        phase_difference,
+        scale_x,
+        scale_y,
+        residual_variance,
+    )
+    standard_errors = np.sqrt(np.maximum(np.diag(covariance), 0.0))
+    uncertainties: Dict[str, Optional[float]] = {
+        "center_x": float(standard_errors[0]),
+        "center_y": float(standard_errors[1]),
+        "amplitude_x": float(amplitude_x * standard_errors[2]),
+        "amplitude_y": float(amplitude_y * standard_errors[3]),
+        "phase_difference_rad": float(standard_errors[4]),
+    }
+
+    warnings_out: List[str] = []
+    if min(phase_difference, np.pi - phase_difference) < 0.1:
+        warnings_out.append("The fitted ellipse is close to a line, so the phase difference is weakly constrained.")
+    if phase_coverage < np.pi:
+        warnings_out.append("The data cover less than half of the ellipse; fitted center, amplitudes, and phase may be correlated.")
+    if not np.isfinite(condition_number) or condition_number > 1e10:
+        warnings_out.append("The fit is ill-conditioned; interpret parameter uncertainties with caution.")
+    if r_squared is not None and r_squared < 0.8:
+        warnings_out.append("The selected X/Y data do not closely follow the common-phase ellipse model.")
+
+    evaluation_theta = np.linspace(0.0, 2.0 * np.pi, max(64, min(int(eval_points), 4000)))
+    fit_x = center_x + amplitude_x * np.cos(evaluation_theta)
+    fit_y = center_y + amplitude_y * np.cos(evaluation_theta + phase_difference)
+    return DifferentialEllipseFitResult(
+        parameter_values={
+            "center_x": float(center_x),
+            "center_y": float(center_y),
+            "amplitude_x": amplitude_x,
+            "amplitude_y": amplitude_y,
+            "phase_difference_rad": phase_difference,
+            "phase_difference_deg": float(np.degrees(phase_difference)),
+        },
+        parameter_uncertainties=uncertainties,
+        fit_x=fit_x,
+        fit_y=fit_y,
+        point_fit_x=np.asarray(point_fit_x, dtype=float),
+        point_fit_y=np.asarray(point_fit_y, dtype=float),
+        normalized_rms_residual=normalized_rms,
+        residual_variance=residual_variance,
+        r_squared=r_squared,
+        phase_coverage_rad=phase_coverage,
+        condition_number=condition_number,
+        warnings=warnings_out,
+    )
 
 
 def _fringe_linear_solution(x_centered: np.ndarray, y_data: np.ndarray, omega: float) -> Tuple[np.ndarray, float]:

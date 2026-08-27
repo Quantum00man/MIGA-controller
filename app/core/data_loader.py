@@ -1,8 +1,10 @@
 import csv
+from datetime import datetime, timezone
 import json
 import math
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+import uuid
 
 import numpy as np
 
@@ -163,6 +165,64 @@ class DataLoader:
                 return self._sanitize_structure(json.load(handle))
         except Exception:
             return {}
+
+    def load_sync_differential_fits(
+        self, year: str, month: str, day: str, run_id: str
+    ) -> List[Dict[str, Any]]:
+        run_dir = self._get_run_dir(year, month, day, run_id)
+        path = run_dir / "sync_differential_fits.json"
+        if not path.is_file():
+            return []
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return []
+        fits = payload.get("fits") if isinstance(payload, dict) else payload
+        return self._sanitize_structure(fits) if isinstance(fits, list) else []
+
+    def save_sync_differential_fit(
+        self,
+        year: str,
+        month: str,
+        day: str,
+        run_id: str,
+        fit_payload: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        run_dir = self._get_run_dir(year, month, day, run_id)
+        if not (run_dir / "sync_manifest.json").is_file():
+            raise ValueError("Differential ellipse fits can only be saved for a SYNC archive")
+        fits = self.load_sync_differential_fits(year, month, day, run_id)
+        saved = self._sanitize_structure({
+            **dict(fit_payload or {}),
+            "id": uuid.uuid4().hex,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+        fits.append(saved)
+        path = run_dir / "sync_differential_fits.json"
+        temporary = path.with_suffix(path.suffix + ".tmp")
+        temporary.write_text(
+            json.dumps({"version": 1, "fits": fits}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        temporary.replace(path)
+        return saved
+
+    def delete_sync_differential_fit(
+        self, year: str, month: str, day: str, run_id: str, fit_id: str
+    ) -> bool:
+        run_dir = self._get_run_dir(year, month, day, run_id)
+        path = run_dir / "sync_differential_fits.json"
+        fits = self.load_sync_differential_fits(year, month, day, run_id)
+        kept = [item for item in fits if str(item.get("id") or "") != str(fit_id or "")]
+        if len(kept) == len(fits):
+            return False
+        temporary = path.with_suffix(path.suffix + ".tmp")
+        temporary.write_text(
+            json.dumps({"version": 1, "fits": kept}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        temporary.replace(path)
+        return True
 
     def _parse_float(self, value: Any) -> Optional[float]:
         if value is None:
@@ -694,6 +754,7 @@ class DataLoader:
             "total_points": len(full_points),
             "marker_optimization": marker_optimization if is_marker_optimization else None,
             "sync_manifest": sync_manifest,
+            "sync_differential_fits": self.load_sync_differential_fits(year, month, day, run_id) if sync_manifest else [],
             "selected_sync_node": str(node_id or ""),
             "interferometer_phase_calibration": phase_calibration,
             "interferometer_phase_calibration_provenance": phase_provenance,

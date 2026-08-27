@@ -620,6 +620,17 @@ class ArchiveScanFitRequest(BaseModel):
     model: FitModelDefinition
 
 
+class ArchiveSyncDifferentialFitRequest(BaseModel):
+    year: str
+    month: str
+    day: str
+    run_id: str
+    x_values: List[float] = Field(default_factory=list)
+    y_values: List[float] = Field(default_factory=list)
+    eval_points: int = Field(361, ge=64, le=4000)
+    source: Dict[str, Any] = Field(default_factory=dict)
+
+
 class BraggPhaseInputPoint(BaseModel):
     p0: float
     value: float

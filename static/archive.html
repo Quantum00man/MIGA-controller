@@ -1085,7 +1085,7 @@
                     </div>
                 </div>
 
-                <div class="card border-info shadow-sm" v-if="loadedPoints.length > 0 && !isAcStarkArchive() && !isLockInArchive()">
+                <div class="card border-info shadow-sm" v-if="(loadedPoints.length > 0 || (syncManifest && syncArchivePairs().length > 0)) && !isAcStarkArchive() && !isLockInArchive()">
                     <button type="button"
                         class="card-header collapsible-card-header bg-info text-white border-0 d-flex justify-content-between align-items-center"
                         @click="togglePanel('scanFitting')" aria-controls="scan-fitting-panel"
@@ -1095,6 +1095,92 @@
                             :class="isPanelCollapsed('scanFitting') ? 'bi-chevron-right' : 'bi-chevron-down'"></i>
                     </button>
                     <div id="scan-fitting-panel" v-show="!isPanelCollapsed('scanFitting')" class="card-body p-3 bg-light">
+                        <template v-if="syncManifest && syncArchiveViewMode === 'differential'">
+                            <div class="small text-muted mb-2">
+                                Physical ellipse model for the current Differential data. Every successful fit is saved with this SYNC archive.
+                            </div>
+                            <div class="border rounded bg-white p-2 mb-3">
+                                <div class="form-label-small mb-1">MODEL</div>
+                                <div class="font-monospace small text-break">X = Cx + Ax cos(θ)</div>
+                                <div class="font-monospace small text-break">Y = Cy + Ay cos(θ + Δφ), &nbsp; Δφ ∈ [0, π]</div>
+                            </div>
+                            <div class="small mb-2">
+                                <div><span class="fw-bold">X:</span> {{ syncArchiveAxisTitle('Master', syncArchiveAxisX) }}</div>
+                                <div><span class="fw-bold">Y:</span> {{ syncArchiveAxisTitle(syncArchiveNodeLabel(syncArchiveSlaveId), syncArchiveAxisY) }}</div>
+                                <span class="badge bg-secondary mt-1">{{ showRawData ? 'NoFit source' : 'Fit source' }}</span>
+                                <span class="badge bg-secondary mt-1 ms-1">{{ syncArchiveDifferentialAggregation === 'average' ? 'Averaged' : 'Every shot' }}</span>
+                                <span class="badge bg-secondary mt-1 ms-1">{{ syncArchiveDifferentialPoints().length }} points</span>
+                            </div>
+
+                            <div class="mb-2">
+                                <label class="form-label-small">SAVED FIT</label>
+                                <select class="form-select form-select-sm" v-model="syncDifferentialFitSelectedId" @change="restoreSyncDifferentialFit">
+                                    <option value="">No saved fit selected</option>
+                                    <option v-for="fit in syncDifferentialFits" :key="fit.id" :value="String(fit.id)">
+                                        {{ formatSyncDifferentialFitOption(fit) }}
+                                    </option>
+                                </select>
+                            </div>
+                            <div v-if="selectedSyncDifferentialFit() && !syncDifferentialFitMatchesCurrent()" class="alert alert-warning small p-2 mb-2">
+                                The selected fit uses different Differential settings.
+                                <button class="btn btn-link btn-sm p-0 ms-1 align-baseline" @click="restoreSyncDifferentialFit">Restore its settings</button>
+                            </div>
+
+                            <div class="d-grid gap-2">
+                                <button class="btn btn-info btn-sm fw-bold text-white shadow-sm" @click="runSyncDifferentialFit"
+                                    :disabled="syncDifferentialFitLoading || syncArchiveDifferentialPoints().length < 8">
+                                    <span v-if="syncDifferentialFitLoading" class="spinner-border spinner-border-sm me-1"></span>
+                                    {{ syncDifferentialFitLoading ? 'Fitting...' : (activeSyncDifferentialFit() ? 'Refit & Save' : 'Fit Ellipse & Save') }}
+                                </button>
+                                <button class="btn btn-outline-danger btn-sm fw-bold" @click="deleteSyncDifferentialFit"
+                                    :disabled="syncDifferentialFitDeleting || !selectedSyncDifferentialFit()">
+                                    <span v-if="syncDifferentialFitDeleting" class="spinner-border spinner-border-sm me-1"></span>
+                                    Delete Saved Fit
+                                </button>
+                            </div>
+                            <div v-if="syncArchiveDifferentialPoints().length < 8" class="form-text text-warning mt-2">
+                                At least 8 valid differential points are required.
+                            </div>
+                            <div v-if="syncDifferentialFitError" class="alert alert-danger small p-2 mt-3 mb-0">{{ syncDifferentialFitError }}</div>
+
+                            <div v-if="selectedSyncDifferentialFit()" class="scan-fit-result mt-3">
+                                <div class="d-flex justify-content-between align-items-center gap-2 mb-2">
+                                    <div class="small fw-bold text-dark">Saved Ellipse Fit</div>
+                                    <select class="form-select form-select-sm" style="width:auto" v-model="syncDifferentialFitPhaseUnit" aria-label="Ellipse phase unit">
+                                        <option value="rad">rad</option>
+                                        <option value="deg">deg</option>
+                                    </select>
+                                </div>
+                                <div class="scan-fit-param-grid">
+                                    <div class="scan-fit-param-row">
+                                        <span>Δφ</span>
+                                        <strong>{{ syncDifferentialPhaseDisplay(selectedSyncDifferentialFit().parameter_values?.phase_difference_rad) }}</strong>
+                                    </div>
+                                    <div class="scan-fit-param-row">
+                                        <span>σ(Δφ)</span>
+                                        <strong>{{ syncDifferentialPhaseDisplay(selectedSyncDifferentialFit().parameter_uncertainties?.phase_difference_rad) }}</strong>
+                                    </div>
+                                    <div class="scan-fit-param-row"><span>Cx</span><strong>{{ formatMetricValue(selectedSyncDifferentialFit().parameter_values?.center_x) }}</strong></div>
+                                    <div class="scan-fit-param-row"><span>Ax</span><strong>{{ formatMetricValue(selectedSyncDifferentialFit().parameter_values?.amplitude_x) }}</strong></div>
+                                    <div class="scan-fit-param-row"><span>Cy</span><strong>{{ formatMetricValue(selectedSyncDifferentialFit().parameter_values?.center_y) }}</strong></div>
+                                    <div class="scan-fit-param-row"><span>Ay</span><strong>{{ formatMetricValue(selectedSyncDifferentialFit().parameter_values?.amplitude_y) }}</strong></div>
+                                </div>
+                                <div class="small text-muted mt-2">
+                                    R²: {{ formatMetricValue(selectedSyncDifferentialFit().r_squared) }} ·
+                                    normalized RMS: {{ formatMetricValue(selectedSyncDifferentialFit().normalized_rms_residual) }}
+                                </div>
+                                <div class="small text-muted mt-1">
+                                    Coverage: {{ formatMetricValue(Number(selectedSyncDifferentialFit().phase_coverage_rad) * 180 / Math.PI) }}° ·
+                                    N={{ selectedSyncDifferentialFit().point_count }}
+                                </div>
+                                <div class="small text-muted mt-1">Saved {{ selectedSyncDifferentialFit().created_at ? new Date(selectedSyncDifferentialFit().created_at).toLocaleString() : '' }}</div>
+                                <div v-for="warning in (selectedSyncDifferentialFit().warnings || [])" :key="warning" class="alert alert-warning small p-2 mt-2 mb-0">
+                                    {{ warning }}
+                                </div>
+                            </div>
+                        </template>
+
+                        <template v-else>
                         <div class="small text-muted mb-2">
                             Current metric <span class="fw-bold text-dark">{{ getMetricConfig().label }}</span>
                             <span class="badge bg-secondary ms-2">{{ showRawData ? 'NoFit source' : 'Fit source' }}</span>
@@ -1305,6 +1391,7 @@
                                     :class="braggPhase.calibrationError ? 'text-danger' : 'text-success'">{{ braggPhase.calibrationMessage }}</div>
                             </div>
                         </div>
+                        </template>
                     </div>
                 </div>
 
@@ -1969,6 +2056,9 @@
                     syncArchiveDifferentialAggregation: 'shots',
                     syncArchiveAxisRange: { xMin: '', xMax: '', yMin: '', yMax: '', contextKey: '' },
                     syncArchiveAxisRangeError: '',
+                    syncDifferentialFits: [], syncDifferentialFitSelectedId: '',
+                    syncDifferentialFitLoading: false, syncDifferentialFitDeleting: false,
+                    syncDifferentialFitError: '', syncDifferentialFitPhaseUnit: 'rad',
                     syncArchiveMetricOptions: [
                         { key: 'atom_number', label: 'Atom Number' },
                         { key: 'amplitude', label: 'Max Voltage' },
@@ -4329,6 +4419,9 @@
                     this.syncArchiveSlaveId = '';
                     this.syncArchiveAxisRange = { xMin: '', xMax: '', yMin: '', yMax: '', contextKey: '' };
                     this.syncArchiveAxisRangeError = '';
+                    this.syncDifferentialFits = [];
+                    this.syncDifferentialFitSelectedId = '';
+                    this.syncDifferentialFitError = '';
                     if (this.syncArchiveReplayTimer) clearInterval(this.syncArchiveReplayTimer);
                     this.syncArchiveReplayTimer = null;
                     this.syncArchiveReplayPlaying = false;
@@ -4362,10 +4455,15 @@
                             : null;
                         this.syncManifest = res.data.sync_manifest && typeof res.data.sync_manifest === 'object'
                             ? res.data.sync_manifest : null;
+                        this.syncDifferentialFits = Array.isArray(res.data.sync_differential_fits)
+                            ? res.data.sync_differential_fits : [];
+                        this.syncDifferentialFitSelectedId = this.syncDifferentialFits.length
+                            ? String(this.syncDifferentialFits[this.syncDifferentialFits.length - 1].id || '') : '';
                         const localArchiveNode = Object.entries(this.syncManifest?.archive_nodes || {}).find(([, entry]) => entry?.local === true)?.[0] || '';
                         this.loadedSyncNode = String(res.data.selected_sync_node || requestedSyncNode || localArchiveNode || '');
                         this.syncArchiveNodeSource = this.loadedSyncNode || 'master';
                         this.syncArchiveSlaveId = this.syncArchiveSlaveOptions()[0] || '';
+                        if (this.syncDifferentialFitSelectedId) this.restoreSyncDifferentialFit(false);
                         this.syncArchiveReplayCount = this.syncArchiveDifferentialPoints().length;
                         this.selectedOptimizationStep = this.markerOptimization?.steps?.length
                             ? Number(this.markerOptimization.steps[0].index) : null;
@@ -5024,6 +5122,127 @@
                     }
                     return limit == null ? points : points.slice(0, Math.max(0, Number(limit) || 0));
                 },
+                syncDifferentialFitSource() {
+                    return {
+                        context_key: this.syncArchiveAxisContextKey(),
+                        slave_id: this.syncArchiveSlaveId,
+                        slave_label: this.syncArchiveNodeLabel(this.syncArchiveSlaveId),
+                        aggregation: this.syncArchiveDifferentialAggregation,
+                        data_mode: this.showRawData ? 'nofit' : 'fit',
+                        phase_unit: this.phaseUnit,
+                        x_axis: { ...this.syncArchiveAxisX },
+                        y_axis: { ...this.syncArchiveAxisY },
+                        x_field: this.syncArchiveMetricField(this.syncArchiveAxisX),
+                        y_field: this.syncArchiveMetricField(this.syncArchiveAxisY),
+                        x_label: this.syncArchiveAxisTitle('Master', this.syncArchiveAxisX),
+                        y_label: this.syncArchiveAxisTitle(this.syncArchiveNodeLabel(this.syncArchiveSlaveId), this.syncArchiveAxisY),
+                    };
+                },
+                selectedSyncDifferentialFit() {
+                    return this.syncDifferentialFits.find(
+                        fit => String(fit.id || '') === String(this.syncDifferentialFitSelectedId || '')
+                    ) || null;
+                },
+                syncDifferentialFitMatchesCurrent(fit = this.selectedSyncDifferentialFit()) {
+                    if (!fit?.source) return false;
+                    return String(fit.source.context_key || '') === this.syncArchiveAxisContextKey();
+                },
+                activeSyncDifferentialFit() {
+                    const fit = this.selectedSyncDifferentialFit();
+                    return this.syncDifferentialFitMatchesCurrent(fit) ? fit : null;
+                },
+                restoreSyncDifferentialFit(render = true) {
+                    const fit = this.selectedSyncDifferentialFit();
+                    const source = fit?.source;
+                    if (!source) {
+                        if (render) this.renderSyncArchivePlot();
+                        return;
+                    }
+                    if (source.slave_id && this.syncArchiveSlaveOptions().includes(String(source.slave_id))) {
+                        this.syncArchiveSlaveId = String(source.slave_id);
+                    }
+                    if (source.x_axis && typeof source.x_axis === 'object') {
+                        this.syncArchiveAxisX = { ...this.syncArchiveAxisX, ...source.x_axis };
+                    }
+                    if (source.y_axis && typeof source.y_axis === 'object') {
+                        this.syncArchiveAxisY = { ...this.syncArchiveAxisY, ...source.y_axis };
+                    }
+                    if (['shots', 'average'].includes(source.aggregation)) {
+                        this.syncArchiveDifferentialAggregation = source.aggregation;
+                    }
+                    if (['rad', 'mrad'].includes(source.phase_unit)) this.phaseUnit = source.phase_unit;
+                    if (['fit', 'nofit'].includes(source.data_mode)) this.showRawData = source.data_mode === 'nofit';
+                    this.syncDifferentialFitError = '';
+                    if (render) this.$nextTick(() => this.resetSyncArchiveReplay());
+                },
+                formatSyncDifferentialFitOption(fit) {
+                    const phase = Number(fit?.parameter_values?.phase_difference_rad);
+                    const phaseLabel = Number.isFinite(phase) ? `${phase.toFixed(5)} rad` : 'phase n/a';
+                    const source = fit?.source || {};
+                    const timestamp = fit?.created_at ? new Date(fit.created_at).toLocaleString() : 'saved';
+                    return `${source.slave_label || source.slave_id || 'Slave'} · ${source.aggregation || 'shots'} · ${phaseLabel} · ${timestamp}`;
+                },
+                syncDifferentialPhaseDisplay(value) {
+                    const numeric = Number(value);
+                    if (!Number.isFinite(numeric)) return 'n/a';
+                    return this.syncDifferentialFitPhaseUnit === 'deg'
+                        ? `${this.formatMetricValue(numeric * 180 / Math.PI)}°`
+                        : `${this.formatMetricValue(numeric)} rad`;
+                },
+                async runSyncDifferentialFit() {
+                    const points = this.syncArchiveDifferentialPoints();
+                    if (points.length < 8) {
+                        this.syncDifferentialFitError = 'At least 8 valid differential points are required.';
+                        return;
+                    }
+                    this.syncDifferentialFitLoading = true;
+                    this.syncDifferentialFitError = '';
+                    try {
+                        const source = {
+                            ...this.syncDifferentialFitSource(),
+                            point_count: points.length,
+                            total_shot_count: points.reduce((total, point) => total + Number(point.count || 0), 0),
+                        };
+                        const response = await axios.post('/archive/sync-differential-fit', {
+                            year: this.selectedYear,
+                            month: this.selectedMonth,
+                            day: this.selectedDay,
+                            run_id: this.selectedRun,
+                            x_values: points.map(point => point.x),
+                            y_values: points.map(point => point.y),
+                            eval_points: 361,
+                            source,
+                        });
+                        this.syncDifferentialFits.push(response.data);
+                        this.syncDifferentialFitSelectedId = String(response.data.id || '');
+                        this.renderSyncArchivePlot();
+                    } catch (error) {
+                        this.syncDifferentialFitError = error.response?.data?.detail || error.message || 'Ellipse fit failed.';
+                    } finally {
+                        this.syncDifferentialFitLoading = false;
+                    }
+                },
+                async deleteSyncDifferentialFit() {
+                    const fit = this.selectedSyncDifferentialFit();
+                    if (!fit?.id || this.syncDifferentialFitDeleting) return;
+                    if (!window.confirm('Delete this saved differential ellipse fit?')) return;
+                    this.syncDifferentialFitDeleting = true;
+                    this.syncDifferentialFitError = '';
+                    try {
+                        const parts = [this.selectedYear, this.selectedMonth, this.selectedDay, this.selectedRun, fit.id]
+                            .map(value => encodeURIComponent(String(value || '')));
+                        await axios.delete(`/archive/sync-differential-fit/${parts.join('/')}`);
+                        this.syncDifferentialFits = this.syncDifferentialFits.filter(item => item.id !== fit.id);
+                        const replacement = this.syncDifferentialFits[this.syncDifferentialFits.length - 1] || null;
+                        this.syncDifferentialFitSelectedId = replacement ? String(replacement.id || '') : '';
+                        if (replacement) this.restoreSyncDifferentialFit();
+                        else this.renderSyncArchivePlot();
+                    } catch (error) {
+                        this.syncDifferentialFitError = error.response?.data?.detail || error.message || 'Could not delete the saved fit.';
+                    } finally {
+                        this.syncDifferentialFitDeleting = false;
+                    }
+                },
                 async downloadSyncArchiveDifferentialCSV() {
                     const points = this.syncArchiveDifferentialPoints();
                     if (!points.length) {
@@ -5142,14 +5361,27 @@
                     if (!element || typeof Plotly === 'undefined') return;
                     const points = this.syncArchiveDifferentialPoints(this.syncArchiveReplayCount);
                     const fixedRanges = this.ensureSyncArchiveAxisRange();
-                    Plotly.react(element, [{
+                    const traces = [{
                         x: points.map(p => p.x), y: points.map(p => p.y), text: points.map(p => this.syncArchiveDifferentialAggregation === 'average'
                             ? `Parameters=${p.params.join(', ')}<br>Average of ${p.count} shots`
                             : `Shot ${p.shot}<br>P0=${p.p0}`),
                         type: 'scatter', mode: 'markers',
                         marker: { size: 8, color: points.map((p, index) => this.syncArchiveDifferentialAggregation === 'average' ? index + 1 : p.shot), colorscale: 'Viridis', showscale: true, colorbar: { title: this.syncArchiveDifferentialAggregation === 'average' ? 'Group' : 'Shot' } },
                         name: this.syncArchiveDifferentialAggregation === 'average' ? 'Averaged scan points' : 'Paired shots'
-                    }], {
+                    }];
+                    const ellipseFit = this.activeSyncDifferentialFit();
+                    if (ellipseFit && Array.isArray(ellipseFit.fit_x) && Array.isArray(ellipseFit.fit_y)) {
+                        traces.push({
+                            x: ellipseFit.fit_x,
+                            y: ellipseFit.fit_y,
+                            type: 'scatter',
+                            mode: 'lines',
+                            line: { color: '#fd7e14', width: 3 },
+                            name: `Ellipse fit · Δφ=${Number(ellipseFit.parameter_values?.phase_difference_rad).toFixed(5)} rad`,
+                            hovertemplate: 'X=%{x:.7g}<br>Y=%{y:.7g}<extra>Ellipse fit</extra>',
+                        });
+                    }
+                    Plotly.react(element, traces, {
                         margin: { l: 75, r: 70, t: 45, b: 70 }, title: this.syncArchiveDifferentialAggregation === 'average' ? 'Saved differential Lissajous · Averaged by scan point' : 'Saved differential Lissajous · Every shot',
                         xaxis: {
                             title: this.syncArchiveAxisTitle('Master', this.syncArchiveAxisX),
@@ -5157,11 +5389,12 @@
                             autorange: !fixedRanges,
                         },
                         yaxis: {
-                            title: this.syncArchiveAxisTitle('Slave', this.syncArchiveAxisY),
+                            title: this.syncArchiveAxisTitle(this.syncArchiveNodeLabel(this.syncArchiveSlaveId), this.syncArchiveAxisY),
                             range: fixedRanges?.yRange,
                             autorange: !fixedRanges,
                         },
                         hovermode: 'closest',
+                        legend: { orientation: 'h', x: 1, xanchor: 'right', y: 1.08 },
                         paper_bgcolor: 'rgba(0,0,0,0)',
                         plot_bgcolor: 'rgba(0,0,0,0)',
                     }, { responsive: true, displaylogo: false });

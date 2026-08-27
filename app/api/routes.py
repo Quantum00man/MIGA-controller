@@ -54,6 +54,7 @@ from app.models.schemas import (
     InterferometerPhaseCalibrationUpdateRequest,
     InterferometerPhaseCalibrationActivateRequest,
     ArchiveScanFitRequest,
+    ArchiveSyncDifferentialFitRequest,
     ArchiveWaveformRequest,
     BraggScanExportRequest,
     BraggSingleExportRequest,
@@ -1458,6 +1459,62 @@ async def fit_archive_scan(req: ArchiveScanFitRequest):
         "offset": fit_result.offset,
         "area": fit_result.area,
     }
+
+
+@router.post("/archive/sync-differential-fit")
+async def fit_archive_sync_differential(req: ArchiveSyncDifferentialFitRequest):
+    if len(req.x_values) != len(req.y_values):
+        raise HTTPException(400, "x_values and y_values must have the same length")
+    fit_result = await run_in_threadpool(
+        fitting.perform_sync_differential_ellipse_fit,
+        np.asarray(req.x_values, dtype=float),
+        np.asarray(req.y_values, dtype=float),
+        req.eval_points,
+    )
+    if fit_result is None:
+        raise HTTPException(
+            400,
+            "Ellipse fit failed. At least 8 valid points spanning both X and Y are required.",
+        )
+    payload = {
+        "model_key": "sync_differential_ellipse",
+        "model_label": "SYNC Differential Ellipse",
+        "point_count": len(req.x_values),
+        "source": req.source,
+        "parameter_values": fit_result.parameter_values,
+        "parameter_uncertainties": fit_result.parameter_uncertainties,
+        "fit_x": fit_result.fit_x.tolist(),
+        "fit_y": fit_result.fit_y.tolist(),
+        "point_fit_x": fit_result.point_fit_x.tolist(),
+        "point_fit_y": fit_result.point_fit_y.tolist(),
+        "normalized_rms_residual": fit_result.normalized_rms_residual,
+        "residual_variance": fit_result.residual_variance,
+        "r_squared": fit_result.r_squared,
+        "phase_coverage_rad": fit_result.phase_coverage_rad,
+        "condition_number": fit_result.condition_number,
+        "warnings": fit_result.warnings,
+    }
+    try:
+        return data_loader.save_sync_differential_fit(
+            req.year, req.month, req.day, req.run_id, payload
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.delete("/archive/sync-differential-fit/{year}/{month}/{day}/{run_id}/{fit_id}")
+async def delete_archive_sync_differential_fit(
+    year: str, month: str, day: str, run_id: str, fit_id: str
+):
+    try:
+        deleted = data_loader.delete_sync_differential_fit(year, month, day, run_id, fit_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    if not deleted:
+        raise HTTPException(404, "Saved differential ellipse fit was not found")
+    return {"deleted": True, "id": fit_id}
 
 
 @router.get("/archive/bragg-phase-calibrations")
