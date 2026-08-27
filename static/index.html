@@ -4672,8 +4672,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                         text: valid.map(p => this.syncDifferentialAggregation === 'average'
                             ? `Parameters=${p.params.join(', ')}<br>Average of ${p.count} shots`
                             : `Shot ${p.shot}<br>P0=${p.p0}`),
-                        type: 'scatter', mode: 'lines+markers',
-                        line: { color: 'rgba(13,110,253,.35)', width: 1.5 },
+                        type: 'scatter', mode: 'markers',
                         marker: { size: 8, color: valid.map((p, index) => this.syncDifferentialAggregation === 'average' ? index + 1 : p.shot), colorscale: 'Viridis', showscale: true, colorbar: { title: this.syncDifferentialAggregation === 'average' ? 'Group' : 'Shot' } },
                         name: this.syncDifferentialAggregation === 'average' ? 'Averaged scan points' : 'Paired shots'
                     }], {

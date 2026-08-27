@@ -5108,7 +5108,7 @@
                         x: points.map(p => p.x), y: points.map(p => p.y), text: points.map(p => this.syncArchiveDifferentialAggregation === 'average'
                             ? `Parameters=${p.params.join(', ')}<br>Average of ${p.count} shots`
                             : `Shot ${p.shot}<br>P0=${p.p0}`),
-                        type: 'scatter', mode: 'lines+markers', line: { color: 'rgba(13,110,253,.35)', width: 1.5 },
+                        type: 'scatter', mode: 'markers',
                         marker: { size: 8, color: points.map((p, index) => this.syncArchiveDifferentialAggregation === 'average' ? index + 1 : p.shot), colorscale: 'Viridis', showscale: true, colorbar: { title: this.syncArchiveDifferentialAggregation === 'average' ? 'Group' : 'Shot' } },
                         name: this.syncArchiveDifferentialAggregation === 'average' ? 'Averaged scan points' : 'Paired shots'
                     }], {
