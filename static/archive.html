@@ -1583,14 +1583,15 @@
                         </div>
                         <div v-if="syncArchiveViewMode === 'node' && syncArchiveTab === 'phase'" class="row g-2 mt-2">
                             <div class="col-12 d-flex flex-wrap align-items-center gap-2">
-                                <select class="form-select form-select-sm" style="width:auto" v-model="syncPhaseViewMode" @change="handleSyncPhaseControlChange">
+                                <select v-if="syncPhasePlotMode === 'series'" class="form-select form-select-sm" style="width:auto" v-model="syncPhaseViewMode" @change="handleSyncPhaseControlChange">
                                     <option value="selected">Selected Host</option>
                                     <option value="all">All Hosts</option>
                                     <option value="difference">Phase Difference</option>
                                 </select>
+                                <span v-else class="badge bg-light text-dark border">All Hosts + Phase Difference</span>
                                 <span class="small text-muted">Calibration host</span>
                                 <select class="form-select form-select-sm" style="width:auto" v-model="syncArchiveNodeSource" @change="handleSyncArchiveNodeSourceChange"><option v-for="nodeId in syncPhaseNodeIds()" :key="nodeId" :value="nodeId">{{ syncArchiveNodeLabel(nodeId) }}</option></select>
-                                <template v-if="syncPhaseViewMode === 'difference'">
+                                <template v-if="syncPhasePlotMode === 'allan' || syncPhaseViewMode === 'difference'">
                                     <span class="small text-muted">Reference</span>
                                     <select class="form-select form-select-sm" style="width:auto" v-model="syncPhaseReferenceNode" @change="handleSyncPhaseControlChange"><option v-for="nodeId in syncPhaseNodeIds()" :key="nodeId" :value="nodeId">{{ syncArchiveNodeLabel(nodeId) }}</option></select>
                                     <span class="small text-muted">Target</span>
@@ -1608,6 +1609,19 @@
                                 <label class="form-label-small mb-0">P0 RANGE</label><input type="number" step="any" class="form-control form-control-sm" style="width:112px" v-model="syncPhaseP0MinInput" @keyup.enter="applySyncPhaseP0Range"><span class="small text-muted">to</span><input type="number" step="any" class="form-control form-control-sm" style="width:112px" v-model="syncPhaseP0MaxInput" @keyup.enter="applySyncPhaseP0Range">
                                 <button class="btn btn-outline-secondary btn-sm" @click="applySyncPhaseP0Range">Apply</button><button class="btn btn-outline-secondary btn-sm" @click="resetSyncPhaseP0Range">Full Range</button><span class="small text-muted">Chronological paired shots; averaging is not used for Allan.</span>
                                 <button class="btn btn-outline-success btn-sm" @click="downloadSyncPhaseAllanCSV"><i class="bi bi-download me-1"></i>Allan CSV</button>
+                            </div>
+                            <div v-if="syncPhasePlotMode === 'allan'" class="col-12">
+                                <section class="allan-statistics" aria-labelledby="sync-phase-allan-statistics-title">
+                                    <div class="allan-statistics-header"><span id="sync-phase-allan-statistics-title" class="allan-statistics-title">Sequence Statistics</span><span class="allan-statistics-note">Valid chronological shots in the selected P0 range</span></div>
+                                    <div class="allan-statistics-scroll" v-if="syncPhaseAllanStatisticsRows().length" tabindex="0">
+                                        <table class="allan-statistics-table"><tbody><tr v-for="row in syncPhaseAllanStatisticsRows()" :key="row.id">
+                                            <th scope="row">{{ row.label }}<span class="allan-statistic-count">{{ row.sampleCount }} valid shots</span></th>
+                                            <td><span class="allan-statistic-label">Mean</span><span class="allan-statistic-value">{{ formatSyncPhaseStatistic(row.mean) }}</span></td>
+                                            <td><span class="allan-statistic-label">RMS</span><span class="allan-statistic-value">{{ formatSyncPhaseStatistic(row.rms) }}</span></td>
+                                            <td><span class="allan-statistic-label">Standard Deviation</span><span class="allan-statistic-value">{{ formatSyncPhaseStatistic(row.standardDeviation) }}</span></td>
+                                        </tr></tbody></table>
+                                    </div>
+                                </section>
                             </div>
                         </div>
                         <div v-else class="row g-2 mt-2">
@@ -5447,6 +5461,7 @@
                 },
                 setSyncPhasePlotMode(mode) {
                     this.syncPhasePlotMode = mode === 'allan' ? 'allan' : 'series';
+                    this.resetSyncPhaseP0Range(false);
                     if (this.syncPhasePlotMode === 'allan') {
                         this.syncPhaseAllanOrder = this.syncPhaseMaxAllanOrder();
                         this.normalizeAndRenderSyncPhaseAllan();
@@ -5454,9 +5469,15 @@
                     else this.renderSyncArchiveNodePlots();
                 },
                 syncPhaseActiveSeriesRows() {
+                    if (this.syncPhasePlotMode === 'allan') return this.syncPhaseAllanDefinitions().map(definition => definition.rows);
                     if (this.syncPhaseViewMode === 'difference') return [this.syncPhaseDifferenceRows()];
                     if (this.syncPhaseViewMode === 'selected') return [this.syncPhaseRows(this.syncArchiveNodeSource)];
                     return this.syncPhaseNodeIds().map(nodeId => this.syncPhaseRows(nodeId));
+                },
+                syncPhaseAllanDefinitions() {
+                    const colors = ['#dc3545', '#0d6efd', '#198754', '#6f42c1', '#fd7e14', '#20c997', '#d63384'];
+                    const nodes = this.syncPhaseNodeIds().map((nodeId, index) => ({ id: nodeId, label: this.syncArchiveNodeLabel(nodeId), rows: this.syncPhaseRows(nodeId), color: colors[index % colors.length], kind: 'host' }));
+                    return [...nodes, { id: `difference:${this.syncPhaseTargetNode}-${this.syncPhaseReferenceNode}`, label: `${this.syncArchiveNodeLabel(this.syncPhaseTargetNode)} − ${this.syncArchiveNodeLabel(this.syncPhaseReferenceNode)}`, rows: this.syncPhaseDifferenceRows(), color: '#212529', kind: 'difference' }];
                 },
                 syncPhaseAvailableP0Bounds() {
                     const values = this.syncPhaseActiveSeriesRows().flat().map(item => Number(item.p0)).filter(Number.isFinite).sort((a, b) => a - b);
@@ -5508,7 +5529,21 @@
                         }
                         orders.push(order); deviations.push(count ? Math.sqrt(sumSquares / count) : null); validWindowCounts.push(count);
                     }
-                    return { orders, deviations, validWindowCounts, mean, count: source.length };
+                    const rms = values.length ? Math.sqrt(values.reduce((sum, value) => sum + value * value, 0) / values.length) : null;
+                    const standardDeviation = values.length > 1 ? Math.sqrt(values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (values.length - 1)) : (values.length ? 0 : null);
+                    return { orders, deviations, validWindowCounts, mean, rms, standardDeviation, count: source.length };
+                },
+                syncPhaseAllanStatisticsRows() {
+                    return this.syncPhaseAllanDefinitions().map(definition => {
+                        const curve = this.syncPhaseAllanCurve(definition.rows);
+                        return { id: definition.id, label: definition.label, mean: curve.mean, rms: curve.rms, standardDeviation: curve.standardDeviation, sampleCount: curve.count };
+                    }).filter(row => row.sampleCount > 0);
+                },
+                formatSyncPhaseStatistic(value) {
+                    const parsed = Number(value);
+                    if (!Number.isFinite(parsed)) return '—';
+                    const scale = this.phaseUnit === 'mrad' ? 1000 : 1;
+                    return `${(parsed * scale).toPrecision(6)} ${this.phaseUnit}`;
                 },
                 syncArchiveTabField(tabId, channel, noFit = false) {
                     const channelSuffix = channel === 'dw' ? 'dw' : 'up';
@@ -5614,15 +5649,16 @@
                     const colors = ['#dc3545', '#0d6efd', '#198754', '#6f42c1', '#fd7e14', '#20c997', '#d63384'];
                     const scale = this.phaseUnit === 'mrad' ? 1000 : 1;
                     let definitions = [];
-                    if (this.syncPhaseViewMode === 'difference') {
-                        definitions = [{
-                            id: `${this.syncPhaseTargetNode}-${this.syncPhaseReferenceNode}`,
-                            label: `${this.syncArchiveNodeLabel(this.syncPhaseTargetNode)} − ${this.syncArchiveNodeLabel(this.syncPhaseReferenceNode)}`,
-                            rows: this.syncPhaseDifferenceRows(), color: '#6f42c1'
-                        }];
+                    if (this.syncPhasePlotMode === 'allan') {
+                        definitions = this.syncPhaseAllanDefinitions();
+                    } else if (this.syncPhaseViewMode === 'difference') {
+                        definitions = [
+                            ...this.syncPhaseNodeIds().map((nodeId, index) => ({ id: nodeId, label: this.syncArchiveNodeLabel(nodeId), rows: this.syncPhaseRows(nodeId), color: colors[index % colors.length], kind: 'host' })),
+                            { id: `${this.syncPhaseTargetNode}-${this.syncPhaseReferenceNode}`, label: `${this.syncArchiveNodeLabel(this.syncPhaseTargetNode)} − ${this.syncArchiveNodeLabel(this.syncPhaseReferenceNode)}`, rows: this.syncPhaseDifferenceRows(), color: '#212529', kind: 'difference' }
+                        ];
                     } else {
                         const ids = this.syncPhaseViewMode === 'selected' ? [this.syncArchiveNodeSource] : this.syncPhaseNodeIds();
-                        definitions = ids.map((nodeId, index) => ({ id: nodeId, label: this.syncArchiveNodeLabel(nodeId), rows: this.syncPhaseRows(nodeId), color: colors[index % colors.length] }));
+                        definitions = ids.map((nodeId, index) => ({ id: nodeId, label: this.syncArchiveNodeLabel(nodeId), rows: this.syncPhaseRows(nodeId), color: colors[index % colors.length], kind: 'host' }));
                     }
                     let traces;
                     let xTitle;
@@ -5637,23 +5673,24 @@
                                 if (relative) return denominator > 1e-12 ? value / denominator : null;
                                 return value * scale;
                             });
-                            return { x: curve.orders, y, customdata: curve.validWindowCounts, type: 'scatter', mode: 'lines+markers', name: definition.label, line: { color: definition.color, width: 2 }, marker: { size: 7 }, hovertemplate: 'n=%{x}<br>Allan=%{y:.6g}<br>valid windows=%{customdata}<extra>%{fullData.name}</extra>' };
+                            return { x: curve.orders, y, customdata: curve.validWindowCounts, type: 'scatter', mode: 'lines+markers', name: definition.kind === 'difference' ? `Difference: ${definition.label}` : definition.label, line: { color: definition.color, width: definition.kind === 'difference' ? 3 : 2, dash: definition.kind === 'difference' ? 'dash' : 'solid' }, marker: { size: 7, symbol: definition.kind === 'difference' ? 'diamond' : 'circle' }, hovertemplate: 'n=%{x}<br>Allan=%{y:.6g}<br>valid windows=%{customdata}<extra>%{fullData.name}</extra>' };
                         });
                         xTitle = 'Allan Order n';
-                        title = `${this.syncPhaseViewMode === 'difference' ? 'Gradient Phase Difference' : 'Interferometer Phase'} · ${this.syncPhaseAllanScale === 'relative' ? 'Relative' : 'Absolute'} overlapping Allan`;
+                        title = `All Hosts + Phase Difference · ${this.syncPhaseAllanScale === 'relative' ? 'Relative' : 'Absolute'} overlapping Allan`;
                     } else {
                         traces = definitions.map(definition => {
                             const rows = this.syncPhaseAggregateRows(definition.rows);
-                            return { x: rows.map(item => item.p0), y: rows.map(item => item.phase * scale), customdata: rows.map(item => [item.shot, item.count || 1]), type: 'scatter', mode: this.syncPhaseAggregation === 'average' ? 'lines+markers' : 'markers', name: definition.label, line: { color: definition.color, width: 2 }, marker: { color: definition.color, size: this.syncPhaseAggregation === 'average' ? 8 : 7, opacity: 0.82 }, hovertemplate: 'P0=%{x:.9g}<br>Δφ=%{y:.6g}<br>first shot=%{customdata[0]}<br>shots=%{customdata[1]}<extra>%{fullData.name}</extra>' };
+                            return { x: rows.map(item => item.p0), y: rows.map(item => item.phase * scale), customdata: rows.map(item => [item.shot, item.count || 1]), type: 'scatter', mode: this.syncPhaseAggregation === 'average' ? 'lines+markers' : 'markers', name: definition.kind === 'difference' ? `Difference: ${definition.label}` : definition.label, yaxis: definition.kind === 'difference' ? 'y2' : 'y', line: { color: definition.color, width: definition.kind === 'difference' ? 3 : 2, dash: definition.kind === 'difference' ? 'dash' : 'solid' }, marker: { color: definition.color, symbol: definition.kind === 'difference' ? 'diamond' : 'circle', size: this.syncPhaseAggregation === 'average' ? 8 : 7, opacity: 0.82 }, hovertemplate: 'P0=%{x:.9g}<br>Δφ=%{y:.6g}<br>first shot=%{customdata[0]}<br>shots=%{customdata[1]}<extra>%{fullData.name}</extra>' };
                         });
                         xTitle = 'Parameter P0';
                         title = this.syncPhaseViewMode === 'difference' ? 'Gradient Phase Difference · Target − Reference' : (this.syncPhaseViewMode === 'all' ? 'All Hosts Interferometer Phase' : `${definitions[0]?.label || ''} Interferometer Phase`);
                     }
                     const relative = this.syncPhasePlotMode === 'allan' && this.syncPhaseAllanScale === 'relative';
                     Plotly.react(element, traces, {
-                        margin: { t: 52, b: 58, l: 76, r: 24 }, title: { text: title, font: { size: 14 }, x: 0.04 },
+                        margin: { t: 52, b: 58, l: 76, r: this.syncPhasePlotMode === 'series' && this.syncPhaseViewMode === 'difference' ? 76 : 24 }, title: { text: title, font: { size: 14 }, x: 0.04 },
                         xaxis: { title: xTitle, type: this.syncPhasePlotMode === 'allan' ? this.syncPhaseAllanXAxis : 'linear', showline: true, mirror: true, ticks: 'inside', gridcolor: '#dde5ee' },
-                        yaxis: { title: relative ? 'Relative Allan deviation' : `Interferometer Δφ (${this.phaseUnit})`, showline: true, mirror: true, ticks: 'inside', gridcolor: '#dde5ee' },
+                        yaxis: { title: relative ? 'Relative Allan deviation' : (this.syncPhasePlotMode === 'series' && this.syncPhaseViewMode === 'difference' ? `Host phase Δφ (${this.phaseUnit})` : `Interferometer Δφ (${this.phaseUnit})`), showline: true, mirror: this.syncPhasePlotMode !== 'series' || this.syncPhaseViewMode !== 'difference', ticks: 'inside', gridcolor: '#dde5ee' },
+                        yaxis2: this.syncPhasePlotMode === 'series' && this.syncPhaseViewMode === 'difference' ? { title: `Phase difference (${this.phaseUnit})`, overlaying: 'y', side: 'right', showline: true, ticks: 'inside', zeroline: true } : undefined,
                         legend: { orientation: 'h', x: 1, xanchor: 'right', y: 1.13 }, hovermode: 'closest', paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
                     }, { responsive: true, displaylogo: false });
                 },
@@ -5690,12 +5727,7 @@
                     await this.downloadCsvContent(csvContent, `sync_interferometer_phase_${runPart}.csv`);
                 },
                 async downloadSyncPhaseAllanCSV() {
-                    let definitions;
-                    if (this.syncPhaseViewMode === 'difference') definitions = [{ id: `${this.syncPhaseTargetNode}-${this.syncPhaseReferenceNode}`, label: `${this.syncArchiveNodeLabel(this.syncPhaseTargetNode)} - ${this.syncArchiveNodeLabel(this.syncPhaseReferenceNode)}`, rows: this.syncPhaseDifferenceRows() }];
-                    else {
-                        const ids = this.syncPhaseViewMode === 'selected' ? [this.syncArchiveNodeSource] : this.syncPhaseNodeIds();
-                        definitions = ids.map(nodeId => ({ id: nodeId, label: this.syncArchiveNodeLabel(nodeId), rows: this.syncPhaseRows(nodeId) }));
-                    }
+                    const definitions = this.syncPhaseAllanDefinitions();
                     const curves = definitions.map(definition => ({ ...definition, curve: this.syncPhaseAllanCurve(definition.rows) }));
                     const orders = curves[0]?.curve?.orders || [];
                     const header = ['allan_order_n', ...curves.flatMap(item => [`${this.sanitizeFilenamePart(item.label)}_allan_rad`, `${this.sanitizeFilenamePart(item.label)}_relative_allan`, `${this.sanitizeFilenamePart(item.label)}_valid_windows`])];
@@ -5703,7 +5735,23 @@
                         const value = item.curve.deviations[index]; const denominator = Math.abs(Number(item.curve.mean));
                         return [value ?? '', value != null && denominator > 1e-12 ? value / denominator : '', item.curve.validWindowCounts[index] ?? 0];
                     })]);
-                    const csvContent = '\uFEFF' + [header, ...rows].map(row => row.map(value => this.csvCell(value)).join(',')).join('\n');
+                    const metadataRows = [
+                        ['reference_node', this.syncPhaseReferenceNode], ['target_node', this.syncPhaseTargetNode],
+                        ['selected_p0_min', this.syncPhaseP0Min ?? ''], ['selected_p0_max', this.syncPhaseP0Max ?? ''],
+                        ['max_order', this.syncPhaseAllanOrder],
+                    ];
+                    curves.forEach(item => {
+                        const key = this.sanitizeFilenamePart(item.label);
+                        metadataRows.push([`${key}_mean_rad`, item.curve.mean ?? '']);
+                        metadataRows.push([`${key}_rms_rad`, item.curve.rms ?? '']);
+                        metadataRows.push([`${key}_standard_deviation_rad`, item.curve.standardDeviation ?? '']);
+                        metadataRows.push([`${key}_sample_count`, item.curve.count]);
+                    });
+                    const csvContent = '\uFEFF' + [
+                        ...metadataRows.map(row => `# ${row.map(value => this.csvCell(value)).join(',')}`),
+                        header.map(value => this.csvCell(value)).join(','),
+                        ...rows.map(row => row.map(value => this.csvCell(value)).join(',')),
+                    ].join('\n');
                     const runPart = this.sanitizeFilenamePart(this.selectedRun || this.loadedRunId || 'run');
                     await this.downloadCsvContent(csvContent, `sync_interferometer_phase_allan_${runPart}.csv`);
                 },

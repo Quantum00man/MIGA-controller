@@ -346,6 +346,13 @@ class InterferometerPhaseTests(unittest.TestCase):
         self.assertIn("wrapped <= -Math.PI + 1e-12", archive_html)
         self.assertIn("syncPhaseAllanCurve", archive_html)
         self.assertIn("Chronological paired shots; averaging is not used for Allan.", archive_html)
+        self.assertIn("All Hosts + Phase Difference", archive_html)
+        self.assertIn("syncPhaseAllanDefinitions", archive_html)
+        self.assertIn("Phase difference (${this.phaseUnit})", archive_html)
+        self.assertIn("overlaying: 'y', side: 'right'", archive_html)
+        self.assertIn("syncPhaseAllanStatisticsRows", archive_html)
+        self.assertIn("Standard Deviation", archive_html)
+        self.assertIn("standard_deviation_rad", archive_html)
         self.assertIn("interferometer_phase_reference_t2_us2", archive_html)
         self.assertIn("sync_interferometer_phase_allan_", archive_html)
 
