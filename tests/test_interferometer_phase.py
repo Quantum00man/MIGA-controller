@@ -353,6 +353,7 @@ class InterferometerPhaseTests(unittest.TestCase):
         self.assertIn("Reverse Difference", archive_html)
         self.assertIn("syncPhaseSelectedNodes.length >= 2", archive_html)
         self.assertIn("syncPhaseSeriesDefinitions", archive_html)
+        self.assertIn("type: 'scatter', mode: 'lines+markers'", archive_html)
         self.assertIn("syncPhaseAllanDefinitions", archive_html)
         self.assertNotIn("Phase difference (${this.phaseUnit})", archive_html)
         self.assertNotIn("yaxis2: this.syncPhasePlotMode", archive_html)
