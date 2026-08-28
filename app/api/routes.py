@@ -277,6 +277,70 @@ def _authorize_sync_node(request: Request) -> None:
         raise HTTPException(403, str(exc))
 
 
+def _sync_manifest_for_run(run_dir: Path) -> Dict[str, Any]:
+    path = Path(run_dir) / "sync_manifest.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+async def _synchronize_archive_phase_metadata(
+    year: str,
+    month: str,
+    day: str,
+    run_id: str,
+    request: Request,
+) -> Dict[str, Any]:
+    run_dir = data_loader.get_run_dir(year, month, day, run_id)
+    manifest = _sync_manifest_for_run(run_dir)
+    if not manifest:
+        return {"status": "local", "message": ""}
+    metadata = data_loader.archive_phase_analysis_metadata(year, month, day, run_id)
+    local_node = sync_manager.archive_local_node_id(run_dir)
+    sync_run_id = str((manifest.get("runtime") or {}).get("sync_run_id") or "")
+    if local_node == "master":
+        coordinator_url = sync_manager.advertised_phase_coordinator_url(run_dir, str(request.base_url))
+        result = await run_in_threadpool(
+            sync_manager.distribute_phase_analysis_metadata,
+            run_dir,
+            metadata,
+            coordinator_url,
+        )
+        data_loader.update_archive_phase_analysis_sync_state(
+            year,
+            month,
+            day,
+            run_id,
+            sync_status=result.get("status") or "pending",
+            sync_message=result.get("message") or "",
+            coordinator_url=coordinator_url,
+        )
+        return result
+    coordinator_url = str(metadata.get("coordinator_url") or "").rstrip("/")
+    if not sync_run_id or not coordinator_url:
+        message = "Master coordinator URL is unavailable; apply or synchronize this Archive once from the Master"
+        data_loader.update_archive_phase_analysis_sync_state(
+            year, month, day, run_id, sync_status="pending", sync_message=message
+        )
+        return {"status": "pending", "message": message}
+    try:
+        result = await run_in_threadpool(
+            sync_manager.forward_phase_analysis_metadata,
+            sync_run_id,
+            metadata,
+            coordinator_url,
+        )
+        return result
+    except Exception as exc:
+        message = str(exc)
+        data_loader.update_archive_phase_analysis_sync_state(
+            year, month, day, run_id, sync_status="pending", sync_message=message
+        )
+        return {"status": "pending", "message": message}
+
+
 @router.get("/sync/config", response_model=ExperimentResponse)
 async def get_sync_config():
     return ExperimentResponse(status="success", message="Sync configuration loaded", data=sync_manager.settings_snapshot())
@@ -320,6 +384,75 @@ async def get_sync_status():
 async def get_sync_node_health(request: Request):
     _authorize_sync_node(request)
     return sync_manager.health()
+
+
+@router.get("/sync/node/phase-calibrations")
+async def get_sync_node_phase_calibrations(request: Request):
+    _authorize_sync_node(request)
+    return {
+        "calibrations": manager.get_bragg_phase_calibrations(),
+        "active": manager.get_active_bragg_phase_calibration(),
+    }
+
+
+@router.post("/sync/node/archive-phase-analysis/{sync_run_id}")
+async def install_sync_phase_analysis(sync_run_id: str, payload: Dict[str, Any], request: Request):
+    _authorize_sync_node(request)
+    try:
+        run_dir = sync_manager.get_sync_run_dir(sync_run_id)
+        return data_loader.install_archive_phase_analysis_metadata(run_dir, payload)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.post("/sync/node/archive-phase-analysis/{sync_run_id}/merge")
+async def merge_sync_phase_analysis(sync_run_id: str, payload: Dict[str, Any], request: Request):
+    _authorize_sync_node(request)
+    try:
+        run_dir = sync_manager.get_sync_run_dir(sync_run_id)
+        if sync_manager.archive_local_node_id(run_dir) != "master":
+            raise ValueError("SYNC phase metadata can only be merged by the Master controller")
+        existing_path = run_dir / "sync_phase_analysis.json"
+        try:
+            existing_payload = json.loads(existing_path.read_text(encoding="utf-8"))
+            existing_revision = int(existing_payload.get("revision") or 0)
+        except (OSError, ValueError):
+            existing_revision = 0
+        incoming_revision = int(payload.get("revision") or 0)
+        if incoming_revision <= existing_revision:
+            raise HTTPException(409, "SYNC phase metadata changed on the Master; reload before applying again")
+        installed = data_loader.install_archive_phase_analysis_metadata(run_dir, payload)
+        metadata = data_loader.archive_phase_analysis_metadata(
+            run_dir.parent.parent.parent.name,
+            run_dir.parent.parent.name,
+            run_dir.parent.name,
+            run_dir.name,
+        )
+        coordinator_url = sync_manager.advertised_phase_coordinator_url(run_dir, str(request.base_url))
+        result = await run_in_threadpool(
+            sync_manager.distribute_phase_analysis_metadata,
+            run_dir,
+            metadata,
+            coordinator_url,
+        )
+        data_loader.update_archive_phase_analysis_sync_state(
+            run_dir.parent.parent.parent.name,
+            run_dir.parent.parent.name,
+            run_dir.parent.name,
+            run_dir.name,
+            sync_status=result.get("status") or "pending",
+            sync_message=result.get("message") or "",
+            coordinator_url=coordinator_url,
+        )
+        return {"installed": installed, "sync": result}
+    except HTTPException:
+        raise
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
 
 
 @router.post("/sync/node/prepare")
@@ -1257,14 +1390,57 @@ async def load_archived_run(year: str, month: str, day: str, run_id: str, node_i
     except Exception as e: raise HTTPException(500, str(e))
 
 
+@router.get("/archive/phase-calibrations/{year}/{month}/{day}/{run_id}")
+async def get_archive_phase_calibrations(
+    year: str, month: str, day: str, run_id: str, node_id: str = ""
+):
+    try:
+        run_dir = data_loader.get_run_dir(year, month, day, run_id)
+        manifest = _sync_manifest_for_run(run_dir)
+        if not manifest:
+            return {
+                "node_id": "archive",
+                "source": "local_settings",
+                "calibrations": manager.get_bragg_phase_calibrations(),
+                "active": manager.get_active_bragg_phase_calibration(),
+            }
+        metadata = data_loader.archive_phase_analysis_metadata(year, month, day, run_id)
+        target = str(node_id or sync_manager.archive_local_node_id(run_dir) or "master")
+        return await run_in_threadpool(
+            sync_manager.get_archive_node_phase_calibrations,
+            run_dir,
+            target,
+            metadata.get("coordinator_url") or "",
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(502, f"Unable to load phase calibrations from the selected SYNC node: {exc}")
+
+
 @router.post("/archive/phase-reference-override")
-async def save_archive_phase_reference_override(req: ArchivePhaseReferenceOverrideRequest):
+async def save_archive_phase_reference_override(req: ArchivePhaseReferenceOverrideRequest, request: Request):
     try:
         selected_calibration = None
         calibration_id = str(req.calibration_id or "").strip()
         if calibration_id:
+            run_dir = data_loader.get_run_dir(req.year, req.month, req.day, req.run_id)
+            manifest = _sync_manifest_for_run(run_dir)
+            if manifest:
+                metadata = data_loader.archive_phase_analysis_metadata(req.year, req.month, req.day, req.run_id)
+                available = await run_in_threadpool(
+                    sync_manager.get_archive_node_phase_calibrations,
+                    run_dir,
+                    str(req.node_id or sync_manager.archive_local_node_id(run_dir) or "master"),
+                    metadata.get("coordinator_url") or "",
+                )
+                calibrations = available.get("calibrations") or []
+            else:
+                calibrations = manager.get_bragg_phase_calibrations()
             selected_calibration = next(
-                (item for item in manager.get_bragg_phase_calibrations() if str(item.get("id") or "") == calibration_id),
+                (item for item in calibrations if str(item.get("id") or "") == calibration_id),
                 None,
             )
             if selected_calibration is None:
@@ -1282,7 +1458,10 @@ async def save_archive_phase_reference_override(req: ArchivePhaseReferenceOverri
             current_phase_calibration=manager.get_active_bragg_phase_calibration(),
             selected_phase_calibration=selected_calibration,
         )
-        return {"status": "success", "context": context}
+        sync_result = await _synchronize_archive_phase_metadata(
+            req.year, req.month, req.day, req.run_id, request
+        )
+        return {"status": "success", "context": context, "sync": sync_result}
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc))
     except ValueError as exc:
@@ -1293,19 +1472,35 @@ async def save_archive_phase_reference_override(req: ArchivePhaseReferenceOverri
 
 @router.delete("/archive/phase-reference-override/{year}/{month}/{day}/{run_id}")
 async def delete_archive_phase_reference_override(
-    year: str, month: str, day: str, run_id: str, node_id: str = ""
+    year: str, month: str, day: str, run_id: str, request: Request, node_id: str = ""
 ):
     try:
         deleted = data_loader.delete_archive_phase_reference_override(
             year, month, day, run_id, node_id or None
         )
-        return {"status": "success", "deleted": deleted}
+        sync_result = await _synchronize_archive_phase_metadata(year, month, day, run_id, request)
+        return {"status": "success", "deleted": deleted, "sync": sync_result}
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc))
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     except Exception as exc:
         raise HTTPException(500, str(exc))
+
+
+@router.post("/archive/phase-analysis/sync/{year}/{month}/{day}/{run_id}")
+async def retry_archive_phase_analysis_sync(
+    year: str, month: str, day: str, run_id: str, request: Request
+):
+    try:
+        result = await _synchronize_archive_phase_metadata(year, month, day, run_id, request)
+        return {"status": "success", "sync": result}
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(502, str(exc))
 
 
 @router.post("/archive/sync/retry/{year}/{month}/{day}/{run_id}")

@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import json
 import math
 from pathlib import Path
+import shutil
 from typing import Any, Dict, List, Optional, Tuple
 import uuid
 
@@ -178,24 +179,147 @@ class DataLoader:
             return {"runtime": {"status": "invalid", "message": "Sync manifest could not be read"}, "pairs": []}
 
     def _read_archive_phase_reference_store(self, run_dir: Path) -> Dict[str, Any]:
-        path = run_dir / "archive_phase_reference_overrides.json"
+        metadata_path = run_dir / "sync_phase_analysis.json"
+        legacy_path = run_dir / "archive_phase_reference_overrides.json"
+        path = metadata_path if metadata_path.is_file() else legacy_path
         if not path.is_file():
-            return {"version": 1, "original_calibrations": {}, "overrides": {}}
+            return {
+                "version": 2, "revision": 0, "original_calibrations": {}, "overrides": {},
+                "sync_status": "local", "sync_message": "", "coordinator_url": "",
+            }
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             payload = {}
+        if isinstance(payload, dict) and isinstance(payload.get("nodes"), dict):
+            nodes = payload.get("nodes") or {}
+            return {
+                "version": 2,
+                "revision": int(payload.get("revision") or 0),
+                "updated_at": str(payload.get("updated_at") or ""),
+                "updated_by": str(payload.get("updated_by") or ""),
+                "sync_status": str(payload.get("sync_status") or "local"),
+                "sync_message": str(payload.get("sync_message") or ""),
+                "coordinator_url": str(payload.get("coordinator_url") or ""),
+                "original_calibrations": {
+                    str(key): deepcopy(value.get("original_calibration"))
+                    for key, value in nodes.items()
+                    if isinstance(value, dict) and isinstance(value.get("original_calibration"), dict)
+                },
+                "overrides": {
+                    str(key): deepcopy(value.get("override"))
+                    for key, value in nodes.items()
+                    if isinstance(value, dict) and isinstance(value.get("override"), dict)
+                },
+            }
         return {
             "version": 1,
+            "revision": int(payload.get("revision") or 0) if isinstance(payload, dict) else 0,
+            "sync_status": "legacy_local",
+            "sync_message": "Legacy Archive phase reference will be migrated when next saved.",
+            "coordinator_url": "",
             "original_calibrations": dict(payload.get("original_calibrations") or {}) if isinstance(payload, dict) else {},
             "overrides": dict(payload.get("overrides") or {}) if isinstance(payload, dict) else {},
         }
 
     def _write_archive_phase_reference_store(self, run_dir: Path, payload: Dict[str, Any]) -> None:
-        path = run_dir / "archive_phase_reference_overrides.json"
+        path = run_dir / "sync_phase_analysis.json"
+        original_calibrations = dict(payload.get("original_calibrations") or {})
+        overrides = dict(payload.get("overrides") or {})
+        node_keys = sorted(set(original_calibrations) | set(overrides))
+        serialized = {
+            "version": 2,
+            "revision": int(payload.get("revision") or 0),
+            "updated_at": str(payload.get("updated_at") or datetime.now(timezone.utc).isoformat()),
+            "updated_by": str(payload.get("updated_by") or ""),
+            "sync_status": str(payload.get("sync_status") or "local"),
+            "sync_message": str(payload.get("sync_message") or ""),
+            "coordinator_url": str(payload.get("coordinator_url") or ""),
+            "nodes": {
+                key: {
+                    "original_calibration": deepcopy(original_calibrations.get(key)),
+                    "override": deepcopy(overrides.get(key)),
+                }
+                for key in node_keys
+            },
+        }
+        if path.is_file():
+            shutil.copy2(path, run_dir / "sync_phase_analysis.previous.json")
         temporary = path.with_suffix(path.suffix + ".tmp")
-        temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        temporary.write_text(json.dumps(serialized, ensure_ascii=False, indent=2), encoding="utf-8")
         temporary.replace(path)
+
+    def archive_phase_analysis_metadata(
+        self, year: str, month: str, day: str, run_id: str
+    ) -> Dict[str, Any]:
+        run_dir = self._get_run_dir(year, month, day, run_id)
+        store = self._read_archive_phase_reference_store(run_dir)
+        return {
+            "version": int(store.get("version") or 2),
+            "revision": int(store.get("revision") or 0),
+            "updated_at": str(store.get("updated_at") or ""),
+            "updated_by": str(store.get("updated_by") or ""),
+            "sync_status": str(store.get("sync_status") or "local"),
+            "sync_message": str(store.get("sync_message") or ""),
+            "coordinator_url": str(store.get("coordinator_url") or ""),
+            "original_calibrations": deepcopy(store.get("original_calibrations") or {}),
+            "overrides": deepcopy(store.get("overrides") or {}),
+        }
+
+    def update_archive_phase_analysis_sync_state(
+        self,
+        year: str,
+        month: str,
+        day: str,
+        run_id: str,
+        *,
+        sync_status: str,
+        sync_message: str = "",
+        coordinator_url: str = "",
+    ) -> Dict[str, Any]:
+        run_dir = self._get_run_dir(year, month, day, run_id)
+        store = self._read_archive_phase_reference_store(run_dir)
+        store["sync_status"] = str(sync_status or "local")
+        store["sync_message"] = str(sync_message or "")
+        if coordinator_url:
+            store["coordinator_url"] = str(coordinator_url).rstrip("/")
+        self._write_archive_phase_reference_store(run_dir, store)
+        return self.archive_phase_analysis_metadata(year, month, day, run_id)
+
+    def install_archive_phase_analysis_metadata(
+        self, run_dir: Path, payload: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        target = Path(run_dir).resolve()
+        if not target.is_dir():
+            raise FileNotFoundError(f"Archive run was not found: {target}")
+        if not isinstance(payload, dict) or int(payload.get("version") or 0) != 2:
+            raise ValueError("Unsupported SYNC phase analysis metadata")
+        incoming_revision = int(payload.get("revision") or 0)
+        existing = self._read_archive_phase_reference_store(target)
+        existing_revision = int(existing.get("revision") or 0)
+        if incoming_revision < existing_revision:
+            return {
+                "installed": False,
+                "reason": "newer_local_revision",
+                "revision": existing_revision,
+            }
+        originals = payload.get("original_calibrations") or {}
+        overrides = payload.get("overrides") or {}
+        if not isinstance(originals, dict) or not isinstance(overrides, dict):
+            raise ValueError("Invalid SYNC phase analysis node map")
+        store = {
+            "version": 2,
+            "revision": incoming_revision,
+            "updated_at": str(payload.get("updated_at") or datetime.now(timezone.utc).isoformat()),
+            "updated_by": str(payload.get("updated_by") or ""),
+            "sync_status": str(payload.get("sync_status") or "synced"),
+            "sync_message": str(payload.get("sync_message") or ""),
+            "coordinator_url": str(payload.get("coordinator_url") or "").rstrip("/"),
+            "original_calibrations": deepcopy(originals),
+            "overrides": deepcopy(overrides),
+        }
+        self._write_archive_phase_reference_store(target, store)
+        return {"installed": True, "revision": incoming_revision}
 
     @staticmethod
     def _archive_phase_node_key(sync_manifest: Optional[Dict[str, Any]], node_id: Optional[str]) -> str:
@@ -269,6 +393,9 @@ class DataLoader:
                 "original_is_preserved": isinstance(stored_original, dict),
                 "has_override": isinstance(override_calibration, dict),
                 "override": deepcopy(override) if isinstance(override, dict) else None,
+                "metadata_revision": int(store.get("revision") or 0),
+                "sync_status": str(store.get("sync_status") or "local"),
+                "sync_message": str(store.get("sync_message") or ""),
             }
         return contexts
 
@@ -308,7 +435,11 @@ class DataLoader:
         numeric_value = float(reference_value)
         if not math.isfinite(numeric_value) or numeric_value < 0:
             raise ValueError("Reference value must be a non-negative finite number")
-        calibration = deepcopy(selected_phase_calibration) if isinstance(selected_phase_calibration, dict) else deepcopy(original)
+        current_effective = context.get("effective_calibration") if isinstance(context, dict) else None
+        base_calibration = selected_phase_calibration if isinstance(selected_phase_calibration, dict) else (
+            current_effective if isinstance(context, dict) and context.get("has_override") and isinstance(current_effective, dict) else original
+        )
+        calibration = deepcopy(base_calibration)
         calibration.update({
             "reference_input_mode": mode,
             "reference_value": numeric_value,
@@ -336,6 +467,11 @@ class DataLoader:
             "updated_at": updated_at,
             "calibration": calibration,
         }
+        store["revision"] = int(store.get("revision") or 0) + 1
+        store["updated_at"] = updated_at
+        store["updated_by"] = node_key
+        store["sync_status"] = "pending" if sync_manifest else "local"
+        store["sync_message"] = "Waiting for SYNC phase metadata distribution" if sync_manifest else ""
         self._write_archive_phase_reference_store(root_run_dir, store)
         return {
             "node_id": node_key,
@@ -356,6 +492,11 @@ class DataLoader:
         if node_key not in overrides:
             return False
         overrides.pop(node_key, None)
+        store["revision"] = int(store.get("revision") or 0) + 1
+        store["updated_at"] = datetime.now(timezone.utc).isoformat()
+        store["updated_by"] = node_key
+        store["sync_status"] = "pending" if sync_manifest else "local"
+        store["sync_message"] = "Waiting for SYNC phase metadata distribution" if sync_manifest else ""
         self._write_archive_phase_reference_store(root_run_dir, store)
         return True
 
@@ -371,7 +512,7 @@ class DataLoader:
         def convert(record: Any, node_key: str) -> Any:
             context = contexts.get(node_key) or {}
             calibration = context.get("effective_calibration")
-            if not context.get("has_override") or not isinstance(record, dict) or not isinstance(calibration, dict):
+            if not isinstance(record, dict) or not isinstance(calibration, dict):
                 return record
             return interferometer_phase.apply_phase(record, calibration)
 
@@ -1006,6 +1147,7 @@ class DataLoader:
             "interferometer_phase_calibration_provenance": phase_provenance,
             "archive_phase_reference_node_id": phase_node_key,
             "archive_phase_reference_contexts": phase_contexts,
+            "archive_phase_analysis": self.archive_phase_analysis_metadata(year, month, day, run_id),
         }
 
 
@@ -1249,7 +1391,7 @@ class DataLoader:
         has_phase_override = bool(phase_context.get("has_override"))
         has_phase_snapshot = "_interferometer_phase_calibration_snapshot" in config_data
         phase_calibration = config_data.get("_interferometer_phase_calibration_snapshot")
-        if has_phase_override or phase_context.get("original_is_preserved"):
+        if isinstance(phase_context.get("effective_calibration"), dict):
             phase_calibration = phase_context.get("effective_calibration")
         elif normalized_mode == "recalculated":
             phase_calibration = (new_settings or {}).get("_interferometer_phase_calibration") or phase_calibration
@@ -1629,7 +1771,7 @@ class DataLoader:
             node_id,
             settings.get("_interferometer_phase_calibration"),
         )
-        if (phase_context.get("has_override") or phase_context.get("original_is_preserved")) and isinstance(phase_context.get("effective_calibration"), dict):
+        if isinstance(phase_context.get("effective_calibration"), dict):
             settings["_interferometer_phase_calibration"] = phase_context["effective_calibration"]
         points = self._read_results_csv(run_dir, max_points=None)
 
@@ -1659,7 +1801,7 @@ class DataLoader:
             "interferometer_phase_calibration_provenance": (
                 "archive_reference_override"
                 if phase_context.get("has_override")
-                else "current_calibration_recalculation" if settings.get("_interferometer_phase_calibration") else "unavailable"
+                else "archive_node_calibration_recalculation" if settings.get("_interferometer_phase_calibration") else "unavailable"
             ),
             "archive_phase_reference_node_id": _phase_node_key,
         }

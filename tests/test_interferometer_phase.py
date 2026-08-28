@@ -153,7 +153,7 @@ class InterferometerPhaseTests(unittest.TestCase):
                 self.assertEqual(overridden["interferometer_phase_calibration_provenance"], "archive_reference_override")
                 self.assertAlmostEqual(overridden["data"][0]["interferometer_phase"], 0.06, places=10)
                 self.assertEqual(json.loads((run_dir / "config.json").read_text(encoding="utf-8")), original_config)
-                self.assertTrue((run_dir / "archive_phase_reference_overrides.json").is_file())
+                self.assertTrue((run_dir / "sync_phase_analysis.json").is_file())
                 self.assertTrue(loader.delete_archive_phase_reference_override("2026", "08", "26", run_dir.name, None))
                 restored = loader.load_run("2026", "08", "26", run_dir.name)
                 self.assertAlmostEqual(restored["data"][0]["interferometer_phase"], -0.75)
@@ -198,6 +198,104 @@ class InterferometerPhaseTests(unittest.TestCase):
         self.assertTrue(payload["archive_phase_reference_contexts"]["master"]["has_override"])
         self.assertTrue(payload["archive_phase_reference_contexts"]["slave-a"]["has_override"])
 
+    def test_sync_archive_recalculates_pairs_with_each_node_snapshot_without_overrides(self):
+        master_cal = calibration(phase_conversion_mode="monotonic_half_fringe", reference_t2_us2=110.0)
+        slave_cal = calibration(
+            id="slave-phase", name="Slave fringe", phase_conversion_mode="monotonic_half_fringe",
+            parameter_values={"A": 10.0, "C": 30.0, "phi0": 0.1},
+            bragg={"angular_frequency_rad_per_us2": 0.02}, reference_t2_us2=60.0,
+        )
+        master_signal = 50.0 + 20.0 * math.cos(0.01 * 110.0 + 0.2 + 0.04)
+        slave_signal = 30.0 + 10.0 * math.cos(0.02 * 60.0 + 0.1 - 0.02)
+        loader = DataLoader()
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run01_20260826"
+            slave_dir = run_dir / "sync_nodes" / "slave-a"
+            slave_dir.mkdir(parents=True)
+            (run_dir / "config.json").write_text(json.dumps({"scan_dimensions": 1, "_interferometer_phase_calibration_snapshot": master_cal}), encoding="utf-8")
+            (slave_dir / "config.json").write_text(json.dumps({"scan_dimensions": 1, "_interferometer_phase_calibration_snapshot": slave_cal}), encoding="utf-8")
+            (run_dir / "sync_manifest.json").write_text(json.dumps({
+                "archive_nodes": {"master": {"path": ".", "local": True}, "slave-a": {"path": "sync_nodes/slave-a", "local": False}},
+                "pairs": [{"slave_node_id": "slave-a", "master": {"intf_p1": master_signal}, "slave": {"intf_p1": slave_signal}}],
+                "node_results": {"master": [], "slaves": {"slave-a": []}},
+            }), encoding="utf-8")
+            with patch.object(loader, "_get_run_dir", return_value=run_dir), patch.object(loader, "_read_results_csv", return_value=[]):
+                payload = loader.load_run("2026", "08", "26", run_dir.name, node_id="master")
+        pair = payload["sync_manifest"]["pairs"][0]
+        self.assertAlmostEqual(pair["master"]["interferometer_phase"], 0.04, places=10)
+        self.assertAlmostEqual(pair["slave"]["interferometer_phase"], -0.02, places=10)
+        self.assertEqual(pair["master"]["interferometer_phase_calibration_id"], "phase-1")
+        self.assertEqual(pair["slave"]["interferometer_phase_calibration_id"], "slave-phase")
+
+    def test_legacy_phase_sidecar_is_migrated_without_touching_raw_archive(self):
+        cal = calibration(phase_conversion_mode="monotonic_half_fringe")
+        loader = DataLoader()
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run01_20260826"
+            run_dir.mkdir()
+            (run_dir / "config.json").write_text(json.dumps({"_interferometer_phase_calibration_snapshot": cal}), encoding="utf-8")
+            legacy = {
+                "version": 1,
+                "original_calibrations": {"archive": cal},
+                "overrides": {},
+            }
+            (run_dir / "archive_phase_reference_overrides.json").write_text(json.dumps(legacy), encoding="utf-8")
+            with patch.object(loader, "_get_run_dir", return_value=run_dir):
+                before = loader.archive_phase_analysis_metadata("2026", "08", "26", run_dir.name)
+                loader.save_archive_phase_reference_override(
+                    "2026", "08", "26", run_dir.name, None, "t2", 120.0, "us", "negative"
+                )
+            migrated = json.loads((run_dir / "sync_phase_analysis.json").read_text(encoding="utf-8"))
+        self.assertEqual(before["sync_status"], "legacy_local")
+        self.assertEqual(migrated["version"], 2)
+        self.assertEqual(migrated["nodes"]["archive"]["original_calibration"]["id"], "phase-1")
+        self.assertEqual(migrated["nodes"]["archive"]["override"]["calibration"]["reference_t2_us2"], 120.0)
+
+    def test_phase_metadata_install_rejects_an_older_revision(self):
+        loader = DataLoader()
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run01_20260826"
+            run_dir.mkdir()
+            newer = {"version": 2, "revision": 4, "original_calibrations": {}, "overrides": {}, "sync_status": "synced"}
+            older = {"version": 2, "revision": 3, "original_calibrations": {}, "overrides": {}, "sync_status": "synced"}
+            first = loader.install_archive_phase_analysis_metadata(run_dir, newer)
+            second = loader.install_archive_phase_analysis_metadata(run_dir, older)
+        self.assertTrue(first["installed"])
+        self.assertFalse(second["installed"])
+        self.assertEqual(second["reason"], "newer_local_revision")
+
+    def test_sync_archive_reanalysis_injects_selected_slave_snapshot_not_local_settings(self):
+        master_cal = calibration(id="master-phase", phase_conversion_mode="monotonic_half_fringe")
+        slave_cal = calibration(id="slave-phase", name="Slave fringe", phase_conversion_mode="monotonic_half_fringe")
+        loader = DataLoader()
+        captured = []
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run01_20260826"
+            slave_dir = run_dir / "sync_nodes" / "slave-a"
+            slave_dir.mkdir(parents=True)
+            (run_dir / "config.json").write_text(json.dumps({"scan_dimensions": 1, "_interferometer_phase_calibration_snapshot": master_cal}), encoding="utf-8")
+            (slave_dir / "config.json").write_text(json.dumps({"scan_dimensions": 1, "_interferometer_phase_calibration_snapshot": slave_cal}), encoding="utf-8")
+            (run_dir / "sync_manifest.json").write_text(json.dumps({
+                "archive_nodes": {"master": {"path": ".", "local": True}, "slave-a": {"path": "sync_nodes/slave-a", "local": False}},
+                "pairs": [], "node_results": {"master": [], "slaves": {"slave-a": []}},
+            }), encoding="utf-8")
+
+            def recalculate(point, waveform, settings, original_settings):
+                captured.append(settings["_interferometer_phase_calibration"]["id"])
+                return {"parameter": 1.0, "all_parameters": [1.0], "step": 0}
+
+            with patch.object(loader, "_get_run_dir", return_value=run_dir), \
+                    patch.object(loader, "_read_results_csv", return_value=[{"step": 0}]), \
+                    patch.object(loader, "_load_waveform_arrays", return_value={}), \
+                    patch.object(loader, "_recalculate_point", side_effect=recalculate):
+                payload = loader.recalculate_run(
+                    "2026", "08", "26", run_dir.name,
+                    {"_interferometer_phase_calibration": master_cal}, node_id="slave-a",
+                )
+        self.assertEqual(captured, ["slave-phase"])
+        self.assertEqual(payload["interferometer_phase_calibration"]["id"], "slave-phase")
+        self.assertEqual(payload["interferometer_phase_calibration_provenance"], "archive_node_calibration_recalculation")
+
     def test_archive_override_can_use_a_different_settings_fringe(self):
         original = calibration(phase_conversion_mode="monotonic_half_fringe")
         selected = calibration(
@@ -218,11 +316,16 @@ class InterferometerPhaseTests(unittest.TestCase):
                     "2026", "08", "26", run_dir.name, None, "t2", 60.0, "us", "negative",
                     selected_phase_calibration=selected,
                 )
+                retained = loader.save_archive_phase_reference_override(
+                    "2026", "08", "26", run_dir.name, None, "t2", 70.0, "us", "negative"
+                )
         self.assertEqual(context["original_calibration"]["id"], "phase-1")
         self.assertEqual(context["effective_calibration"]["id"], "settings-phase-2")
         self.assertEqual(context["effective_calibration"]["name"], "Settings fringe B")
         self.assertEqual(context["effective_calibration"]["settings_reference_calibration_id"], "settings-phase-2")
         self.assertEqual(context["effective_calibration"]["reference_t2_us2"], 60.0)
+        self.assertEqual(retained["effective_calibration"]["id"], "settings-phase-2")
+        self.assertEqual(retained["effective_calibration"]["reference_t2_us2"], 70.0)
 
     def test_archive_phase_reference_editor_supports_arbitrary_t2_and_curve_marker(self):
         archive_html = (Path(__file__).resolve().parents[1] / "static" / "archive.html").read_text(encoding="utf-8")
@@ -232,6 +335,19 @@ class InterferometerPhaseTests(unittest.TestCase):
         self.assertIn("/archive/phase-reference-override", archive_html)
         self.assertIn("Currently applied fringe:", archive_html)
         self.assertIn("Settings — {{ calibration.name }}", archive_html)
+
+    def test_sync_archive_phase_supports_all_nodes_gradient_allan_and_csv(self):
+        archive_html = (Path(__file__).resolve().parents[1] / "static" / "archive.html").read_text(encoding="utf-8")
+        self.assertIn("All Hosts", archive_html)
+        self.assertIn("Phase Difference", archive_html)
+        self.assertIn("Δφ = Target − Reference", archive_html)
+        self.assertIn("syncPhaseDifferenceRows", archive_html)
+        self.assertIn("this.syncPhaseSameP0(reference.p0, target.p0)", archive_html)
+        self.assertIn("wrapped <= -Math.PI + 1e-12", archive_html)
+        self.assertIn("syncPhaseAllanCurve", archive_html)
+        self.assertIn("Chronological paired shots; averaging is not used for Allan.", archive_html)
+        self.assertIn("interferometer_phase_reference_t2_us2", archive_html)
+        self.assertIn("sync_interferometer_phase_allan_", archive_html)
 
 
 if __name__ == "__main__":

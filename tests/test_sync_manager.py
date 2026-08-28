@@ -449,6 +449,84 @@ class SyncManagerTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 sync.retry_archive_replication(run_dir)
 
+    def test_archive_phase_calibrations_are_loaded_from_selected_remote_node(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            (run_dir / "sync_manifest.json").write_text(json.dumps({
+                "runtime": {"sync_run_id": "sync_test", "slaves": [{"node_id": "slave_b", "base_url": "http://slave:8000"}]},
+                "archive_nodes": {"master": {"local": True, "path": "."}, "slave_b": {"local": False, "path": "sync_nodes/slave_b"}},
+            }), encoding="utf-8")
+            manager = FakeManager(run_dir)
+            sync = SyncManager(manager)
+            remote = {"id": "slave-cal", "name": "Slave fringe"}
+            with patch("app.core.sync_manager.requests.get", return_value=FakeResponse(payload={"calibrations": [remote], "active": remote})) as get:
+                payload = sync.get_archive_node_phase_calibrations(run_dir, "slave_b")
+            self.assertEqual(payload["source"], "remote_settings")
+            self.assertEqual(payload["active"]["id"], "slave-cal")
+            self.assertEqual(get.call_args.args[0], "http://slave:8000/sync/node/phase-calibrations")
+            self.assertEqual(get.call_args.kwargs["headers"], {"X-MIGA-Sync-Token": "secret"})
+
+    def test_master_distributes_versioned_phase_metadata_to_every_slave(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            (run_dir / "sync_manifest.json").write_text(json.dumps({
+                "runtime": {"sync_run_id": "sync_test", "slaves": [
+                    {"node_id": "slave_b", "base_url": "http://slave-b"},
+                    {"node_id": "slave_c", "base_url": "http://slave-c"},
+                ]},
+                "archive_nodes": {"master": {"local": True, "path": "."}},
+            }), encoding="utf-8")
+            sync = SyncManager(FakeManager(run_dir))
+            calls = []
+
+            def post(url, **kwargs):
+                calls.append((url, kwargs.get("json")))
+                return FakeResponse(payload={"installed": True, "revision": 7})
+
+            metadata = {"version": 2, "revision": 7, "original_calibrations": {}, "overrides": {}}
+            with patch("app.core.sync_manager.requests.post", side_effect=post):
+                result = sync.distribute_phase_analysis_metadata(run_dir, metadata, "http://master:8000")
+            self.assertEqual(result["status"], "synced")
+            self.assertEqual([item[0] for item in calls], [
+                "http://slave-b/sync/node/archive-phase-analysis/sync_test",
+                "http://slave-c/sync/node/archive-phase-analysis/sync_test",
+            ])
+            self.assertTrue(all(item[1]["coordinator_url"] == "http://master:8000" for item in calls))
+
+    def test_localhost_coordinator_url_is_advertised_as_master_lan_address(self):
+        class FakeSocket:
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def connect(self, address): self.address = address
+            def getsockname(self): return ("192.168.10.12", 54321)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            (run_dir / "sync_manifest.json").write_text(json.dumps({
+                "runtime": {"slaves": [{"node_id": "slave_b", "base_url": "http://192.168.10.20:8000"}]},
+            }), encoding="utf-8")
+            sync = SyncManager(FakeManager(run_dir))
+            with patch("app.core.sync_manager.socket.socket", return_value=FakeSocket()):
+                advertised = sync.advertised_phase_coordinator_url(run_dir, "http://127.0.0.1:8000")
+        self.assertEqual(advertised, "http://192.168.10.12:8000")
+
+    def test_archive_replication_recovers_newer_pending_phase_metadata_from_slave(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            replica_dir = run_dir / "sync_nodes" / "slave_b"
+            replica_dir.mkdir(parents=True)
+            master = {"version": 2, "revision": 2, "nodes": {}, "sync_status": "synced"}
+            replica = {"version": 2, "revision": 3, "nodes": {"slave_b": {"override": {"node_id": "slave_b"}}}, "sync_status": "pending"}
+            (run_dir / "sync_phase_analysis.json").write_text(json.dumps(master), encoding="utf-8")
+            (replica_dir / "sync_phase_analysis.json").write_text(json.dumps(replica), encoding="utf-8")
+            sync = SyncManager(FakeManager(run_dir))
+            merged = sync._merge_newer_replica_phase_metadata(run_dir, "sync_nodes/slave_b")
+            installed = json.loads((run_dir / "sync_phase_analysis.json").read_text(encoding="utf-8"))
+            self.assertTrue(merged)
+            self.assertEqual(installed["revision"], 3)
+            self.assertIn("slave_b", installed["nodes"])
+            self.assertTrue((run_dir / "sync_phase_analysis.previous.json").is_file())
+
 
 if __name__ == "__main__":
     unittest.main()

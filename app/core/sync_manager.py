@@ -10,11 +10,12 @@ import json
 from pathlib import Path
 import re
 import shutil
+import socket
 import tempfile
 import threading
 import time
 from typing import Any, Deque, Dict, List, Optional, Tuple
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 from uuid import uuid4
 
 import requests
@@ -106,6 +107,9 @@ class SyncManager:
                 return config_path.parent.resolve()
         raise FileNotFoundError(f"Archive for Sync run {sync_run_id} was not found")
 
+    def get_sync_run_dir(self, sync_run_id: str) -> Path:
+        return self._find_sync_run_dir(sync_run_id)
+
     @staticmethod
     def _archive_checksum(path: Path) -> str:
         digest = hashlib.sha256()
@@ -194,6 +198,29 @@ class SyncManager:
             "size_bytes": archive_path.stat().st_size,
             "received_at_ms": int(time.time() * 1000),
         }
+
+    def _merge_newer_replica_phase_metadata(
+        self, master_run_dir: Path, replica_relative_path: str
+    ) -> bool:
+        master_path = Path(master_run_dir) / "sync_phase_analysis.json"
+        replica_path = Path(master_run_dir) / replica_relative_path / "sync_phase_analysis.json"
+        if not replica_path.is_file():
+            return False
+        try:
+            replica = json.loads(replica_path.read_text(encoding="utf-8"))
+            master = json.loads(master_path.read_text(encoding="utf-8")) if master_path.is_file() else {}
+        except (OSError, ValueError):
+            return False
+        if int(replica.get("version") or 0) != 2:
+            return False
+        if int(replica.get("revision") or 0) <= int(master.get("revision") or 0):
+            return False
+        if master_path.is_file():
+            shutil.copy2(master_path, Path(master_run_dir) / "sync_phase_analysis.previous.json")
+        temporary = master_path.with_suffix(master_path.suffix + ".tmp")
+        temporary.write_text(json.dumps(replica, ensure_ascii=False, indent=2), encoding="utf-8")
+        temporary.replace(master_path)
+        return True
 
     def install_node_archive(
         self,
@@ -804,6 +831,7 @@ class SyncManager:
                     temp_path,
                     response.headers.get("X-MIGA-Archive-SHA256", ""),
                 )
+                self._merge_newer_replica_phase_metadata(master_run_dir, installed["path"])
                 node_state.update({"pull_status": "complete", "remote_run_id": response.headers.get("X-MIGA-Archive-Run-Id", ""), **installed})
             except Exception as exc:
                 node_state.update({"pull_status": "failed", "pull_error": str(exc)})
@@ -906,6 +934,151 @@ class SyncManager:
             raise ValueError("Archive replication can only be retried from the Master controller")
         runtime["master_run_dir"] = str(Path(run_dir).resolve())
         return self._replicate_archives(Path(run_dir), runtime)
+
+    @staticmethod
+    def _archive_manifest(run_dir: Path) -> Dict[str, Any]:
+        path = Path(run_dir) / "sync_manifest.json"
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
+    def archive_local_node_id(self, run_dir: Path) -> str:
+        manifest = self._archive_manifest(run_dir)
+        for node_id, entry in (manifest.get("archive_nodes") or {}).items():
+            if isinstance(entry, dict) and entry.get("local") is True:
+                return str(node_id)
+        return "master" if str((manifest.get("runtime") or {}).get("sync_role") or "") == "master" else ""
+
+    def _archive_node_base_url(
+        self, run_dir: Path, node_id: str, coordinator_url: str = ""
+    ) -> str:
+        manifest = self._archive_manifest(run_dir)
+        target = str(node_id or "").strip()
+        if target == "master":
+            return str(coordinator_url or "").rstrip("/")
+        for slave in (manifest.get("runtime") or {}).get("slaves") or []:
+            candidate = self._safe_node_id(slave.get("node_id") or slave.get("name"))
+            if candidate == target:
+                return self._normalize_url(slave.get("base_url"))
+        return ""
+
+    def get_archive_node_phase_calibrations(
+        self,
+        run_dir: Path,
+        node_id: str,
+        coordinator_url: str = "",
+    ) -> Dict[str, Any]:
+        local_node = self.archive_local_node_id(run_dir)
+        target = str(node_id or local_node or "master")
+        if target == local_node:
+            active = self.manager.get_active_bragg_phase_calibration()
+            return {
+                "node_id": target,
+                "source": "local_settings",
+                "calibrations": self.manager.get_bragg_phase_calibrations(),
+                "active": active,
+            }
+        base_url = self._archive_node_base_url(run_dir, target, coordinator_url)
+        if not base_url:
+            raise ValueError(f"Controller URL for SYNC node {target} is unavailable")
+        response = requests.get(
+            f"{base_url}/sync/node/phase-calibrations",
+            headers=self._headers(),
+            timeout=8.0,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        return {
+            "node_id": target,
+            "source": "remote_settings",
+            "calibrations": payload.get("calibrations") or [],
+            "active": payload.get("active"),
+        }
+
+    def distribute_phase_analysis_metadata(
+        self,
+        run_dir: Path,
+        metadata: Dict[str, Any],
+        coordinator_url: str,
+    ) -> Dict[str, Any]:
+        manifest = self._archive_manifest(run_dir)
+        runtime = manifest.get("runtime") or {}
+        sync_run_id = str(runtime.get("sync_run_id") or "")
+        if not sync_run_id:
+            raise ValueError("SYNC run id is missing from the Archive")
+        if self.archive_local_node_id(run_dir) != "master":
+            raise ValueError("Only the Master controller can distribute SYNC phase metadata")
+        wire = deepcopy(metadata)
+        wire.update({
+            "version": 2,
+            "sync_status": "synced",
+            "sync_message": "",
+            "coordinator_url": str(coordinator_url or "").rstrip("/"),
+        })
+        nodes: Dict[str, Any] = {}
+        for slave in runtime.get("slaves") or []:
+            node_id = self._safe_node_id(slave.get("node_id") or slave.get("name"))
+            try:
+                response = requests.post(
+                    f"{self._normalize_url(slave.get('base_url'))}/sync/node/archive-phase-analysis/{sync_run_id}",
+                    json=wire,
+                    headers=self._headers(),
+                    timeout=8.0,
+                )
+                response.raise_for_status()
+                nodes[node_id] = {"status": "synced", **(response.json() or {})}
+            except Exception as exc:
+                nodes[node_id] = {"status": "pending", "error": str(exc)}
+        complete = bool(nodes) and all(item.get("status") == "synced" for item in nodes.values())
+        return {
+            "status": "synced" if complete else "pending",
+            "message": "" if complete else "One or more SYNC nodes did not receive the phase metadata",
+            "nodes": nodes,
+            "coordinator_url": wire["coordinator_url"],
+        }
+
+    def advertised_phase_coordinator_url(self, run_dir: Path, request_base_url: str) -> str:
+        value = str(request_base_url or "").rstrip("/")
+        parsed = urlparse(value)
+        hostname = str(parsed.hostname or "").lower()
+        if hostname not in {"localhost", "127.0.0.1", "::1"}:
+            return value
+        manifest = self._archive_manifest(run_dir)
+        for slave in (manifest.get("runtime") or {}).get("slaves") or []:
+            peer = urlparse(self._normalize_url(slave.get("base_url")))
+            if not peer.hostname:
+                continue
+            try:
+                family = socket.AF_INET6 if ":" in peer.hostname else socket.AF_INET
+                with socket.socket(family, socket.SOCK_DGRAM) as probe:
+                    probe.connect((peer.hostname, peer.port or 80))
+                    local_ip = str(probe.getsockname()[0])
+                host = f"[{local_ip}]" if ":" in local_ip else local_ip
+                netloc = f"{host}:{parsed.port}" if parsed.port else host
+                return urlunparse((parsed.scheme or "http", netloc, parsed.path, "", "", "")).rstrip("/")
+            except OSError:
+                continue
+        return value
+
+    def forward_phase_analysis_metadata(
+        self,
+        sync_run_id: str,
+        metadata: Dict[str, Any],
+        coordinator_url: str,
+    ) -> Dict[str, Any]:
+        target = str(coordinator_url or "").rstrip("/")
+        if not target:
+            raise ValueError("Master coordinator URL is unavailable; update from the Master Archive first")
+        response = requests.post(
+            f"{target}/sync/node/archive-phase-analysis/{sync_run_id}/merge",
+            json=metadata,
+            headers=self._headers(),
+            timeout=12.0,
+        )
+        response.raise_for_status()
+        return response.json()
 
     def _write_archive_snapshot(self) -> None:
         with self._lock:

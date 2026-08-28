@@ -1562,7 +1562,7 @@
                                     <option value="node">Node Data</option>
                                     <option value="differential">Differential Replay</option>
                                 </select>
-                                <select v-if="syncArchiveViewMode === 'node'" class="form-select form-select-sm" style="width:auto" v-model="syncArchiveNodeSource" @change="handleSyncArchiveNodeSourceChange">
+                                <select v-if="syncArchiveViewMode === 'node' && syncArchiveTab !== 'phase'" class="form-select form-select-sm" style="width:auto" v-model="syncArchiveNodeSource" @change="handleSyncArchiveNodeSourceChange">
                                     <option value="master">Master</option>
                                     <option v-for="slaveId in syncArchiveSlaveOptions()" :key="slaveId" :value="slaveId">{{ syncArchiveNodeLabel(slaveId) }}</option>
                                 </select>
@@ -1580,6 +1580,35 @@
                                         role="tab" :aria-selected="syncArchiveTab === tab.id" @click="setSyncArchiveTab(tab.id)">{{ tab.label }}</button>
                                 </li>
                             </ul>
+                        </div>
+                        <div v-if="syncArchiveViewMode === 'node' && syncArchiveTab === 'phase'" class="row g-2 mt-2">
+                            <div class="col-12 d-flex flex-wrap align-items-center gap-2">
+                                <select class="form-select form-select-sm" style="width:auto" v-model="syncPhaseViewMode" @change="handleSyncPhaseControlChange">
+                                    <option value="selected">Selected Host</option>
+                                    <option value="all">All Hosts</option>
+                                    <option value="difference">Phase Difference</option>
+                                </select>
+                                <span class="small text-muted">Calibration host</span>
+                                <select class="form-select form-select-sm" style="width:auto" v-model="syncArchiveNodeSource" @change="handleSyncArchiveNodeSourceChange"><option v-for="nodeId in syncPhaseNodeIds()" :key="nodeId" :value="nodeId">{{ syncArchiveNodeLabel(nodeId) }}</option></select>
+                                <template v-if="syncPhaseViewMode === 'difference'">
+                                    <span class="small text-muted">Reference</span>
+                                    <select class="form-select form-select-sm" style="width:auto" v-model="syncPhaseReferenceNode" @change="handleSyncPhaseControlChange"><option v-for="nodeId in syncPhaseNodeIds()" :key="nodeId" :value="nodeId">{{ syncArchiveNodeLabel(nodeId) }}</option></select>
+                                    <span class="small text-muted">Target</span>
+                                    <select class="form-select form-select-sm" style="width:auto" v-model="syncPhaseTargetNode" @change="handleSyncPhaseControlChange"><option v-for="nodeId in syncPhaseNodeIds()" :key="nodeId" :value="nodeId" :disabled="nodeId === syncPhaseReferenceNode">{{ syncArchiveNodeLabel(nodeId) }}</option></select>
+                                    <span class="badge bg-light text-dark border">Δφ = Target − Reference</span>
+                                </template>
+                                <div class="btn-group btn-group-sm" role="group" aria-label="SYNC phase plot mode"><button class="btn" :class="syncPhasePlotMode === 'series' ? 'btn-dark' : 'btn-outline-dark'" @click="setSyncPhasePlotMode('series')">Series</button><button class="btn" :class="syncPhasePlotMode === 'allan' ? 'btn-dark' : 'btn-outline-dark'" @click="setSyncPhasePlotMode('allan')">Allan</button></div>
+                                <select v-if="syncPhasePlotMode === 'series'" class="form-select form-select-sm" style="width:auto" v-model="syncPhaseAggregation" @change="renderSyncArchiveNodePlots"><option value="shots">Every shot</option><option value="average">Averaged by P0</option></select>
+                                <button class="btn btn-outline-success btn-sm" @click="downloadSyncPhaseCSV" :disabled="!syncPhaseExportRows().length"><i class="bi bi-download me-1"></i>Phase CSV</button>
+                            </div>
+                            <div v-if="syncPhasePlotMode === 'allan'" class="col-12 d-flex flex-wrap align-items-center gap-2">
+                                <label class="form-label-small mb-0">MAX N</label><input type="number" class="form-control form-control-sm" style="width:88px" min="1" :max="syncPhaseMaxAllanOrder()" v-model.number="syncPhaseAllanOrder" @change="normalizeAndRenderSyncPhaseAllan">
+                                <div class="btn-group btn-group-sm"><button class="btn" :class="syncPhaseAllanScale === 'absolute' ? 'btn-primary' : 'btn-outline-primary'" @click="syncPhaseAllanScale='absolute'; renderSyncArchiveNodePlots()">Absolute</button><button class="btn" :class="syncPhaseAllanScale === 'relative' ? 'btn-primary' : 'btn-outline-primary'" @click="syncPhaseAllanScale='relative'; renderSyncArchiveNodePlots()">Relative</button></div>
+                                <div class="btn-group btn-group-sm"><button class="btn" :class="syncPhaseAllanXAxis === 'linear' ? 'btn-secondary' : 'btn-outline-secondary'" @click="syncPhaseAllanXAxis='linear'; renderSyncArchiveNodePlots()">Linear X</button><button class="btn" :class="syncPhaseAllanXAxis === 'log' ? 'btn-secondary' : 'btn-outline-secondary'" @click="syncPhaseAllanXAxis='log'; renderSyncArchiveNodePlots()">Log X</button></div>
+                                <label class="form-label-small mb-0">P0 RANGE</label><input type="number" step="any" class="form-control form-control-sm" style="width:112px" v-model="syncPhaseP0MinInput" @keyup.enter="applySyncPhaseP0Range"><span class="small text-muted">to</span><input type="number" step="any" class="form-control form-control-sm" style="width:112px" v-model="syncPhaseP0MaxInput" @keyup.enter="applySyncPhaseP0Range">
+                                <button class="btn btn-outline-secondary btn-sm" @click="applySyncPhaseP0Range">Apply</button><button class="btn btn-outline-secondary btn-sm" @click="resetSyncPhaseP0Range">Full Range</button><span class="small text-muted">Chronological paired shots; averaging is not used for Allan.</span>
+                                <button class="btn btn-outline-success btn-sm" @click="downloadSyncPhaseAllanCSV"><i class="bi bi-download me-1"></i>Allan CSV</button>
+                            </div>
                         </div>
                         <div v-else class="row g-2 mt-2">
                             <div class="col-lg-6 d-flex gap-2">
@@ -1648,7 +1677,10 @@
                 <section v-if="archivePhaseReferenceEditorVisible()" class="card mb-4 border-0 shadow-sm">
                     <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
                         <span><i class="bi bi-crosshair text-success me-2"></i>Archive Phase Reference</span>
-                        <span v-if="archivePhaseReferenceContext()?.has_override" class="badge bg-success">Archive override</span>
+                        <div class="d-flex gap-2">
+                            <span v-if="archivePhaseReferenceContext()?.has_override" class="badge bg-success">Archive override</span>
+                            <span v-if="syncManifest" class="badge" :class="archivePhaseSyncStatusClass()">{{ archivePhaseSyncStatusLabel() }}</span>
+                        </div>
                     </div>
                     <div class="card-body">
                         <div v-if="archivePhaseReferenceMessage" class="alert py-2" :class="archivePhaseReferenceError ? 'alert-danger' : 'alert-success'">{{ archivePhaseReferenceMessage }}</div>
@@ -1663,12 +1695,17 @@
                                         <strong>Currently applied fringe:</strong> {{ archivePhaseReferenceCalibration()?.name || 'unnamed' }}
                                     </div>
                                     <label class="form-label-small mt-2">Reference fringe</label>
-                                    <select class="form-select mb-2" v-model="archivePhaseReferenceSelectedCalibrationId" @change="selectArchivePhaseReferenceCalibration">
+                                    <select class="form-select mb-2" v-model="archivePhaseReferenceSelectedCalibrationId" @change="selectArchivePhaseReferenceCalibration" :disabled="archivePhaseCalibrationListLoading">
                                         <option value="archive">Current archive fringe — {{ archivePhaseReferenceCalibration()?.name || 'unnamed' }}</option>
                                         <option v-for="calibration in settingsPhaseCalibrations" :key="calibration.id" :value="`settings:${calibration.id}`">
                                             Settings — {{ calibration.name }}{{ calibration.id === settingsActivePhaseCalibrationId ? ' (active)' : '' }}
                                         </option>
                                     </select>
+                                    <div class="form-text mb-2">
+                                        {{ archivePhaseCalibrationListLoading ? 'Loading calibrations from this node…' : archivePhaseCalibrationSourceLabel() }}
+                                    </div>
+                                    <div v-if="archivePhaseCalibrationListError" class="alert alert-warning py-2 small">{{ archivePhaseCalibrationListError }}</div>
+                                    <div v-if="archivePhaseAnalysis.sync_message" class="alert alert-warning py-2 small">{{ archivePhaseAnalysis.sync_message }}</div>
                                     <div class="small text-muted mb-3">
                                         <strong>Preview fringe:</strong> {{ archivePhaseReferenceDraft.name || 'Saved fringe calibration' }}
                                         <span v-if="archivePhaseReferenceDraft.id === settingsActivePhaseCalibrationId" class="badge bg-primary ms-1">Settings active</span><br>
@@ -1694,6 +1731,7 @@
                                     <div class="d-grid gap-2">
                                         <button class="btn btn-success" @click="saveArchivePhaseReference" :disabled="archivePhaseReferenceBusy"><span v-if="archivePhaseReferenceBusy" class="spinner-border spinner-border-sm me-1"></span>Apply &amp; recalculate</button>
                                         <button class="btn btn-outline-secondary" @click="restoreArchivePhaseReference" :disabled="archivePhaseReferenceBusy || !archivePhaseReferenceContext()?.has_override">Restore experiment reference</button>
+                                        <button v-if="syncManifest && archivePhaseAnalysis.sync_status === 'pending'" class="btn btn-outline-warning" @click="retryArchivePhaseAnalysisSync" :disabled="archivePhaseReferenceBusy">Retry phase metadata sync</button>
                                     </div>
                                     <div class="form-text mt-2">This override is saved only with this Archive run; raw CSV and global Settings are unchanged.</div>
                                 </div>
@@ -2108,6 +2146,8 @@
                     archivePhaseReferenceContexts: {}, archivePhaseReferenceNodeId: '', archivePhaseReferenceDraft: {},
                     archivePhaseReferenceBusy: false, archivePhaseReferenceMessage: '', archivePhaseReferenceError: false,
                     archivePhaseReferenceSelectedCalibrationId: 'archive', settingsPhaseCalibrations: [], settingsActivePhaseCalibrationId: '',
+                    archivePhaseCalibrationListLoading: false, archivePhaseCalibrationListError: '', archivePhaseCalibrationListSource: '',
+                    archivePhaseAnalysis: {},
                     markerOptimization: null, selectedOptimizationStep: null,
                     syncManifest: null,
                     syncArchiveViewMode: 'node',
@@ -2115,6 +2155,10 @@
                     loadedSyncNode: '',
                     syncArchiveRetrying: false,
                     syncArchiveTab: 'atoms',
+                    syncPhaseViewMode: 'all', syncPhaseAggregation: 'shots', syncPhasePlotMode: 'series',
+                    syncPhaseReferenceNode: 'master', syncPhaseTargetNode: '',
+                    syncPhaseAllanOrder: 1, syncPhaseAllanScale: 'absolute', syncPhaseAllanXAxis: 'linear',
+                    syncPhaseP0Min: null, syncPhaseP0Max: null, syncPhaseP0MinInput: '', syncPhaseP0MaxInput: '',
                     syncArchiveSlaveId: '',
                     syncArchiveAxisX: { metric: 'intf_p', channel: 'up' },
                     syncArchiveAxisY: { metric: 'intf_p', channel: 'up' },
@@ -4366,14 +4410,35 @@
                         const response = await axios.get('/settings/interferometer-phase-calibrations');
                         const calibrations = Array.isArray(response.data?.calibrations) ? response.data.calibrations : [];
                         this.braggPhase.calibrations = calibrations;
-                        this.settingsPhaseCalibrations = calibrations;
-                        this.settingsActivePhaseCalibrationId = String(response.data?.active?.id || '');
                         if (this.braggPhase.selectedCalibrationId !== 'current'
                             && !this.braggPhase.calibrations.some(item => item.id === this.braggPhase.selectedCalibrationId)) {
                             this.braggPhase.selectedCalibrationId = 'current';
                         }
                     } catch (error) {
                         console.error(error);
+                    }
+                },
+                async fetchArchiveNodePhaseCalibrations() {
+                    if (!this.selectedRun) return;
+                    this.archivePhaseCalibrationListLoading = true;
+                    this.archivePhaseCalibrationListError = '';
+                    try {
+                        const query = new URLSearchParams({ t: String(Date.now()) });
+                        const node = this.syncManifest ? this.archivePhaseReferenceNodeKey() : '';
+                        if (node) query.set('node_id', node);
+                        const response = await axios.get(
+                            `/archive/phase-calibrations/${this.selectedYear}/${this.selectedMonth}/${this.selectedDay}/${this.selectedRun}?${query.toString()}`
+                        );
+                        this.settingsPhaseCalibrations = Array.isArray(response.data?.calibrations) ? response.data.calibrations : [];
+                        this.settingsActivePhaseCalibrationId = String(response.data?.active?.id || '');
+                        this.archivePhaseCalibrationListSource = String(response.data?.source || '');
+                    } catch (error) {
+                        this.settingsPhaseCalibrations = [];
+                        this.settingsActivePhaseCalibrationId = '';
+                        this.archivePhaseCalibrationListSource = '';
+                        this.archivePhaseCalibrationListError = error.response?.data?.detail || error.message || 'Unable to load calibrations from this node.';
+                    } finally {
+                        this.archivePhaseCalibrationListLoading = false;
                     }
                 },
                 async saveCurrentBraggCalibration() {
@@ -4490,6 +4555,8 @@
                     this.archivePhaseReferenceDraft = {};
                     this.archivePhaseReferenceMessage = '';
                     this.archivePhaseReferenceError = false;
+                    this.archivePhaseAnalysis = {};
+                    this.archivePhaseCalibrationListError = '';
                     this.syncArchiveViewMode = 'node';
                     this.syncArchiveNodeSource = requestedSyncNode || 'master';
                     this.loadedSyncNode = requestedSyncNode;
@@ -4530,6 +4597,8 @@
                         this.archivePhaseReferenceContexts = res.data.archive_phase_reference_contexts && typeof res.data.archive_phase_reference_contexts === 'object'
                             ? res.data.archive_phase_reference_contexts : {};
                         this.archivePhaseReferenceNodeId = String(res.data.archive_phase_reference_node_id || '');
+                        this.archivePhaseAnalysis = res.data.archive_phase_analysis && typeof res.data.archive_phase_analysis === 'object'
+                            ? res.data.archive_phase_analysis : {};
                         this.markerOptimization = res.data.marker_optimization && typeof res.data.marker_optimization === 'object'
                             ? res.data.marker_optimization
                             : null;
@@ -4542,8 +4611,14 @@
                         const localArchiveNode = Object.entries(this.syncManifest?.archive_nodes || {}).find(([, entry]) => entry?.local === true)?.[0] || '';
                         this.loadedSyncNode = String(res.data.selected_sync_node || requestedSyncNode || localArchiveNode || '');
                         this.syncArchiveNodeSource = this.loadedSyncNode || 'master';
+                        await this.fetchArchiveNodePhaseCalibrations();
                         this.initializeArchivePhaseReferenceDraft();
                         this.syncArchiveSlaveId = this.syncArchiveSlaveOptions()[0] || '';
+                        this.syncPhaseReferenceNode = this.syncPhaseNodeIds().includes(this.syncPhaseReferenceNode) ? this.syncPhaseReferenceNode : 'master';
+                        if (!this.syncPhaseNodeIds().includes(this.syncPhaseTargetNode) || this.syncPhaseTargetNode === this.syncPhaseReferenceNode) {
+                            this.syncPhaseTargetNode = this.syncPhaseNodeIds().find(nodeId => nodeId !== this.syncPhaseReferenceNode) || '';
+                        }
+                        this.resetSyncPhaseP0Range(false);
                         if (this.syncDifferentialFitSelectedId) this.restoreSyncDifferentialFit(false);
                         this.syncArchiveReplayCount = this.syncArchiveDifferentialPoints().length;
                         this.selectedOptimizationStep = this.markerOptimization?.steps?.length
@@ -4997,6 +5072,28 @@
                 archivePhaseReferenceCalibration() {
                     return this.archivePhaseReferenceContext()?.effective_calibration || null;
                 },
+                archivePhaseCalibrationSourceLabel() {
+                    if (this.archivePhaseCalibrationListSource === 'remote_settings') {
+                        return `Calibration list loaded from ${this.archivePhaseReferenceNodeLabel()} Settings.`;
+                    }
+                    if (this.archivePhaseCalibrationListSource === 'local_settings') {
+                        return `Calibration list loaded from this node's local Settings.`;
+                    }
+                    return 'Calibration source unavailable.';
+                },
+                archivePhaseSyncStatusLabel() {
+                    const status = String(this.archivePhaseAnalysis?.sync_status || 'local');
+                    if (status === 'synced') return `Phase metadata synced · r${Number(this.archivePhaseAnalysis?.revision || 0)}`;
+                    if (status === 'pending') return `Phase metadata pending · r${Number(this.archivePhaseAnalysis?.revision || 0)}`;
+                    if (status === 'legacy_local') return 'Legacy local metadata';
+                    return `Local phase metadata · r${Number(this.archivePhaseAnalysis?.revision || 0)}`;
+                },
+                archivePhaseSyncStatusClass() {
+                    const status = String(this.archivePhaseAnalysis?.sync_status || 'local');
+                    if (status === 'synced') return 'bg-success';
+                    if (status === 'pending') return 'bg-warning text-dark';
+                    return 'bg-secondary';
+                },
                 initializeArchivePhaseReferenceDraft() {
                     const calibration = this.archivePhaseReferenceCalibration();
                     this.archivePhaseReferenceDraft = calibration ? JSON.parse(JSON.stringify(calibration)) : {};
@@ -5143,7 +5240,10 @@
                             monotonic_slope: this.archivePhaseReferenceDraft.monotonic_slope,
                         });
                         await this.loadRun(node);
-                        this.archivePhaseReferenceMessage = `Archive phase reference applied to ${this.archivePhaseReferenceNodeLabel()}.`;
+                        const syncSuffix = this.syncManifest
+                            ? (this.archivePhaseAnalysis?.sync_status === 'synced' ? ' SYNC metadata updated on all reachable nodes.' : ' Saved locally; SYNC update is pending.')
+                            : '';
+                        this.archivePhaseReferenceMessage = `Archive phase reference applied to ${this.archivePhaseReferenceNodeLabel()}.${syncSuffix}`;
                     } catch (error) {
                         this.archivePhaseReferenceError = true;
                         this.archivePhaseReferenceMessage = error.response?.data?.detail || error.message || 'Unable to apply archive phase reference.';
@@ -5162,10 +5262,32 @@
                         const query = node ? `?node_id=${encodeURIComponent(node)}` : '';
                         await axios.delete(`/archive/phase-reference-override/${this.selectedYear}/${this.selectedMonth}/${this.selectedDay}/${this.selectedRun}${query}`);
                         await this.loadRun(node);
-                        this.archivePhaseReferenceMessage = `Original experiment phase reference restored for ${this.archivePhaseReferenceNodeLabel()}.`;
+                        const syncSuffix = this.syncManifest
+                            ? (this.archivePhaseAnalysis?.sync_status === 'synced' ? ' SYNC metadata updated.' : ' SYNC update is pending.')
+                            : '';
+                        this.archivePhaseReferenceMessage = `Original experiment phase reference restored for ${this.archivePhaseReferenceNodeLabel()}.${syncSuffix}`;
                     } catch (error) {
                         this.archivePhaseReferenceError = true;
                         this.archivePhaseReferenceMessage = error.response?.data?.detail || error.message || 'Unable to restore the experiment reference.';
+                    } finally {
+                        this.archivePhaseReferenceBusy = false;
+                    }
+                },
+                async retryArchivePhaseAnalysisSync() {
+                    if (!this.syncManifest || this.archivePhaseReferenceBusy) return;
+                    this.archivePhaseReferenceBusy = true;
+                    this.archivePhaseReferenceMessage = '';
+                    this.archivePhaseReferenceError = false;
+                    const node = this.archivePhaseReferenceNodeKey();
+                    try {
+                        await axios.post(`/archive/phase-analysis/sync/${this.selectedYear}/${this.selectedMonth}/${this.selectedDay}/${this.selectedRun}`);
+                        await this.loadRun(node);
+                        this.archivePhaseReferenceMessage = this.archivePhaseAnalysis?.sync_status === 'synced'
+                            ? 'SYNC phase metadata is up to date.'
+                            : 'Phase metadata is still pending on one or more nodes.';
+                    } catch (error) {
+                        this.archivePhaseReferenceError = true;
+                        this.archivePhaseReferenceMessage = error.response?.data?.detail || error.message || 'Unable to synchronize phase metadata.';
                     } finally {
                         this.archivePhaseReferenceBusy = false;
                     }
@@ -5175,6 +5297,7 @@
                     if (this.archivePhaseCalibrationProvenance === 'run_snapshot') return 'run calibration snapshot';
                     if (this.archivePhaseCalibrationProvenance === 'current_calibration_legacy_run') return 'current calibration (legacy run)';
                     if (this.archivePhaseCalibrationProvenance === 'current_calibration_recalculation') return 'current calibration (recalculated)';
+                    if (this.archivePhaseCalibrationProvenance === 'archive_node_calibration_recalculation') return 'archive node calibration (recalculated)';
                     return 'no calibration';
                 },
                 syncArchivePairs() {
@@ -5200,6 +5323,7 @@
                         await this.loadRun(source);
                         return;
                     }
+                    await this.fetchArchiveNodePhaseCalibrations();
                     this.initializeArchivePhaseReferenceDraft();
                     this.renderSyncArchiveNodePlots();
                     this.$nextTick(() => this.renderArchivePhaseReferencePlot());
@@ -5234,8 +5358,8 @@
                 },
                 syncArchiveNodeRows(source = this.syncArchiveNodeSource) {
                     const nodes = this.syncManifest?.node_results;
-                    if (source === 'master' && Array.isArray(nodes?.master)) return nodes.master;
-                    if (source !== 'master' && Array.isArray(nodes?.slaves?.[source])) return nodes.slaves[source];
+                    if (source === 'master' && Array.isArray(nodes?.master) && nodes.master.length) return nodes.master;
+                    if (source !== 'master' && Array.isArray(nodes?.slaves?.[source]) && nodes.slaves[source].length) return nodes.slaves[source];
                     const pairs = Array.isArray(this.syncManifest?.pairs) ? this.syncManifest.pairs : [];
                     const selected = source === 'master'
                         ? pairs.map(pair => pair.master)
@@ -5250,6 +5374,141 @@
                         slave => String(slave.node_id || '') === String(nodeId)
                     );
                     return state?.name || nodeId;
+                },
+                syncPhaseNodeIds() {
+                    const nodeResults = this.syncManifest?.node_results || {};
+                    const ids = [
+                        'master',
+                        ...Object.keys(nodeResults.slaves || {}),
+                        ...this.syncArchiveSlaveOptions(),
+                    ];
+                    return [...new Set(ids.filter(nodeId => nodeId === 'master' || String(nodeId || '').trim()))];
+                },
+                syncPhaseP0(row) {
+                    const value = Number(row?.sync_p0 ?? row?.parameter ?? row?.all_parameters?.[0]);
+                    return Number.isFinite(value) ? value : null;
+                },
+                syncPhaseShot(row, fallback = 0) {
+                    const value = Number(row?.sync_shot_index ?? row?.step ?? fallback);
+                    return Number.isFinite(value) ? value : fallback;
+                },
+                syncPhaseRows(nodeId, includeInvalid = false) {
+                    return this.syncArchiveNodeRows(nodeId).map((row, index) => ({
+                        row,
+                        nodeId,
+                        shot: this.syncPhaseShot(row, index),
+                        p0: this.syncPhaseP0(row),
+                        phase: Number(row?.interferometer_phase),
+                        valid: row?.interferometer_phase_valid === true && Number.isFinite(Number(row?.interferometer_phase)),
+                    })).filter(item => Number.isFinite(item.p0) && (includeInvalid || item.valid))
+                        .sort((a, b) => a.shot - b.shot);
+                },
+                syncPhaseSameP0(left, right) {
+                    const a = Number(left); const b = Number(right);
+                    if (!Number.isFinite(a) || !Number.isFinite(b)) return false;
+                    return Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
+                },
+                wrapSyncPhase(value) {
+                    const twoPi = 2 * Math.PI;
+                    let wrapped = ((Number(value) + Math.PI) % twoPi + twoPi) % twoPi - Math.PI;
+                    if (wrapped <= -Math.PI + 1e-12) wrapped = Math.PI;
+                    return wrapped;
+                },
+                syncPhaseDifferenceRows(referenceNode = this.syncPhaseReferenceNode, targetNode = this.syncPhaseTargetNode) {
+                    if (!referenceNode || !targetNode || referenceNode === targetNode) return [];
+                    const referenceByShot = new Map(this.syncPhaseRows(referenceNode).map(item => [item.shot, item]));
+                    return this.syncPhaseRows(targetNode).map(target => {
+                        const reference = referenceByShot.get(target.shot);
+                        if (!reference || !this.syncPhaseSameP0(reference.p0, target.p0)) return null;
+                        const rawDifference = target.phase - reference.phase;
+                        return { shot: target.shot, p0: target.p0, phase: this.wrapSyncPhase(rawDifference), rawDifference, reference, target };
+                    }).filter(Boolean).sort((a, b) => a.shot - b.shot);
+                },
+                syncPhaseAggregateRows(rows) {
+                    if (this.syncPhaseAggregation !== 'average') return rows.map(item => ({ ...item, count: 1 }));
+                    const groups = new Map();
+                    rows.forEach(item => {
+                        const key = Number(item.p0).toFixed(9);
+                        const group = groups.get(key) || { p0: item.p0, phaseSum: 0, rawSum: 0, count: 0, shot: item.shot };
+                        group.phaseSum += Number(item.phase); group.rawSum += Number(item.rawDifference ?? item.phase); group.count += 1;
+                        group.shot = Math.min(group.shot, item.shot); groups.set(key, group);
+                    });
+                    return [...groups.values()].map(group => ({ p0: group.p0, phase: group.phaseSum / group.count, rawDifference: group.rawSum / group.count, count: group.count, shot: group.shot })).sort((a, b) => a.p0 - b.p0);
+                },
+                ensureSyncPhaseNodes() {
+                    const ids = this.syncPhaseNodeIds();
+                    if (!ids.includes(this.syncPhaseReferenceNode)) this.syncPhaseReferenceNode = ids[0] || '';
+                    if (!ids.includes(this.syncPhaseTargetNode) || this.syncPhaseTargetNode === this.syncPhaseReferenceNode) this.syncPhaseTargetNode = ids.find(id => id !== this.syncPhaseReferenceNode) || '';
+                },
+                handleSyncPhaseControlChange() {
+                    this.ensureSyncPhaseNodes();
+                    this.resetSyncPhaseP0Range(false);
+                    this.renderSyncArchiveNodePlots();
+                },
+                setSyncPhasePlotMode(mode) {
+                    this.syncPhasePlotMode = mode === 'allan' ? 'allan' : 'series';
+                    if (this.syncPhasePlotMode === 'allan') {
+                        this.syncPhaseAllanOrder = this.syncPhaseMaxAllanOrder();
+                        this.normalizeAndRenderSyncPhaseAllan();
+                    }
+                    else this.renderSyncArchiveNodePlots();
+                },
+                syncPhaseActiveSeriesRows() {
+                    if (this.syncPhaseViewMode === 'difference') return [this.syncPhaseDifferenceRows()];
+                    if (this.syncPhaseViewMode === 'selected') return [this.syncPhaseRows(this.syncArchiveNodeSource)];
+                    return this.syncPhaseNodeIds().map(nodeId => this.syncPhaseRows(nodeId));
+                },
+                syncPhaseAvailableP0Bounds() {
+                    const values = this.syncPhaseActiveSeriesRows().flat().map(item => Number(item.p0)).filter(Number.isFinite).sort((a, b) => a - b);
+                    return values.length ? { min: values[0], max: values[values.length - 1] } : { min: null, max: null };
+                },
+                resetSyncPhaseP0Range(render = true) {
+                    const bounds = this.syncPhaseAvailableP0Bounds();
+                    this.syncPhaseP0Min = bounds.min; this.syncPhaseP0Max = bounds.max;
+                    this.syncPhaseP0MinInput = Number.isFinite(bounds.min) ? String(bounds.min) : '';
+                    this.syncPhaseP0MaxInput = Number.isFinite(bounds.max) ? String(bounds.max) : '';
+                    if (render) this.renderSyncArchiveNodePlots();
+                },
+                applySyncPhaseP0Range() {
+                    const bounds = this.syncPhaseAvailableP0Bounds();
+                    if (!Number.isFinite(bounds.min) || !Number.isFinite(bounds.max)) return;
+                    let min = Number(this.syncPhaseP0MinInput); let max = Number(this.syncPhaseP0MaxInput);
+                    if (!Number.isFinite(min)) min = bounds.min; if (!Number.isFinite(max)) max = bounds.max;
+                    if (min > max) [min, max] = [max, min];
+                    this.syncPhaseP0Min = Math.max(bounds.min, min); this.syncPhaseP0Max = Math.min(bounds.max, max);
+                    this.syncPhaseP0MinInput = String(this.syncPhaseP0Min); this.syncPhaseP0MaxInput = String(this.syncPhaseP0Max);
+                    this.normalizeAndRenderSyncPhaseAllan();
+                },
+                syncPhaseAllanRows(rows) {
+                    const min = this.syncPhaseP0Min === null || this.syncPhaseP0Min === '' ? null : Number(this.syncPhaseP0Min);
+                    const max = this.syncPhaseP0Max === null || this.syncPhaseP0Max === '' ? null : Number(this.syncPhaseP0Max);
+                    return rows.filter(item => (!Number.isFinite(min) || item.p0 >= min - 1e-12) && (!Number.isFinite(max) || item.p0 <= max + 1e-12)).sort((a, b) => a.shot - b.shot);
+                },
+                syncPhaseMaxAllanOrder() {
+                    const counts = this.syncPhaseActiveSeriesRows().map(rows => this.syncPhaseAllanRows(rows).length).filter(count => count > 0);
+                    return Math.max(1, Math.floor((counts.length ? Math.min(...counts) : 0) / 2));
+                },
+                normalizeAndRenderSyncPhaseAllan() {
+                    this.syncPhaseAllanOrder = Math.max(1, Math.min(this.syncPhaseMaxAllanOrder(), Math.round(Number(this.syncPhaseAllanOrder) || 1)));
+                    this.renderSyncArchiveNodePlots();
+                },
+                syncPhaseAllanCurve(rows) {
+                    const source = this.syncPhaseAllanRows(rows);
+                    const maxOrder = Math.max(0, Math.min(this.syncPhaseMaxAllanOrder(), Math.round(Number(this.syncPhaseAllanOrder) || 1)));
+                    const values = source.map(item => Number(item.phase));
+                    const mean = values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+                    const orders = []; const deviations = []; const validWindowCounts = [];
+                    for (let order = 1; order <= maxOrder; order += 1) {
+                        const prefix = [0]; values.forEach((value, index) => prefix.push(prefix[index] + value));
+                        let sumSquares = 0; let count = 0;
+                        for (let start = 0; start <= values.length - 2 * order; start += 1) {
+                            const split = start + order; const end = split + order;
+                            const difference = ((prefix[end] - prefix[split]) - (prefix[split] - prefix[start])) / order;
+                            sumSquares += difference * difference / 2; count += 1;
+                        }
+                        orders.push(order); deviations.push(count ? Math.sqrt(sumSquares / count) : null); validWindowCounts.push(count);
+                    }
+                    return { orders, deviations, validWindowCounts, mean, count: source.length };
                 },
                 syncArchiveTabField(tabId, channel, noFit = false) {
                     const channelSuffix = channel === 'dw' ? 'dw' : 'up';
@@ -5304,6 +5563,10 @@
                 },
                 renderSyncArchiveNodePlots() {
                     if (typeof Plotly === 'undefined') return;
+                    if (this.syncArchiveTab === 'phase') {
+                        this.renderSyncPhasePlot();
+                        return;
+                    }
                     const metric = this.getMetricConfig(this.syncArchiveTab);
                     const sourceLabel = this.syncArchiveNodeLabel(this.syncArchiveNodeSource);
                     const renderChannel = (channel, elementId, color) => {
@@ -5340,6 +5603,109 @@
                     const downElement = document.getElementById('syncArchiveNodePlotDw');
                     if (downElement) downElement.style.display = this.syncArchiveTab === 'phase' ? 'none' : 'block';
                     if (this.syncArchiveTab !== 'phase') renderChannel('dw', 'syncArchiveNodePlotDw', '#0d6efd');
+                },
+                renderSyncPhasePlot() {
+                    if (typeof Plotly === 'undefined') return;
+                    this.ensureSyncPhaseNodes();
+                    const element = document.getElementById('syncArchiveNodePlotUp');
+                    const downElement = document.getElementById('syncArchiveNodePlotDw');
+                    if (downElement) downElement.style.display = 'none';
+                    if (!element) return;
+                    const colors = ['#dc3545', '#0d6efd', '#198754', '#6f42c1', '#fd7e14', '#20c997', '#d63384'];
+                    const scale = this.phaseUnit === 'mrad' ? 1000 : 1;
+                    let definitions = [];
+                    if (this.syncPhaseViewMode === 'difference') {
+                        definitions = [{
+                            id: `${this.syncPhaseTargetNode}-${this.syncPhaseReferenceNode}`,
+                            label: `${this.syncArchiveNodeLabel(this.syncPhaseTargetNode)} − ${this.syncArchiveNodeLabel(this.syncPhaseReferenceNode)}`,
+                            rows: this.syncPhaseDifferenceRows(), color: '#6f42c1'
+                        }];
+                    } else {
+                        const ids = this.syncPhaseViewMode === 'selected' ? [this.syncArchiveNodeSource] : this.syncPhaseNodeIds();
+                        definitions = ids.map((nodeId, index) => ({ id: nodeId, label: this.syncArchiveNodeLabel(nodeId), rows: this.syncPhaseRows(nodeId), color: colors[index % colors.length] }));
+                    }
+                    let traces;
+                    let xTitle;
+                    let title;
+                    if (this.syncPhasePlotMode === 'allan') {
+                        traces = definitions.map(definition => {
+                            const curve = this.syncPhaseAllanCurve(definition.rows);
+                            const relative = this.syncPhaseAllanScale === 'relative';
+                            const denominator = Math.abs(Number(curve.mean));
+                            const y = curve.deviations.map(value => {
+                                if (value == null) return null;
+                                if (relative) return denominator > 1e-12 ? value / denominator : null;
+                                return value * scale;
+                            });
+                            return { x: curve.orders, y, customdata: curve.validWindowCounts, type: 'scatter', mode: 'lines+markers', name: definition.label, line: { color: definition.color, width: 2 }, marker: { size: 7 }, hovertemplate: 'n=%{x}<br>Allan=%{y:.6g}<br>valid windows=%{customdata}<extra>%{fullData.name}</extra>' };
+                        });
+                        xTitle = 'Allan Order n';
+                        title = `${this.syncPhaseViewMode === 'difference' ? 'Gradient Phase Difference' : 'Interferometer Phase'} · ${this.syncPhaseAllanScale === 'relative' ? 'Relative' : 'Absolute'} overlapping Allan`;
+                    } else {
+                        traces = definitions.map(definition => {
+                            const rows = this.syncPhaseAggregateRows(definition.rows);
+                            return { x: rows.map(item => item.p0), y: rows.map(item => item.phase * scale), customdata: rows.map(item => [item.shot, item.count || 1]), type: 'scatter', mode: this.syncPhaseAggregation === 'average' ? 'lines+markers' : 'markers', name: definition.label, line: { color: definition.color, width: 2 }, marker: { color: definition.color, size: this.syncPhaseAggregation === 'average' ? 8 : 7, opacity: 0.82 }, hovertemplate: 'P0=%{x:.9g}<br>Δφ=%{y:.6g}<br>first shot=%{customdata[0]}<br>shots=%{customdata[1]}<extra>%{fullData.name}</extra>' };
+                        });
+                        xTitle = 'Parameter P0';
+                        title = this.syncPhaseViewMode === 'difference' ? 'Gradient Phase Difference · Target − Reference' : (this.syncPhaseViewMode === 'all' ? 'All Hosts Interferometer Phase' : `${definitions[0]?.label || ''} Interferometer Phase`);
+                    }
+                    const relative = this.syncPhasePlotMode === 'allan' && this.syncPhaseAllanScale === 'relative';
+                    Plotly.react(element, traces, {
+                        margin: { t: 52, b: 58, l: 76, r: 24 }, title: { text: title, font: { size: 14 }, x: 0.04 },
+                        xaxis: { title: xTitle, type: this.syncPhasePlotMode === 'allan' ? this.syncPhaseAllanXAxis : 'linear', showline: true, mirror: true, ticks: 'inside', gridcolor: '#dde5ee' },
+                        yaxis: { title: relative ? 'Relative Allan deviation' : `Interferometer Δφ (${this.phaseUnit})`, showline: true, mirror: true, ticks: 'inside', gridcolor: '#dde5ee' },
+                        legend: { orientation: 'h', x: 1, xanchor: 'right', y: 1.13 }, hovermode: 'closest', paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
+                    }, { responsive: true, displaylogo: false });
+                },
+                syncPhaseExportRows() {
+                    const nodeIds = this.syncPhaseNodeIds();
+                    const rowsByNode = Object.fromEntries(nodeIds.map(nodeId => [nodeId, this.syncPhaseRows(nodeId, true)]));
+                    const shots = [...new Set(nodeIds.flatMap(nodeId => rowsByNode[nodeId].map(item => item.shot)))].sort((a, b) => a - b);
+                    return shots.map(shot => {
+                        const nodes = {};
+                        nodeIds.forEach(nodeId => { nodes[nodeId] = rowsByNode[nodeId].find(item => item.shot === shot) || null; });
+                        const reference = nodes[this.syncPhaseReferenceNode]; const target = nodes[this.syncPhaseTargetNode];
+                        let rawDifference = null; let wrappedDifference = null;
+                        if (reference?.valid && target?.valid && this.syncPhaseSameP0(reference.p0, target.p0)) {
+                            rawDifference = target.phase - reference.phase; wrappedDifference = this.wrapSyncPhase(rawDifference);
+                        }
+                        const p0 = nodeIds.map(nodeId => nodes[nodeId]?.p0).find(Number.isFinite);
+                        return { shot, p0, nodes, rawDifference, wrappedDifference };
+                    });
+                },
+                async downloadSyncPhaseCSV() {
+                    const exportRows = this.syncPhaseExportRows(); const nodeIds = this.syncPhaseNodeIds();
+                    if (!exportRows.length) return;
+                    const nodeHeaders = nodeIds.flatMap(nodeId => {
+                        const prefix = this.sanitizeFilenamePart(this.syncArchiveNodeLabel(nodeId), nodeId);
+                        return [`${prefix}_phase_rad`, `${prefix}_valid`, `${prefix}_calibration_id`, `${prefix}_calibration_name`, `${prefix}_reference_T2_us2`];
+                    });
+                    const header = ['sync_shot_index', 'P0', ...nodeHeaders, 'difference_reference', 'difference_target', 'raw_difference_rad', 'wrapped_difference_rad'];
+                    const rows = exportRows.map(item => [item.shot, item.p0, ...nodeIds.flatMap(nodeId => {
+                        const record = item.nodes[nodeId]; const row = record?.row || {};
+                        return [record?.valid ? record.phase : '', record?.valid === true, row.interferometer_phase_calibration_id || '', row.interferometer_phase_calibration_name || '', row.interferometer_phase_reference_t2_us2 ?? ''];
+                    }), this.syncPhaseReferenceNode, this.syncPhaseTargetNode, item.rawDifference ?? '', item.wrappedDifference ?? '']);
+                    const csvContent = '\uFEFF' + [header, ...rows].map(row => row.map(value => this.csvCell(value)).join(',')).join('\n');
+                    const runPart = this.sanitizeFilenamePart(this.selectedRun || this.loadedRunId || 'run');
+                    await this.downloadCsvContent(csvContent, `sync_interferometer_phase_${runPart}.csv`);
+                },
+                async downloadSyncPhaseAllanCSV() {
+                    let definitions;
+                    if (this.syncPhaseViewMode === 'difference') definitions = [{ id: `${this.syncPhaseTargetNode}-${this.syncPhaseReferenceNode}`, label: `${this.syncArchiveNodeLabel(this.syncPhaseTargetNode)} - ${this.syncArchiveNodeLabel(this.syncPhaseReferenceNode)}`, rows: this.syncPhaseDifferenceRows() }];
+                    else {
+                        const ids = this.syncPhaseViewMode === 'selected' ? [this.syncArchiveNodeSource] : this.syncPhaseNodeIds();
+                        definitions = ids.map(nodeId => ({ id: nodeId, label: this.syncArchiveNodeLabel(nodeId), rows: this.syncPhaseRows(nodeId) }));
+                    }
+                    const curves = definitions.map(definition => ({ ...definition, curve: this.syncPhaseAllanCurve(definition.rows) }));
+                    const orders = curves[0]?.curve?.orders || [];
+                    const header = ['allan_order_n', ...curves.flatMap(item => [`${this.sanitizeFilenamePart(item.label)}_allan_rad`, `${this.sanitizeFilenamePart(item.label)}_relative_allan`, `${this.sanitizeFilenamePart(item.label)}_valid_windows`])];
+                    const rows = orders.map((order, index) => [order, ...curves.flatMap(item => {
+                        const value = item.curve.deviations[index]; const denominator = Math.abs(Number(item.curve.mean));
+                        return [value ?? '', value != null && denominator > 1e-12 ? value / denominator : '', item.curve.validWindowCounts[index] ?? 0];
+                    })]);
+                    const csvContent = '\uFEFF' + [header, ...rows].map(row => row.map(value => this.csvCell(value)).join(',')).join('\n');
+                    const runPart = this.sanitizeFilenamePart(this.selectedRun || this.loadedRunId || 'run');
+                    await this.downloadCsvContent(csvContent, `sync_interferometer_phase_allan_${runPart}.csv`);
                 },
                 resetSyncArchiveReplay() {
                     if (this.syncArchiveReplayPlaying) this.toggleSyncArchiveReplay();
