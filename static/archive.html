@@ -5680,19 +5680,22 @@
                     } else {
                         traces = definitions.map(definition => {
                             const rows = this.syncPhaseAggregateRows(definition.rows);
-                            return { x: rows.map(item => item.p0), y: rows.map(item => item.phase * scale), customdata: rows.map(item => [item.shot, item.count || 1]), type: 'scatter', mode: this.syncPhaseAggregation === 'average' ? 'lines+markers' : 'markers', name: definition.kind === 'difference' ? `Difference: ${definition.label}` : definition.label, yaxis: definition.kind === 'difference' ? 'y2' : 'y', line: { color: definition.color, width: definition.kind === 'difference' ? 3 : 2, dash: definition.kind === 'difference' ? 'dash' : 'solid' }, marker: { color: definition.color, symbol: definition.kind === 'difference' ? 'diamond' : 'circle', size: this.syncPhaseAggregation === 'average' ? 8 : 7, opacity: 0.82 }, hovertemplate: 'P0=%{x:.9g}<br>Δφ=%{y:.6g}<br>first shot=%{customdata[0]}<br>shots=%{customdata[1]}<extra>%{fullData.name}</extra>' };
+                            return { x: rows.map(item => item.p0), y: rows.map(item => item.phase * scale), customdata: rows.map(item => [item.shot, item.count || 1]), type: 'scatter', mode: this.syncPhaseAggregation === 'average' ? 'lines+markers' : 'markers', name: definition.kind === 'difference' ? `Difference: ${definition.label}` : definition.label, ...(definition.kind === 'difference' ? { yaxis: 'y2' } : {}), line: { color: definition.color, width: definition.kind === 'difference' ? 3 : 2, dash: definition.kind === 'difference' ? 'dash' : 'solid' }, marker: { color: definition.color, symbol: definition.kind === 'difference' ? 'diamond' : 'circle', size: this.syncPhaseAggregation === 'average' ? 8 : 7, opacity: 0.82 }, hovertemplate: 'P0=%{x:.9g}<br>Δφ=%{y:.6g}<br>first shot=%{customdata[0]}<br>shots=%{customdata[1]}<extra>%{fullData.name}</extra>' };
                         });
                         xTitle = 'Parameter P0';
                         title = this.syncPhaseViewMode === 'difference' ? 'Gradient Phase Difference · Target − Reference' : (this.syncPhaseViewMode === 'all' ? 'All Hosts Interferometer Phase' : `${definitions[0]?.label || ''} Interferometer Phase`);
                     }
                     const relative = this.syncPhasePlotMode === 'allan' && this.syncPhaseAllanScale === 'relative';
-                    Plotly.react(element, traces, {
+                    const dualAxis = this.syncPhasePlotMode === 'series' && this.syncPhaseViewMode === 'difference';
+                    const layout = {
                         margin: { t: 52, b: 58, l: 76, r: this.syncPhasePlotMode === 'series' && this.syncPhaseViewMode === 'difference' ? 76 : 24 }, title: { text: title, font: { size: 14 }, x: 0.04 },
-                        xaxis: { title: xTitle, type: this.syncPhasePlotMode === 'allan' ? this.syncPhaseAllanXAxis : 'linear', showline: true, mirror: true, ticks: 'inside', gridcolor: '#dde5ee' },
-                        yaxis: { title: relative ? 'Relative Allan deviation' : (this.syncPhasePlotMode === 'series' && this.syncPhaseViewMode === 'difference' ? `Host phase Δφ (${this.phaseUnit})` : `Interferometer Δφ (${this.phaseUnit})`), showline: true, mirror: this.syncPhasePlotMode !== 'series' || this.syncPhaseViewMode !== 'difference', ticks: 'inside', gridcolor: '#dde5ee' },
-                        yaxis2: this.syncPhasePlotMode === 'series' && this.syncPhaseViewMode === 'difference' ? { title: `Phase difference (${this.phaseUnit})`, overlaying: 'y', side: 'right', showline: true, ticks: 'inside', zeroline: true } : undefined,
+                        xaxis: { title: xTitle, type: this.syncPhasePlotMode === 'allan' ? this.syncPhaseAllanXAxis : 'linear', anchor: 'y', showline: true, mirror: true, ticks: 'inside', gridcolor: '#dde5ee' },
+                        yaxis: { title: relative ? 'Relative Allan deviation' : (dualAxis ? `Host phase Δφ (${this.phaseUnit})` : `Interferometer Δφ (${this.phaseUnit})`), anchor: 'x', showline: true, mirror: !dualAxis, ticks: 'inside', gridcolor: '#dde5ee' },
                         legend: { orientation: 'h', x: 1, xanchor: 'right', y: 1.13 }, hovermode: 'closest', paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
-                    }, { responsive: true, displaylogo: false });
+                        uirevision: `sync-phase:${this.syncPhasePlotMode}:${this.syncPhaseViewMode}:${this.syncPhaseReferenceNode}:${this.syncPhaseTargetNode}`,
+                    };
+                    if (dualAxis) layout.yaxis2 = { title: `Phase difference (${this.phaseUnit})`, anchor: 'x', overlaying: 'y', side: 'right', showline: true, ticks: 'inside', zeroline: true };
+                    Plotly.react(element, traces, layout, { responsive: true, displaylogo: false });
                 },
                 syncPhaseExportRows() {
                     const nodeIds = this.syncPhaseNodeIds();

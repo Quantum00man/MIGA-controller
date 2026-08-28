@@ -350,6 +350,8 @@ class InterferometerPhaseTests(unittest.TestCase):
         self.assertIn("syncPhaseAllanDefinitions", archive_html)
         self.assertIn("Phase difference (${this.phaseUnit})", archive_html)
         self.assertIn("overlaying: 'y', side: 'right'", archive_html)
+        self.assertNotIn("yaxis2: this.syncPhasePlotMode", archive_html)
+        self.assertIn("if (dualAxis) layout.yaxis2", archive_html)
         self.assertIn("syncPhaseAllanStatisticsRows", archive_html)
         self.assertIn("Standard Deviation", archive_html)
         self.assertIn("standard_deviation_rad", archive_html)
