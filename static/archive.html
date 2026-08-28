@@ -1583,21 +1583,18 @@
                         </div>
                         <div v-if="syncArchiveViewMode === 'node' && syncArchiveTab === 'phase'" class="row g-2 mt-2">
                             <div class="col-12 d-flex flex-wrap align-items-center gap-2">
-                                <select v-if="syncPhasePlotMode === 'series'" class="form-select form-select-sm" style="width:auto" v-model="syncPhaseViewMode" @change="handleSyncPhaseControlChange">
-                                    <option value="selected">Selected Host</option>
-                                    <option value="all">All Hosts</option>
-                                    <option value="difference">Phase Difference</option>
-                                </select>
-                                <span v-else class="badge bg-light text-dark border">All Hosts + Phase Difference</span>
+                                <div class="d-flex flex-wrap align-items-center gap-3 border rounded px-2 py-1">
+                                    <span class="small text-muted">Hosts</span>
+                                    <div v-for="nodeId in syncPhaseNodeIds()" :key="`phase-select-${nodeId}`" class="form-check mb-0">
+                                        <input :id="`syncPhaseNode-${nodeId}`" class="form-check-input" type="checkbox" :checked="syncPhaseSelectedNodes.includes(nodeId)" :disabled="!syncPhaseSelectedNodes.includes(nodeId) && syncPhaseSelectedNodes.length >= 2" @change="toggleSyncPhaseNodeSelection(nodeId, $event.target.checked)">
+                                        <label class="form-check-label small" :for="`syncPhaseNode-${nodeId}`">{{ syncArchiveNodeLabel(nodeId) }}</label>
+                                    </div>
+                                </div>
+                                <button class="btn btn-outline-secondary btn-sm" @click="reverseSyncPhaseDifference" :disabled="syncPhaseSelectedNodes.length !== 2"><i class="bi bi-arrow-left-right me-1"></i>Reverse Difference</button>
+                                <span v-if="syncPhaseSelectedNodes.length === 2" class="badge bg-light text-dark border">Δφ = {{ syncArchiveNodeLabel(syncPhaseTargetNode) }} − {{ syncArchiveNodeLabel(syncPhaseReferenceNode) }}</span>
+                                <span v-else class="small text-muted">Select two hosts to calculate phase difference.</span>
                                 <span class="small text-muted">Calibration host</span>
                                 <select class="form-select form-select-sm" style="width:auto" v-model="syncArchiveNodeSource" @change="handleSyncArchiveNodeSourceChange"><option v-for="nodeId in syncPhaseNodeIds()" :key="nodeId" :value="nodeId">{{ syncArchiveNodeLabel(nodeId) }}</option></select>
-                                <template v-if="syncPhasePlotMode === 'allan' || syncPhaseViewMode === 'difference'">
-                                    <span class="small text-muted">Reference</span>
-                                    <select class="form-select form-select-sm" style="width:auto" v-model="syncPhaseReferenceNode" @change="handleSyncPhaseControlChange"><option v-for="nodeId in syncPhaseNodeIds()" :key="nodeId" :value="nodeId">{{ syncArchiveNodeLabel(nodeId) }}</option></select>
-                                    <span class="small text-muted">Target</span>
-                                    <select class="form-select form-select-sm" style="width:auto" v-model="syncPhaseTargetNode" @change="handleSyncPhaseControlChange"><option v-for="nodeId in syncPhaseNodeIds()" :key="nodeId" :value="nodeId" :disabled="nodeId === syncPhaseReferenceNode">{{ syncArchiveNodeLabel(nodeId) }}</option></select>
-                                    <span class="badge bg-light text-dark border">Δφ = Target − Reference</span>
-                                </template>
                                 <div class="btn-group btn-group-sm" role="group" aria-label="SYNC phase plot mode"><button class="btn" :class="syncPhasePlotMode === 'series' ? 'btn-dark' : 'btn-outline-dark'" @click="setSyncPhasePlotMode('series')">Series</button><button class="btn" :class="syncPhasePlotMode === 'allan' ? 'btn-dark' : 'btn-outline-dark'" @click="setSyncPhasePlotMode('allan')">Allan</button></div>
                                 <select v-if="syncPhasePlotMode === 'series'" class="form-select form-select-sm" style="width:auto" v-model="syncPhaseAggregation" @change="renderSyncArchiveNodePlots"><option value="shots">Every shot</option><option value="average">Averaged by P0</option></select>
                                 <button class="btn btn-outline-success btn-sm" @click="downloadSyncPhaseCSV" :disabled="!syncPhaseExportRows().length"><i class="bi bi-download me-1"></i>Phase CSV</button>
@@ -2169,7 +2166,8 @@
                     loadedSyncNode: '',
                     syncArchiveRetrying: false,
                     syncArchiveTab: 'atoms',
-                    syncPhaseViewMode: 'all', syncPhaseAggregation: 'shots', syncPhasePlotMode: 'series',
+                    syncPhaseSelectedNodes: [],
+                    syncPhaseAggregation: 'shots', syncPhasePlotMode: 'series',
                     syncPhaseReferenceNode: 'master', syncPhaseTargetNode: '',
                     syncPhaseAllanOrder: 1, syncPhaseAllanScale: 'absolute', syncPhaseAllanXAxis: 'linear',
                     syncPhaseP0Min: null, syncPhaseP0Max: null, syncPhaseP0MinInput: '', syncPhaseP0MaxInput: '',
@@ -4628,10 +4626,7 @@
                         await this.fetchArchiveNodePhaseCalibrations();
                         this.initializeArchivePhaseReferenceDraft();
                         this.syncArchiveSlaveId = this.syncArchiveSlaveOptions()[0] || '';
-                        this.syncPhaseReferenceNode = this.syncPhaseNodeIds().includes(this.syncPhaseReferenceNode) ? this.syncPhaseReferenceNode : 'master';
-                        if (!this.syncPhaseNodeIds().includes(this.syncPhaseTargetNode) || this.syncPhaseTargetNode === this.syncPhaseReferenceNode) {
-                            this.syncPhaseTargetNode = this.syncPhaseNodeIds().find(nodeId => nodeId !== this.syncPhaseReferenceNode) || '';
-                        }
+                        this.ensureSyncPhaseNodes(true);
                         this.resetSyncPhaseP0Range(false);
                         if (this.syncDifferentialFitSelectedId) this.restoreSyncDifferentialFit(false);
                         this.syncArchiveReplayCount = this.syncArchiveDifferentialPoints().length;
@@ -5449,10 +5444,28 @@
                     });
                     return [...groups.values()].map(group => ({ p0: group.p0, phase: group.phaseSum / group.count, rawDifference: group.rawSum / group.count, count: group.count, shot: group.shot })).sort((a, b) => a.p0 - b.p0);
                 },
-                ensureSyncPhaseNodes() {
+                ensureSyncPhaseNodes(initialize = false) {
                     const ids = this.syncPhaseNodeIds();
-                    if (!ids.includes(this.syncPhaseReferenceNode)) this.syncPhaseReferenceNode = ids[0] || '';
-                    if (!ids.includes(this.syncPhaseTargetNode) || this.syncPhaseTargetNode === this.syncPhaseReferenceNode) this.syncPhaseTargetNode = ids.find(id => id !== this.syncPhaseReferenceNode) || '';
+                    let selected = [...new Set((this.syncPhaseSelectedNodes || []).filter(nodeId => ids.includes(nodeId)))].slice(0, 2);
+                    if (initialize && !selected.length) selected = ids.slice(0, 2);
+                    this.syncPhaseSelectedNodes = selected;
+                    this.syncPhaseReferenceNode = selected[0] || '';
+                    this.syncPhaseTargetNode = selected[1] || '';
+                },
+                toggleSyncPhaseNodeSelection(nodeId, checked) {
+                    const selected = [...(this.syncPhaseSelectedNodes || [])];
+                    const index = selected.indexOf(nodeId);
+                    if (checked && index < 0 && selected.length < 2) selected.push(nodeId);
+                    if (!checked && index >= 0) selected.splice(index, 1);
+                    this.syncPhaseSelectedNodes = selected;
+                    this.ensureSyncPhaseNodes();
+                    this.handleSyncPhaseControlChange();
+                },
+                reverseSyncPhaseDifference() {
+                    if (this.syncPhaseSelectedNodes.length !== 2) return;
+                    this.syncPhaseSelectedNodes = [this.syncPhaseSelectedNodes[1], this.syncPhaseSelectedNodes[0]];
+                    this.ensureSyncPhaseNodes();
+                    this.handleSyncPhaseControlChange();
                 },
                 handleSyncPhaseControlChange() {
                     this.ensureSyncPhaseNodes();
@@ -5470,13 +5483,19 @@
                 },
                 syncPhaseActiveSeriesRows() {
                     if (this.syncPhasePlotMode === 'allan') return this.syncPhaseAllanDefinitions().map(definition => definition.rows);
-                    if (this.syncPhaseViewMode === 'difference') return [this.syncPhaseDifferenceRows()];
-                    if (this.syncPhaseViewMode === 'selected') return [this.syncPhaseRows(this.syncArchiveNodeSource)];
-                    return this.syncPhaseNodeIds().map(nodeId => this.syncPhaseRows(nodeId));
+                    return this.syncPhaseSeriesDefinitions().map(definition => definition.rows);
+                },
+                syncPhaseSeriesDefinitions() {
+                    const colors = ['#dc3545', '#0d6efd', '#198754', '#6f42c1', '#fd7e14', '#20c997', '#d63384'];
+                    const nodeIds = (this.syncPhaseSelectedNodes || []).filter(nodeId => this.syncPhaseNodeIds().includes(nodeId));
+                    const definitions = nodeIds.map((nodeId, index) => ({ id: nodeId, label: this.syncArchiveNodeLabel(nodeId), rows: this.syncPhaseRows(nodeId), color: colors[index % colors.length], kind: 'host' }));
+                    if (nodeIds.length === 2) definitions.push({ id: `${this.syncPhaseTargetNode}-${this.syncPhaseReferenceNode}`, label: `${this.syncArchiveNodeLabel(this.syncPhaseTargetNode)} − ${this.syncArchiveNodeLabel(this.syncPhaseReferenceNode)}`, rows: this.syncPhaseDifferenceRows(), color: '#212529', kind: 'difference' });
+                    return definitions;
                 },
                 syncPhaseAllanDefinitions() {
                     const colors = ['#dc3545', '#0d6efd', '#198754', '#6f42c1', '#fd7e14', '#20c997', '#d63384'];
                     const nodes = this.syncPhaseNodeIds().map((nodeId, index) => ({ id: nodeId, label: this.syncArchiveNodeLabel(nodeId), rows: this.syncPhaseRows(nodeId), color: colors[index % colors.length], kind: 'host' }));
+                    if (this.syncPhaseSelectedNodes.length !== 2) return nodes;
                     return [...nodes, { id: `difference:${this.syncPhaseTargetNode}-${this.syncPhaseReferenceNode}`, label: `${this.syncArchiveNodeLabel(this.syncPhaseTargetNode)} − ${this.syncArchiveNodeLabel(this.syncPhaseReferenceNode)}`, rows: this.syncPhaseDifferenceRows(), color: '#212529', kind: 'difference' }];
                 },
                 syncPhaseAvailableP0Bounds() {
@@ -5646,20 +5665,8 @@
                     const downElement = document.getElementById('syncArchiveNodePlotDw');
                     if (downElement) downElement.style.display = 'none';
                     if (!element) return;
-                    const colors = ['#dc3545', '#0d6efd', '#198754', '#6f42c1', '#fd7e14', '#20c997', '#d63384'];
                     const scale = this.phaseUnit === 'mrad' ? 1000 : 1;
-                    let definitions = [];
-                    if (this.syncPhasePlotMode === 'allan') {
-                        definitions = this.syncPhaseAllanDefinitions();
-                    } else if (this.syncPhaseViewMode === 'difference') {
-                        definitions = [
-                            ...this.syncPhaseNodeIds().map((nodeId, index) => ({ id: nodeId, label: this.syncArchiveNodeLabel(nodeId), rows: this.syncPhaseRows(nodeId), color: colors[index % colors.length], kind: 'host' })),
-                            { id: `${this.syncPhaseTargetNode}-${this.syncPhaseReferenceNode}`, label: `${this.syncArchiveNodeLabel(this.syncPhaseTargetNode)} − ${this.syncArchiveNodeLabel(this.syncPhaseReferenceNode)}`, rows: this.syncPhaseDifferenceRows(), color: '#212529', kind: 'difference' }
-                        ];
-                    } else {
-                        const ids = this.syncPhaseViewMode === 'selected' ? [this.syncArchiveNodeSource] : this.syncPhaseNodeIds();
-                        definitions = ids.map((nodeId, index) => ({ id: nodeId, label: this.syncArchiveNodeLabel(nodeId), rows: this.syncPhaseRows(nodeId), color: colors[index % colors.length], kind: 'host' }));
-                    }
+                    const definitions = this.syncPhasePlotMode === 'allan' ? this.syncPhaseAllanDefinitions() : this.syncPhaseSeriesDefinitions();
                     let traces;
                     let xTitle;
                     let title;
@@ -5680,21 +5687,21 @@
                     } else {
                         traces = definitions.map(definition => {
                             const rows = this.syncPhaseAggregateRows(definition.rows);
-                            return { x: rows.map(item => item.p0), y: rows.map(item => item.phase * scale), customdata: rows.map(item => [item.shot, item.count || 1]), type: 'scatter', mode: this.syncPhaseAggregation === 'average' ? 'lines+markers' : 'markers', name: definition.kind === 'difference' ? `Difference: ${definition.label}` : definition.label, ...(definition.kind === 'difference' ? { yaxis: 'y2' } : {}), line: { color: definition.color, width: definition.kind === 'difference' ? 3 : 2, dash: definition.kind === 'difference' ? 'dash' : 'solid' }, marker: { color: definition.color, symbol: definition.kind === 'difference' ? 'diamond' : 'circle', size: this.syncPhaseAggregation === 'average' ? 8 : 7, opacity: 0.82 }, hovertemplate: 'P0=%{x:.9g}<br>Δφ=%{y:.6g}<br>first shot=%{customdata[0]}<br>shots=%{customdata[1]}<extra>%{fullData.name}</extra>' };
+                            return { x: rows.map(item => item.p0), y: rows.map(item => item.phase * scale), customdata: rows.map(item => [item.shot, item.count || 1]), type: 'scatter', mode: this.syncPhaseAggregation === 'average' ? 'lines+markers' : 'markers', name: definition.kind === 'difference' ? `Difference: ${definition.label}` : definition.label, line: { color: definition.color, width: definition.kind === 'difference' ? 3 : 2, dash: definition.kind === 'difference' ? 'dash' : 'solid' }, marker: { color: definition.color, symbol: definition.kind === 'difference' ? 'diamond' : 'circle', size: this.syncPhaseAggregation === 'average' ? 8 : 7, opacity: 0.82 }, hovertemplate: 'P0=%{x:.9g}<br>Δφ=%{y:.6g}<br>first shot=%{customdata[0]}<br>shots=%{customdata[1]}<extra>%{fullData.name}</extra>' };
                         });
                         xTitle = 'Parameter P0';
-                        title = this.syncPhaseViewMode === 'difference' ? 'Gradient Phase Difference · Target − Reference' : (this.syncPhaseViewMode === 'all' ? 'All Hosts Interferometer Phase' : `${definitions[0]?.label || ''} Interferometer Phase`);
+                        const hostCount = definitions.filter(definition => definition.kind === 'host').length;
+                        const hasDifference = definitions.some(definition => definition.kind === 'difference');
+                        title = !definitions.length ? 'Select one or more phase traces' : (hostCount && hasDifference ? 'Host Phase + Gradient Phase Difference' : (hasDifference ? 'Gradient Phase Difference · Target − Reference' : (hostCount > 1 ? 'All Hosts Interferometer Phase' : `${definitions[0]?.label || ''} Interferometer Phase`)));
                     }
                     const relative = this.syncPhasePlotMode === 'allan' && this.syncPhaseAllanScale === 'relative';
-                    const dualAxis = this.syncPhasePlotMode === 'series' && this.syncPhaseViewMode === 'difference';
                     const layout = {
-                        margin: { t: 52, b: 58, l: 76, r: this.syncPhasePlotMode === 'series' && this.syncPhaseViewMode === 'difference' ? 76 : 24 }, title: { text: title, font: { size: 14 }, x: 0.04 },
+                        margin: { t: 52, b: 58, l: 76, r: 24 }, title: { text: title, font: { size: 14 }, x: 0.04 },
                         xaxis: { title: xTitle, type: this.syncPhasePlotMode === 'allan' ? this.syncPhaseAllanXAxis : 'linear', anchor: 'y', showline: true, mirror: true, ticks: 'inside', gridcolor: '#dde5ee' },
-                        yaxis: { title: relative ? 'Relative Allan deviation' : (dualAxis ? `Host phase Δφ (${this.phaseUnit})` : `Interferometer Δφ (${this.phaseUnit})`), anchor: 'x', showline: true, mirror: !dualAxis, ticks: 'inside', gridcolor: '#dde5ee' },
+                        yaxis: { title: relative ? 'Relative Allan deviation' : `Interferometer Δφ (${this.phaseUnit})`, anchor: 'x', showline: true, mirror: true, ticks: 'inside', gridcolor: '#dde5ee' },
                         legend: { orientation: 'h', x: 1, xanchor: 'right', y: 1.13 }, hovermode: 'closest', paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
-                        uirevision: `sync-phase:${this.syncPhasePlotMode}:${this.syncPhaseViewMode}:${this.syncPhaseReferenceNode}:${this.syncPhaseTargetNode}`,
+                        uirevision: `sync-phase:${this.syncPhasePlotMode}:${this.syncPhaseSelectedNodes.join('|')}:${this.syncPhaseReferenceNode}:${this.syncPhaseTargetNode}`,
                     };
-                    if (dualAxis) layout.yaxis2 = { title: `Phase difference (${this.phaseUnit})`, anchor: 'x', overlaying: 'y', side: 'right', showline: true, ticks: 'inside', zeroline: true };
                     Plotly.react(element, traces, layout, { responsive: true, displaylogo: false });
                 },
                 syncPhaseExportRows() {
