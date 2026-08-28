@@ -92,10 +92,10 @@ optimization_manager = OptimizationManager(manager)
 marker_optimization_manager = MarkerOptimizationManager(manager)
 marker_document_store = SequenceMarkerDocumentStore(config.SEQUENCE_MARKER_DOCUMENTS_DIR)
 from app.core.schedule_manager import ScheduleManager
-schedule_manager = ScheduleManager(manager)
 data_loader = DataLoader()
 archive_collection_store = ArchiveCollectionStore(config.DATA_BASE_DIR)
 sync_manager = SyncManager(manager)
+schedule_manager = ScheduleManager(manager, sync_manager)
 
 
 def _bragg_export_template_path(settings: Dict[str, Any]) -> Path:

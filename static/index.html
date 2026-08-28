@@ -763,6 +763,12 @@
                         <input type="file" :ref="`syncSlaveFile_${slave.id}`" style="display:none" accept=".mot" @change="selectSyncSlaveSequence($event, slave)">
                         <div class="form-text font-monospace">{{ slave.base_url }}</div>
                     </div>
+                    <div class="form-check form-switch mt-3 pt-2 border-top">
+                        <input class="form-check-input" type="checkbox" role="switch" id="syncScheduleEnabled"
+                            v-model="syncScheduleEnabled" :disabled="isRunning || isScheduleActive()">
+                        <label class="form-check-label small fw-bold" for="syncScheduleEnabled">Use scheduled queue</label>
+                        <div class="form-text">Queue SYNC runs with separate Master settings and Slave sequence snapshots.</div>
+                    </div>
                 </div>
             </template>
 
@@ -773,7 +779,7 @@
                         :disabled="isRunning || isScheduleActive()">
                     <label class="btn btn-outline-secondary" for="sourceClassic">Classic Placeholders</label>
                     <input type="radio" class="btn-check" id="sourceMarkers" value="markers" v-model="config.parameter_source"
-                        :disabled="isRunning || isScheduleActive() || runMode === 'scheduled'">
+                        :disabled="isRunning || isScheduleActive() || runMode !== 'live'">
                     <label class="btn btn-outline-primary" for="sourceMarkers">Auto Markers</label>
                 </div>
                 <template v-if="config.parameter_source === 'markers'">
@@ -850,7 +856,7 @@
 
 
 <div v-if="isScheduledMode()" class="card p-3 mb-3">
-    <div class="small text-muted fw-bold mb-2">SCHEDULE PLANNER</div>
+    <div class="small text-muted fw-bold mb-2">{{ isSyncMode() ? 'SYNC SCHEDULE PLANNER' : 'SCHEDULE PLANNER' }}</div>
     <div class="row g-2">
         <div class="col-6">
             <label class="form-label small text-muted mb-1">Shot Time (s)</label>
@@ -1297,6 +1303,9 @@
                 </div>
                 <div class="small fw-bold text-dark">{{ getScheduledTaskModeLabel(task) }} | {{ task.estimated_points }} shots | {{ formatDuration(task.estimated_duration_sec) }}</div>
                 <div class="small text-muted mt-1">{{ getScheduledTaskAxisLabel(task.config) }}</div>
+                <div class="small text-muted mt-1" v-if="task.execution_mode === 'sync'">
+                    {{ task.sync?.slaves?.length || 0 }} Slave node(s) | {{ Number(task.sync?.master_delay_ms || 0) }} ms Master delay
+                </div>
                 <div class="small text-muted mt-1" v-if="scheduleSettings.timingMode === 'sequential'">
                     {{ index === 0 ? 'Starts immediately after schedule start.' : `Starts after previous task + ${formatDuration(getSequentialGapSec())}` }}
                 </div>
@@ -1653,6 +1662,7 @@
                     syncReplayPlaying: false,
                     syncReplayTimer: null,
                     syncStatusPollTimer: null,
+                    syncScheduleEnabled: false,
                     scheduleSettings: { singlePointDurationSec: 1.615, timingMode: 'sequential', sequentialGapSec: 60 },
                     scheduledTasks: [],
                     selectedScheduledTaskId: null,
@@ -1747,7 +1757,7 @@
                     }
                 },
                 runMode(value) {
-                    if (value === 'scheduled' && this.config.parameter_source === 'markers') this.config.parameter_source = 'classic';
+                    if (value !== 'live' && this.config.parameter_source === 'markers') this.config.parameter_source = 'classic';
                     if (value === 'sync') {
                         if (['lock_in', 'ac_stark'].includes(this.config.mode)) this.config.mode = 'standard';
                         this.fetchSyncConfig();
@@ -1756,9 +1766,13 @@
                     this.saveState();
                     this.requestPlotResize();
                 },
+                syncScheduleEnabled() {
+                    this.saveState();
+                    this.requestPlotResize();
+                },
                 'config.parameter_source'(source) {
                     if (source === 'markers') {
-                        if (this.runMode === 'scheduled') this.runMode = 'live';
+                        if (this.runMode !== 'live') this.runMode = 'live';
                         this.config.mode = 'standard';
                         this.fetchSequenceMarkers();
                     } else {
@@ -2025,7 +2039,9 @@
                             this.progressPercent = Math.round(100 * this.currentStep / total);
                         } else if (this.isRunning && this.isSyncMode() && ['done', 'error', 'stopped'].includes(this.syncRuntime.status)) {
                             this.isRunning = false;
-                            this.statusMessage = this.syncRuntime.status === 'error' ? this.syncRuntime.message : 'IDLE';
+                            if (!this.isScheduleActive()) {
+                                this.statusMessage = this.syncRuntime.status === 'error' ? this.syncRuntime.message : 'IDLE';
+                            }
                         }
                     } catch (error) {
                         if (this.syncRuntime.active) this.addLog('SYNC status error: ' + this.formatRequestError(error));
@@ -2524,6 +2540,7 @@
                         currentDdsXmlName: this.currentDdsXmlName,
                         sidebarWidth: this.sidebarWidth,
                         runMode: this.runMode,
+                        syncScheduleEnabled: this.syncScheduleEnabled,
                         scheduleSettings: this.scheduleSettings,
                         scheduledTasks: this.scheduledTasks,
                         showRawData: this.showRawData,
@@ -2566,6 +2583,7 @@
                             if (['live', 'scheduled', 'sync'].includes(state.runMode)) {
                                 this.runMode = state.runMode;
                             }
+                            this.syncScheduleEnabled = Boolean(state.syncScheduleEnabled);
                             if (state.scheduleSettings && typeof state.scheduleSettings === 'object') {
                                 this.scheduleSettings = {
                                     ...this.scheduleSettings,
@@ -2882,7 +2900,7 @@ handleWindowResize() {
     this.requestPlotResize();
 },
 isScheduledMode() {
-    return this.runMode === 'scheduled';
+    return this.runMode === 'scheduled' || (this.runMode === 'sync' && this.syncScheduleEnabled);
 },
 isSyncMode() {
     return this.runMode === 'sync';
@@ -2896,7 +2914,7 @@ isStatusActive() {
 isStartDisabled() {
     const acStarkMissingXml = this.config.mode === 'ac_stark' && !String(this.currentDdsXmlName || '').trim();
     const acStarkScheduled = this.config.mode === 'ac_stark' && this.isScheduledMode();
-    const syncInvalid = this.isSyncMode() && (
+    const syncInvalid = this.isSyncMode() && !this.isScheduledMode() && (
         this.syncConfig.role !== 'master'
         || !this.syncSlaves.length
         || this.syncSlaves.some(slave => !String(slave.sequence_content_base64 || slave.sequence_content || '').trim())
@@ -3136,7 +3154,8 @@ refreshScheduledTaskEstimates() {
 getScheduledTaskModeLabel(task) {
     const configObj = task?.config || {};
     const scanDimensions = this.resolveScanDimensionsFromConfig(configObj);
-    if (scanDimensions > 1) return `${scanDimensions}D standard scan`;
+    const prefix = task?.execution_mode === 'sync' ? 'SYNC | ' : '';
+    if (scanDimensions > 1) return `${prefix}${scanDimensions}D standard scan`;
     const modeMap = {
         standard: '1D standard scan',
         timing: '1D timing scan',
@@ -3146,7 +3165,7 @@ getScheduledTaskModeLabel(task) {
         bragg_rabi: '1D Bragg Rabi scan',
         lock_in: 'Lock-in Measurement'
     };
-    return modeMap[String(configObj.mode || 'standard')] || '1D scan';
+    return prefix + (modeMap[String(configObj.mode || 'standard')] || '1D scan');
 },
 getScheduledTaskAxisLabel(configObj = {}) {
     if (String(configObj.mode || '') === 'lock_in') {
@@ -3215,6 +3234,31 @@ async captureCurrentSequenceForTask() {
         sequence_snapshot: String(res.data?.content || ''),
     };
 },
+captureCurrentSyncSetupForTask() {
+    if (!this.isSyncMode()) return null;
+    if (this.syncConfig.role !== 'master') {
+        throw new Error('This controller is not configured as Master.');
+    }
+    if (!this.syncSlaves.length) {
+        throw new Error('No enabled Slave is configured.');
+    }
+    const missing = this.syncSlaves.find(slave => !String(slave.sequence_content_base64 || slave.sequence_content || '').trim());
+    if (missing) {
+        throw new Error(`Select a .mot file for ${missing.name}.`);
+    }
+    return {
+        master_delay_ms: Number(this.syncMasterDelayMs) || 0,
+        slaves: this.syncSlaves.map(slave => ({
+            node_id: slave.id,
+            name: slave.name,
+            base_url: slave.base_url,
+            sequence_name: slave.sequence_name,
+            sequence_content: slave.sequence_content || '',
+            sequence_content_base64: slave.sequence_content_base64 || '',
+            enabled: true,
+        })),
+    };
+},
 async addScheduledTaskFromCurrentSetup() {
     if (this.isScheduleActive()) return;
     if (this.config.mode === 'ac_stark') {
@@ -3224,9 +3268,17 @@ async addScheduledTaskFromCurrentSetup() {
     try {
         const configSnapshot = this.prepareScanPayload(this.config, this.currentSequenceName);
         const sequenceInfo = await this.captureCurrentSequenceForTask();
+        const syncSetup = this.captureCurrentSyncSetupForTask();
+        const executionMode = syncSetup ? 'sync' : 'scan';
+        const incompatibleTask = this.scheduledTasks.find(task => (task.execution_mode || 'scan') !== executionMode);
+        if (incompatibleTask) {
+            throw new Error('Clear the existing queue before mixing regular and SYNC tasks.');
+        }
         const task = {
             id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
             name: this.buildScheduledTaskName(configSnapshot, sequenceInfo.sequence_file_name),
+            execution_mode: executionMode,
+            sync: syncSetup,
             config: configSnapshot,
             sequence_name: sequenceInfo.sequence_name,
             sequence_file_name: sequenceInfo.sequence_file_name,
@@ -3256,7 +3308,15 @@ async updateSelectedScheduledTask() {
     try {
         const configSnapshot = this.prepareScanPayload(this.config, this.currentSequenceName);
         const sequenceInfo = await this.captureCurrentSequenceForTask();
+        const syncSetup = this.captureCurrentSyncSetupForTask();
+        const executionMode = syncSetup ? 'sync' : 'scan';
+        const incompatibleTask = this.scheduledTasks.find(item => item.id !== task.id && (item.execution_mode || 'scan') !== executionMode);
+        if (incompatibleTask) {
+            throw new Error('Clear the incompatible queue tasks before changing this task type.');
+        }
         task.config = configSnapshot;
+        task.execution_mode = executionMode;
+        task.sync = syncSetup;
         task.sequence_name = sequenceInfo.sequence_name;
         task.sequence_file_name = sequenceInfo.sequence_file_name;
         task.sequence_source = sequenceInfo.sequence_source;
@@ -3274,6 +3334,17 @@ loadScheduledTaskIntoEditor(taskId) {
     const task = this.getScheduledTaskById(taskId);
     if (!task || this.isScheduleActive()) return;
     this.selectedScheduledTaskId = task.id;
+    if (task.execution_mode === 'sync') {
+        this.runMode = 'sync';
+        this.syncScheduleEnabled = true;
+        this.syncMasterDelayMs = Number(task.sync?.master_delay_ms) || 0;
+        this.syncSlaves = (task.sync?.slaves || []).map(slave => ({
+            ...this.cloneConfig(slave),
+            id: slave.node_id,
+        }));
+    } else if (this.isSyncMode()) {
+        this.runMode = 'scheduled';
+    }
     const restoredConfig = this.cloneConfig(task.config);
     this.config = { ...this.config, ...restoredConfig };
     this.config.scan_dimensions = this.resolveScanDimensionsFromConfig(this.config);
@@ -3446,6 +3517,11 @@ ensureScheduledTasksValid() {
     const invalidTask = this.scheduledTasks.find((task) => task.validation_error || !task.estimated_points || typeof task.sequence_snapshot !== 'string');
     if (invalidTask) {
         throw new Error(`Task invalid: ${invalidTask.name}.`);
+    }
+    const expectedMode = this.isSyncMode() ? 'sync' : 'scan';
+    const incompatibleTask = this.scheduledTasks.find(task => (task.execution_mode || 'scan') !== expectedMode);
+    if (incompatibleTask) {
+        throw new Error(`Task ${incompatibleTask.name} does not match the current run mode.`);
     }
     if (this.scheduleSettings.timingMode === 'specific') {
         const missingTime = this.scheduledTasks.find((task) => !Number.isFinite(this.parseScheduledDateTime(task.scheduled_at)));
@@ -5061,15 +5137,6 @@ finishScheduledRun(finalStatus = 'IDLE') {
             }
         },
         async stopScan() {
-            if (this.isSyncMode() || this.syncRuntime?.active) {
-                try {
-                    await axios.post('/sync/stop');
-                    this.statusMessage = 'SYNC STOPPING';
-                } catch (error) {
-                    this.addLog('SYNC stop failed: ' + this.formatRequestError(error));
-                }
-                return;
-            }
             if (this.isScheduleActive()) {
                 this.scheduleRuntime.stopRequested = true;
                 this.statusMessage = this.isRunning ? 'STOPPING' : 'STOPPED';
@@ -5077,6 +5144,15 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     await axios.post('/schedule/stop');
                 } catch (error) {
                     this.addLog('Schedule stop failed: ' + this.formatRequestError(error));
+                }
+                return;
+            }
+            if (this.isSyncMode() || this.syncRuntime?.active) {
+                try {
+                    await axios.post('/sync/stop');
+                    this.statusMessage = 'SYNC STOPPING';
+                } catch (error) {
+                    this.addLog('SYNC stop failed: ' + this.formatRequestError(error));
                 }
                 return;
             }

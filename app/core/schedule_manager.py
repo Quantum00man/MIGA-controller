@@ -8,7 +8,7 @@ from typing import Any, Dict, List
 
 import config
 from app.core.experiment_manager import ExperimentManager
-from app.models.schemas import ScanConfig
+from app.models.schemas import ScanConfig, SyncStartRequest
 
 
 class ScheduleManager:
@@ -21,11 +21,16 @@ class ScheduleManager:
             cls._instance = super().__new__(cls)
         return cls._instance
 
-    def __init__(self, manager: ExperimentManager | None = None):
+    def __init__(self, manager: ExperimentManager | None = None, sync_manager: Any | None = None):
         if getattr(self, "initialized", False):
+            if manager is not None:
+                self.manager = manager
+            if sync_manager is not None:
+                self.sync_manager = sync_manager
             return
         self.initialized = True
         self.manager = manager or ExperimentManager()
+        self.sync_manager = sync_manager
         self._lock = threading.RLock()
         self._wake = threading.Event()
         self._state = self._load()
@@ -69,11 +74,38 @@ class ScheduleManager:
         with self._lock:
             result = deepcopy(self._state)
         # Sequence source can be large and is private execution input, not status.
-        result["tasks"] = [
-            {key: value for key, value in task.items() if key != "sequence_snapshot"}
-            for task in result.get("tasks", [])
-        ]
-        result["currentTaskStep"] = int(getattr(self.manager.status, "current_step", 0) or 0)
+        public_tasks = []
+        for task in result.get("tasks", []):
+            public_task = {key: value for key, value in task.items() if key != "sequence_snapshot"}
+            sync_payload = public_task.get("sync")
+            if isinstance(sync_payload, dict):
+                public_task["sync"] = {
+                    **sync_payload,
+                    "slaves": [
+                        {
+                            key: value
+                            for key, value in slave.items()
+                            if key not in {"sequence_content", "sequence_content_base64"}
+                        }
+                        for slave in sync_payload.get("slaves", [])
+                        if isinstance(slave, dict)
+                    ],
+                }
+            public_tasks.append(public_task)
+        result["tasks"] = public_tasks
+        active_task = next(
+            (task for task in self._state.get("tasks", []) if task.get("id") == result.get("activeTaskId")),
+            None,
+        )
+        if (
+            active_task
+            and active_task.get("execution_mode") == "sync"
+            and self.sync_manager is not None
+            and not result.get("waiting")
+        ):
+            result["currentTaskStep"] = int(self.sync_manager.status().get("master_step") or 0)
+        else:
+            result["currentTaskStep"] = int(getattr(self.manager.status, "current_step", 0) or 0)
         return result
 
     def start(self, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -89,15 +121,40 @@ class ScheduleManager:
                 raise ValueError("Auto Markers are available in Live only")
             if config_payload.get("mode") == "ac_stark":
                 raise ValueError("AC Stark Centering is available in Live Mode only")
-            normalized.append({
+            execution_mode = str(task.get("execution_mode") or "scan").strip().lower()
+            if execution_mode not in {"scan", "sync"}:
+                raise ValueError(f"Task {index + 1} has an invalid execution mode")
+            normalized_task = {
                 "id": str(task.get("id") or f"task_{index + 1}"),
                 "name": str(task.get("name") or f"Task {index + 1}"),
+                "execution_mode": execution_mode,
                 "config": config_payload,
                 "sequence_snapshot": task["sequence_snapshot"],
                 "sequence_file_name": str(task.get("sequence_file_name") or task.get("sequence_name") or "sequence.mot"),
                 "scheduledAtMs": task.get("scheduledAtMs"),
                 "estimated_points": int(task.get("estimated_points") or 0),
-            })
+            }
+            if execution_mode == "sync":
+                if self.sync_manager is None:
+                    raise ValueError("SYNC scheduling is unavailable")
+                if config_payload.get("mode") == "lock_in":
+                    raise ValueError("Lock-in Measurement is not available in SYNC mode")
+                raw_sync = task.get("sync") if isinstance(task.get("sync"), dict) else {}
+                sync_payload = SyncStartRequest(
+                    scan_config=config_payload,
+                    master_delay_ms=raw_sync.get("master_delay_ms", 100),
+                    slaves=raw_sync.get("slaves") or [],
+                ).dict()
+                if not sync_payload["slaves"]:
+                    raise ValueError(f"Task {index + 1} has no enabled Sync slave")
+                for slave in sync_payload["slaves"]:
+                    if not str(slave.get("sequence_content") or slave.get("sequence_content_base64") or "").strip():
+                        raise ValueError(f"Task {index + 1} has no sequence for Sync slave {slave.get('name') or slave.get('node_id')}")
+                normalized_task["sync"] = {
+                    "master_delay_ms": sync_payload["master_delay_ms"],
+                    "slaves": sync_payload["slaves"],
+                }
+            normalized.append(normalized_task)
         timing = str(payload.get("timingMode") or "sequential").lower()
         if timing not in {"sequential", "specific"}:
             raise ValueError("Invalid timing mode")
@@ -106,6 +163,8 @@ class ScheduleManager:
                 raise ValueError("A scheduled queue is already active")
             if self.manager.get_active_mode():
                 raise ValueError("Hardware is currently busy")
+            if self.sync_manager is not None and self.sync_manager.status().get("active"):
+                raise ValueError("A Sync run is currently active")
             self._state = self._default_state()
             self._state.update({
                 "active": True, "tasks": normalized, "timingMode": timing,
@@ -124,7 +183,12 @@ class ScheduleManager:
             self._state["statusMessage"] = "STOPPING"
             self._save_locked()
         self._wake.set()
-        if self.manager.get_active_mode() == "scan":
+        if self.sync_manager is not None and self.sync_manager.status().get("active"):
+            try:
+                self.sync_manager.stop_master("Scheduled queue stop requested")
+            except ValueError:
+                pass
+        elif self.manager.get_active_mode() == "scan":
             self.manager.stop_scan()
         return self.get_status()
 
@@ -155,6 +219,38 @@ class ScheduleManager:
         shutil.move(str(tmp), str(target))
         return task["sequence_file_name"]
 
+    def _execute_task(self, task: Dict[str, Any]) -> None:
+        sequence_name = self._install_sequence(task)
+        scan_config = deepcopy(task["config"])
+        scan_config["sequence_name"] = sequence_name
+        if task.get("execution_mode") == "sync":
+            if self.sync_manager is None:
+                raise RuntimeError("SYNC scheduling is unavailable")
+            sync_payload = deepcopy(task.get("sync") or {})
+            sync_payload["scan_config"] = scan_config
+            self.sync_manager.start_master(sync_payload)
+            stop_sent = False
+            while self.sync_manager.status().get("active"):
+                if self._should_stop() and not stop_sent:
+                    try:
+                        self.sync_manager.stop_master("Scheduled queue stop requested")
+                    except ValueError:
+                        pass
+                    stop_sent = True
+                time.sleep(0.5)
+            sync_status = self.sync_manager.status()
+            if sync_status.get("status") == "error":
+                raise RuntimeError(sync_status.get("message") or "SYNC task failed")
+            return
+
+        result = self.manager.start_scan(scan_config)
+        if result.get("status") != "success":
+            raise RuntimeError(result.get("message") or "Task start failed")
+        while self.manager.status.is_running:
+            if self._should_stop():
+                self.manager.stop_scan()
+            time.sleep(0.5)
+
     def _run(self) -> None:
         while True:
             self._wake.wait(1.0)
@@ -184,17 +280,8 @@ class ScheduleManager:
                         target_ms = int(time.time() * 1000 + gap_sec * 1000)
                     if target_ms and target_ms > int(time.time() * 1000) and not self._wait_until(target_ms):
                         break
-                    sequence_name = self._install_sequence(task)
-                    scan_config = deepcopy(task["config"])
-                    scan_config["sequence_name"] = sequence_name
                     self._set(currentTaskStartedAtMs=int(time.time() * 1000), statusMessage=f"TASK {index + 1}/{len(tasks)}")
-                    result = self.manager.start_scan(scan_config)
-                    if result.get("status") != "success":
-                        raise RuntimeError(result.get("message") or "Task start failed")
-                    while self.manager.status.is_running:
-                        if self._should_stop():
-                            self.manager.stop_scan()
-                        time.sleep(0.5)
+                    self._execute_task(task)
                     if self._should_stop():
                         break
                     completed.add(task["id"])
