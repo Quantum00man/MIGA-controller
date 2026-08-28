@@ -1,4 +1,5 @@
 import threading
+from pathlib import Path
 from types import SimpleNamespace
 
 from app.core.schedule_manager import ScheduleManager
@@ -71,6 +72,7 @@ def sync_task():
                     "base_url": "http://127.0.0.1:9001",
                     "sequence_name": "slave.mot",
                     "sequence_content_base64": "c2xhdmUgc2VxdWVuY2U=",
+                    "phase_calibration": {"name": "Slave fringe", "reference_t2_us2": 12.5},
                     "enabled": True,
                 }
             ],
@@ -88,6 +90,7 @@ def test_start_accepts_sync_task_and_redacts_sequence_content():
     assert stored["execution_mode"] == "sync"
     assert stored["sync"]["master_delay_ms"] == 125
     assert stored["sync"]["slaves"][0]["sequence_content_base64"]
+    assert stored["sync"]["slaves"][0]["phase_calibration"]["name"] == "Slave fringe"
     public_slave = status["tasks"][0]["sync"]["slaves"][0]
     assert "sequence_content" not in public_slave
     assert "sequence_content_base64" not in public_slave
@@ -107,6 +110,7 @@ def test_execute_sync_task_uses_sync_manager_with_master_sequence_name():
     assert payload["scan_config"]["sequence_name"] == "master.mot"
     assert payload["master_delay_ms"] == 125
     assert payload["slaves"][0]["node_id"] == "slave_1"
+    assert payload["slaves"][0]["phase_calibration"]["reference_t2_us2"] == 12.5
 
 
 def test_existing_schedule_task_defaults_to_regular_scan():
@@ -123,3 +127,22 @@ def test_existing_schedule_task_defaults_to_regular_scan():
     assert stored["execution_mode"] == "scan"
     assert scheduler.sync_manager.started == []
     assert scheduler.manager.started[0]["sequence_name"] == "master.mot"
+
+
+def test_temporary_sequence_does_not_install_over_active_template():
+    scheduler = make_scheduler()
+    task = sync_task()
+    task["execution_mode"] = "scan"
+    task.pop("sync")
+    task["temporary_sequence"] = True
+    scheduler._install_sequence = lambda queued_task: (_ for _ in ()).throw(
+        AssertionError("temporary task must not overwrite the active template")
+    )
+
+    scheduler.start({"timingMode": "sequential", "tasks": [task]})
+    stored = scheduler._state["tasks"][0]
+    scheduler._execute_task(stored)
+
+    override = scheduler.manager.started[0]["_template_path_override"]
+    assert scheduler.manager.started[0]["sequence_name"] == "master.mot"
+    assert not Path(override).exists()

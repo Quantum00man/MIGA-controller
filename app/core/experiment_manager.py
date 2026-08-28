@@ -8,6 +8,7 @@ import math
 import queue
 import os
 import shutil
+from copy import deepcopy
 import shlex
 import subprocess
 import numpy as np
@@ -809,15 +810,18 @@ class ExperimentManager:
                 print(f"[User JSON] Skipping invalid Bragg phase calibration: {exc}")
         return sorted(normalized, key=lambda item: item['created_at'], reverse=True)
 
-    def save_bragg_phase_calibration(self, name: str, fit_result: Dict[str, Any], source: Dict[str, Any]) -> Dict[str, Any]:
+    def build_bragg_phase_calibration(self, name: str, fit_result: Dict[str, Any], source: Dict[str, Any]) -> Dict[str, Any]:
         label = str(name or '').strip()
         if not label:
             raise ValueError('Calibration name is required')
-        calibration = self._normalize_bragg_phase_calibration({
+        return self._normalize_bragg_phase_calibration({
             **dict(fit_result or {}),
             'name': label,
             'source': dict(source or {}),
         })
+
+    def save_bragg_phase_calibration(self, name: str, fit_result: Dict[str, Any], source: Dict[str, Any]) -> Dict[str, Any]:
+        calibration = self.build_bragg_phase_calibration(name, fit_result, source)
         payload = self._load_user_json_payload()
         calibrations = self.get_bragg_phase_calibrations()
         calibrations.append(calibration)
@@ -1306,7 +1310,12 @@ class ExperimentManager:
         self.status = ExperimentStatus(is_running=True, total_steps=len(parameters), message='Starting...')
 
         try:
-            self._active_phase_calibration_for_run = self.get_active_bragg_phase_calibration()
+            requested_phase_calibration = scan_config.get('interferometer_phase_calibration_override')
+            self._active_phase_calibration_for_run = (
+                deepcopy(requested_phase_calibration)
+                if isinstance(requested_phase_calibration, dict)
+                else self.get_active_bragg_phase_calibration()
+            )
             scan_config['_system_settings_snapshot'] = self.settings
             scan_config['_interferometer_phase_calibration_snapshot'] = self._active_phase_calibration_for_run
             self.data_manager.init_run(scan_config)

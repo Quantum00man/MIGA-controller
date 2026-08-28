@@ -1389,6 +1389,63 @@
                                 </div>
                                 <div v-if="braggPhase.calibrationMessage" class="small mt-1"
                                     :class="braggPhase.calibrationError ? 'text-danger' : 'text-success'">{{ braggPhase.calibrationMessage }}</div>
+                                <div class="border rounded bg-light p-2 mt-3">
+                                    <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap">
+                                        <div>
+                                            <div class="small fw-bold text-dark">Generate phase-noise schedule</div>
+                                            <div class="small text-muted">Each task uses its selected Master mid fringe as the temporary phase zero.</div>
+                                        </div>
+                                        <span class="badge bg-secondary">Link mode only</span>
+                                    </div>
+                                    <div v-if="midFringeScheduleAvailabilityMessage()" class="alert alert-warning small py-2 mt-2 mb-0">
+                                        {{ midFringeScheduleAvailabilityMessage() }}
+                                    </div>
+                                    <template v-else>
+                                        <div class="row g-2 mt-1">
+                                            <div class="col-6">
+                                                <label class="form-label small mb-1">Mid-fringe P0 min ((μs)²)</label>
+                                                <input type="number" class="form-control form-control-sm" v-model.number="midFringeSchedule.filterMin">
+                                            </div>
+                                            <div class="col-6">
+                                                <label class="form-label small mb-1">Mid-fringe P0 max ((μs)²)</label>
+                                                <input type="number" class="form-control form-control-sm" v-model.number="midFringeSchedule.filterMax">
+                                            </div>
+                                        </div>
+                                        <div class="d-flex gap-2 my-2">
+                                            <button class="btn btn-outline-primary btn-sm" @click="selectVisibleMidFringes">Select in range</button>
+                                            <button class="btn btn-outline-secondary btn-sm" @click="midFringeSchedule.selectedValues = []">Clear</button>
+                                        </div>
+                                        <div class="border rounded bg-white p-2" style="max-height: 150px; overflow-y: auto;">
+                                            <label v-for="value in visibleMidFringeScheduleValues()" :key="value" class="form-check small mb-1">
+                                                <input class="form-check-input" type="checkbox" :value="value" v-model="midFringeSchedule.selectedValues">
+                                                <span class="form-check-label font-monospace">P0={{ formatMetricValue(value) }} · {{ phaseSlopeLabel(midFringeSlope(value)) }}</span>
+                                            </label>
+                                            <div v-if="!visibleMidFringeScheduleValues().length" class="small text-muted">No fitted mid fringes in this range.</div>
+                                        </div>
+                                        <div class="small fw-bold text-dark mt-2">Virtual P0 shot counter</div>
+                                        <div class="row g-2">
+                                            <div class="col-4"><label class="form-label small mb-1">Start</label><input type="number" class="form-control form-control-sm" v-model.number="midFringeSchedule.shotStart"></div>
+                                            <div class="col-4"><label class="form-label small mb-1">Stop</label><input type="number" class="form-control form-control-sm" v-model.number="midFringeSchedule.shotStop"></div>
+                                            <div class="col-4"><label class="form-label small mb-1">Step</label><input type="number" min="0.000000001" class="form-control form-control-sm" v-model.number="midFringeSchedule.shotStep"></div>
+                                        </div>
+                                        <div class="row g-2 align-items-end mt-1">
+                                            <div class="col-7">
+                                                <label class="form-label small mb-1">Gap between tasks (s)</label>
+                                                <input type="number" min="0" class="form-control form-control-sm" v-model.number="midFringeSchedule.gapSeconds">
+                                            </div>
+                                            <div class="col-5 small text-muted pb-1">Averages fixed to 1</div>
+                                        </div>
+                                        <button class="btn btn-primary btn-sm w-100 mt-2" @click="prepareMidFringeSchedule"
+                                            :disabled="midFringeSchedule.busy || !midFringeSchedule.selectedValues.length">
+                                            <span v-if="midFringeSchedule.busy" class="spinner-border spinner-border-sm me-1"></span>Add to Scheduled Queue
+                                        </button>
+                                    </template>
+                                    <div v-if="midFringeSchedule.message" class="alert small py-2 mt-2 mb-0"
+                                        :class="midFringeSchedule.error ? 'alert-danger' : 'alert-success'">
+                                        {{ midFringeSchedule.message }}
+                                        <button v-if="midFringeSchedule.result && !midFringeSchedule.error" class="btn btn-success btn-sm ms-2" @click="openPreparedMidFringeQueue">Open Queue in Index</button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                         </template>
@@ -2229,6 +2286,11 @@
                         applicationMode: 'full', manualA: '', manualC: '', referenceCount: 5,
                         tSource: 'p0_t2', referenceMidP0: '',
                         calibrationName: '', saving: false, calibrationMessage: '', calibrationError: false
+                    },
+                    midFringeSchedule: {
+                        filterMin: '', filterMax: '', selectedValues: [],
+                        shotStart: 1, shotStop: 100, shotStep: 1, gapSeconds: 10,
+                        busy: false, message: '', error: false, result: null
                     },
                     showDisplayMenu: false, showTofFitCurve: true, showTofRawCurve: true, showScanFitCurve: true,
                     showRawData: true, phaseUnit: 'rad', maximizedView: null, currentTab: 'atoms', plotMode: 'series', allanOrder: 1, allanScaleMode: 'absolute', allanXAxisMode: 'linear', allanP0AvailableMin: null, allanP0AvailableMax: null, allanP0Min: null, allanP0Max: null, allanP0MinInput: '', allanP0MaxInput: '', plotRevision: 0,
@@ -3560,6 +3622,84 @@
                     if (!points.length) return 'No mid-fringe intersection lies inside the selected fit range.';
                     return points.map((value, index) => `#${index + 1}: ${this.formatMetricValue(value)}`).join(' · ');
                 },
+                initializeMidFringeSchedule(result = this.scanFitResult) {
+                    const values = Array.isArray(result?.bragg?.mid_fringe_x)
+                        ? result.bragg.mid_fringe_x.map(Number).filter(Number.isFinite).sort((a, b) => a - b)
+                        : [];
+                    this.midFringeSchedule.filterMin = Number.isFinite(Number(result?.fit_min)) ? Number(result.fit_min) : (values[0] ?? '');
+                    this.midFringeSchedule.filterMax = Number.isFinite(Number(result?.fit_max)) ? Number(result.fit_max) : (values[values.length - 1] ?? '');
+                    this.midFringeSchedule.selectedValues = [...values];
+                    this.midFringeSchedule.message = '';
+                    this.midFringeSchedule.error = false;
+                    this.midFringeSchedule.result = null;
+                },
+                visibleMidFringeScheduleValues() {
+                    const values = Array.isArray(this.scanFitResult?.bragg?.mid_fringe_x)
+                        ? this.scanFitResult.bragg.mid_fringe_x.map(Number).filter(Number.isFinite)
+                        : [];
+                    const minimum = Number(this.midFringeSchedule.filterMin);
+                    const maximum = Number(this.midFringeSchedule.filterMax);
+                    return values.filter(value => (!Number.isFinite(minimum) || value >= minimum)
+                        && (!Number.isFinite(maximum) || value <= maximum));
+                },
+                selectVisibleMidFringes() {
+                    this.midFringeSchedule.selectedValues = [...this.visibleMidFringeScheduleValues()];
+                },
+                midFringeSlope(value) {
+                    const amplitude = Number(this.scanFitResult?.parameter_values?.A);
+                    const omega = Number(this.scanFitResult?.bragg?.angular_frequency_rad_per_us2);
+                    const phi0 = Number(this.scanFitResult?.parameter_values?.phi0);
+                    const reference = Number(value);
+                    if (![amplitude, omega, phi0, reference].every(Number.isFinite)) return 'negative';
+                    return -amplitude * omega * Math.sin(omega * reference + phi0) > 0 ? 'positive' : 'negative';
+                },
+                midFringeScheduleAvailabilityMessage() {
+                    if (String(this.loadedConfig?.mode || '').trim().toLowerCase() !== 'link') {
+                        return 'The loaded Archive was not created in Link mode.';
+                    }
+                    if (this.syncManifest && this.loadedSyncNode && this.loadedSyncNode !== 'master') {
+                        return 'Load the Master node before preparing a SYNC scheduled queue.';
+                    }
+                    if (!this.loadedRunRef) return 'Load an Archive run first.';
+                    return '';
+                },
+                async prepareMidFringeSchedule() {
+                    if (this.midFringeSchedule.busy || this.midFringeScheduleAvailabilityMessage()) return;
+                    this.midFringeSchedule.busy = true;
+                    this.midFringeSchedule.message = '';
+                    this.midFringeSchedule.error = false;
+                    this.midFringeSchedule.result = null;
+                    try {
+                        const response = await axios.post('/archive/mid-fringe-schedule', {
+                            ...this.loadedRunRef,
+                            fit_result: this.scanFitResult,
+                            mid_fringe_values: this.midFringeSchedule.selectedValues.map(Number),
+                            shot_start: Number(this.midFringeSchedule.shotStart),
+                            shot_stop: Number(this.midFringeSchedule.shotStop),
+                            shot_step: Number(this.midFringeSchedule.shotStep),
+                            gap_seconds: Number(this.midFringeSchedule.gapSeconds)
+                        });
+                        this.midFringeSchedule.result = response.data;
+                        this.midFringeSchedule.message = `Prepared ${response.data.task_count} task(s), ${response.data.shot_count_per_task} shots each (${response.data.total_shots} total).`;
+                    } catch (error) {
+                        this.midFringeSchedule.error = true;
+                        this.midFringeSchedule.message = error.response?.data?.detail || error.message || 'Unable to prepare the mid-fringe queue.';
+                    } finally {
+                        this.midFringeSchedule.busy = false;
+                    }
+                },
+                openPreparedMidFringeQueue() {
+                    const result = this.midFringeSchedule.result;
+                    if (!result?.batch_id || !this.loadedRunRef) return;
+                    const query = new URLSearchParams({
+                        prepared_queue: result.batch_id,
+                        archive_year: this.loadedRunRef.year,
+                        archive_month: this.loadedRunRef.month,
+                        archive_day: this.loadedRunRef.day,
+                        archive_run: this.loadedRunRef.run_id
+                    });
+                    window.location.href = `/index.html?${query.toString()}`;
+                },
                 applyScanFitLayout(layout, result, color) {
                     if (!result) return layout;
                     const shapes = Array.isArray(layout.shapes) ? [...layout.shapes] : [];
@@ -3652,6 +3792,7 @@
                             this.braggPhase.manualA = Number(this.scanFitResult.parameter_values?.A);
                             this.braggPhase.manualC = Number(this.scanFitResult.parameter_values?.C);
                             this.ensureBraggReferenceMidFringe(this.scanFitResult);
+                            this.initializeMidFringeSchedule(this.scanFitResult);
                         }
                         this.scanFitError = '';
                         this.plotRevision++;
@@ -3684,6 +3825,10 @@
                     this.braggPhase.selectedCalibrationId = 'current';
                     this.braggPhase.result = null;
                     this.braggPhase.error = '';
+                    this.midFringeSchedule.selectedValues = [];
+                    this.midFringeSchedule.message = '';
+                    this.midFringeSchedule.error = false;
+                    this.midFringeSchedule.result = null;
                     this.scanFitError = '';
                     this.plotRevision++;
                     this.renderMainPlot();

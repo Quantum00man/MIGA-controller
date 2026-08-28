@@ -505,11 +505,14 @@ class SyncManager:
                 raise ValueError(f"Duplicate Slave URL: {base_url}")
             seen_node_ids.add(node_id)
             seen_urls.add(base_url)
+            slave_scan_config = deepcopy(scan_config)
+            if isinstance(raw_slave.get("phase_calibration"), dict):
+                slave_scan_config["interferometer_phase_calibration_override"] = deepcopy(raw_slave["phase_calibration"])
             prepare_payload = {
                 "sync_run_id": sync_run_id,
                 "master_node_id": node_name,
                 "slave_node_id": node_id,
-                "scan_config": scan_config,
+                "scan_config": slave_scan_config,
                 "shot_plan": shot_plan,
                 "sequence_name": raw_slave.get("sequence_name") or "slave.mot",
                 "sequence_content": raw_slave.get("sequence_content") or "",
@@ -969,6 +972,7 @@ class SyncManager:
         run_dir: Path,
         node_id: str,
         coordinator_url: str = "",
+        base_url_override: str = "",
     ) -> Dict[str, Any]:
         local_node = self.archive_local_node_id(run_dir)
         target = str(node_id or local_node or "master")
@@ -980,7 +984,8 @@ class SyncManager:
                 "calibrations": self.manager.get_bragg_phase_calibrations(),
                 "active": active,
             }
-        base_url = self._archive_node_base_url(run_dir, target, coordinator_url)
+        base_url = self._normalize_url(base_url_override) if str(base_url_override or "").strip() else ""
+        base_url = base_url or self._archive_node_base_url(run_dir, target, coordinator_url)
         if not base_url:
             raise ValueError(f"Controller URL for SYNC node {target} is unavailable")
         response = requests.get(

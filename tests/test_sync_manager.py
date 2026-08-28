@@ -97,11 +97,15 @@ class SyncManagerTests(unittest.TestCase):
                 return FakeResponse()
 
             payload = {
-                "scan_config": {"mode": "standard", "start": 1, "stop": 3, "step": 1},
+                "scan_config": {
+                    "mode": "standard", "start": 1, "stop": 3, "step": 1,
+                    "interferometer_phase_calibration_override": {"name": "Master fringe"},
+                },
                 "master_delay_ms": 0,
                 "slaves": [{
                     "node_id": "slave_b", "name": "Node B", "base_url": "192.168.1.20:8000",
                     "sequence_name": "slave.mot", "sequence_content": "+10us WAIT = OFF (1)\n",
+                    "phase_calibration": {"name": "Slave fringe", "reference_t2_us2": 12.5},
                     "enabled": True,
                 }],
             }
@@ -111,9 +115,14 @@ class SyncManagerTests(unittest.TestCase):
 
             prepare = next(body for url, body in calls if url.endswith("/prepare"))
             self.assertEqual(prepare["shot_plan"], [[3], [1], [3], [2]])
+            self.assertEqual(
+                prepare["scan_config"]["interferometer_phase_calibration_override"]["name"],
+                "Slave fringe",
+            )
             self.assertEqual(manager.events, ["slave_start", "master_start"])
             self.assertEqual(result["expected_shots"], 4)
             master_plan = manager.started[0][1]
+            self.assertEqual(manager.started[0][0]["interferometer_phase_calibration_override"]["name"], "Master fringe")
             self.assertEqual([item["metadata"]["sync_shot_index"] for item in master_plan], [0, 1, 2, 3])
             self.assertEqual([item["metadata"]["sync_p0"] for item in master_plan], [3, 1, 3, 2])
 

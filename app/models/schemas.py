@@ -81,6 +81,7 @@ class ScanConfig(BaseModel):
     lock_in_b_value: float = Field(0.5)
     parameter_source: str = Field("classic")
     marker_axes: List[str] = Field(default_factory=list)
+    interferometer_phase_calibration_override: Optional[Dict[str, Any]] = Field(None)
 
     @validator("parameter_source")
     def normalize_parameter_source(cls, value):
@@ -502,6 +503,7 @@ class SyncSlaveRunConfig(BaseModel):
     sequence_name: str = Field("slave.mot")
     sequence_content: str = Field("")
     sequence_content_base64: str = Field("")
+    phase_calibration: Optional[Dict[str, Any]] = Field(None)
     enabled: bool = Field(True)
 
 
@@ -629,6 +631,19 @@ class ArchiveSyncDifferentialFitRequest(BaseModel):
     y_values: List[float] = Field(default_factory=list)
     eval_points: int = Field(361, ge=64, le=4000)
     source: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ArchiveMidFringeScheduleRequest(BaseModel):
+    year: str
+    month: str
+    day: str
+    run_id: str
+    fit_result: Dict[str, Any]
+    mid_fringe_values: List[float] = Field(default_factory=list, min_length=1, max_length=200)
+    shot_start: float = Field(1)
+    shot_stop: float = Field(100)
+    shot_step: float = Field(1, gt=0)
+    gap_seconds: float = Field(10, ge=0)
 
 
 class ArchivePhaseReferenceOverrideRequest(BaseModel):

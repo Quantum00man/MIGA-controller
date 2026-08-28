@@ -135,6 +135,12 @@ class DataLoader:
     def get_run_dir(self, year: str, month: str, day: str, run_id: str) -> Path:
         return self._get_run_dir(year, month, day, run_id)
 
+    def get_archive_config(
+        self, year: str, month: str, day: str, run_id: str, node_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        root_run_dir = self._get_run_dir(year, month, day, run_id)
+        return self._load_config_data(self._resolve_archive_node_dir(root_run_dir, node_id))
+
     def _resolve_archive_node_dir(self, run_dir: Path, node_id: Optional[str] = None) -> Path:
         requested = str(node_id or "").strip()
         if not requested:

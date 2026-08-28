@@ -1280,7 +1280,7 @@
 
 
 <span class="section-label" v-if="isScheduledMode()">Scheduled Tasks</span>
-<div class="card p-3" v-if="isScheduledMode()">
+<div class="card p-3" id="scheduledTaskQueueCard" v-if="isScheduledMode()">
     <div class="d-flex justify-content-between align-items-center mb-2">
         <div class="small text-muted fw-bold">TASK QUEUE</div>
         <button class="btn btn-outline-danger btn-sm" @click="clearScheduledTasks"
@@ -1288,6 +1288,10 @@
     </div>
     <div v-if="!scheduledTasks.length" class="small text-muted">
         No scheduled tasks yet. Load or edit a sequence/config, then snapshot it into the queue.
+    </div>
+    <div v-if="preparedQueueImportMessage" class="alert py-2 small mb-2"
+        :class="preparedQueueImportError ? 'alert-danger' : 'alert-success'">
+        {{ preparedQueueImportMessage }}
     </div>
     <div v-for="(task, index) in scheduledTasks" :key="task.id"
         class="scheduled-task-card p-2 mb-2 border rounded"
@@ -1303,6 +1307,7 @@
                 </div>
                 <div class="small fw-bold text-dark">{{ getScheduledTaskModeLabel(task) }} | {{ task.estimated_points }} shots | {{ formatDuration(task.estimated_duration_sec) }}</div>
                 <div class="small text-muted mt-1">{{ getScheduledTaskAxisLabel(task.config) }}</div>
+                <div class="small text-primary mt-1" v-if="task.note">{{ task.note }}</div>
                 <div class="small text-muted mt-1" v-if="task.execution_mode === 'sync'">
                     {{ task.sync?.slaves?.length || 0 }} Slave node(s) | {{ Number(task.sync?.master_delay_ms || 0) }} ms Master delay
                 </div>
@@ -1665,6 +1670,8 @@
                     syncScheduleEnabled: false,
                     scheduleSettings: { singlePointDurationSec: 1.615, timingMode: 'sequential', sequentialGapSec: 60 },
                     scheduledTasks: [],
+                    preparedQueueImportMessage: '',
+                    preparedQueueImportError: false,
                     selectedScheduledTaskId: null,
                     scheduleRuntime: {
                         active: false,
@@ -1825,6 +1832,7 @@
                     // server-owned execution status is shared between clients.
                     this.sharedStateBootstrapComplete = true;
                     this.fetchScheduledStatus();
+                    this.importPreparedQueueFromUrl();
                 this.windowResizeHandler = () => this.handleWindowResize();
                 window.addEventListener('resize', this.windowResizeHandler);
                 this.statusPollTimer = setInterval(() => this.fetchStatus(), 2000);
@@ -3216,6 +3224,54 @@ getDefaultScheduledTimeValue() {
         .filter((value) => Number.isFinite(value));
     const baseMs = validTimes.length ? Math.max(...validTimes) + 60000 : Date.now() + 60000;
     return this.toDateTimeLocalValue(baseMs);
+},
+async importPreparedQueueFromUrl() {
+    const query = new URLSearchParams(window.location.search);
+    const batchId = String(query.get('prepared_queue') || '').trim();
+    if (!batchId) return;
+    const year = String(query.get('archive_year') || '').trim();
+    const month = String(query.get('archive_month') || '').trim();
+    const day = String(query.get('archive_day') || '').trim();
+    const runId = String(query.get('archive_run') || '').trim();
+    this.preparedQueueImportMessage = '';
+    this.preparedQueueImportError = false;
+    try {
+        if (!year || !month || !day || !runId) throw new Error('Prepared queue Archive reference is incomplete.');
+        if (this.isScheduleActive()) throw new Error('Stop the active schedule before importing another queue.');
+        const pathParts = [year, month, day, runId, batchId].map(value => encodeURIComponent(value));
+        const response = await axios.get(`/archive/mid-fringe-schedule/${pathParts.join('/')}`);
+        const payload = response.data || {};
+        const incoming = Array.isArray(payload.tasks) ? payload.tasks : [];
+        if (!incoming.length) throw new Error('The prepared queue contains no tasks.');
+        const executionMode = payload.execution_mode === 'sync' ? 'sync' : 'scan';
+        const incompatible = this.scheduledTasks.find(task => (task.execution_mode || 'scan') !== executionMode);
+        if (incompatible) throw new Error('Clear the existing incompatible queue before importing this batch.');
+        const existingIds = new Set(this.scheduledTasks.map(task => String(task.id)));
+        const newTasks = incoming
+            .filter(task => task && !existingIds.has(String(task.id)))
+            .map(task => this.cloneConfig(task));
+        if (newTasks.length) this.scheduledTasks.push(...newTasks);
+        this.runMode = executionMode === 'sync' ? 'sync' : 'scheduled';
+        this.syncScheduleEnabled = executionMode === 'sync';
+        this.scheduleSettings.timingMode = 'sequential';
+        this.scheduleSettings.sequentialGapSec = Math.max(0, Number(payload.gap_seconds) || 0);
+        this.selectedScheduledTaskId = (newTasks[0] || incoming[0])?.id || null;
+        this.refreshScheduledTaskEstimates();
+        this.saveState();
+        this.preparedQueueImportMessage = newTasks.length
+            ? `Imported ${newTasks.length} mid-fringe task(s) from ${runId}. Review or edit them below before starting.`
+            : `This prepared mid-fringe batch is already in the queue.`;
+        this.addLog(this.preparedQueueImportMessage);
+        ['prepared_queue', 'archive_year', 'archive_month', 'archive_day', 'archive_run'].forEach(key => query.delete(key));
+        const suffix = query.toString();
+        window.history.replaceState({}, '', `${window.location.pathname}${suffix ? `?${suffix}` : ''}${window.location.hash}`);
+        await this.$nextTick();
+        document.getElementById('scheduledTaskQueueCard')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch (error) {
+        this.preparedQueueImportError = true;
+        this.preparedQueueImportMessage = `Prepared queue import failed: ${error.response?.data?.detail || error.message || error}`;
+        this.addLog(this.preparedQueueImportMessage);
+    }
 },
 async captureCurrentSequenceForTask() {
     if (this.seqFile) {

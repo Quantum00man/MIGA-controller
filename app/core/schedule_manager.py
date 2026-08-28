@@ -1,5 +1,7 @@
 import json
+import os
 import shutil
+import tempfile
 import threading
 import time
 from copy import deepcopy
@@ -130,6 +132,9 @@ class ScheduleManager:
                 "execution_mode": execution_mode,
                 "config": config_payload,
                 "sequence_snapshot": task["sequence_snapshot"],
+                "temporary_sequence": bool(task.get("temporary_sequence", False)),
+                "note": str(task.get("note") or ""),
+                "mid_fringe_p0_us2": task.get("mid_fringe_p0_us2"),
                 "sequence_file_name": str(task.get("sequence_file_name") or task.get("sequence_name") or "sequence.mot"),
                 "scheduledAtMs": task.get("scheduledAtMs"),
                 "estimated_points": int(task.get("estimated_points") or 0),
@@ -220,36 +225,50 @@ class ScheduleManager:
         return task["sequence_file_name"]
 
     def _execute_task(self, task: Dict[str, Any]) -> None:
-        sequence_name = self._install_sequence(task)
+        temporary_path = None
+        sequence_name = task["sequence_file_name"]
+        if task.get("temporary_sequence"):
+            file_descriptor, raw_path = tempfile.mkstemp(prefix="miga_scheduled_", suffix=".mot")
+            os.close(file_descriptor)
+            temporary_path = Path(raw_path)
+            temporary_path.write_text(task["sequence_snapshot"], encoding="utf-8")
+        else:
+            sequence_name = self._install_sequence(task)
         scan_config = deepcopy(task["config"])
         scan_config["sequence_name"] = sequence_name
-        if task.get("execution_mode") == "sync":
-            if self.sync_manager is None:
-                raise RuntimeError("SYNC scheduling is unavailable")
-            sync_payload = deepcopy(task.get("sync") or {})
-            sync_payload["scan_config"] = scan_config
-            self.sync_manager.start_master(sync_payload)
-            stop_sent = False
-            while self.sync_manager.status().get("active"):
-                if self._should_stop() and not stop_sent:
-                    try:
-                        self.sync_manager.stop_master("Scheduled queue stop requested")
-                    except ValueError:
-                        pass
-                    stop_sent = True
-                time.sleep(0.5)
-            sync_status = self.sync_manager.status()
-            if sync_status.get("status") == "error":
-                raise RuntimeError(sync_status.get("message") or "SYNC task failed")
-            return
+        if temporary_path is not None:
+            scan_config["_template_path_override"] = str(temporary_path)
+        try:
+            if task.get("execution_mode") == "sync":
+                if self.sync_manager is None:
+                    raise RuntimeError("SYNC scheduling is unavailable")
+                sync_payload = deepcopy(task.get("sync") or {})
+                sync_payload["scan_config"] = scan_config
+                self.sync_manager.start_master(sync_payload)
+                stop_sent = False
+                while self.sync_manager.status().get("active"):
+                    if self._should_stop() and not stop_sent:
+                        try:
+                            self.sync_manager.stop_master("Scheduled queue stop requested")
+                        except ValueError:
+                            pass
+                        stop_sent = True
+                    time.sleep(0.5)
+                sync_status = self.sync_manager.status()
+                if sync_status.get("status") == "error":
+                    raise RuntimeError(sync_status.get("message") or "SYNC task failed")
+                return
 
-        result = self.manager.start_scan(scan_config)
-        if result.get("status") != "success":
-            raise RuntimeError(result.get("message") or "Task start failed")
-        while self.manager.status.is_running:
-            if self._should_stop():
-                self.manager.stop_scan()
-            time.sleep(0.5)
+            result = self.manager.start_scan(scan_config)
+            if result.get("status") != "success":
+                raise RuntimeError(result.get("message") or "Task start failed")
+            while self.manager.status.is_running:
+                if self._should_stop():
+                    self.manager.stop_scan()
+                time.sleep(0.5)
+        finally:
+            if temporary_path is not None:
+                temporary_path.unlink(missing_ok=True)
 
     def _run(self) -> None:
         while True:

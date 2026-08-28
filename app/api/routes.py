@@ -1,3 +1,4 @@
+import base64
 import ipaddress
 import json
 import os
@@ -22,7 +23,17 @@ from app.core.data_loader import DataLoader
 from app.core.archive_collection_store import ArchiveCollectionStore
 from app.core.data_manager import DataManager
 from app.core.bragg_export import build_bragg_zip_export, build_single_bragg_export, read_sequence_template
-from app.core.link_export import build_link_zip_export, build_single_link_export
+from app.core.link_export import build_link_zip_export, build_single_link_export, render_link_mot
+from app.core.mid_fringe_schedule import (
+    build_mid_fringe_task,
+    build_virtual_scan_config,
+    calibration_at_reference,
+    load_prepared_queue,
+    new_batch_id,
+    save_prepared_queue,
+    validate_selected_mid_fringes,
+    virtual_shot_count,
+)
 from app.core.sequence_markers import (
     add_sequence_marker,
     decode_mot_bytes,
@@ -56,6 +67,7 @@ from app.models.schemas import (
     InterferometerPhaseCalibrationActivateRequest,
     ArchiveScanFitRequest,
     ArchiveSyncDifferentialFitRequest,
+    ArchiveMidFringeScheduleRequest,
     ArchiveWaveformRequest,
     BraggScanExportRequest,
     BraggSingleExportRequest,
@@ -1523,6 +1535,184 @@ async def download_archived_sequence(year: str, month: str, day: str, run_id: st
         raise HTTPException(404, str(exc))
     except Exception as exc:
         raise HTTPException(500, str(exc))
+
+
+@router.post("/archive/mid-fringe-schedule")
+async def prepare_archive_mid_fringe_schedule(req: ArchiveMidFringeScheduleRequest):
+    try:
+        run_dir = data_loader.get_run_dir(req.year, req.month, req.day, req.run_id)
+        manifest = _sync_manifest_for_run(run_dir)
+        is_sync = bool(manifest)
+        if is_sync and sync_manager.archive_local_node_id(run_dir) != "master":
+            raise ValueError("A SYNC mid-fringe queue must be prepared on the Master controller")
+
+        master_config = data_loader.get_archive_config(
+            req.year, req.month, req.day, req.run_id, node_id="master" if is_sync else None
+        )
+        if str(master_config.get("mode") or "").strip().lower() != "link":
+            raise ValueError("Mid-fringe queue generation is available only for archived Link mode scans")
+        selected = validate_selected_mid_fringes(req.fit_result, req.mid_fringe_values)
+        shot_count = virtual_shot_count(req.shot_start, req.shot_stop, req.shot_step)
+
+        master_sequence_path, _ = data_loader.get_archived_sequence_file(
+            req.year, req.month, req.day, req.run_id, node_id="master" if is_sync else None
+        )
+        master_template, _ = decode_mot_bytes(master_sequence_path.read_bytes())
+        master_sequence_name = str(master_config.get("sequence_name") or master_sequence_path.name)
+        source = {
+            "year": req.year,
+            "month": req.month,
+            "day": req.day,
+            "run_id": req.run_id,
+            "node_id": "master" if is_sync else "",
+            "sequence_name": master_sequence_name,
+            "generated_for": "mid_fringe_schedule",
+        }
+        master_base_calibration = manager.build_bragg_phase_calibration(
+            f"{req.run_id} current Bragg fit", req.fit_result, source
+        )
+
+        runtime = manifest.get("runtime") if isinstance(manifest.get("runtime"), dict) else {}
+        runtime_slaves = runtime.get("slaves") if isinstance(runtime.get("slaves"), list) else []
+        configured_slaves = {
+            str(item.get("id") or "").strip(): item
+            for item in (manager.get_settings().get("sync_slaves") or [])
+            if isinstance(item, dict) and item.get("enabled", True) and str(item.get("id") or "").strip()
+        }
+        archived_nodes = manifest.get("archive_nodes") if isinstance(manifest.get("archive_nodes"), dict) else {}
+        slave_specs = []
+        if is_sync:
+            historical = {
+                str(item.get("node_id") or "").strip(): item
+                for item in runtime_slaves
+                if isinstance(item, dict) and str(item.get("node_id") or "").strip()
+            }
+            for node_id, entry in archived_nodes.items():
+                if node_id != "master" and isinstance(entry, dict):
+                    historical.setdefault(str(node_id), entry)
+            if not historical:
+                raise ValueError("The archived SYNC run does not contain any Slave nodes")
+            phase_metadata = data_loader.archive_phase_analysis_metadata(
+                req.year, req.month, req.day, req.run_id
+            )
+            for node_id in sorted(historical):
+                archived = historical[node_id]
+                current = configured_slaves.get(node_id) or {}
+                base_url = str(current.get("base_url") or archived.get("base_url") or "").rstrip("/")
+                if not base_url:
+                    raise ValueError(f"Current controller URL is unavailable for Slave {node_id}")
+                slave_sequence_path, _ = data_loader.get_archived_sequence_file(
+                    req.year, req.month, req.day, req.run_id, node_id=node_id
+                )
+                slave_config = data_loader.get_archive_config(
+                    req.year, req.month, req.day, req.run_id, node_id=node_id
+                )
+                available = await run_in_threadpool(
+                    sync_manager.get_archive_node_phase_calibrations,
+                    run_dir,
+                    node_id,
+                    phase_metadata.get("coordinator_url") or "",
+                    base_url,
+                )
+                slave_calibration = available.get("active")
+                if not isinstance(slave_calibration, dict):
+                    raise ValueError(f"Slave {node_id} has no active interferometer phase calibration")
+                slave_specs.append({
+                    "node_id": node_id,
+                    "name": str(current.get("name") or archived.get("name") or node_id),
+                    "base_url": base_url,
+                    "sequence_name": str(slave_config.get("sequence_name") or slave_sequence_path.name),
+                    "sequence_content_base64": base64.b64encode(slave_sequence_path.read_bytes()).decode("ascii"),
+                    "base_calibration": slave_calibration,
+                })
+
+        batch_id = new_batch_id()
+        tasks = []
+        for index, reference in enumerate(selected):
+            master_parameters = manager.build_link_export_parameter_sets(master_config, p0=reference)[0]
+            master_sequence = render_link_mot(master_template, master_parameters)
+            master_calibration = calibration_at_reference(master_base_calibration, reference)
+            task_config = build_virtual_scan_config(
+                master_config,
+                reference,
+                master_calibration,
+                req.shot_start,
+                req.shot_stop,
+                req.shot_step,
+                master_sequence_name,
+            )
+            sync_payload = None
+            if is_sync:
+                sync_payload = {
+                    "master_delay_ms": max(0.0, float(runtime.get("master_delay_ms") or 0.0)),
+                    "slaves": [
+                        {
+                            "node_id": spec["node_id"],
+                            "name": spec["name"],
+                            "base_url": spec["base_url"],
+                            "sequence_name": spec["sequence_name"],
+                            "sequence_content": "",
+                            "sequence_content_base64": spec["sequence_content_base64"],
+                            "phase_calibration": calibration_at_reference(spec["base_calibration"], reference),
+                            "enabled": True,
+                        }
+                        for spec in slave_specs
+                    ],
+                }
+            tasks.append(build_mid_fringe_task(
+                batch_id=batch_id,
+                index=index,
+                reference=reference,
+                sequence_name=master_sequence_name,
+                sequence_snapshot=master_sequence,
+                config=task_config,
+                shot_count=shot_count,
+                execution_mode="sync" if is_sync else "scan",
+                sync=sync_payload,
+            ))
+
+        payload = {
+            "version": 1,
+            "batch_id": batch_id,
+            "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "execution_mode": "sync" if is_sync else "scan",
+            "gap_seconds": float(req.gap_seconds),
+            "shot_range": {"start": req.shot_start, "stop": req.shot_stop, "step": req.shot_step},
+            "shot_count_per_task": shot_count,
+            "selected_mid_fringe_values": selected,
+            "source": source,
+            "tasks": tasks,
+        }
+        save_prepared_queue(run_dir, payload)
+        return {
+            "status": "success",
+            "batch_id": batch_id,
+            "execution_mode": payload["execution_mode"],
+            "task_count": len(tasks),
+            "shot_count_per_task": shot_count,
+            "total_shots": shot_count * len(tasks),
+            "gap_seconds": payload["gap_seconds"],
+            "selected_mid_fringe_values": selected,
+        }
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, f"Unable to prepare the mid-fringe queue: {exc}")
+
+
+@router.get("/archive/mid-fringe-schedule/{year}/{month}/{day}/{run_id}/{batch_id}")
+async def get_archive_mid_fringe_schedule(
+    year: str, month: str, day: str, run_id: str, batch_id: str
+):
+    try:
+        run_dir = data_loader.get_run_dir(year, month, day, run_id)
+        return load_prepared_queue(run_dir, batch_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
 
 @router.get("/archive/marker-optimization/artifact/{year}/{month}/{day}/{run_id}/{kind}")
 async def download_archived_marker_optimization_artifact(
