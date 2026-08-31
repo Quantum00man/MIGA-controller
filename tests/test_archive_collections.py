@@ -78,6 +78,17 @@ class ArchiveCollectionStoreTests(unittest.TestCase):
         self.assertEqual(removed["changed"], 2)
         self.assertFalse(self.store.snapshot()["favorites"])
 
+    def test_archive_ui_shares_loaded_timeline_or_collection_run_by_url(self):
+        archive_html = (
+            Path(__file__).resolve().parents[1] / "static" / "archive.html"
+        ).read_text(encoding="utf-8")
+        self.assertIn("Share Run Link", archive_html)
+        self.assertIn("Share loaded run", archive_html)
+        self.assertIn("loadSharedRunFromUrl", archive_html)
+        self.assertIn("url.searchParams.set('run', String(reference.run_id))", archive_html)
+        self.assertIn("this.fetchArchiveTree().then(() => this.loadSharedRunFromUrl())", archive_html)
+        self.assertIn("document.execCommand('copy')", archive_html)
+
 
 class ArchiveCollectionPreviewTests(unittest.TestCase):
     def test_standard_scan_preview_uses_selected_metric(self):

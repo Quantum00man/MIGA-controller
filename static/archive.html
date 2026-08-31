@@ -957,6 +957,12 @@
                             <button class="btn btn-outline-warning btn-sm w-100 mt-2 fw-bold" @click="openFavoriteDialogForLoadedRun">
                                 <i class="bi bi-star me-1"></i>Add to Collections
                             </button>
+                            <button class="btn btn-outline-primary btn-sm w-100 mt-2 fw-bold" @click="copyLoadedRunShareLink"
+                                :disabled="!loadedRunRef">
+                                <i class="bi bi-link-45deg me-1"></i>Share Run Link
+                            </button>
+                            <div v-if="shareLinkMessage" class="small mt-1"
+                                :class="shareLinkError ? 'text-danger' : 'text-success'">{{ shareLinkMessage }}</div>
                             <button v-if="!isMarkerOptimizationArchive()" class="btn btn-outline-secondary btn-sm w-100 mt-2" @click="exportLoadedSequence"
                                 :disabled="isExportingSequence || !loadedRunEntry?.has_sequence_file">
                                 <span v-if="isExportingSequence" class="spinner-border spinner-border-sm me-1"></span>
@@ -1465,9 +1471,14 @@
                                 <div id="collections-title" class="fw-bold text-primary"><i class="bi bi-stars me-2"></i>{{ selectedCollectionFolder()?.name || 'Collections' }}</div>
                                 <div class="small text-muted text-lowercase">{{ collectionBreadcrumb() }}</div>
                             </div>
-                            <button class="btn btn-sm btn-warning fw-bold" :disabled="!loadedRunRef || !collectionFolders.length" @click="openFavoriteDialogForLoadedRun">
-                                <i class="bi bi-star me-1"></i>Save loaded result
-                            </button>
+                            <div class="d-flex gap-2">
+                                <button class="btn btn-sm btn-outline-primary fw-bold" :disabled="!loadedRunRef" @click="copyLoadedRunShareLink">
+                                    <i class="bi bi-link-45deg me-1"></i>Share loaded run
+                                </button>
+                                <button class="btn btn-sm btn-warning fw-bold" :disabled="!loadedRunRef || !collectionFolders.length" @click="openFavoriteDialogForLoadedRun">
+                                    <i class="bi bi-star me-1"></i>Save loaded result
+                                </button>
+                            </div>
                         </div>
                         <div class="collections-toolbar">
                             <div class="input-group input-group-sm collection-search">
@@ -2207,6 +2218,7 @@
                     collectionBatchDialog: { action: '', folder_id: null, error: '' },
                     isLoading: false, isLoadingAllan: false, isLoadingWaveforms: false, isSaving: false,
                     loadedRunId: '', loadedRunEntry: null, loadedRunRef: null, isExportingSequence: false, errorMsg: '', dataCount: 0, selectedPointKey: '', selectedPointKeys: [], selectedPointLabel: '', selectedCount: 0,
+                    shareLinkMessage: '', shareLinkError: false,
                     currentWaveforms: [],
                     selectedAllanWindow: null,
                     loadedPoints: [], currentCalculatedPoints: [], originalSettings: {}, loadedConfig: {}, currentScanDimensions: 1,
@@ -2324,7 +2336,7 @@
                 showScanFitCurve() { this.handleScanFitVisibilityChange(); }
             },
             mounted() {
-                this.fetchArchiveTree();
+                this.fetchArchiveTree().then(() => this.loadSharedRunFromUrl());
                 this.fetchCollections();
                 this.fetchDefaultFitModels();
                 this.fetchDefaultScanFitModels();
@@ -4544,6 +4556,71 @@
                 },
                 getTabTitle() { return this.tabs.find(t => t.id === this.currentTab)?.label || 'Results'; },
                 async fetchArchiveTree() { try { const res = await axios.get('/archive/tree'); this.archiveTree = res.data; } catch (e) { } },
+                loadedRunShareUrl(reference = this.loadedRunRef) {
+                    if (!reference?.year || !reference?.month || !reference?.day || !reference?.run_id) return '';
+                    const url = new URL(window.location.pathname || '/archive.html', window.location.origin);
+                    url.searchParams.set('year', String(reference.year));
+                    url.searchParams.set('month', String(reference.month));
+                    url.searchParams.set('day', String(reference.day));
+                    url.searchParams.set('run', String(reference.run_id));
+                    return url.toString();
+                },
+                async copyTextToClipboard(text) {
+                    if (navigator.clipboard && window.isSecureContext) {
+                        await navigator.clipboard.writeText(text);
+                        return;
+                    }
+                    const input = document.createElement('textarea');
+                    input.value = text;
+                    input.setAttribute('readonly', '');
+                    input.style.position = 'fixed';
+                    input.style.opacity = '0';
+                    document.body.appendChild(input);
+                    input.select();
+                    const copied = document.execCommand('copy');
+                    document.body.removeChild(input);
+                    if (!copied) throw new Error('Browser clipboard access is unavailable');
+                },
+                async copyLoadedRunShareLink() {
+                    const url = this.loadedRunShareUrl();
+                    if (!url) return;
+                    this.shareLinkMessage = '';
+                    this.shareLinkError = false;
+                    try {
+                        await this.copyTextToClipboard(url);
+                        this.shareLinkMessage = 'Run link copied.';
+                    } catch (error) {
+                        this.shareLinkError = true;
+                        this.shareLinkMessage = error.message || 'Unable to copy the Run link.';
+                    }
+                },
+                async loadSharedRunFromUrl() {
+                    const query = new URLSearchParams(window.location.search);
+                    const values = {
+                        year: String(query.get('year') || '').trim(),
+                        month: String(query.get('month') || '').trim(),
+                        day: String(query.get('day') || '').trim(),
+                        run_id: String(query.get('run') || '').trim(),
+                    };
+                    const provided = Object.values(values).filter(Boolean).length;
+                    if (!provided) return;
+                    if (provided !== 4) {
+                        this.errorMsg = 'The shared Archive link is incomplete.';
+                        return;
+                    }
+                    const runs = this.archiveTree?.[values.year]?.[values.month]?.[values.day];
+                    const exists = Array.isArray(runs) && runs.some(entry => String(entry?.id || entry?.run_id || entry) === values.run_id);
+                    if (!exists) {
+                        this.errorMsg = `Shared Archive Run not found: ${values.day}/${values.run_id}`;
+                        return;
+                    }
+                    this.archiveSourceMode = 'timeline';
+                    this.selectedYear = values.year;
+                    this.selectedMonth = values.month;
+                    this.selectedDay = values.day;
+                    this.selectedRun = values.run_id;
+                    await this.loadRun();
+                },
                 async fetchDefaultFitModels() {
                     try {
                         const res = await axios.get('/fitting/models/defaults');
@@ -4730,6 +4807,8 @@
                     this.selectedOptimizationStep = null;
                     this.clearAllanCache();
                     this.errorMsg = '';
+                    this.shareLinkMessage = '';
+                    this.shareLinkError = false;
                     this.resetScanFitSession({ clearRange: true });
 
                     // 重置波形图
