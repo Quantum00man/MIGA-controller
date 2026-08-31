@@ -4840,6 +4840,7 @@
                             : null;
                         this.syncManifest = res.data.sync_manifest && typeof res.data.sync_manifest === 'object'
                             ? res.data.sync_manifest : null;
+                        if (this.syncManifest) this.showRawData = false;
                         this.syncDifferentialFits = Array.isArray(res.data.sync_differential_fits)
                             ? res.data.sync_differential_fits : [];
                         this.syncDifferentialFitSelectedId = this.syncDifferentialFits.length

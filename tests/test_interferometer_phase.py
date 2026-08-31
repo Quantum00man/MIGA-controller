@@ -361,6 +361,7 @@ class InterferometerPhaseTests(unittest.TestCase):
         self.assertIn("syncPhaseAllanStatisticsRows", archive_html)
         self.assertIn("Standard Deviation", archive_html)
         self.assertIn("standard_deviation_rad", archive_html)
+        self.assertIn("if (this.syncManifest) this.showRawData = false;", archive_html)
         self.assertIn("interferometer_phase_reference_t2_us2", archive_html)
         self.assertIn("sync_interferometer_phase_allan_", archive_html)
 
