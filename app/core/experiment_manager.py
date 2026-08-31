@@ -365,44 +365,89 @@ class ExperimentManager:
             raise ValueError("Selected SYNC run does not contain any archived Slave nodes")
 
         configured_slaves = {
-            str(item.get("id") or "").strip(): item
+            str(item.get("id") or "").strip(): dict(item)
             for item in (self.settings.get("sync_slaves") or [])
             if isinstance(item, dict) and item.get("enabled", True) and str(item.get("id") or "").strip()
         }
-        historical_ids = set(historical_nodes)
-        configured_ids = set(configured_slaves)
-        if historical_ids != configured_ids:
-            missing = sorted(historical_ids - configured_ids)
-            extra = sorted(configured_ids - historical_ids)
+
+        def normalized_url(value: Any) -> str:
+            result = str(value or "").strip().lower().rstrip("/")
+            for prefix in ("http://", "https://"):
+                if result.startswith(prefix):
+                    result = result[len(prefix):]
+                    break
+            return result
+
+        def normalized_name(value: Any) -> str:
+            return " ".join(str(value or "").strip().casefold().split())
+
+        node_mapping: Dict[str, Tuple[str, str]] = {}
+        unused_configured_ids = set(configured_slaves)
+        unmatched_historical = []
+        for historical_id, historical in historical_nodes.items():
+            if historical_id in unused_configured_ids:
+                node_mapping[historical_id] = (historical_id, "id")
+                unused_configured_ids.remove(historical_id)
+                continue
+            historical_url = normalized_url(historical.get("base_url"))
+            url_matches = [
+                node_id for node_id in unused_configured_ids
+                if historical_url and normalized_url(configured_slaves[node_id].get("base_url")) == historical_url
+            ]
+            if len(url_matches) == 1:
+                current_id = url_matches[0]
+                node_mapping[historical_id] = (current_id, "url")
+                unused_configured_ids.remove(current_id)
+                continue
+            historical_name = normalized_name(historical.get("name"))
+            name_matches = [
+                node_id for node_id in unused_configured_ids
+                if historical_name and normalized_name(configured_slaves[node_id].get("name")) == historical_name
+            ]
+            if len(name_matches) == 1:
+                current_id = name_matches[0]
+                node_mapping[historical_id] = (current_id, "name")
+                unused_configured_ids.remove(current_id)
+                continue
+            unmatched_historical.append(historical_id)
+
+        if unmatched_historical or unused_configured_ids:
             details = []
-            if missing:
-                details.append("missing current Slave IDs: " + ", ".join(missing))
-            if extra:
-                details.append("current Slave IDs not present in the run: " + ", ".join(extra))
-            raise ValueError("SYNC Slave configuration does not match the archived run (" + "; ".join(details) + ")")
+            if unmatched_historical:
+                details.append("unmatched archived Slaves: " + ", ".join(sorted(unmatched_historical)))
+            if unused_configured_ids:
+                details.append("current Slaves not present in the run: " + ", ".join(sorted(unused_configured_ids)))
+            raise ValueError(
+                "SYNC Slave configuration does not match the archived run ("
+                + "; ".join(details)
+                + "). Matching uses ID, then controller URL, then node name."
+            )
 
         run_root = run_dir.resolve()
         restored_slaves = []
         missing_sequences = []
-        for node_id in sorted(historical_nodes):
-            archive_entry = archive_nodes.get(node_id) if isinstance(archive_nodes.get(node_id), dict) else {}
-            relative_path = str(archive_entry.get("path") or f"sync_nodes/{node_id}")
+        for historical_id in sorted(historical_nodes):
+            current_id, match_method = node_mapping[historical_id]
+            archive_entry = archive_nodes.get(historical_id) if isinstance(archive_nodes.get(historical_id), dict) else {}
+            relative_path = str(archive_entry.get("path") or f"sync_nodes/{historical_id}")
             node_run_dir = (run_dir / relative_path).resolve()
             if node_run_dir != run_root and run_root not in node_run_dir.parents:
-                raise ValueError(f"Archived path for Slave {node_id} is invalid")
+                raise ValueError(f"Archived path for Slave {historical_id} is invalid")
             sequence_path = node_run_dir / "sequence.mot"
             if not sequence_path.is_file():
-                missing_sequences.append(node_id)
+                missing_sequences.append(historical_id)
                 continue
             node_config = {}
             try:
                 node_config = json.loads((node_run_dir / "config.json").read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 pass
-            configured = configured_slaves[node_id]
+            configured = configured_slaves[current_id]
             restored_slaves.append({
-                "node_id": node_id,
-                "name": configured.get("name") or historical_nodes[node_id].get("name") or node_id,
+                "node_id": current_id,
+                "archive_node_id": historical_id,
+                "match_method": match_method,
+                "name": configured.get("name") or historical_nodes[historical_id].get("name") or current_id,
                 "sequence_name": str(node_config.get("sequence_name") or sequence_path.name),
                 "sequence_content_base64": base64.b64encode(sequence_path.read_bytes()).decode("ascii"),
             })

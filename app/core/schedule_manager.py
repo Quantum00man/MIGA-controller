@@ -36,6 +36,8 @@ class ScheduleManager:
         self._lock = threading.RLock()
         self._wake = threading.Event()
         self._state = self._load()
+        if str(self._state.get("error") or "").startswith("Scheduled queue interrupted by controller restart"):
+            self._save_locked()
         self._thread = threading.Thread(target=self._run, name="miga-scheduler", daemon=True)
         self._thread.start()
 
@@ -59,10 +61,19 @@ class ScheduleManager:
                 state.update(raw)
         except Exception:
             pass
-        # A process cannot resume a scan that was already in memory. Retry that task.
+        # Hardware and remote SYNC state cannot be reconstructed safely after a
+        # controller restart. Keep the queue for inspection, but never retry an
+        # in-flight task automatically.
         if state.get("active"):
+            interrupted_task = state.get("activeTaskId")
+            detail = f" while running task {interrupted_task}" if interrupted_task else ""
+            state["active"] = False
+            state["stopRequested"] = False
             state["waiting"] = False
+            state["waitUntilMs"] = None
             state["currentTaskStartedAtMs"] = None
+            state["statusMessage"] = "ERROR"
+            state["error"] = f"Scheduled queue interrupted by controller restart{detail}; review and start it again manually"
         return state
 
     def _save_locked(self) -> None:

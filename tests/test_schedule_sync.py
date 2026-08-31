@@ -1,6 +1,9 @@
 import threading
+import json
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from app.core.schedule_manager import ScheduleManager
 from app.models.schemas import ScanConfig
@@ -146,3 +149,24 @@ def test_temporary_sequence_does_not_install_over_active_template():
     override = scheduler.manager.started[0]["_template_path_override"]
     assert scheduler.manager.started[0]["sequence_name"] == "master.mot"
     assert not Path(override).exists()
+
+
+def test_persisted_active_schedule_is_interrupted_instead_of_retried_after_restart():
+    with tempfile.TemporaryDirectory() as temporary:
+        state_path = Path(temporary) / "schedule_state.json"
+        state_path.write_text(json.dumps({
+            "active": True,
+            "waiting": True,
+            "activeTaskId": "sync_1",
+            "tasks": [sync_task()],
+            "statusMessage": "TASK 1/1",
+        }), encoding="utf-8")
+        scheduler = object.__new__(ScheduleManager)
+        with patch("app.core.schedule_manager.config.SCHEDULE_STATE_PATH", state_path):
+            state = scheduler._load()
+
+    assert state["active"] is False
+    assert state["waiting"] is False
+    assert state["statusMessage"] == "ERROR"
+    assert "controller restart" in state["error"]
+    assert state["tasks"][0]["id"] == "sync_1"

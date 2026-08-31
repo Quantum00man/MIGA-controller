@@ -44,6 +44,7 @@ SYNC_RESULT_FIELDS = (
     "interferometer_phase_calibration_id", "interferometer_phase_calibration_name",
     "interferometer_phase_reference_t2_us2",
 )
+SYNC_STATUS_MAX_CONSECUTIVE_FAILURES = 3
 
 
 class SyncManager:
@@ -757,13 +758,22 @@ class SyncManager:
                     slave["current_step"] = int(node_state.get("current_step") or 0)
                     slave["run_id"] = node_state.get("run_id") or slave.get("run_id")
                     slave["status"] = "running" if node_state.get("is_running") else "done"
+                    slave["status_poll_failures"] = 0
+                    slave.pop("error", None)
                     if not node_state.get("is_running") and slave["current_step"] < expected:
                         failed_reason = f"Slave {slave['name']} stopped before completing the shot plan"
                     all_slaves_complete = all_slaves_complete and slave["current_step"] >= expected
                 except Exception as exc:
-                    slave["status"] = "unreachable"
-                    slave["error"] = str(exc)
-                    failed_reason = f"Slave {slave['name']} disconnected"
+                    failures = int(slave.get("status_poll_failures") or 0) + 1
+                    slave["status_poll_failures"] = failures
+                    slave["status"] = (
+                        "unreachable" if failures >= SYNC_STATUS_MAX_CONSECUTIVE_FAILURES else "retrying"
+                    )
+                    slave["error"] = f"Status poll {failures}/{SYNC_STATUS_MAX_CONSECUTIVE_FAILURES}: {exc}"
+                    if failures >= SYNC_STATUS_MAX_CONSECUTIVE_FAILURES:
+                        failed_reason = (
+                            f"Slave {slave['name']} disconnected after {failures} consecutive status failures: {exc}"
+                        )
                     all_slaves_complete = False
                 updated_states.append(slave)
             with self._lock:

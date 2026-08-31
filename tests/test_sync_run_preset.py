@@ -47,7 +47,7 @@ class SyncRunPresetTests(unittest.TestCase):
             "runtime": {
                 "sync_run_id": "sync_test",
                 "master_delay_ms": 37.5,
-                "slaves": [{"node_id": "slave_b", "name": "Node B"}],
+                "slaves": [{"node_id": "slave_b", "name": "Node B", "base_url": "http://10.0.0.21:8000/"}],
             },
             "archive_nodes": {
                 "master": {"path": ".", "local": True},
@@ -93,6 +93,29 @@ class SyncRunPresetTests(unittest.TestCase):
                         "2026", "08", "25", "run01_20260825", include_sync=True
                     )
             self.assertFalse(template_target.exists())
+
+    def test_sync_preset_maps_changed_internal_id_by_controller_url(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._create_run(root)
+            template_target = root / "active" / "seq0.mot"
+            manager = self._manager(["slave_new_timestamp_id"])
+            manager.settings["sync_slaves"][0].update({
+                "name": "MIGA21",
+                "base_url": "10.0.0.21:8000",
+            })
+            with patch("app.core.experiment_manager.config.DATA_BASE_DIR", root), patch(
+                "app.core.experiment_manager.config.SEQUENCE_TEMPLATE_PATH_LINUX", str(template_target)
+            ):
+                payload = manager.load_run_preset(
+                    "2026", "08", "25", "run01_20260825", include_sync=True
+                )
+
+            restored = payload["sync_preset"]["slaves"][0]
+            self.assertEqual(restored["node_id"], "slave_new_timestamp_id")
+            self.assertEqual(restored["archive_node_id"], "slave_b")
+            self.assertEqual(restored["match_method"], "url")
+            self.assertEqual(base64.b64decode(restored["sequence_content_base64"]), b"\xb5slave-sequence")
 
     def test_sync_preset_requires_historical_replication_for_missing_slave_sequence(self):
         with tempfile.TemporaryDirectory() as tmp:

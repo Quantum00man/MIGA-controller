@@ -223,6 +223,49 @@ class SyncManagerTests(unittest.TestCase):
             self.assertFalse(sync.status()["active"])
             self.assertEqual(sync.status()["status"], "error")
             self.assertIn("disconnected", sync.status()["message"])
+            self.assertIn("3 consecutive status failures", sync.status()["message"])
+            self.assertIn("offline", sync.status()["message"])
+
+    def test_single_status_poll_failure_is_retried_without_stopping_sync(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = FakeManager(tmp)
+            manager.status.is_running = True
+            sync = SyncManager(manager)
+            sync._runtime.update({
+                "active": True,
+                "sync_run_id": "sync_test",
+                "status": "running",
+                "expected_shots": 4,
+                "slaves": [{
+                    "node_id": "slave_b", "name": "Node B",
+                    "base_url": "http://192.168.1.20:8000", "cursor": 0,
+                }],
+            })
+            attempts = 0
+
+            def poll_status(*args, **kwargs):
+                nonlocal attempts
+                attempts += 1
+                if attempts == 1:
+                    raise ConnectionError("temporary network jitter")
+                manager.status.is_running = False
+                manager.status.current_step = 4
+                return FakeResponse({
+                    "is_running": False,
+                    "current_step": 4,
+                    "latest_sequence": 0,
+                    "results": [],
+                })
+
+            with patch("app.core.sync_manager.requests.get", side_effect=poll_status), patch(
+                "app.core.sync_manager.time.sleep", return_value=None
+            ), patch.object(sync, "_replicate_archives", return_value={}):
+                sync._monitor_master()
+
+            self.assertEqual(attempts, 2)
+            self.assertEqual(sync.status()["status"], "done")
+            self.assertEqual(sync.status()["slaves"][0]["status_poll_failures"], 0)
+            self.assertNotIn("error", sync.status()["slaves"][0])
 
     def test_stop_orders_slave_delay_then_master(self):
         with tempfile.TemporaryDirectory() as tmp:
