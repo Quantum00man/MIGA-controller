@@ -1595,6 +1595,7 @@
                         lock_in_b_value: 0.5
                     },
                     isRunning: false, isSimulation: false, statusMessage: "IDLE", currentStep: 0, plotRevision: 0, logs: [], ws: null,
+                    lastLoggedScheduleErrorKey: '',
                     progressPercent: 0,
                     braggExportFwhm: 50,
                     braggExportBusy: false,
@@ -2103,6 +2104,7 @@
                     try {
                         const res = await axios.get('/schedule/status');
                         const state = res.data?.data || {};
+                        const wasScheduleActive = Boolean(this.scheduleRuntime?.active);
                         this.scheduleRuntime = {
                             ...this.getDefaultScheduleRuntime(),
                             active: Boolean(state.active),
@@ -2122,7 +2124,20 @@
                         if (state.active || shouldApplyTerminalStatus) {
                             this.statusMessage = state.statusMessage || this.statusMessage;
                         }
-                        if (state.error) this.addLog('Server schedule error: ' + state.error);
+                        const scheduleError = String(state.error || '').trim();
+                        const errorAtMs = Number(state.errorAtMs || 0);
+                        const isRecentError = errorAtMs > 0 && Math.abs(Date.now() - errorAtMs) < 60000;
+                        const errorKey = scheduleError
+                            ? `${state.scheduleStartedAtMs || ''}|${state.activeTaskId || ''}|${errorAtMs}|${scheduleError}`
+                            : '';
+                        if (
+                            scheduleError
+                            && errorKey !== this.lastLoggedScheduleErrorKey
+                            && (wasScheduleActive || state.active || isRecentError)
+                        ) {
+                            this.addLog('Server schedule error: ' + scheduleError);
+                            this.lastLoggedScheduleErrorKey = errorKey;
+                        }
                         return state;
                     } catch (error) {
                         return null;

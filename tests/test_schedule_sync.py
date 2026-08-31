@@ -14,6 +14,10 @@ class FakeExperimentManager:
         self.status = SimpleNamespace(current_step=0, is_running=False)
         self.started = []
         self.stopped = False
+        self.settings = {"sync_slaves": []}
+
+    def get_settings(self):
+        return self.settings
 
     def get_active_mode(self):
         return None
@@ -100,6 +104,25 @@ def test_start_accepts_sync_task_and_redacts_sequence_content():
     assert "sequence_snapshot" not in status["tasks"][0]
 
 
+def test_start_rebases_persisted_sync_slave_id_using_current_url():
+    scheduler = make_scheduler()
+    scheduler.manager.settings["sync_slaves"] = [{
+        "id": "slave_current",
+        "name": "MIGA21",
+        "base_url": "http://127.0.0.1:9001/",
+        "enabled": True,
+    }]
+    task = sync_task()
+    task["sync"]["slaves"][0]["node_id"] = "slave_historical"
+
+    scheduler.start({"timingMode": "sequential", "tasks": [task]})
+
+    stored_slave = scheduler._state["tasks"][0]["sync"]["slaves"][0]
+    assert stored_slave["node_id"] == "slave_current"
+    assert stored_slave["base_url"] == "http://127.0.0.1:9001"
+    assert stored_slave["phase_calibration"]["name"] == "Slave fringe"
+
+
 def test_execute_sync_task_uses_sync_manager_with_master_sequence_name():
     scheduler = make_scheduler()
     task = sync_task()
@@ -169,4 +192,5 @@ def test_persisted_active_schedule_is_interrupted_instead_of_retried_after_resta
     assert state["waiting"] is False
     assert state["statusMessage"] == "ERROR"
     assert "controller restart" in state["error"]
+    assert state["errorAtMs"] is not None
     assert state["tasks"][0]["id"] == "sync_1"

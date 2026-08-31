@@ -50,7 +50,7 @@ class ScheduleManager:
             "currentTaskStartedAtMs": None, "waitUntilMs": None,
             "scheduleStartedAtMs": None, "completedTaskIds": [],
             "timingMode": "sequential", "sequentialGapSec": 0,
-            "tasks": [], "statusMessage": "IDLE", "error": None,
+            "tasks": [], "statusMessage": "IDLE", "error": None, "errorAtMs": None,
         }
 
     def _load(self) -> Dict[str, Any]:
@@ -74,7 +74,45 @@ class ScheduleManager:
             state["currentTaskStartedAtMs"] = None
             state["statusMessage"] = "ERROR"
             state["error"] = f"Scheduled queue interrupted by controller restart{detail}; review and start it again manually"
+            state["errorAtMs"] = int(time.time() * 1000)
         return state
+
+    def _match_current_sync_slave(self, queued_slave: Dict[str, Any]) -> Dict[str, Any]:
+        """Rebase a persisted queue entry onto the controller's current node id.
+
+        Browser queues and generated mid-fringe queues may outlive a Settings edit,
+        which creates a new internal slave id even when the physical controller URL
+        is unchanged. The URL is the stable identity for execution; calibration and
+        sequence snapshots remain those captured by the queued task.
+        """
+        try:
+            configured = self.manager.get_settings().get("sync_slaves") or []
+        except (AttributeError, TypeError):
+            return queued_slave
+
+        enabled = [item for item in configured if isinstance(item, dict) and item.get("enabled", True)]
+        queued_id = str(queued_slave.get("node_id") or "").strip()
+
+        def normalize_url(value: Any) -> str:
+            return str(value or "").strip().rstrip("/").lower()
+
+        match = next((item for item in enabled if str(item.get("id") or item.get("node_id") or "").strip() == queued_id), None)
+        if match is None:
+            queued_url = normalize_url(queued_slave.get("base_url"))
+            url_matches = [item for item in enabled if queued_url and normalize_url(item.get("base_url")) == queued_url]
+            if len(url_matches) == 1:
+                match = url_matches[0]
+        if match is None:
+            return queued_slave
+
+        current_id = str(match.get("id") or match.get("node_id") or queued_id).strip()
+        return {
+            **queued_slave,
+            "node_id": current_id,
+            "name": str(match.get("name") or queued_slave.get("name") or current_id),
+            "base_url": str(match.get("base_url") or queued_slave.get("base_url") or "").rstrip("/"),
+            "enabled": True,
+        }
 
     def _save_locked(self) -> None:
         path = Path(config.SCHEDULE_STATE_PATH)
@@ -163,6 +201,9 @@ class ScheduleManager:
                 ).dict()
                 if not sync_payload["slaves"]:
                     raise ValueError(f"Task {index + 1} has no enabled Sync slave")
+                sync_payload["slaves"] = [
+                    self._match_current_sync_slave(slave) for slave in sync_payload["slaves"]
+                ]
                 for slave in sync_payload["slaves"]:
                     if not str(slave.get("sequence_content") or slave.get("sequence_content_base64") or "").strip():
                         raise ValueError(f"Task {index + 1} has no sequence for Sync slave {slave.get('name') or slave.get('node_id')}")
@@ -321,4 +362,11 @@ class ScheduleManager:
                 else:
                     self._set(active=False, waiting=False, waitUntilMs=None, statusMessage="IDLE")
             except Exception as exc:
-                self._set(active=False, waiting=False, waitUntilMs=None, statusMessage="ERROR", error=str(exc))
+                self._set(
+                    active=False,
+                    waiting=False,
+                    waitUntilMs=None,
+                    statusMessage="ERROR",
+                    error=str(exc),
+                    errorAtMs=int(time.time() * 1000),
+                )
