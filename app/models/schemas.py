@@ -633,6 +633,20 @@ class ArchiveSyncDifferentialFitRequest(BaseModel):
     source: Dict[str, Any] = Field(default_factory=dict)
 
 
+class ArchiveLabPlotExportRequest(BaseModel):
+    year: str
+    month: str
+    day: str
+    run_id: str
+    metrics: List[str] = Field(default_factory=lambda: [
+        "atoms", "amp", "tail", "sigma", "temp", "arrival", "prob", "intf", "phase"
+    ])
+    source: str = Field("fit")
+    include_fits: bool = Field(True)
+    include_differential: bool = Field(True)
+    current_fit: Optional[Dict[str, Any]] = Field(None)
+
+
 class ArchiveMidFringeScheduleRequest(BaseModel):
     year: str
     month: str

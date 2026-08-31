@@ -815,6 +815,9 @@
         .collection-batch-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 14px; border-top: 1px solid #b6d4fe; border-bottom: 1px solid #b6d4fe; background: #e7f1ff; }
         .collection-dialog-backdrop { position: fixed; inset: 0; z-index: 1080; display: grid; place-items: center; padding: 18px; background: rgba(20,31,48,.45); }
         .collection-dialog { width: min(560px,100%); max-height: calc(100vh - 36px); overflow-y: auto; border-radius: 9px; background: #fff; box-shadow: 0 24px 70px rgba(20,31,48,.28); }
+        .labplot-dialog { width: min(680px,100%); }
+        .labplot-metric-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px 18px; padding: 12px; border: 1px solid var(--archive-border); border-radius: 7px; background: var(--archive-surface-subtle); }
+        .labplot-summary { padding: 10px 12px; border-left: 3px solid var(--archive-accent); background: var(--archive-accent-soft); color: #084298; font-size: .78rem; }
         .collection-folder-picker { max-height: 230px; overflow-y: auto; border: 1px solid var(--archive-border); border-radius: 7px; }
         .collection-folder-choice { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 40px; padding: 7px 10px; border: 0; border-bottom: 1px solid var(--archive-border-soft); background: #fff; text-align: left; }
         .collection-folder-choice.active { background: var(--archive-accent-soft); color: #084298; font-weight: 700; }
@@ -831,6 +834,7 @@
             .collection-grid.list-view .collection-item { display: block; }
             .collection-grid.list-view .collection-item-check { position: absolute; }
             .collection-preview-panel { padding: 12px; }
+            .labplot-metric-grid { grid-template-columns: 1fr; }
         }
 
     </style>
@@ -1847,6 +1851,8 @@
                                         CSV</button>
                                     <button class="btn btn-outline-success fw-bold" @click="exportAllPlots"
                                         :disabled="!loadedRunId"><i class="bi bi-camera-fill"></i> Plots</button>
+                                    <button class="btn btn-outline-dark fw-bold" @click="openLabPlotExport"
+                                        :disabled="!loadedRunId"><i class="bi bi-file-earmark-bar-graph"></i> LabPlot</button>
                                 </div>
                                 <div v-if="loadedRunId" class="archive-display-menu" ref="displayMenuWrap">
                                     <button class="btn btn-outline-secondary btn-sm archive-display-btn"
@@ -2119,6 +2125,59 @@
             </div>
         </div>
 
+        <div v-if="labPlotExport.open" class="collection-dialog-backdrop" @click.self="closeLabPlotExport">
+            <section class="collection-dialog labplot-dialog" role="dialog" aria-modal="true" aria-labelledby="labplot-export-title">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span id="labplot-export-title"><i class="bi bi-file-earmark-bar-graph me-2"></i>Export LabPlot Project</span>
+                    <button class="btn btn-sm btn-light" aria-label="Close LabPlot export" @click="closeLabPlotExport"><i class="bi bi-x-lg"></i></button>
+                </div>
+                <div class="p-3">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <span class="form-label-small mb-0">Physical parameters</span>
+                        <div class="btn-group btn-group-sm">
+                            <button class="btn btn-outline-secondary" @click="selectAllLabPlotMetrics">Select all</button>
+                            <button class="btn btn-outline-secondary" @click="labPlotExport.metrics = []">Clear</button>
+                        </div>
+                    </div>
+                    <div class="labplot-metric-grid mb-3">
+                        <div v-for="tab in tabs" :key="`labplot-${tab.id}`" class="form-check mb-0">
+                            <input class="form-check-input" type="checkbox" :id="`labplot-metric-${tab.id}`" :value="tab.id" v-model="labPlotExport.metrics">
+                            <label class="form-check-label" :for="`labplot-metric-${tab.id}`">{{ tab.label }}</label>
+                        </div>
+                    </div>
+                    <div class="row g-3 mb-3">
+                        <div class="col-sm-6">
+                            <label class="form-label-small" for="labplot-source">Data source</label>
+                            <select id="labplot-source" class="form-select form-select-sm" v-model="labPlotExport.source">
+                                <option value="fit">Fit</option>
+                                <option value="nofit">NoFit</option>
+                            </select>
+                        </div>
+                        <div class="col-sm-6 d-flex flex-column justify-content-end gap-2">
+                            <div class="form-check form-switch mb-0">
+                                <input id="labplot-include-fits" class="form-check-input" type="checkbox" v-model="labPlotExport.includeFits">
+                                <label class="form-check-label" for="labplot-include-fits">Include fringe and ellipse fit curves</label>
+                            </div>
+                            <div v-if="syncManifest" class="form-check form-switch mb-0">
+                                <input id="labplot-include-differential" class="form-check-input" type="checkbox" v-model="labPlotExport.includeDifferential">
+                                <label class="form-check-label" for="labplot-include-differential">Include SYNC differential worksheets</label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="labplot-summary mb-3">
+                        LabPlot 2.12.1 project. UP and DOWN use stacked plots. SYNC differential exports Every Shot and Average as separate worksheets using Interferometer P UP.
+                    </div>
+                    <div v-if="labPlotExport.error" class="alert alert-danger small py-2">{{ labPlotExport.error }}</div>
+                    <div class="d-flex justify-content-end gap-2">
+                        <button class="btn btn-outline-secondary btn-sm" :disabled="labPlotExport.busy" @click="closeLabPlotExport">Cancel</button>
+                        <button class="btn btn-dark btn-sm fw-bold" :disabled="labPlotExport.busy || !labPlotExport.metrics.length" @click="exportLabPlotProject">
+                            <span v-if="labPlotExport.busy" class="spinner-border spinner-border-sm me-1"></span>Export .lml
+                        </button>
+                    </div>
+                </div>
+            </section>
+        </div>
+
         <div v-if="collectionDialog.type" class="collection-dialog-backdrop" @click.self="closeCollectionDialog">
             <section class="collection-dialog" role="dialog" aria-modal="true" :aria-labelledby="'collection-dialog-title'">
                 <div class="card-header d-flex justify-content-between align-items-center">
@@ -2219,6 +2278,7 @@
                     isLoading: false, isLoadingAllan: false, isLoadingWaveforms: false, isSaving: false,
                     loadedRunId: '', loadedRunEntry: null, loadedRunRef: null, isExportingSequence: false, errorMsg: '', dataCount: 0, selectedPointKey: '', selectedPointKeys: [], selectedPointLabel: '', selectedCount: 0,
                     shareLinkMessage: '', shareLinkError: false,
+                    labPlotExport: { open: false, metrics: [], source: 'fit', includeFits: true, includeDifferential: true, busy: false, error: '' },
                     currentWaveforms: [],
                     selectedAllanWindow: null,
                     loadedPoints: [], currentCalculatedPoints: [], originalSettings: {}, loadedConfig: {}, currentScanDimensions: 1,
@@ -6950,6 +7010,54 @@
                     this.render3DScatter(rows, metric);
                 },
 
+                selectAllLabPlotMetrics() {
+                    this.labPlotExport.metrics = this.tabs.map(tab => tab.id);
+                },
+                openLabPlotExport() {
+                    this.labPlotExport = {
+                        open: true,
+                        metrics: this.tabs.map(tab => tab.id),
+                        source: 'fit',
+                        includeFits: true,
+                        includeDifferential: Boolean(this.syncManifest),
+                        busy: false,
+                        error: ''
+                    };
+                },
+                closeLabPlotExport() {
+                    if (!this.labPlotExport.busy) this.labPlotExport.open = false;
+                },
+                async exportLabPlotProject() {
+                    if (!this.loadedRunRef || !this.labPlotExport.metrics.length || this.labPlotExport.busy) return;
+                    this.labPlotExport.busy = true;
+                    this.labPlotExport.error = '';
+                    try {
+                        const currentFit = this.scanFitResult?.model_key === 'bragg_fringes'
+                            ? { ...this.scanFitResult }
+                            : null;
+                        const response = await axios.post('/archive/labplot-export', {
+                            ...this.loadedRunRef,
+                            metrics: this.labPlotExport.metrics,
+                            source: this.labPlotExport.source,
+                            include_fits: this.labPlotExport.includeFits,
+                            include_differential: this.labPlotExport.includeDifferential,
+                            current_fit: currentFit
+                        }, { responseType: 'blob' });
+                        const fallbackName = `miga_${this.sanitizeFilenamePart(this.selectedRun || this.loadedRunId || 'archive')}.lml`;
+                        const suggestedName = this.getFilenameFromDisposition(response.headers?.['content-disposition']) || fallbackName;
+                        await this.downloadBlobContent(response.data, suggestedName, {
+                            description: 'LabPlot Project', mimeType: 'application/x-labplot', extension: '.lml'
+                        });
+                        this.labPlotExport.open = false;
+                    } catch (error) {
+                        const fallback = error.response?.data instanceof Blob
+                            ? await this.getBlobErrorDetail(error.response.data, 'LabPlot export failed')
+                            : (error.response?.data?.detail || error.message || 'LabPlot export failed');
+                        this.labPlotExport.error = fallback;
+                    } finally {
+                        this.labPlotExport.busy = false;
+                    }
+                },
                 async exportCSV() {
                     if (this.isLockInArchive()) {
                         await this.exportLockInCSV();

@@ -21,6 +21,7 @@ from app.analysis import fitting
 from app.core.experiment_manager import ExperimentManager
 from app.core.data_loader import DataLoader
 from app.core.archive_collection_store import ArchiveCollectionStore
+from app.core.archive_labplot import build_archive_project
 from app.core.data_manager import DataManager
 from app.core.bragg_export import build_bragg_zip_export, build_single_bragg_export, read_sequence_template
 from app.core.link_export import build_link_zip_export, build_single_link_export, render_link_mot
@@ -67,6 +68,7 @@ from app.models.schemas import (
     InterferometerPhaseCalibrationActivateRequest,
     ArchiveScanFitRequest,
     ArchiveSyncDifferentialFitRequest,
+    ArchiveLabPlotExportRequest,
     ArchiveMidFringeScheduleRequest,
     ArchiveWaveformRequest,
     BraggScanExportRequest,
@@ -1952,6 +1954,38 @@ async def delete_archive_sync_differential_fit(
     if not deleted:
         raise HTTPException(404, "Saved differential ellipse fit was not found")
     return {"deleted": True, "id": fit_id}
+
+
+@router.post("/archive/labplot-export")
+async def export_archive_labplot(req: ArchiveLabPlotExportRequest):
+    source = str(req.source or "fit").strip().lower()
+    if source not in {"fit", "nofit"}:
+        raise HTTPException(400, "LabPlot source must be fit or nofit")
+    try:
+        content = await run_in_threadpool(
+            build_archive_project,
+            data_loader,
+            req.year,
+            req.month,
+            req.day,
+            req.run_id,
+            req.metrics,
+            source,
+            req.include_fits,
+            req.include_differential,
+            manager.get_active_bragg_phase_calibration(),
+            req.current_fit,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    safe_run = "".join(char if char.isalnum() or char in "-_" else "_" for char in req.run_id) or "archive"
+    return Response(
+        content=content,
+        media_type="application/x-labplot",
+        headers={"Content-Disposition": f'attachment; filename="miga_{safe_run}.lml"'},
+    )
 
 
 @router.get("/archive/bragg-phase-calibrations")
