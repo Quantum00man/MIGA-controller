@@ -242,8 +242,19 @@ def optimize_sync_phase_calibrations(
         values[valid] = np.unwrap(target_phase[valid] - ref_phase[valid])
         return values
 
+    def full_phase_series(parameters: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        reference_values, _, _ = _phase_values(
+            reference_signals, parameters[0], parameters[1], reference_sign, reference_reference_phase
+        )
+        target_values, _, _ = _phase_values(
+            target_signals, parameters[2], parameters[3], target_sign, target_reference_phase
+        )
+        return reference_values, target_values
+
     before_series = full_difference_series(initial)
     after_series = full_difference_series(optimized)
+    reference_before_series, target_before_series = full_phase_series(initial)
+    reference_after_series, target_after_series = full_phase_series(optimized)
     return {
         "objective": objective,
         "combined_allan_weight": float(combined_allan_weight),
@@ -271,6 +282,10 @@ def optimize_sync_phase_calibrations(
                 "p0": item.get("p0"),
                 "before_rad": float(before_series[index]) if np.isfinite(before_series[index]) else None,
                 "after_rad": float(after_series[index]) if np.isfinite(after_series[index]) else None,
+                "reference_before_rad": float(reference_before_series[index]) if np.isfinite(reference_before_series[index]) else None,
+                "reference_after_rad": float(reference_after_series[index]) if np.isfinite(reference_after_series[index]) else None,
+                "target_before_rad": float(target_before_series[index]) if np.isfinite(target_before_series[index]) else None,
+                "target_after_rad": float(target_after_series[index]) if np.isfinite(target_after_series[index]) else None,
             }
             for index, item in enumerate(selected_pairs)
         ],

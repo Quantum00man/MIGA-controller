@@ -36,6 +36,9 @@ class SyncPhaseCalibrationOptimizationTests(unittest.TestCase):
         self.assertIn("/archive/sync-phase-calibration-optimize", archive_html)
         self.assertIn("syncPhaseCalibrationOptimizationPlot", archive_html)
         self.assertIn("Preview only; saved calibrations are not modified", archive_html)
+        self.assertIn("Optimization preview is applied to Phase Series, Allan and Sequence Statistics", archive_html)
+        self.assertIn("syncPhaseOptimizationPreviewRecord", archive_html)
+        self.assertIn("resetSyncPhaseCalibrationOptimizationPreview", archive_html)
 
     def test_joint_ac_optimization_reduces_sync_allan_and_std(self):
         random = np.random.default_rng(44)
@@ -64,6 +67,10 @@ class SyncPhaseCalibrationOptimizationTests(unittest.TestCase):
         self.assertEqual(result["optimized_reference_calibration"]["id"], "master-cal")
         self.assertTrue(result["optimized_reference_calibration"]["sync_optimized_preview"])
         self.assertIn("saved_fit_curve", result["fringe_constraint"]["reference"]["source"])
+        self.assertEqual(len(result["series"]), 240)
+        self.assertIsNotNone(result["series"][0]["reference_after_rad"])
+        self.assertIsNotNone(result["series"][0]["target_after_rad"])
+        self.assertIsNotNone(result["series"][0]["after_rad"])
 
     def test_invalid_objective_and_too_few_pairs_are_rejected(self):
         pairs = [{"shot": index, "p0": 1.0, "reference_signal": 0.2, "target_signal": 0.3} for index in range(7)]

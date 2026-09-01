@@ -1712,6 +1712,10 @@
                                     <div class="form-text">Uses the current P0 range. Larger fringe/prior weights keep A and C closer to the original calibration.</div>
                                     <div v-if="syncPhaseCalibrationOptimization.error" class="alert alert-danger small py-2 mt-2 mb-0">{{ syncPhaseCalibrationOptimization.error }}</div>
                                     <template v-if="syncPhaseCalibrationOptimization.result">
+                                        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mt-3">
+                                            <span class="badge bg-primary">Optimization preview is applied to Phase Series, Allan and Sequence Statistics</span>
+                                            <button class="btn btn-outline-secondary btn-sm" @click="resetSyncPhaseCalibrationOptimizationPreview">Reset preview</button>
+                                        </div>
                                         <div class="table-responsive mt-3">
                                             <table class="table table-sm table-bordered align-middle mb-2">
                                                 <thead><tr><th>Quantity</th><th>Before</th><th>After</th><th>Change</th></tr></thead>
@@ -5727,15 +5731,26 @@
                     const value = Number(row?.sync_shot_index ?? row?.step ?? fallback);
                     return Number.isFinite(value) ? value : fallback;
                 },
+                syncPhaseOptimizationPreviewRecord(nodeId, shot) {
+                    const result = this.syncPhaseCalibrationOptimization.result;
+                    if (!result || !Array.isArray(result.series)) return null;
+                    let field = '';
+                    if (String(nodeId) === String(result.reference_node_id)) field = 'reference_after_rad';
+                    else if (String(nodeId) === String(result.target_node_id)) field = 'target_after_rad';
+                    if (!field) return null;
+                    const record = result.series.find(item => Number(item.shot) === Number(shot));
+                    return record ? { matched: true, value: record[field] } : null;
+                },
                 syncPhaseRows(nodeId, includeInvalid = false) {
-                    return this.syncArchiveNodeRows(nodeId).map((row, index) => ({
-                        row,
-                        nodeId,
-                        shot: this.syncPhaseShot(row, index),
-                        p0: this.syncPhaseP0(row),
-                        phase: Number(row?.interferometer_phase),
-                        valid: row?.interferometer_phase_valid === true && Number.isFinite(Number(row?.interferometer_phase)),
-                    })).filter(item => Number.isFinite(item.p0) && (includeInvalid || item.valid))
+                    return this.syncArchiveNodeRows(nodeId).map((row, index) => {
+                        const shot = this.syncPhaseShot(row, index);
+                        const preview = this.syncPhaseOptimizationPreviewRecord(nodeId, shot);
+                        const phase = preview ? Number(preview.value) : Number(row?.interferometer_phase);
+                        const valid = preview
+                            ? preview.value != null && Number.isFinite(phase)
+                            : row?.interferometer_phase_valid === true && Number.isFinite(phase);
+                        return { row, nodeId, shot, p0: this.syncPhaseP0(row), phase, valid, optimizationPreview: Boolean(preview) };
+                    }).filter(item => Number.isFinite(item.p0) && (includeInvalid || item.valid))
                         .sort((a, b) => a.shot - b.shot);
                 },
                 syncPhaseSameP0(left, right) {
@@ -5756,7 +5771,16 @@
                         const reference = referenceByShot.get(target.shot);
                         if (!reference || !this.syncPhaseSameP0(reference.p0, target.p0)) return null;
                         const rawDifference = target.phase - reference.phase;
-                        return { shot: target.shot, p0: target.p0, phase: this.wrapSyncPhase(rawDifference), rawDifference, reference, target };
+                        const result = this.syncPhaseCalibrationOptimization.result;
+                        const optimizedPair = result
+                            && String(referenceNode) === String(result.reference_node_id)
+                            && String(targetNode) === String(result.target_node_id);
+                        const optimizedRecord = optimizedPair
+                            ? (result.series || []).find(item => Number(item.shot) === Number(target.shot)) : null;
+                        const optimizedDifference = Number(optimizedRecord?.after_rad);
+                        const phase = optimizedRecord?.after_rad != null && Number.isFinite(optimizedDifference)
+                            ? optimizedDifference : this.wrapSyncPhase(rawDifference);
+                        return { shot: target.shot, p0: target.p0, phase, rawDifference, reference, target, optimizationPreview: Boolean(optimizedRecord) };
                     }).filter(Boolean).sort((a, b) => a.shot - b.shot);
                 },
                 syncPhaseAggregateRows(rows) {
@@ -5896,6 +5920,10 @@
                     this.syncPhaseCalibrationOptimization.error = '';
                     this.syncPhaseCalibrationOptimization.result = null;
                 },
+                resetSyncPhaseCalibrationOptimizationPreview() {
+                    this.clearSyncPhaseCalibrationOptimization();
+                    this.renderSyncArchiveNodePlots();
+                },
                 async runSyncPhaseCalibrationOptimization() {
                     if (this.syncPhaseSelectedNodes.length !== 2 || this.syncPhaseCalibrationOptimization.loading) return;
                     const state = this.syncPhaseCalibrationOptimization;
@@ -5916,6 +5944,7 @@
                         });
                         state.result = response.data;
                         await this.$nextTick();
+                        this.renderSyncArchiveNodePlots();
                         this.renderSyncPhaseCalibrationOptimizationPlot();
                     } catch (error) {
                         state.error = error.response?.data?.detail || error.message || 'A/C optimization failed.';
