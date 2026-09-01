@@ -82,7 +82,7 @@
 \newcommand{\ui}[1]{\textbf{#1}}
 \newcommand{\pathcode}[1]{\nolinkurl{#1}}
 \newcommand{\branchname}{\texttt{marker-optimization}}
-\newcommand{\commitid}{\texttt{7347b12}}
+\newcommand{\commitid}{\texttt{f60eef0}}
 \newcommand{\warningtext}[1]{\par\medskip\noindent
   \fcolorbox{MigaRed}{MigaRed!5}{\parbox{0.93\linewidth}{\textbf{Caution.} #1}}\par\medskip}
 \newcommand{\notetext}[1]{\par\medskip\noindent
@@ -995,6 +995,146 @@ Sensitivity is $|\sin\phi_i^{\mathrm{pred}}|$. A point is high quality only when
 inside the user-defined mid-fringe band and its normalized signal was not clipped. Optional
 reference-first correction shifts $C$ by the mean residual of the first $N$ points.
 
+\section{Archive interferometer phase and SYNC $A/C$ optimization}
+\subsection{Monotonic half-fringe phase conversion}
+The Archive interferometer-phase view uses each node's own effective Bragg calibration.
+For a SYNC archive this is normally the calibration snapshot saved by that node; an
+archive phase-reference override, when present, becomes the effective calibration. The
+selected signal field (for example \code{intf_p1} or \code{intf_p1_nofit}), slope,
+$\omega$, $\phi_0$ and reference $T^2$ therefore remain independent for Master and Slave.
+
+For measured signal $S_{i,k}$ from node $i$ and shot $k$, define
+\begin{equation}
+  u_{i,k}=\frac{S_{i,k}-C_i}{A_i}.
+\end{equation}
+Unlike the general phase-space display above, Archive interferometer phase does not clip
+an out-of-envelope value: $|u_{i,k}|>1$ makes the shot invalid. A saved monotonic-slope
+choice selects one $\pi$-wide half-fringe. With
+\begin{equation}
+  s_i=\begin{cases}
+    +1,&\text{negative-slope half-fringe},\\
+    -1,&\text{positive-slope half-fringe},
+  \end{cases}
+\end{equation}
+the reported phase relative to the calibration reference is
+\begin{equation}
+  \Delta\phi_{i,k}
+  =s_i\arccos(u_{i,k})
+  -s_i\arccos\!\left[\cos\!\left(\omega_iT_{i,\mathrm{ref}}^2+\phi_{0,i}\right)\right].
+  \label{eq:archive-phase}
+\end{equation}
+SYNC rows are paired by logical shot index and matching $P_0=T^2$. For selected Reference
+and Target nodes the differential sequence is
+\begin{equation}
+  d_k=\Delta\phi_{\mathrm{Target},k}-\Delta\phi_{\mathrm{Reference},k}.
+\end{equation}
+The ordinary series view wraps the difference to $(-\pi,\pi]$. Optimization unwraps the
+chronological sequence because the expected physical differential phase is an unknown
+constant and a wrap boundary must not create artificial noise.
+
+\subsection{Why optimize $A$ and $C$}
+Equation~\eqref{eq:archive-phase} shows that changing only $\omega$ or $\phi_0$ changes a
+constant reference term and therefore cannot change standard deviation or first-order
+Allan deviation. Amplitude and offset change the per-shot nonlinear inversion. Their
+local sensitivities are
+\begin{equation}
+  \frac{\partial\Delta\phi}{\partial A}
+  =s\frac{u}{A\sqrt{1-u^2}},\qquad
+  \frac{\partial\Delta\phi}{\partial C}
+  =s\frac{1}{A\sqrt{1-u^2}}.
+\end{equation}
+At mid-fringe $u\simeq0$, $C$ is directly constrained while the first-order sensitivity
+to $A$ is weak. The saved fringe curve and parameter prior are consequently essential
+when estimating $A$ from a mid-fringe-only SYNC sequence.
+
+The optimizer varies four independent parameters,
+\begin{equation}
+  \mathbf p=(A_R,C_R,A_T,C_T),
+\end{equation}
+starting from the Reference and Target nodes' respective effective calibrations. It keeps
+$\omega$, $\phi_0$, reference $T^2$, monotonic slope and signal-source selection fixed.
+Reversing the displayed difference swaps Reference and Target roles but never causes the
+nodes to share calibration parameters.
+The Archive page submits the selected nodes and controls to
+\code{/archive/sync-phase-calibration-optimize}; the server reads the paired raw signal
+fields and both effective calibrations from the selected archive.
+
+\subsection{Objective and constraints}
+The selectable SYNC metric $m(d)$ is
+\begin{equation}
+  m(d)=\begin{cases}
+    \sigma_{\mathrm{A},1}(d),&\text{Allan n=1},\\
+    \operatorname{std}(d),&\text{Standard deviation},\\
+    \sqrt{\lambda\sigma_{\mathrm{A},1}^2(d)+(1-\lambda)\operatorname{std}^2(d)},
+      &\text{Combined},
+  \end{cases}
+\end{equation}
+where $\lambda$ is \ui{Allan Weight}. The first-order value is
+\begin{equation}
+  \sigma_{\mathrm{A},1}(d)
+  =\sqrt{\frac{1}{2(N-1)}\sum_{k=1}^{N-1}(d_{k+1}-d_k)^2}.
+\end{equation}
+The normalized optimization loss is
+\begin{equation}
+  L=\left(\frac{m(d)}{m(d_0)}\right)^2
+  +w_fL_{\mathrm{fringe}}+w_pL_{\mathrm{prior}}+L_{\mathrm{invalid}},
+  \label{eq:sync-ac-loss}
+\end{equation}
+where $d_0$ is the sequence produced by the original calibrations. For node $i$, candidate
+$A_i,C_i$ are compared with that node's own saved fitted curve $(x_j,y_j^{\mathrm{fit}})$:
+\begin{align}
+  \widehat y_{i,j}&=C_i+A_i\cos(\omega_ix_j+\phi_{0,i}),\\
+  L_{\mathrm{fringe}}&=
+  \left(\frac{\operatorname{RMSE}_R}{A_{R,0}}\right)^2+
+  \left(\frac{\operatorname{RMSE}_T}{A_{T,0}}\right)^2.
+\end{align}
+Thus \ui{Fringe Weight} $w_f$ controls how strongly the optimized curves must remain close
+to the two saved fitting curves. The current constraint uses saved \code{fit_x}/
+\code{fit_y}; it does not refit the original raw fringe shots.
+
+For an \ui{A/C Bounds} fraction $b$, the hard parameter intervals are
+\begin{align}
+  A_i&\in[A_{i,0}(1-b),A_{i,0}(1+b)],\\
+  C_i&\in[C_{i,0}-bA_{i,0},C_{i,0}+bA_{i,0}].
+\end{align}
+The soft prior is the mean squared displacement normalized by these allowed scales,
+\begin{equation}
+  L_{\mathrm{prior}}=\frac{1}{4}\sum_q
+  \left(\frac{p_q-p_{q,0}}{bA_{i(q),0}}\right)^2.
+\end{equation}
+\ui{Prior Weight} $w_p$ therefore controls direct preference for the original $A,C$
+values, whereas \ui{Fringe Weight} controls agreement with the original curves. Candidate
+parameters that make a normalized signal leave $[-1,1]$ receive an overflow and invalid-
+shot penalty; invalid shots are not silently removed to improve the objective.
+
+Recommended initial controls are $b=10\%$, $w_f=1$ and $w_p=0.05$. Reducing the weights
+allows more aggressive SYNC-noise reduction; increasing them makes the result more
+conservative. Do not set both weights to zero for mid-fringe data. A parameter reaching
+its hard boundary is reported and normally indicates that the bound, data model or
+calibration quality needs review rather than automatic acceptance.
+
+\begin{procedure}{preview a joint SYNC $A/C$ optimization}
+  \item Load a replicated SYNC run in the Data Archive and select
+  \ui{Interferometer Phase}.
+  \item Select exactly two hosts. The first is Reference and the second Target; use
+  \ui{Reverse Difference} when required.
+  \item Set the inclusive $P_0$ range to the chronological shots that should constrain
+  the constant differential phase.
+  \item In \ui{Joint A/C calibration optimization}, choose \ui{Allan n=1},
+  \ui{Standard deviation} or \ui{Combined}; then set bounds and constraint weights.
+  \item Click \ui{Optimize A/C}. Inspect parameter changes, valid-pair count, boundary
+  warnings, saved-curve RMSE and the mean-removed before/after differential plot.
+  \item The optimized per-node phases immediately feed the existing Phase Series, Allan
+  plot and Sequence Statistics. Changing Allan order or $P_0$ filtering recalculates
+  those views from the preview values.
+  \item Click \ui{Reset preview} to restore the archived phases.
+\end{procedure}
+
+\warningtext{Optimization results are preview-only. They do not overwrite an archived
+run and do not save or activate a Settings calibration. A small Allan or standard
+deviation alone is insufficient evidence of a valid calibration: also inspect curve
+agreement, parameter movement, valid-shot count and boundary warnings.}
+
 \section{Overlapping Allan deviation}
 Allan analysis is available only for non-randomized one-dimensional scans. After optional
 inclusive $P_0$ filtering, for averaging order $n$ define adjacent block means
@@ -1260,7 +1400,7 @@ Settings/system & Simulation mode, all/analysis settings, folder browser and con
 repository update status/fetch/apply.\\
 Fitting & Default waveform models, default scan models and saved custom scan model.\\
 Archive & Tree, load, sequence/waveform, recalculate, overwrite, Allan, scan fit, Bragg
-phase space, reusable calibrations and sync retry.\\
+phase space, reusable calibrations, SYNC $A/C$ phase-calibration preview and sync retry.\\
 Collections & Folder and favourite create/update/delete plus batch operations.\\
 WebSocket & \code{/ws} broadcasts shot, trial, sync pair, completion and error payloads.\\
 \bottomrule
@@ -1296,6 +1436,10 @@ replication.\\
 \pathcode{app/analysis/physics.py} & $K$, atom numbers, probabilities, arrival and temperature.\\
 \pathcode{app/analysis/lock_in.py} & ABBA validation and demodulation statistics.\\
 \pathcode{app/analysis/phase_space.py} & Bragg phase inversion and quality statistics.\\
+\pathcode{app/analysis/interferometer_phase.py} & Monotonic half-fringe Archive phase
+conversion and reference subtraction.\\
+\pathcode{app/analysis/phase_calibration_optimization.py} & Joint SYNC Reference/Target
+$A,C$ optimization, constraints, preview phases and diagnostics.\\
 \pathcode{static/*.html} & Vue interfaces and Plotly visualization.\\
 \pathcode{tests/} & Regression evidence for markers, optimization, sync, archive, fitting,
 calibration, exports and settings.\\
@@ -1317,6 +1461,9 @@ calibration, exports and settings.\\
   each. At least one variable and one trial are required.
   \item Allan deviation is defined here only for the original order of non-randomized 1D
   scans. Invalid windows are omitted and their count is reported.
+  \item SYNC $A/C$ optimization must retain a fringe constraint or parameter prior,
+  especially for mid-fringe data where $A$ is weakly identifiable. Preview results are
+  not persisted automatically.
   \item Sync archives are accepted only after checksum and safe-extraction validation.
   \item Software limits supplement rather than replace independent hardware interlocks.
 \end{itemize}
