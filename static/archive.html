@@ -1711,10 +1711,28 @@
                                     </div>
                                     <div class="form-text">Uses the current P0 range. Larger fringe/prior weights keep A and C closer to the original calibration.</div>
                                     <div v-if="syncPhaseCalibrationOptimization.error" class="alert alert-danger small py-2 mt-2 mb-0">{{ syncPhaseCalibrationOptimization.error }}</div>
+                                    <div v-if="syncPhaseCalibrationOptimization.message" class="alert alert-success small py-2 mt-2 mb-0">{{ syncPhaseCalibrationOptimization.message }}</div>
+                                    <div v-if="syncPhaseCalibrationOptimization.saved.length" class="row g-2 align-items-end mt-1">
+                                        <div class="col-md-8">
+                                            <label class="form-label-small">SAVED OPTIMIZATION RESULTS</label>
+                                            <select class="form-select form-select-sm" v-model="syncPhaseCalibrationOptimization.selectedId">
+                                                <option v-for="record in syncPhaseCalibrationOptimization.saved" :key="record.id" :value="String(record.id)">{{ formatSyncPhaseCalibrationOptimizationOption(record) }}</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-4 d-flex gap-2">
+                                            <button class="btn btn-outline-primary btn-sm flex-fill" @click="applySavedSyncPhaseCalibrationOptimization" :disabled="!syncPhaseCalibrationOptimization.selectedId">Apply preview</button>
+                                            <button class="btn btn-outline-danger btn-sm flex-fill" @click="deleteSavedSyncPhaseCalibrationOptimization" :disabled="syncPhaseCalibrationOptimization.deleting || !syncPhaseCalibrationOptimization.selectedId">{{ syncPhaseCalibrationOptimization.deleting ? 'Deleting…' : 'Delete' }}</button>
+                                        </div>
+                                    </div>
                                     <template v-if="syncPhaseCalibrationOptimization.result">
                                         <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mt-3">
                                             <span class="badge bg-primary">Optimization preview is applied to Phase Series, Allan and Sequence Statistics</span>
-                                            <button class="btn btn-outline-secondary btn-sm" @click="resetSyncPhaseCalibrationOptimizationPreview">Reset preview</button>
+                                            <div class="d-flex flex-wrap gap-2">
+                                                <input v-if="!syncPhaseCalibrationOptimization.result.id" type="text" class="form-control form-control-sm" style="width:190px" maxlength="120" placeholder="Optional result name" v-model.trim="syncPhaseCalibrationOptimization.name">
+                                                <button v-if="!syncPhaseCalibrationOptimization.result.id" class="btn btn-success btn-sm" @click="saveSyncPhaseCalibrationOptimization" :disabled="syncPhaseCalibrationOptimization.saving">{{ syncPhaseCalibrationOptimization.saving ? 'Saving…' : 'Save result' }}</button>
+                                                <span v-else class="badge bg-success align-self-center">Saved separately from original archive data</span>
+                                                <button class="btn btn-outline-secondary btn-sm" @click="resetSyncPhaseCalibrationOptimizationPreview">Reset preview</button>
+                                            </div>
                                         </div>
                                         <div class="table-responsive mt-3">
                                             <table class="table table-sm table-bordered align-middle mb-2">
@@ -2340,7 +2358,9 @@
                     syncPhaseCalibrationOptimization: {
                         objective: 'allan', combinedAllanWeight: 0.5, boundPercent: 10,
                         fringeWeight: 1, priorWeight: 0.05,
-                        loading: false, error: '', result: null,
+                        loading: false, saving: false, deleting: false,
+                        error: '', message: '', result: null, name: '',
+                        saved: [], selectedId: '',
                     },
                     syncArchiveSlaveId: '',
                     syncArchiveAxisX: { metric: 'intf_p', channel: 'up' },
@@ -4903,8 +4923,13 @@
                     this.syncDifferentialFitSelectedId = '';
                     this.syncDifferentialFitError = '';
                     this.syncPhaseCalibrationOptimization.loading = false;
+                    this.syncPhaseCalibrationOptimization.saving = false;
+                    this.syncPhaseCalibrationOptimization.deleting = false;
                     this.syncPhaseCalibrationOptimization.error = '';
+                    this.syncPhaseCalibrationOptimization.message = '';
                     this.syncPhaseCalibrationOptimization.result = null;
+                    this.syncPhaseCalibrationOptimization.saved = [];
+                    this.syncPhaseCalibrationOptimization.selectedId = '';
                     if (this.syncArchiveReplayTimer) clearInterval(this.syncArchiveReplayTimer);
                     this.syncArchiveReplayTimer = null;
                     this.syncArchiveReplayPlaying = false;
@@ -4950,6 +4975,10 @@
                             ? res.data.sync_differential_fits : [];
                         this.syncDifferentialFitSelectedId = this.syncDifferentialFits.length
                             ? String(this.syncDifferentialFits[this.syncDifferentialFits.length - 1].id || '') : '';
+                        this.syncPhaseCalibrationOptimization.saved = Array.isArray(res.data.sync_phase_calibration_optimizations)
+                            ? res.data.sync_phase_calibration_optimizations : [];
+                        this.syncPhaseCalibrationOptimization.selectedId = this.syncPhaseCalibrationOptimization.saved.length
+                            ? String(this.syncPhaseCalibrationOptimization.saved[this.syncPhaseCalibrationOptimization.saved.length - 1].id || '') : '';
                         const localArchiveNode = Object.entries(this.syncManifest?.archive_nodes || {}).find(([, entry]) => entry?.local === true)?.[0] || '';
                         this.loadedSyncNode = String(res.data.selected_sync_node || requestedSyncNode || localArchiveNode || '');
                         this.syncArchiveNodeSource = this.loadedSyncNode || 'master';
@@ -5739,7 +5768,7 @@
                     else if (String(nodeId) === String(result.target_node_id)) field = 'target_after_rad';
                     if (!field) return null;
                     const record = result.series.find(item => Number(item.shot) === Number(shot));
-                    return record ? { matched: true, value: record[field] } : null;
+                    return { matched: true, value: record ? record[field] : null };
                 },
                 syncPhaseRows(nodeId, includeInvalid = false) {
                     return this.syncArchiveNodeRows(nodeId).map((row, index) => {
@@ -5918,6 +5947,7 @@
                 },
                 clearSyncPhaseCalibrationOptimization() {
                     this.syncPhaseCalibrationOptimization.error = '';
+                    this.syncPhaseCalibrationOptimization.message = '';
                     this.syncPhaseCalibrationOptimization.result = null;
                 },
                 resetSyncPhaseCalibrationOptimizationPreview() {
@@ -5927,7 +5957,7 @@
                 async runSyncPhaseCalibrationOptimization() {
                     if (this.syncPhaseSelectedNodes.length !== 2 || this.syncPhaseCalibrationOptimization.loading) return;
                     const state = this.syncPhaseCalibrationOptimization;
-                    state.loading = true; state.error = ''; state.result = null;
+                    state.loading = true; state.error = ''; state.message = ''; state.result = null;
                     const boundPercent = Math.max(0.1, Math.min(50, Number(state.boundPercent) || 10));
                     const allanWeight = Math.max(0, Math.min(1, Number(state.combinedAllanWeight) || 0));
                     state.boundPercent = boundPercent; state.combinedAllanWeight = allanWeight;
@@ -5950,6 +5980,92 @@
                         state.error = error.response?.data?.detail || error.message || 'A/C optimization failed.';
                     } finally {
                         state.loading = false;
+                    }
+                },
+                formatSyncPhaseCalibrationOptimizationOption(record) {
+                    const name = String(record?.name || '').trim();
+                    const reference = this.syncArchiveNodeLabel(record?.reference_node_id || '');
+                    const target = this.syncArchiveNodeLabel(record?.target_node_id || '');
+                    const objective = String(record?.objective || record?.settings?.objective || 'objective');
+                    const timestamp = record?.created_at ? new Date(record.created_at).toLocaleString() : '';
+                    return [name || (target + ' - ' + reference), objective, timestamp].filter(Boolean).join(' · ');
+                },
+                selectedSavedSyncPhaseCalibrationOptimization() {
+                    const id = String(this.syncPhaseCalibrationOptimization.selectedId || '');
+                    return this.syncPhaseCalibrationOptimization.saved.find(record => String(record?.id || '') === id) || null;
+                },
+                async saveSyncPhaseCalibrationOptimization() {
+                    const state = this.syncPhaseCalibrationOptimization;
+                    if (!state.result || state.result.id || state.saving) return;
+                    state.saving = true; state.error = ''; state.message = '';
+                    try {
+                        const response = await axios.post('/archive/sync-phase-calibration-optimization/save', {
+                            year: this.selectedYear, month: this.selectedMonth, day: this.selectedDay, run_id: this.selectedRun,
+                            name: state.name || '', result: state.result,
+                        });
+                        const saved = response.data;
+                        state.saved.push(saved);
+                        state.selectedId = String(saved.id || '');
+                        state.result = saved;
+                        state.name = '';
+                        state.message = 'Optimization result saved as an Archive sidecar. Original run data and calibrations were not changed.';
+                    } catch (error) {
+                        state.error = error.response?.data?.detail || error.message || 'Unable to save optimization result.';
+                    } finally {
+                        state.saving = false;
+                    }
+                },
+                async applySavedSyncPhaseCalibrationOptimization() {
+                    const saved = this.selectedSavedSyncPhaseCalibrationOptimization();
+                    if (!saved) return;
+                    const state = this.syncPhaseCalibrationOptimization;
+                    state.error = ''; state.message = '';
+                    state.result = JSON.parse(JSON.stringify(saved));
+                    const nodeIds = this.syncPhaseNodeIds();
+                    const reference = String(saved.reference_node_id || '');
+                    const target = String(saved.target_node_id || '');
+                    if (nodeIds.includes(reference) && nodeIds.includes(target) && reference !== target) {
+                        this.syncPhaseSelectedNodes = [reference, target];
+                        this.ensureSyncPhaseNodes();
+                    }
+                    const settings = saved.settings || {};
+                    if (['allan', 'std', 'combined'].includes(settings.objective)) state.objective = settings.objective;
+                    if (Number.isFinite(Number(settings.combined_allan_weight))) state.combinedAllanWeight = Number(settings.combined_allan_weight);
+                    if (Number.isFinite(Number(settings.parameter_bound_fraction))) state.boundPercent = Number(settings.parameter_bound_fraction) * 100;
+                    if (Number.isFinite(Number(settings.fringe_weight))) state.fringeWeight = Number(settings.fringe_weight);
+                    if (Number.isFinite(Number(settings.prior_weight))) state.priorWeight = Number(settings.prior_weight);
+                    if (settings.p0_min != null && Number.isFinite(Number(settings.p0_min))) {
+                        this.syncPhaseP0Min = Number(settings.p0_min); this.syncPhaseP0MinInput = String(settings.p0_min);
+                    }
+                    if (settings.p0_max != null && Number.isFinite(Number(settings.p0_max))) {
+                        this.syncPhaseP0Max = Number(settings.p0_max); this.syncPhaseP0MaxInput = String(settings.p0_max);
+                    }
+                    state.message = 'Saved optimization applied as a preview. Original archive data remain unchanged.';
+                    await this.$nextTick();
+                    this.renderSyncArchiveNodePlots();
+                    this.renderSyncPhaseCalibrationOptimizationPlot();
+                },
+                async deleteSavedSyncPhaseCalibrationOptimization() {
+                    const state = this.syncPhaseCalibrationOptimization;
+                    const saved = this.selectedSavedSyncPhaseCalibrationOptimization();
+                    if (!saved || state.deleting) return;
+                    const prompt = 'Delete saved optimization "' + this.formatSyncPhaseCalibrationOptimizationOption(saved)
+                        + '"? Original archive data will remain unchanged.';
+                    if (!window.confirm(prompt)) return;
+                    state.deleting = true; state.error = ''; state.message = '';
+                    try {
+                        const url = '/archive/sync-phase-calibration-optimization/'
+                            + [this.selectedYear, this.selectedMonth, this.selectedDay, this.selectedRun, encodeURIComponent(saved.id)].join('/');
+                        await axios.delete(url);
+                        state.saved = state.saved.filter(record => String(record?.id || '') !== String(saved.id || ''));
+                        if (String(state.result?.id || '') === String(saved.id || '')) state.result = null;
+                        state.selectedId = state.saved.length ? String(state.saved[state.saved.length - 1].id || '') : '';
+                        state.message = 'Saved optimization deleted. Original archive data were not changed.';
+                        this.renderSyncArchiveNodePlots();
+                    } catch (error) {
+                        state.error = error.response?.data?.detail || error.message || 'Unable to delete saved optimization.';
+                    } finally {
+                        state.deleting = false;
                     }
                 },
                 syncPhaseCalibrationOptimizationRows() {

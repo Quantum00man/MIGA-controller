@@ -649,6 +649,15 @@ class ArchiveSyncPhaseCalibrationOptimizeRequest(BaseModel):
     p0_max: Optional[float] = Field(None)
 
 
+class ArchiveSyncPhaseCalibrationSaveRequest(BaseModel):
+    year: str
+    month: str
+    day: str
+    run_id: str
+    name: str = Field("")
+    result: Dict[str, Any]
+
+
 class ArchiveLabPlotExportRequest(BaseModel):
     year: str
     month: str

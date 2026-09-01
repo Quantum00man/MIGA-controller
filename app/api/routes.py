@@ -69,6 +69,7 @@ from app.models.schemas import (
     ArchiveScanFitRequest,
     ArchiveSyncDifferentialFitRequest,
     ArchiveSyncPhaseCalibrationOptimizeRequest,
+    ArchiveSyncPhaseCalibrationSaveRequest,
     ArchiveLabPlotExportRequest,
     ArchiveMidFringeScheduleRequest,
     ArchiveWaveformRequest,
@@ -2064,11 +2065,62 @@ async def optimize_archive_sync_phase_calibrations(req: ArchiveSyncPhaseCalibrat
         result["reference_node_label"] = "Master" if req.reference_node_id == "master" else req.reference_node_id
         result["target_node_label"] = "Master" if req.target_node_id == "master" else req.target_node_id
         result["source_fields"] = {"reference": reference_field, "target": target_field}
+        result["settings"] = {
+            "objective": req.objective,
+            "combined_allan_weight": req.combined_allan_weight,
+            "parameter_bound_fraction": req.parameter_bound_fraction,
+            "fringe_weight": req.fringe_weight,
+            "prior_weight": req.prior_weight,
+            "p0_min": req.p0_min,
+            "p0_max": req.p0_max,
+        }
         return result
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc))
     except ValueError as exc:
         raise HTTPException(400, str(exc))
+
+
+@router.post("/archive/sync-phase-calibration-optimization/save")
+async def save_archive_sync_phase_calibration_optimization(
+    req: ArchiveSyncPhaseCalibrationSaveRequest,
+):
+    try:
+        return await run_in_threadpool(
+            data_loader.save_sync_phase_calibration_optimization,
+            req.year,
+            req.month,
+            req.day,
+            req.run_id,
+            req.result,
+            req.name,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.delete(
+    "/archive/sync-phase-calibration-optimization/{year}/{month}/{day}/{run_id}/{optimization_id}"
+)
+async def delete_archive_sync_phase_calibration_optimization(
+    year: str, month: str, day: str, run_id: str, optimization_id: str
+):
+    try:
+        deleted = await run_in_threadpool(
+            data_loader.delete_sync_phase_calibration_optimization,
+            year,
+            month,
+            day,
+            run_id,
+            optimization_id,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    if not deleted:
+        raise HTTPException(404, "Saved phase calibration optimization was not found")
+    return {"deleted": True, "id": optimization_id}
 
 
 @router.delete("/archive/sync-differential-fit/{year}/{month}/{day}/{run_id}/{fit_id}")

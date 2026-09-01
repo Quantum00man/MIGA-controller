@@ -613,6 +613,82 @@ class DataLoader:
         temporary.replace(path)
         return True
 
+    def load_sync_phase_calibration_optimizations(
+        self, year: str, month: str, day: str, run_id: str
+    ) -> List[Dict[str, Any]]:
+        run_dir = self._get_run_dir(year, month, day, run_id)
+        path = run_dir / "sync_phase_calibration_optimizations.json"
+        if not path.is_file():
+            return []
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return []
+        records = payload.get("optimizations") if isinstance(payload, dict) else payload
+        return self._sanitize_structure(records) if isinstance(records, list) else []
+
+    def save_sync_phase_calibration_optimization(
+        self,
+        year: str,
+        month: str,
+        day: str,
+        run_id: str,
+        optimization_payload: Dict[str, Any],
+        name: str = "",
+    ) -> Dict[str, Any]:
+        run_dir = self._get_run_dir(year, month, day, run_id)
+        if not (run_dir / "sync_manifest.json").is_file():
+            raise ValueError("Phase calibration optimizations can only be saved for a SYNC archive")
+        payload = dict(optimization_payload or {})
+        series = payload.get("series")
+        if not isinstance(series, list) or len(series) < 2:
+            raise ValueError("The optimization result does not contain a valid phase series")
+        if len(series) > 100000:
+            raise ValueError("The optimization result contains too many phase points")
+        required = (
+            "reference_node_id", "target_node_id", "parameters_before", "parameters_after",
+            "metrics_before", "metrics_after",
+        )
+        if any(key not in payload for key in required):
+            raise ValueError("The optimization result is missing required metadata")
+        records = self.load_sync_phase_calibration_optimizations(year, month, day, run_id)
+        saved = self._sanitize_structure({
+            **payload,
+            "id": uuid.uuid4().hex,
+            "name": str(name or "").strip(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "storage_mode": "archive_sidecar_preview",
+        })
+        records.append(saved)
+        path = run_dir / "sync_phase_calibration_optimizations.json"
+        temporary = path.with_suffix(path.suffix + ".tmp")
+        temporary.write_text(
+            json.dumps({"version": 1, "optimizations": records}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        temporary.replace(path)
+        return saved
+
+    def delete_sync_phase_calibration_optimization(
+        self, year: str, month: str, day: str, run_id: str, optimization_id: str
+    ) -> bool:
+        run_dir = self._get_run_dir(year, month, day, run_id)
+        path = run_dir / "sync_phase_calibration_optimizations.json"
+        records = self.load_sync_phase_calibration_optimizations(year, month, day, run_id)
+        kept = [
+            item for item in records
+            if str(item.get("id") or "") != str(optimization_id or "")
+        ]
+        if len(kept) == len(records):
+            return False
+        temporary = path.with_suffix(path.suffix + ".tmp")
+        temporary.write_text(
+            json.dumps({"version": 1, "optimizations": kept}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        temporary.replace(path)
+        return True
+
     def _parse_float(self, value: Any) -> Optional[float]:
         if value is None:
             return None
@@ -1147,6 +1223,10 @@ class DataLoader:
             "marker_optimization": marker_optimization if is_marker_optimization else None,
             "sync_manifest": sync_manifest,
             "sync_differential_fits": self.load_sync_differential_fits(year, month, day, run_id) if sync_manifest else [],
+            "sync_phase_calibration_optimizations": (
+                self.load_sync_phase_calibration_optimizations(year, month, day, run_id)
+                if sync_manifest else []
+            ),
             "selected_sync_node": str(node_id or ""),
             "interferometer_phase_calibration": phase_calibration,
             "interferometer_phase_original_calibration": phase_context.get("original_calibration"),

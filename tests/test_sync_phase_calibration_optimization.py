@@ -1,5 +1,7 @@
 import asyncio
+import json
 import math
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -8,6 +10,7 @@ import numpy as np
 
 from app.analysis.phase_calibration_optimization import optimize_sync_phase_calibrations
 from app.api.routes import optimize_archive_sync_phase_calibrations
+from app.core.data_loader import DataLoader
 from app.models.schemas import ArchiveSyncPhaseCalibrationOptimizeRequest
 
 
@@ -39,6 +42,10 @@ class SyncPhaseCalibrationOptimizationTests(unittest.TestCase):
         self.assertIn("Optimization preview is applied to Phase Series, Allan and Sequence Statistics", archive_html)
         self.assertIn("syncPhaseOptimizationPreviewRecord", archive_html)
         self.assertIn("resetSyncPhaseCalibrationOptimizationPreview", archive_html)
+        self.assertIn("saveSyncPhaseCalibrationOptimization", archive_html)
+        self.assertIn("applySavedSyncPhaseCalibrationOptimization", archive_html)
+        self.assertIn("deleteSavedSyncPhaseCalibrationOptimization", archive_html)
+        self.assertIn("Saved separately from original archive data", archive_html)
 
     def test_joint_ac_optimization_reduces_sync_allan_and_std(self):
         random = np.random.default_rng(44)
@@ -107,6 +114,55 @@ class SyncPhaseCalibrationOptimizationTests(unittest.TestCase):
         self.assertEqual(response["target_node_id"], "slave-a")
         self.assertEqual(response["pair_count"], 12)
         self.assertEqual(response["source_fields"], {"reference": "intf_p1", "target": "intf_p1"})
+        self.assertEqual(response["settings"]["objective"], "allan")
+        self.assertEqual(response["settings"]["parameter_bound_fraction"], 0.1)
+
+    def test_saved_optimization_is_a_separate_sidecar_and_is_deletable(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            run_dir = root / "2026" / "09" / "01" / "sync01"
+            run_dir.mkdir(parents=True)
+            manifest_text = json.dumps({"runtime": {"status": "done"}, "pairs": []})
+            config_text = json.dumps({"mode": "sync", "sentinel": "original"})
+            results_text = "Step,Interferometer_Phase_Rad\n0,0.1\n"
+            (run_dir / "sync_manifest.json").write_text(manifest_text, encoding="utf-8")
+            (run_dir / "config.json").write_text(config_text, encoding="utf-8")
+            (run_dir / "results.csv").write_text(results_text, encoding="utf-8")
+            loader = DataLoader()
+            loader.base_dir = root
+            payload = {
+                "reference_node_id": "master",
+                "target_node_id": "slave-a",
+                "parameters_before": {"reference": {"A": 1.0, "C": 0.1}},
+                "parameters_after": {"reference": {"A": 1.01, "C": 0.11}},
+                "metrics_before": {"allan_n1_rad": 0.02},
+                "metrics_after": {"allan_n1_rad": 0.01},
+                "series": [
+                    {"shot": 0, "p0": 50.0, "after_rad": 0.1},
+                    {"shot": 1, "p0": 50.0, "after_rad": 0.11},
+                ],
+            }
+
+            saved = loader.save_sync_phase_calibration_optimization(
+                "2026", "09", "01", "sync01", payload, "quiet pair"
+            )
+            records = loader.load_sync_phase_calibration_optimizations(
+                "2026", "09", "01", "sync01"
+            )
+
+            self.assertEqual(len(records), 1)
+            self.assertEqual(records[0]["id"], saved["id"])
+            self.assertEqual(records[0]["name"], "quiet pair")
+            self.assertEqual(records[0]["storage_mode"], "archive_sidecar_preview")
+            self.assertEqual((run_dir / "config.json").read_text(encoding="utf-8"), config_text)
+            self.assertEqual((run_dir / "results.csv").read_text(encoding="utf-8"), results_text)
+            self.assertEqual((run_dir / "sync_manifest.json").read_text(encoding="utf-8"), manifest_text)
+            self.assertTrue(loader.delete_sync_phase_calibration_optimization(
+                "2026", "09", "01", "sync01", saved["id"]
+            ))
+            self.assertEqual(loader.load_sync_phase_calibration_optimizations(
+                "2026", "09", "01", "sync01"
+            ), [])
 
 
 if __name__ == "__main__":
