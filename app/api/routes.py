@@ -16,8 +16,8 @@ from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
-from typing import Dict, Any, List
-from app.analysis import fitting
+from typing import Dict, Any, List, Optional
+from app.analysis import fitting, interferometer_phase, phase_calibration_optimization
 from app.core.experiment_manager import ExperimentManager
 from app.core.data_loader import DataLoader
 from app.core.archive_collection_store import ArchiveCollectionStore
@@ -68,6 +68,7 @@ from app.models.schemas import (
     InterferometerPhaseCalibrationActivateRequest,
     ArchiveScanFitRequest,
     ArchiveSyncDifferentialFitRequest,
+    ArchiveSyncPhaseCalibrationOptimizeRequest,
     ArchiveLabPlotExportRequest,
     ArchiveMidFringeScheduleRequest,
     ArchiveWaveformRequest,
@@ -1937,6 +1938,133 @@ async def fit_archive_sync_differential(req: ArchiveSyncDifferentialFitRequest):
         return data_loader.save_sync_differential_fit(
             req.year, req.month, req.day, req.run_id, payload
         )
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.post("/archive/sync-phase-calibration-optimize")
+async def optimize_archive_sync_phase_calibrations(req: ArchiveSyncPhaseCalibrationOptimizeRequest):
+    if req.reference_node_id == req.target_node_id:
+        raise HTTPException(400, "Reference and target nodes must be different")
+    try:
+        loaded = await run_in_threadpool(
+            data_loader.load_run,
+            req.year,
+            req.month,
+            req.day,
+            req.run_id,
+            None,
+            manager.get_active_bragg_phase_calibration(),
+        )
+        manifest = loaded.get("sync_manifest") or {}
+        if not manifest:
+            raise ValueError("The selected archive is not a SYNC run")
+        contexts = loaded.get("archive_phase_reference_contexts") or {}
+
+        def calibration_for(node_id: str) -> Dict[str, Any]:
+            context = contexts.get(node_id) or {}
+            calibration = context.get("effective_calibration")
+            if not isinstance(calibration, dict):
+                raise ValueError(f"Node {node_id} has no effective interferometer phase calibration")
+            return calibration
+
+        reference_calibration = calibration_for(req.reference_node_id)
+        target_calibration = calibration_for(req.target_node_id)
+        node_results = manifest.get("node_results") or {}
+
+        def rows_for(node_id: str) -> List[Dict[str, Any]]:
+            if node_id == "master":
+                rows = node_results.get("master")
+            else:
+                rows = (node_results.get("slaves") or {}).get(node_id)
+            if isinstance(rows, list) and rows:
+                return rows
+            pairs = manifest.get("pairs") or []
+            if node_id == "master":
+                candidates = [item.get("master") for item in pairs]
+            else:
+                candidates = [
+                    item.get("slave") for item in pairs
+                    if str(item.get("slave_node_id") or "") == str(node_id)
+                ]
+            unique: Dict[int, Dict[str, Any]] = {}
+            for index, row in enumerate(candidates):
+                if not isinstance(row, dict):
+                    continue
+                shot = int(row.get("sync_shot_index", row.get("step", index)))
+                unique[shot] = row
+            return [unique[key] for key in sorted(unique)]
+
+        def shot_number(row: Dict[str, Any], fallback: int) -> int:
+            try:
+                return int(row.get("sync_shot_index", row.get("step", fallback)))
+            except (TypeError, ValueError):
+                return fallback
+
+        def p0_value(row: Dict[str, Any]) -> Optional[float]:
+            value = row.get("sync_p0", row.get("parameter"))
+            if value is None and isinstance(row.get("all_parameters"), list) and row["all_parameters"]:
+                value = row["all_parameters"][0]
+            try:
+                result = float(value)
+            except (TypeError, ValueError):
+                return None
+            return result if np.isfinite(result) else None
+
+        reference_rows = rows_for(req.reference_node_id)
+        target_rows = rows_for(req.target_node_id)
+        reference_by_shot = {shot_number(row, index): row for index, row in enumerate(reference_rows)}
+        reference_field = interferometer_phase.source_field(reference_calibration)
+        target_field = interferometer_phase.source_field(target_calibration)
+        pairs = []
+        for index, target_row in enumerate(target_rows):
+            shot = shot_number(target_row, index)
+            reference_row = reference_by_shot.get(shot)
+            if not isinstance(reference_row, dict):
+                continue
+            reference_p0 = p0_value(reference_row)
+            target_p0 = p0_value(target_row)
+            if reference_p0 is None or target_p0 is None:
+                continue
+            if abs(reference_p0 - target_p0) > 1e-9 * max(1.0, abs(reference_p0), abs(target_p0)):
+                continue
+            if req.p0_min is not None and target_p0 < req.p0_min:
+                continue
+            if req.p0_max is not None and target_p0 > req.p0_max:
+                continue
+            try:
+                reference_signal = float(reference_row.get(reference_field))
+                target_signal = float(target_row.get(target_field))
+            except (TypeError, ValueError):
+                continue
+            if not np.isfinite(reference_signal) or not np.isfinite(target_signal):
+                continue
+            pairs.append({
+                "shot": shot,
+                "p0": target_p0,
+                "reference_signal": reference_signal,
+                "target_signal": target_signal,
+            })
+
+        result = await run_in_threadpool(
+            phase_calibration_optimization.optimize_sync_phase_calibrations,
+            pairs,
+            reference_calibration,
+            target_calibration,
+            req.objective,
+            req.combined_allan_weight,
+            req.parameter_bound_fraction,
+            req.fringe_weight,
+            req.prior_weight,
+        )
+        result["reference_node_id"] = req.reference_node_id
+        result["target_node_id"] = req.target_node_id
+        result["reference_node_label"] = "Master" if req.reference_node_id == "master" else req.reference_node_id
+        result["target_node_label"] = "Master" if req.target_node_id == "master" else req.target_node_id
+        result["source_fields"] = {"reference": reference_field, "target": target_field}
+        return result
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc))
     except ValueError as exc:

@@ -633,6 +633,22 @@ class ArchiveSyncDifferentialFitRequest(BaseModel):
     source: Dict[str, Any] = Field(default_factory=dict)
 
 
+class ArchiveSyncPhaseCalibrationOptimizeRequest(BaseModel):
+    year: str
+    month: str
+    day: str
+    run_id: str
+    reference_node_id: str
+    target_node_id: str
+    objective: str = Field("allan")
+    combined_allan_weight: float = Field(0.5, ge=0, le=1)
+    parameter_bound_fraction: float = Field(0.1, gt=0, le=0.5)
+    fringe_weight: float = Field(1.0, ge=0, le=1000)
+    prior_weight: float = Field(0.05, ge=0, le=1000)
+    p0_min: Optional[float] = Field(None)
+    p0_max: Optional[float] = Field(None)
+
+
 class ArchiveLabPlotExportRequest(BaseModel):
     year: str
     month: str

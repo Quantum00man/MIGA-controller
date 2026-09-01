@@ -1638,7 +1638,7 @@
                                     <option value="master">Master</option>
                                     <option v-for="slaveId in syncArchiveSlaveOptions()" :key="slaveId" :value="slaveId">{{ syncArchiveNodeLabel(slaveId) }}</option>
                                 </select>
-                                <select v-if="(syncArchiveViewMode === 'node' && syncArchiveTab === 'phase') || (syncArchiveViewMode === 'differential' && (syncArchiveAxisX.metric === 'phase' || syncArchiveAxisY.metric === 'phase'))" class="form-select form-select-sm" style="width:auto" v-model="phaseUnit" aria-label="SYNC phase unit"><option value="rad">rad</option><option value="mrad">mrad</option></select>
+                                <select v-if="(syncArchiveViewMode === 'node' && syncArchiveTab === 'phase') || (syncArchiveViewMode === 'differential' && (syncArchiveAxisX.metric === 'phase' || syncArchiveAxisY.metric === 'phase'))" class="form-select form-select-sm" style="width:auto" v-model="phaseUnit" @change="renderSyncArchiveNodePlots(); renderSyncPhaseCalibrationOptimizationPlot()" aria-label="SYNC phase unit"><option value="rad">rad</option><option value="mrad">mrad</option></select>
                                 <div class="form-check form-switch mb-0">
                                     <input class="form-check-input" type="checkbox" id="syncArchiveShowRaw" v-model="showRawData">
                                     <label class="form-check-label small fw-bold text-muted" for="syncArchiveShowRaw">{{ syncArchiveViewMode === 'node' ? 'Show NoFit' : 'Use NoFit' }}</label>
@@ -1690,6 +1690,39 @@
                                             <td><span class="allan-statistic-label">Standard Deviation</span><span class="allan-statistic-value">{{ formatSyncPhaseStatistic(row.standardDeviation) }}</span></td>
                                         </tr></tbody></table>
                                     </div>
+                                </section>
+                            </div>
+                            <div class="col-12" v-if="syncPhaseSelectedNodes.length === 2">
+                                <section class="border rounded bg-white p-3 mt-1" aria-labelledby="sync-phase-calibration-optimization-title">
+                                    <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-2">
+                                        <div>
+                                            <div id="sync-phase-calibration-optimization-title" class="fw-bold">Joint A/C calibration optimization</div>
+                                            <div class="small text-muted">Minimize the constant-phase SYNC difference while constraining both saved fringe curves. Preview only; saved calibrations are not modified.</div>
+                                        </div>
+                                        <span class="badge bg-light text-dark border">{{ syncArchiveNodeLabel(syncPhaseTargetNode) }} − {{ syncArchiveNodeLabel(syncPhaseReferenceNode) }}</span>
+                                    </div>
+                                    <div class="row g-2 align-items-end">
+                                        <div class="col-sm-6 col-lg-2"><label class="form-label-small">OBJECTIVE</label><select class="form-select form-select-sm" v-model="syncPhaseCalibrationOptimization.objective"><option value="allan">Allan n=1</option><option value="std">Standard deviation</option><option value="combined">Combined</option></select></div>
+                                        <div class="col-sm-6 col-lg-2" v-if="syncPhaseCalibrationOptimization.objective === 'combined'"><label class="form-label-small">ALLAN WEIGHT</label><input type="number" class="form-control form-control-sm" min="0" max="1" step="0.05" v-model.number="syncPhaseCalibrationOptimization.combinedAllanWeight"></div>
+                                        <div class="col-sm-6 col-lg-2"><label class="form-label-small">A/C BOUNDS (%)</label><input type="number" class="form-control form-control-sm" min="0.1" max="50" step="1" v-model.number="syncPhaseCalibrationOptimization.boundPercent"></div>
+                                        <div class="col-sm-6 col-lg-2"><label class="form-label-small">FRINGE WEIGHT</label><input type="number" class="form-control form-control-sm" min="0" max="1000" step="0.1" v-model.number="syncPhaseCalibrationOptimization.fringeWeight"></div>
+                                        <div class="col-sm-6 col-lg-2"><label class="form-label-small">PRIOR WEIGHT</label><input type="number" class="form-control form-control-sm" min="0" max="1000" step="0.01" v-model.number="syncPhaseCalibrationOptimization.priorWeight"></div>
+                                        <div class="col-sm-6 col-lg-2"><button class="btn btn-primary btn-sm w-100 fw-bold" @click="runSyncPhaseCalibrationOptimization" :disabled="syncPhaseCalibrationOptimization.loading"><span v-if="syncPhaseCalibrationOptimization.loading" class="spinner-border spinner-border-sm me-1"></span>{{ syncPhaseCalibrationOptimization.loading ? 'Optimizing…' : 'Optimize A/C' }}</button></div>
+                                    </div>
+                                    <div class="form-text">Uses the current P0 range. Larger fringe/prior weights keep A and C closer to the original calibration.</div>
+                                    <div v-if="syncPhaseCalibrationOptimization.error" class="alert alert-danger small py-2 mt-2 mb-0">{{ syncPhaseCalibrationOptimization.error }}</div>
+                                    <template v-if="syncPhaseCalibrationOptimization.result">
+                                        <div class="table-responsive mt-3">
+                                            <table class="table table-sm table-bordered align-middle mb-2">
+                                                <thead><tr><th>Quantity</th><th>Before</th><th>After</th><th>Change</th></tr></thead>
+                                                <tbody>
+                                                    <tr v-for="row in syncPhaseCalibrationOptimizationRows()" :key="row.key"><th class="fw-normal">{{ row.label }}</th><td>{{ row.before }}</td><td class="fw-bold">{{ row.after }}</td><td :class="row.improved === true ? 'text-success' : (row.improved === false ? 'text-warning' : '')">{{ row.change }}</td></tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                        <div id="syncPhaseCalibrationOptimizationPlot" style="height:280px"></div>
+                                        <div v-for="warning in (syncPhaseCalibrationOptimization.result.warnings || [])" :key="warning" class="alert alert-warning small py-2 mt-2 mb-0">{{ warning }}</div>
+                                    </template>
                                 </section>
                             </div>
                         </div>
@@ -2300,6 +2333,11 @@
                     syncPhaseReferenceNode: 'master', syncPhaseTargetNode: '',
                     syncPhaseAllanOrder: 1, syncPhaseAllanScale: 'absolute', syncPhaseAllanXAxis: 'linear',
                     syncPhaseP0Min: null, syncPhaseP0Max: null, syncPhaseP0MinInput: '', syncPhaseP0MaxInput: '',
+                    syncPhaseCalibrationOptimization: {
+                        objective: 'allan', combinedAllanWeight: 0.5, boundPercent: 10,
+                        fringeWeight: 1, priorWeight: 0.05,
+                        loading: false, error: '', result: null,
+                    },
                     syncArchiveSlaveId: '',
                     syncArchiveAxisX: { metric: 'intf_p', channel: 'up' },
                     syncArchiveAxisY: { metric: 'intf_p', channel: 'up' },
@@ -4860,6 +4898,9 @@
                     this.syncDifferentialFits = [];
                     this.syncDifferentialFitSelectedId = '';
                     this.syncDifferentialFitError = '';
+                    this.syncPhaseCalibrationOptimization.loading = false;
+                    this.syncPhaseCalibrationOptimization.error = '';
+                    this.syncPhaseCalibrationOptimization.result = null;
                     if (this.syncArchiveReplayTimer) clearInterval(this.syncArchiveReplayTimer);
                     this.syncArchiveReplayTimer = null;
                     this.syncArchiveReplayPlaying = false;
@@ -5744,12 +5785,14 @@
                     if (!checked && index >= 0) selected.splice(index, 1);
                     this.syncPhaseSelectedNodes = selected;
                     this.ensureSyncPhaseNodes();
+                    this.clearSyncPhaseCalibrationOptimization();
                     this.handleSyncPhaseControlChange();
                 },
                 reverseSyncPhaseDifference() {
                     if (this.syncPhaseSelectedNodes.length !== 2) return;
                     this.syncPhaseSelectedNodes = [this.syncPhaseSelectedNodes[1], this.syncPhaseSelectedNodes[0]];
                     this.ensureSyncPhaseNodes();
+                    this.clearSyncPhaseCalibrationOptimization();
                     this.handleSyncPhaseControlChange();
                 },
                 handleSyncPhaseControlChange() {
@@ -5848,6 +5891,83 @@
                     if (!Number.isFinite(parsed)) return '—';
                     const scale = this.phaseUnit === 'mrad' ? 1000 : 1;
                     return `${(parsed * scale).toPrecision(6)} ${this.phaseUnit}`;
+                },
+                clearSyncPhaseCalibrationOptimization() {
+                    this.syncPhaseCalibrationOptimization.error = '';
+                    this.syncPhaseCalibrationOptimization.result = null;
+                },
+                async runSyncPhaseCalibrationOptimization() {
+                    if (this.syncPhaseSelectedNodes.length !== 2 || this.syncPhaseCalibrationOptimization.loading) return;
+                    const state = this.syncPhaseCalibrationOptimization;
+                    state.loading = true; state.error = ''; state.result = null;
+                    const boundPercent = Math.max(0.1, Math.min(50, Number(state.boundPercent) || 10));
+                    const allanWeight = Math.max(0, Math.min(1, Number(state.combinedAllanWeight) || 0));
+                    state.boundPercent = boundPercent; state.combinedAllanWeight = allanWeight;
+                    try {
+                        const response = await axios.post('/archive/sync-phase-calibration-optimize', {
+                            year: this.selectedYear, month: this.selectedMonth, day: this.selectedDay, run_id: this.selectedRun,
+                            reference_node_id: this.syncPhaseReferenceNode, target_node_id: this.syncPhaseTargetNode,
+                            objective: state.objective, combined_allan_weight: allanWeight,
+                            parameter_bound_fraction: boundPercent / 100,
+                            fringe_weight: Math.max(0, Number(state.fringeWeight) || 0),
+                            prior_weight: Math.max(0, Number(state.priorWeight) || 0),
+                            p0_min: this.syncPhaseP0Min !== null && this.syncPhaseP0Min !== '' && Number.isFinite(Number(this.syncPhaseP0Min)) ? Number(this.syncPhaseP0Min) : null,
+                            p0_max: this.syncPhaseP0Max !== null && this.syncPhaseP0Max !== '' && Number.isFinite(Number(this.syncPhaseP0Max)) ? Number(this.syncPhaseP0Max) : null,
+                        });
+                        state.result = response.data;
+                        await this.$nextTick();
+                        this.renderSyncPhaseCalibrationOptimizationPlot();
+                    } catch (error) {
+                        state.error = error.response?.data?.detail || error.message || 'A/C optimization failed.';
+                    } finally {
+                        state.loading = false;
+                    }
+                },
+                syncPhaseCalibrationOptimizationRows() {
+                    const result = this.syncPhaseCalibrationOptimization.result;
+                    if (!result) return [];
+                    const before = result.parameters_before || {}; const after = result.parameters_after || {};
+                    const metricsBefore = result.metrics_before || {}; const metricsAfter = result.metrics_after || {};
+                    const numericRow = (key, label, oldValue, newValue, unit = '') => {
+                        const oldNumber = Number(oldValue); const newNumber = Number(newValue);
+                        const change = newNumber - oldNumber;
+                        return { key, label, before: `${this.formatMetricValue(oldNumber)}${unit}`, after: `${this.formatMetricValue(newNumber)}${unit}`, change: `${change >= 0 ? '+' : ''}${this.formatMetricValue(change)}${unit}`, improved: null };
+                    };
+                    const metricRow = (key, label, oldValue, newValue) => {
+                        const oldNumber = Number(oldValue); const newNumber = Number(newValue);
+                        const percent = oldNumber > 0 ? 100 * (oldNumber - newNumber) / oldNumber : null;
+                        return { key, label, before: this.formatSyncPhaseStatistic(oldNumber), after: this.formatSyncPhaseStatistic(newNumber), change: Number.isFinite(percent) ? `${percent >= 0 ? '−' : '+'}${Math.abs(percent).toFixed(2)}%` : '—', improved: Number.isFinite(percent) ? percent > 0 : null };
+                    };
+                    return [
+                        numericRow('reference-a', `${this.syncArchiveNodeLabel(result.reference_node_id)} A`, before.reference?.A, after.reference?.A),
+                        numericRow('reference-c', `${this.syncArchiveNodeLabel(result.reference_node_id)} C`, before.reference?.C, after.reference?.C),
+                        numericRow('target-a', `${this.syncArchiveNodeLabel(result.target_node_id)} A`, before.target?.A, after.target?.A),
+                        numericRow('target-c', `${this.syncArchiveNodeLabel(result.target_node_id)} C`, before.target?.C, after.target?.C),
+                        metricRow('allan', 'Differential Allan n=1', metricsBefore.allan_n1_rad, metricsAfter.allan_n1_rad),
+                        metricRow('std', 'Differential standard deviation', metricsBefore.std_rad, metricsAfter.std_rad),
+                        { key: 'valid', label: 'Valid paired shots', before: String(metricsBefore.valid_pair_count ?? '—'), after: String(metricsAfter.valid_pair_count ?? '—'), change: `${result.pair_count || 0} input`, improved: null },
+                    ];
+                },
+                renderSyncPhaseCalibrationOptimizationPlot() {
+                    if (typeof Plotly === 'undefined') return;
+                    const element = document.getElementById('syncPhaseCalibrationOptimizationPlot');
+                    const series = this.syncPhaseCalibrationOptimization.result?.series || [];
+                    if (!element || !series.length) return;
+                    const center = values => {
+                        const finite = values.filter(Number.isFinite); const mean = finite.length ? finite.reduce((sum, value) => sum + value, 0) / finite.length : 0;
+                        return values.map(value => Number.isFinite(value) ? (value - mean) * (this.phaseUnit === 'mrad' ? 1000 : 1) : null);
+                    };
+                    const before = series.map(item => item.before_rad == null ? NaN : Number(item.before_rad));
+                    const after = series.map(item => item.after_rad == null ? NaN : Number(item.after_rad));
+                    Plotly.react(element, [
+                        { x: series.map(item => item.shot), y: center(before), type: 'scatter', mode: 'lines+markers', name: 'Before', line: { color: '#6c757d', width: 1.5 }, marker: { size: 5 } },
+                        { x: series.map(item => item.shot), y: center(after), type: 'scatter', mode: 'lines+markers', name: 'After', line: { color: '#0d6efd', width: 2 }, marker: { size: 5 } },
+                    ], {
+                        margin: { t: 40, b: 48, l: 68, r: 20 }, title: { text: 'Mean-removed differential phase', font: { size: 13 }, x: 0.04 },
+                        xaxis: { title: 'SYNC shot index', showline: true, mirror: true, ticks: 'inside', gridcolor: '#dde5ee' },
+                        yaxis: { title: `Residual Δφ (${this.phaseUnit})`, showline: true, mirror: true, ticks: 'inside', gridcolor: '#dde5ee' },
+                        legend: { orientation: 'h', x: 1, xanchor: 'right', y: 1.16 }, paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
+                    }, { responsive: true, displaylogo: false });
                 },
                 syncArchiveTabField(tabId, channel, noFit = false) {
                     const channelSuffix = channel === 'dw' ? 'dw' : 'up';
