@@ -94,30 +94,54 @@
 \begin{document}
 
 \begin{titlepage}
-  \pagecolor{MigaNavy}
-  \color{white}
+  \thispagestyle{empty}
   \centering
-  \vspace*{23mm}
-  {\sffamily\bfseries\fontsize{35}{41}\selectfont MIGA Controller\par}
-  \vspace{5mm}
-  {\sffamily\fontsize{20}{25}\selectfont Operation, Optimization and Analysis Manual\par}
-  \vspace{14mm}
-  {\color{MigaCyan}\rule{0.76\textwidth}{1.3pt}\par}
-  \vspace{17mm}
-  {\Large Complete feature reference for the \branchname{} branch\par}
+
+  \vspace*{13mm}
+  {\large\scshape MIGA Project\par}
+  \vspace{2mm}
+  {\normalsize Cold Atoms Bordeaux\par}
+
+  \vspace{22mm}
+  {\color{MigaNavy}\rule{0.78\textwidth}{0.8pt}\par}
+  \vspace{12mm}
+
+  {\color{MigaNavy}\bfseries\fontsize{31}{37}\selectfont
+    MIGA Controller\par}
+  \vspace{8mm}
+  {\Large Operation, Optimization and Analysis\par}
+  \vspace{3mm}
+  {\Large Manual\par}
+
+  \vspace{12mm}
+  {\color{MigaNavy}\rule{0.78\textwidth}{0.8pt}\par}
+  \vspace{10mm}
+  {\large\scshape Technical Reference Manual\par}
+  \vspace{3mm}
+  {\normalsize Complete reference for the \branchname{} branch\par}
+
   \vfill
-  \begin{tabular}{rl}
-    \textbf{Author:} & Yiming MENG\\[2mm]
-    \textbf{Rendered:} & \today\\[2mm]
-    \textbf{Source revision:} & \commitid\\[2mm]
-    \textbf{Project:} & MIGA / Cold Atoms Bordeaux
+
+  \begin{tabular}{>{\raggedleft\arraybackslash}p{34mm} p{64mm}}
+    \textit{Prepared by} & Yiming MENG\\[3mm]
+    \textit{Project} & MIGA / Cold Atoms Bordeaux\\[3mm]
+    \textit{Source revision} & \commitid\\[3mm]
+    \textit{Document date} & \today
   \end{tabular}
+
   \vfill
-  {\small Laboratory control software for cold-atom acquisition, sequence generation,\par
-  online optimization, synchronized measurements and reproducible re-analysis.}
-  \vspace*{12mm}
+
+  \begin{minipage}{0.78\textwidth}
+    \centering
+    \small\color{MigaGray}
+    Laboratory control software for cold-atom acquisition, sequence generation,
+    synchronized measurements, online optimization and reproducible archive analysis.
+  \end{minipage}
+
+  \vspace{9mm}
+  {\color{MigaNavy!45}\rule{0.42\textwidth}{0.45pt}\par}
+  \vspace*{5mm}
 \end{titlepage}
-\nopagecolor
 \color{black}
 
 \frontmatter
