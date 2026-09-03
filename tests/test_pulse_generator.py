@@ -28,14 +28,19 @@ class BraggCalibrationTests(unittest.TestCase):
         self.assertGreater(normalized_power_to_voltage(0.0011, CALIBRATION), -0.5)
 
     def test_schema_rejects_voltage_interval_outside_hardware_range(self):
+        calibration = BraggPowerCalibration(linear_voltage_min=-15.0, linear_voltage_max=15.0)
+        self.assertEqual(calibration.linear_voltage_min, -15.0)
+        self.assertEqual(calibration.linear_voltage_max, 15.0)
         with self.assertRaises(ValueError):
-            BraggPowerCalibration(linear_voltage_min=-3.1)
+            BraggPowerCalibration(linear_voltage_min=-15.1)
+        with self.assertRaises(ValueError):
+            BraggPowerCalibration(linear_voltage_max=15.1)
         with self.assertRaises(ValueError):
             BraggPowerCalibration(linear_voltage_min=1.0, linear_voltage_max=0.0)
 
     def test_mapping_rejects_invalid_runtime_interval(self):
-        invalid = {**CALIBRATION, "linear_voltage_max": 3.1}
-        with self.assertRaisesRegex(ValueError, "-3 <= min < max <= 3"):
+        invalid = {**CALIBRATION, "linear_voltage_max": 15.1}
+        with self.assertRaisesRegex(ValueError, "-15 <= min < max <= 15"):
             normalized_power_to_voltage(0.5, invalid)
 
 

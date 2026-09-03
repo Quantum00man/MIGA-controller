@@ -247,8 +247,8 @@ class BraggPowerCalibration(BaseModel):
     growth_rate: float = Field(1.0, gt=0)
     midpoint: float = Field(0.0)
     shape: float = Field(1.0, gt=0)
-    linear_voltage_min: float = Field(-0.5, ge=-3.0, le=3.0)
-    linear_voltage_max: float = Field(0.5, ge=-3.0, le=3.0)
+    linear_voltage_min: float = Field(-0.5, ge=-15.0, le=15.0)
+    linear_voltage_max: float = Field(0.5, ge=-15.0, le=15.0)
     off_threshold: float = Field(0.001, ge=0.0, lt=1.0)
 
     @validator("upper_asymptote")

@@ -802,7 +802,7 @@ calibration. For voltage $v$,
   P(v)=L+(U-L)\left[1+e^{-k(v-v_0)}\right]^{-\nu}.
 \end{equation}
 The selected linear voltage interval is renormalized to $[0,1]$. Requests below the off
-threshold map to \SI{-3}{V}; operating voltages must remain within \SIrange{-3}{3}{V}.
+threshold map to \SI{-3}{V}; operating voltages must remain within \SIrange{-15}{15}{V}.
 
 \section{AC Stark centering}
 The AC Stark workflow validates an uploaded \code{ad9958} XML table and appends one DDS
@@ -1479,7 +1479,7 @@ calibration, exports and settings.\\
   remain inside the scanned interval after representation rounding.
   \item DDS amplitudes are restricted to $0\ldots1023$; element numbers/counts to
   $0\ldots500$ and at most 500 elements.
-  \item Bragg voltage calibration operates within \SIrange{-3}{3}{V}; off is
+  \item Bragg voltage calibration operates within \SIrange{-15}{15}{V}; off is
   \SI{-3}{V}; normalized power cannot exceed one.
   \item Bayesian variables have unique parameter indices and at most 5000 discrete values
   each. At least one variable and one trial are required.

@@ -1024,18 +1024,18 @@
                                 </div>
                                 <div class="col-md-4">
                                     <label class="form-label small text-muted">Linear voltage min (V)</label>
-                                    <input type="number" step="0.001" min="-3" max="3" class="form-control" v-model.number="s.bragg_power_calibration.linear_voltage_min">
+                                    <input type="number" step="0.001" min="-15" max="15" class="form-control" v-model.number="s.bragg_power_calibration.linear_voltage_min">
                                 </div>
                                 <div class="col-md-4">
                                     <label class="form-label small text-muted">Linear voltage max (V)</label>
-                                    <input type="number" step="0.001" min="-3" max="3" class="form-control" v-model.number="s.bragg_power_calibration.linear_voltage_max">
+                                    <input type="number" step="0.001" min="-15" max="15" class="form-control" v-model.number="s.bragg_power_calibration.linear_voltage_max">
                                 </div>
                                 <div class="col-md-4">
                                     <label class="form-label small text-muted">Off threshold</label>
                                     <input type="number" step="0.0001" min="0" max="0.9999" class="form-control" v-model.number="s.bragg_power_calibration.off_threshold">
                                 </div>
                             </div>
-                            <div class="form-text mt-3">Output range: −3.000 to +3.000 V, resolution: 0.001 V, off voltage: −3.000 V, channel: 32.</div>
+                            <div class="form-text mt-3">Selectable range: −15.000 to +15.000 V, resolution: 0.001 V, off voltage: −3.000 V, channel: 32.</div>
                         </div>
                     </div>
                 </div>
@@ -2193,8 +2193,8 @@
                     if (calibration.growthRate <= 0 || calibration.shape <= 0) {
                         throw new Error('k and n must be positive.');
                     }
-                    if (calibration.voltageMin < -3 || calibration.voltageMax > 3 || calibration.voltageMin >= calibration.voltageMax) {
-                        throw new Error('The linear voltage interval must satisfy -3 <= min < max <= 3 V.');
+                    if (calibration.voltageMin < -15 || calibration.voltageMax > 15 || calibration.voltageMin >= calibration.voltageMax) {
+                        throw new Error('The linear voltage interval must satisfy -15 <= min < max <= 15 V.');
                     }
                     if (calibration.threshold < 0 || calibration.threshold >= 1) {
                         throw new Error('The off threshold must be in the interval [0, 1).');
@@ -2207,7 +2207,7 @@
                         throw new Error('The selected interval does not provide an increasing, invertible power range.');
                     }
 
-                    const rawVoltage = Array.from({ length: 601 }, (_, index) => -3 + index * 0.01);
+                    const rawVoltage = Array.from({ length: 601 }, (_, index) => -15 + index * 0.05);
                     const rawPower = rawVoltage.map(voltage => this.braggPowerAtVoltage(voltage, calibration));
                     const linearVoltage = Array.from(
                         { length: 501 },
@@ -2307,10 +2307,10 @@
                             x0: c.voltageMin, x1: c.voltageMax, y0: 0, y1: 1,
                             fillcolor: 'rgba(13,110,253,0.08)', line: { width: 0 }, layer: 'below'
                         }, {
-                            type: 'line', x0: -3, x1: 3, y0: c.lower, y1: c.lower,
+                            type: 'line', x0: -15, x1: 15, y0: c.lower, y1: c.lower,
                             line: { color: muted, width: 1, dash: 'dot' }
                         }, {
-                            type: 'line', x0: -3, x1: 3, y0: c.upper, y1: c.upper,
+                            type: 'line', x0: -15, x1: 15, y0: c.upper, y1: c.upper,
                             line: { color: muted, width: 1, dash: 'dot' }
                         }];
                         const rawAnnotations = [{
@@ -2330,7 +2330,7 @@
                             text: `P high ${this.formatBraggPlotNumber(c.upper)}`, showarrow: false,
                             xanchor: 'right', yshift: -9, font: { size: 10, color: muted }
                         }];
-                        if (c.midpoint >= -3 && c.midpoint <= 3) {
+                        if (c.midpoint >= -15 && c.midpoint <= 15) {
                             rawShapes.push({
                                 type: 'line', xref: 'x', yref: 'paper',
                                 x0: c.midpoint, x1: c.midpoint, y0: 0, y1: 1,
@@ -2348,7 +2348,7 @@
                                 text: `k = ${this.formatBraggPlotNumber(c.growthRate)}   V0 = ${this.formatBraggPlotNumber(c.midpoint)} V   n = ${this.formatBraggPlotNumber(c.shape)}`,
                                 x: 0.02, xanchor: 'left', font: { size: 11, color: '#596579' }
                             },
-                            xaxis: { ...commonAxis, title: 'Input voltage (V)', range: [-3, 3], dtick: 1 },
+                            xaxis: { ...commonAxis, title: 'Input voltage (V)', range: [-15, 15], dtick: 5 },
                             yaxis: { ...commonAxis, title: 'Raw optical power' },
                             shapes: rawShapes,
                             annotations: rawAnnotations

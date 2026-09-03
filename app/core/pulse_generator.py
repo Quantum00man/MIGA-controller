@@ -6,8 +6,8 @@ import numpy as np
 import config
 
 
-BRAGG_VOLTAGE_MIN = -3.0
-BRAGG_VOLTAGE_MAX = 3.0
+BRAGG_VOLTAGE_MIN = -15.0
+BRAGG_VOLTAGE_MAX = 15.0
 BRAGG_OFF_VOLTAGE = -3.0
 BRAGG_MAX_POINTS = 2_000_000
 
@@ -36,7 +36,7 @@ def _calibration_values(calibration: Dict[str, Any] | None) -> Tuple[float, ...]
     if growth <= 0 or shape <= 0:
         raise ValueError("Bragg calibration growth rate and shape must be positive")
     if not BRAGG_VOLTAGE_MIN <= voltage_min < voltage_max <= BRAGG_VOLTAGE_MAX:
-        raise ValueError("Bragg linear voltage range must satisfy -3 <= min < max <= 3 V")
+        raise ValueError("Bragg linear voltage range must satisfy -15 <= min < max <= 15 V")
     if not 0 <= off_threshold < 1:
         raise ValueError("Bragg off threshold must be in the interval [0, 1)")
     return values
