@@ -780,7 +780,7 @@ trial $k$, a window $w$ stops when
 \notetext{A low mean uncertainty does not prove that the global optimum was found. Search
 quality depends on the bounded grid, metric stability, initialization and trial budget.}
 
-\chapter{Bragg, AC Stark and lock-in workflows}\label{ch:special}
+\chapter{Bragg, AC Stark, lock-in and transfer-function workflows}\label{ch:special}
 
 \section{Calibrated Bragg pulse generation}
 The Bragg generator writes channel 32 with a sampled Gaussian or Blackman envelope. For a
@@ -854,6 +854,30 @@ Fit and NoFit metric receives block values plus mean, sample standard deviation 
 \caption{ABBA lock-in block and reference sequence.}
 \label{fig:abba}
 \end{figure}
+
+\section{Bragg transfer-function scan}
+Transfer Function is a Live, one-dimensional, ordered scan of the carrier frequency on
+channel 1 of an Aim-TTi TG5012A. Configure the instrument address under
+\ui{Settings $>$ TG5012A}, select Transfer Function under \ui{Scan Logic}, and enter the
+frequency start, stop, step and repetitions per frequency. The uploaded \code{.mot}
+sequence is executed unchanged and therefore requires no \code{PARAMETER} placeholder.
+The TG5012A settings tab also provides a test-frequency action: it connects with the
+currently displayed address, verifies the model and immediately sets only the channel-1
+carrier frequency. The previous frequency is not restored.
+
+The controller opens one instrument LAN connection on TCP port 9221 for the scan. At each
+new frequency it selects channel 1, sends only the \code{FREQ} command, waits for the instrument's operation-
+complete reply, and then waits a fixed five seconds before the first sequence. It does not
+change waveform, amplitude, phase or output state and does not restore the original
+frequency after the scan.
+
+For every frequency, the live and Archive plots show the sample standard deviation
+($n-1$ denominator) of atom number, interferometer probabilities $P_1/P_2$, and calibrated
+interferometer phase. Fit is the default source; NoFit is available for atom number and
+$P_1/P_2$. Phase follows the active calibration snapshot for the run. One complete
+frequency sweep is stored as one Archive run, including every shot and waveform plus
+\pathcode{transfer_function_summary.csv} and
+\pathcode{transfer_function_summary.json}.
 
 \chapter{Synchronized multi-controller operation}\label{ch:sync}
 
@@ -1204,6 +1228,8 @@ compensation and embedded metadata.\\
 Fitting Models & Atom-area method, baseline points, waveform model formulas, guesses,
 roles and fixed/free parameters.\\
 SYNC & Standalone/Master/Slave role, node name, token, allowed IP and slave endpoints.\\
+TG5012A & Direct instrument IP, TCP port, timeout and connection/model test for Transfer
+Function scans.\\
 Network & Acquisition platform, Red Pitaya addresses, DAQ rate and timeout.\\
 Logic \& Channels & Launch/trigger channel IDs and linked-mode timing constant.\\
 System Paths & \code{tmot4}, arguments, \code{cmot4}, default template and DDS writer.\\
@@ -1245,6 +1271,8 @@ Optimized marker sequence & Final baseline after all accepted marker steps.\\
 \pathcode{optimization_report.json} & Optimization configuration and final status.\\
 Best sequence & Classic placeholder template rendered with best Bayesian parameters.\\
 AC Stark XML and plan & Original/generated DDS tables and requested/actual power ratios.\\
+Transfer Function CSV/JSON & Per-frequency valid sample counts, means and sample standard
+deviations for Fit, NoFit and calibrated phase metrics.\\
 \pathcode{sync_manifest.json} & Node identities, progress, paired data and replication state.\\
 \bottomrule
 \end{tabularx}
@@ -1421,7 +1449,7 @@ Marker optimization & Catalog, workflow start/stop/status, presets and artifact 
 Sync & Configuration, connectivity test, master start/stop/status, slave health/prepare/
 start/stop/status and archive transfer.\\
 Settings/system & Simulation mode, all/analysis settings, folder browser and controlled
-repository update status/fetch/apply.\\
+repository update status/fetch/apply, plus TG5012A connection test.\\
 Fitting & Default waveform models, default scan models and saved custom scan model.\\
 Archive & Tree, load, sequence/waveform, recalculate, overwrite, Allan, scan fit, Bragg
 phase space, reusable calibrations, SYNC $A/C$ phase-calibration preview and sync retry.\\
@@ -1456,9 +1484,11 @@ replication.\\
 \pathcode{app/core/data_loader.py} & Archive loading, recalculation, Allan and sync nodes.\\
 \pathcode{app/core/pulse_generator.py} & Calibrated Gaussian/Blackman Bragg pulses.\\
 \pathcode{app/drivers/dds_table.py} & DDS XML, Raman calibration inversion and write/verify.\\
+\pathcode{app/drivers/tti_generator.py} & TG5012A identity check and channel-1 carrier-frequency command.\\
 \pathcode{app/analysis/fitting.py} & Waveform/scan models, safe formulas and Bragg fringe.\\
 \pathcode{app/analysis/physics.py} & $K$, atom numbers, probabilities, arrival and temperature.\\
 \pathcode{app/analysis/lock_in.py} & ABBA validation and demodulation statistics.\\
+\pathcode{app/analysis/transfer_function.py} & Per-frequency Fit/NoFit and phase sample statistics.\\
 \pathcode{app/analysis/phase_space.py} & Bragg phase inversion and quality statistics.\\
 \pathcode{app/analysis/interferometer_phase.py} & Monotonic half-fringe Archive phase
 conversion and reference subtraction.\\

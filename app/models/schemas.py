@@ -1,3 +1,5 @@
+import math
+
 from pydantic import BaseModel, Field, validator
 from typing import Optional, List, Dict, Any
 
@@ -79,6 +81,11 @@ class ScanConfig(BaseModel):
     ac_stark_dds_xml_name: str = Field("")
     lock_in_a_value: float = Field(1.0)
     lock_in_b_value: float = Field(0.5)
+    transfer_frequency_start_hz: float = Field(1000.0)
+    transfer_frequency_stop_hz: float = Field(10000.0)
+    transfer_frequency_step_hz: float = Field(1000.0)
+    transfer_repeats: int = Field(10, ge=2, le=100000)
+    transfer_settling_time_s: float = Field(5.0, ge=0.0, le=3600.0)
     parameter_source: str = Field("classic")
     marker_axes: List[str] = Field(default_factory=list)
     interferometer_phase_calibration_override: Optional[Dict[str, Any]] = Field(None)
@@ -482,6 +489,13 @@ class SystemSettings(BaseModel):
     sync_shared_token: str = Field("")
     sync_allowed_master_ip: str = Field("")
     sync_slaves: List[SyncSlaveSettings] = Field(default_factory=list)
+    tti_host: str = Field("")
+    tti_port: int = Field(9221, ge=1, le=65535)
+    tti_timeout_s: float = Field(3.0, ge=0.2, le=120.0)
+
+    @validator("tti_host")
+    def normalize_tti_host(cls, value):
+        return str(value or "").strip()
 
     @validator("sync_role")
     def validate_sync_role(cls, value):
@@ -494,6 +508,30 @@ class SystemSettings(BaseModel):
 class SystemUpdateRequest(BaseModel):
     repo_url: Optional[str] = Field(None)
     branch: Optional[str] = Field(None)
+
+
+class TtiConnectionTestRequest(BaseModel):
+    host: str
+    port: int = Field(9221, ge=1, le=65535)
+    timeout_s: float = Field(3.0, ge=0.2, le=120.0)
+
+    @validator("host")
+    def validate_host(cls, value):
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("TG5012A IP address is required")
+        return normalized
+
+
+class TtiFrequencyTestRequest(TtiConnectionTestRequest):
+    frequency_hz: float
+
+    @validator("frequency_hz")
+    def validate_frequency(cls, value):
+        numeric = float(value)
+        if not math.isfinite(numeric):
+            raise ValueError("TG5012A test frequency must be finite")
+        return numeric
 
 
 class SyncSlaveRunConfig(BaseModel):

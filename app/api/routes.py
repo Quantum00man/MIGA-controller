@@ -53,6 +53,12 @@ from app.core.marker_optimization_manager import MARKER_OBJECTIVES, MarkerOptimi
 from app.core.marker_document_store import SequenceMarkerDocumentStore
 from app.core.sync_manager import SyncManager
 from app.drivers.dds_table import DdsTableError, validate_dds_table
+from app.drivers.tti_generator import (
+    set_tti_test_frequency,
+    TtiConnectionSettings,
+    TtiGeneratorError,
+    test_tti_connection,
+)
 from app.models.schemas import (
     AnalysisSettings,
     ArchiveAllanRequest,
@@ -94,6 +100,8 @@ from app.models.schemas import (
     ScheduleRequest,
     SystemSettings,
     SystemUpdateRequest,
+    TtiConnectionTestRequest,
+    TtiFrequencyTestRequest,
     SyncNodeCommandRequest,
     SyncNodePrepareRequest,
     SyncNodeTestRequest,
@@ -1235,6 +1243,48 @@ async def update_all_settings(settings: SystemSettings):
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     return ExperimentResponse(status="success", message="Updated")
+
+
+@router.post("/settings/tti/test", response_model=ExperimentResponse)
+async def test_tti_generator(settings: TtiConnectionTestRequest):
+    try:
+        identity = await run_in_threadpool(
+            test_tti_connection,
+            TtiConnectionSettings(
+                host=settings.host,
+                port=settings.port,
+                timeout_s=settings.timeout_s,
+            ),
+        )
+        return ExperimentResponse(
+            status="success",
+            message="TG5012A connection verified",
+            data={"identity": identity},
+        )
+    except TtiGeneratorError as exc:
+        raise HTTPException(502, str(exc))
+
+
+@router.post("/settings/tti/test-frequency", response_model=ExperimentResponse)
+async def test_tti_generator_frequency(settings: TtiFrequencyTestRequest):
+    try:
+        identity = await run_in_threadpool(
+            set_tti_test_frequency,
+            TtiConnectionSettings(
+                host=settings.host,
+                port=settings.port,
+                timeout_s=settings.timeout_s,
+            ),
+            settings.frequency_hz,
+        )
+        return ExperimentResponse(
+            status="success",
+            message="TG5012A CH1 test frequency confirmed",
+            data={"identity": identity, "frequency_hz": settings.frequency_hz},
+        )
+    except TtiGeneratorError as exc:
+        raise HTTPException(502, str(exc))
+
 
 @router.get("/settings/analysis", response_model=AnalysisSettings)
 async def get_analysis_settings(): return manager.get_analysis_config()

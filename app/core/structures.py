@@ -33,6 +33,10 @@ class ScanResult:
     window_dw: Optional[Tuple[float, float]] = None
     all_parameters: Optional[List[float]] = None
 
+    # Transfer Function provenance. Empty for other scan modes.
+    transfer_frequency_hz: Optional[float] = None
+    transfer_repeat: Optional[int] = None
+
     # AC Stark scan provenance. These stay empty for every other scan mode.
     ac_stark_ratio: Optional[float] = None
     ac_stark_side: Optional[str] = None

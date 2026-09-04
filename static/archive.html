@@ -2388,6 +2388,7 @@
                     savedPreviewMap: {}, recalculatedPreviewMap: {},
                     acStarkSummary: [], savedAcStarkSummary: [], recalculatedAcStarkSummary: [],
                     lockInAnalysis: {}, savedLockInAnalysis: {}, recalculatedLockInAnalysis: {},
+                    transferFunctionSummary: [], savedTransferFunctionSummary: [], recalculatedTransferFunctionSummary: [],
                     savedAllanCache: {}, recalculatedAllanCache: {}, currentAllanData: null,
                     defaultFitModels: [], defaultScanFitModels: [],
                     collapsedPanels: { reanalysis: true, scanFitting: true },
@@ -3066,10 +3067,13 @@
                 isLockInArchive() {
                     return String(this.loadedConfig?.mode || "").trim().toLowerCase() === "lock_in";
                 },
+                isTransferFunctionArchive() {
+                    return String(this.loadedConfig?.mode || "").trim().toLowerCase() === "transfer_function";
+                },
                 getVisibleTabs() {
-                    return this.isAcStarkArchive()
-                        ? this.tabs.filter(tab => ["atoms", "prob"].includes(tab.id))
-                        : this.tabs;
+                    if (this.isAcStarkArchive()) return this.tabs.filter(tab => ["atoms", "prob"].includes(tab.id));
+                    if (this.isTransferFunctionArchive()) return this.tabs.filter(tab => ["atoms", "intf", "phase"].includes(tab.id));
+                    return this.tabs;
                 },
                 isMarkerOptimizationArchive() {
                     return Boolean(this.markerOptimization)
@@ -3120,6 +3124,7 @@
                     await this.applyDisplayedPoints(this.loadedPoints, this.savedStats, this.savedPreviewMap, true);
                 },
                 getArchiveXAxisLabel() {
+                    if (this.isTransferFunctionArchive()) return "TG5012A CH1 frequency (Hz)";
                     const step = this.activeOptimizationStep();
                     return step?.marker_name || step?.marker_id || "Parameter P0";
                 },
@@ -3127,7 +3132,7 @@
                     return this.getActiveScanDimensions() === 3;
                 },
                 canUseAllanMode() {
-                    return !this.isAcStarkArchive() && !this.isLockInArchive() && !this.isMarkerOptimizationArchive() && this.getActiveScanDimensions() === 1 && !Boolean(this.loadedConfig?.randomize);
+                    return !this.isAcStarkArchive() && !this.isLockInArchive() && !this.isTransferFunctionArchive() && !this.isMarkerOptimizationArchive() && this.getActiveScanDimensions() === 1 && !Boolean(this.loadedConfig?.randomize);
                 },
                 normalizeAllanScaleMode(mode) {
                     return mode === 'relative' ? 'relative' : 'absolute';
@@ -4899,6 +4904,9 @@
                     this.lockInAnalysis = {};
                     this.savedLockInAnalysis = {};
                     this.recalculatedLockInAnalysis = {};
+                    this.transferFunctionSummary = [];
+                    this.savedTransferFunctionSummary = [];
+                    this.recalculatedTransferFunctionSummary = [];
                     this.selectedPointKey = '';
                     this.selectedPointKeys = [];
                     this.selectedPointLabel = '';
@@ -4992,6 +5000,11 @@
                         this.selectedOptimizationStep = this.markerOptimization?.steps?.length
                             ? Number(this.markerOptimization.steps[0].index) : null;
                         if (this.isAcStarkArchive() && !["atoms", "prob"].includes(this.currentTab)) this.currentTab = "atoms";
+                        if (this.isTransferFunctionArchive()) {
+                            if (!["atoms", "intf", "phase"].includes(this.currentTab)) this.currentTab = "atoms";
+                            this.showRawData = false;
+                            this.plotMode = "series";
+                        }
                         this.currentScanDimensions = this.resolveScanDimensions(res.data.scan_dimensions, this.loadedConfig);
                         this.originalSettings = this.normalizeAnalysis(snap);
                         this.analysis = this.normalizeAnalysis({ ...this.analysis, ...snap });
@@ -5002,6 +5015,8 @@
                         this.acStarkSummary = this.savedAcStarkSummary;
                         this.savedLockInAnalysis = res.data.lock_in_analysis && typeof res.data.lock_in_analysis === 'object' ? res.data.lock_in_analysis : {};
                         this.lockInAnalysis = this.savedLockInAnalysis;
+                        this.savedTransferFunctionSummary = Array.isArray(res.data.transfer_function_summary) ? res.data.transfer_function_summary : [];
+                        this.transferFunctionSummary = this.savedTransferFunctionSummary;
                         this.savedPreviewMap = res.data.preview_map && typeof res.data.preview_map === 'object' ? res.data.preview_map : {};
                         this.savedDataCount = Number.isFinite(res.data.total_points) ? res.data.total_points : this.loadedPoints.length;
                         this.dataCount = this.savedDataCount;
@@ -5073,6 +5088,8 @@
                         this.acStarkSummary = this.recalculatedAcStarkSummary;
                         this.recalculatedLockInAnalysis = res.data.lock_in_analysis && typeof res.data.lock_in_analysis === 'object' ? res.data.lock_in_analysis : {};
                         this.lockInAnalysis = this.recalculatedLockInAnalysis;
+                        this.recalculatedTransferFunctionSummary = Array.isArray(res.data.transfer_function_summary) ? res.data.transfer_function_summary : [];
+                        this.transferFunctionSummary = this.recalculatedTransferFunctionSummary;
                         this.recalculatedPreviewMap = res.data.preview_map && typeof res.data.preview_map === 'object' ? res.data.preview_map : {};
                         this.dataCount = Number.isFinite(res.data.total_points) ? res.data.total_points : res.data.data.length;
                         this.displayMode = 'recalculated';
@@ -5109,6 +5126,7 @@
                     this.scanFitError = '';
                     this.acStarkSummary = this.savedAcStarkSummary;
                     this.lockInAnalysis = this.savedLockInAnalysis;
+                    this.transferFunctionSummary = this.savedTransferFunctionSummary;
                     await this.applyDisplayedPoints(this.loadedPoints, this.savedStats, this.savedPreviewMap, false);
                     if (this.plotMode === 'allan') {
                         this.syncCurrentAllanData();
@@ -7891,7 +7909,74 @@
                     Plotly.react('resultsPlotDw', down.traces, down.layout);
                     Plotly.react('resultsPlotTotal', [], this.layoutResTot);
                 },
+                renderTransferFunctionArchivePlot() {
+                    const rows = (Array.isArray(this.transferFunctionSummary) ? this.transferFunctionSummary : [])
+                        .slice().sort((a, b) => Number(a.frequency_hz) - Number(b.frequency_hz));
+                    const raw = this.showRawData;
+                    let fields;
+                    let labels;
+                    let metricLabel;
+                    if (this.currentTab === 'intf') {
+                        fields = raw
+                            ? ['intf_p1_nofit_std', 'intf_p2_nofit_std', null]
+                            : ['intf_p1_fit_std', 'intf_p2_fit_std', null];
+                        labels = ['P1', 'P2', ''];
+                        metricLabel = 'Interferometer probability';
+                    } else if (this.currentTab === 'phase') {
+                        fields = ['interferometer_phase_std', null, null];
+                        labels = ['Phase', '', ''];
+                        metricLabel = `Calibrated interferometer phase (${this.phaseUnit})`;
+                    } else {
+                        fields = raw
+                            ? ['atom_number_up_nofit_std', 'atom_number_dw_nofit_std', 'atom_number_total_nofit_std']
+                            : ['atom_number_up_fit_std', 'atom_number_dw_fit_std', 'atom_number_total_fit_std'];
+                        labels = ['UP', 'DOWN', 'TOTAL (UP+DOWN)'];
+                        metricLabel = 'Atom number';
+                    }
+                    const sourceLabel = this.currentTab === 'phase' ? 'Active calibration' : (raw ? 'NoFit' : 'Fit');
+                    const colors = ['#c62828', '#1565c0', '#198754'];
+                    const plotIds = ['resultsPlotUp', 'resultsPlotDw', 'resultsPlotTotal'];
+                    fields.forEach((field, index) => {
+                        if (!field) {
+                            Plotly.react(plotIds[index], [], this[`layoutRes${index === 0 ? 'Up' : index === 1 ? 'Dw' : 'Tot'}`]);
+                            return;
+                        }
+                        const countField = field.replace('_std', '_count');
+                        const scale = this.currentTab === 'phase' && this.phaseUnit === 'mrad' ? 1000 : 1;
+                        const trace = {
+                            x: rows.map(row => Number(row.frequency_hz)),
+                            y: rows.map(row => Number.isFinite(Number(row[field])) ? Number(row[field]) * scale : null),
+                            customdata: rows.map(row => this.getHistoryKey([Number(row.frequency_hz)])),
+                            text: rows.map(row => Number(row[countField] ?? row.shot_count ?? 0)),
+                            type: 'scatter', mode: 'lines+markers',
+                            name: `${labels[index]} standard deviation`,
+                            line: { color: colors[index], width: 2 }, marker: { color: colors[index], size: 7 },
+                            connectgaps: false,
+                            hovertemplate: 'Frequency=%{x:.9g} Hz<br>Std=%{y:.6g}<br>n=%{text}<extra></extra>'
+                        };
+                        const base = this.buildCommonAnalysisLayout();
+                        const isLastVisible = (this.currentTab === 'atoms' && index === 2)
+                            || (this.currentTab === 'intf' && index === 1)
+                            || (this.currentTab === 'phase' && index === 0);
+                        const layout = {
+                            ...base,
+                            margin: isLastVisible ? { t: 10, b: 50, l: 78, r: 20 } : { t: 38, b: 8, l: 78, r: 20 },
+                            xaxis: { ...base.xaxis, title: isLastVisible ? 'TG5012A CH1 frequency (Hz)' : '', showticklabels: isLastVisible },
+                            yaxis: { ...base.yaxis, title: `${metricLabel} standard deviation` },
+                            title: { text: `${labels[index]} | Transfer Function | ${sourceLabel}`, font: { size: 13 }, x: 0.05, y: 0.93 },
+                            showlegend: false
+                        };
+                        if (index === 0) this.layoutResUp = layout;
+                        else if (index === 1) this.layoutResDw = layout;
+                        else this.layoutResTot = layout;
+                        Plotly.react(plotIds[index], [trace], layout);
+                    });
+                },
                 renderMainPlot() {
+                    if (this.isTransferFunctionArchive()) {
+                        this.renderTransferFunctionArchivePlot();
+                        return;
+                    }
                     if (this.isAcStarkArchive()) {
                         this.renderAcStarkArchivePlot();
                         return;

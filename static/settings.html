@@ -546,6 +546,65 @@
                     </div>
                 </div>
 
+                <div v-if="tab==='tti'">
+                    <div class="row g-3 align-items-end">
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold" for="tti-host">TG5012A IP address</label>
+                            <input id="tti-host" class="form-control font-monospace" v-model.trim="s.tti_host"
+                                placeholder="192.168.1.100" autocomplete="off">
+                            <div class="form-text">The controller connects directly to the instrument LAN socket.</div>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label fw-bold" for="tti-port">TCP port</label>
+                            <input id="tti-port" type="number" min="1" max="65535" class="form-control"
+                                v-model.number="s.tti_port">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label fw-bold" for="tti-timeout">Timeout (s)</label>
+                            <input id="tti-timeout" type="number" min="0.2" max="120" step="0.1" class="form-control"
+                                v-model.number="s.tti_timeout_s">
+                        </div>
+                        <div class="col-12 d-flex align-items-center gap-3 flex-wrap">
+                            <button type="button" class="btn btn-outline-primary" @click="testTtiConnection" :disabled="ttiTesting || ttiFrequencyTesting">
+                                <span v-if="ttiTesting" class="spinner-border spinner-border-sm me-2"></span>
+                                {{ ttiTesting ? 'Testing...' : 'Test Connection' }}
+                            </button>
+                            <span v-if="ttiTestMessage" class="small" :class="ttiTestError ? 'text-danger' : 'text-success'">
+                                {{ ttiTestMessage }}
+                            </span>
+                        </div>
+                        <div class="col-12 mt-4 pt-3 border-top">
+                            <label class="form-label fw-bold" for="tti-test-frequency">Test CH1 frequency</label>
+                            <div class="row g-2 align-items-center">
+                                <div class="col-md-6">
+                                    <div class="input-group">
+                                        <input id="tti-test-frequency" type="number" step="any" class="form-control"
+                                            v-model.number="ttiTestFrequencyHz">
+                                        <span class="input-group-text">Hz</span>
+                                    </div>
+                                </div>
+                                <div class="col-md-6 d-grid">
+                                    <button type="button" class="btn btn-outline-warning" @click="setTtiTestFrequency"
+                                        :disabled="ttiTesting || ttiFrequencyTesting">
+                                        <span v-if="ttiFrequencyTesting" class="spinner-border spinner-border-sm me-2"></span>
+                                        {{ ttiFrequencyTesting ? 'Setting frequency...' : 'Set Test Frequency' }}
+                                    </button>
+                                </div>
+                                <div class="col-12">
+                                    <div class="form-text">This immediately changes the connected TG5012A CH1 carrier frequency and does not restore its previous value.</div>
+                                    <div v-if="ttiFrequencyMessage" class="small mt-2" :class="ttiFrequencyError ? 'text-danger' : 'text-success'">
+                                        {{ ttiFrequencyMessage }}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="alert alert-light border mt-4 mb-0 small">
+                        Transfer Function scans select CH1 and change only its carrier frequency. Waveform, amplitude,
+                        phase and output state are left unchanged.
+                    </div>
+                </div>
+
                 <div v-if="tab==='net'">
                     <div class="row g-3">
                         <div class="col-12 mb-3 bg-light p-3 border rounded">
@@ -1494,12 +1553,15 @@
                         { id: 'fitting', label: 'Fitting Models', icon: 'bi-bezier2', description: 'Manage atom-area calculation and the models used for time-of-flight fitting.' },
                         { id: 'phase', label: 'Interferometer Phase', icon: 'bi-activity', description: 'Manage Bragg fringe calibrations, data sources and the fixed T or T² phase reference.' },
                         { id: 'sync', label: 'SYNC', icon: 'bi-bounding-box-circles', description: 'Configure Standalone, Master or Slave operation for synchronized differential measurements.' },
+                        { id: 'tti', label: 'TG5012A', icon: 'bi-soundwave', description: 'Configure and verify the direct LAN connection used by Transfer Function scans.' },
                         { id: 'net', label: 'Network', icon: 'bi-hdd-network', description: 'Select the acquisition platform and configure device connection limits.' },
                         { id: 'logic', label: 'Logic & Channels', icon: 'bi-diagram-3', description: 'Set launch, trigger and linked-mode channel timing.' },
                         { id: 'paths', label: 'System Paths', icon: 'bi-folder2-open', description: 'Configure executable and default template locations used by the controller.' },
                         { id: 'update', label: 'System Update', icon: 'bi-arrow-repeat', description: 'Review the current checkout and update the controller from its configured GitHub source.' }
                     ],
                     updateInfo: {}, updateMsg: '', updateIsError: false, updateBusy: false,
+                    ttiTesting: false, ttiTestMessage: '', ttiTestError: false,
+                    ttiTestFrequencyHz: 1000, ttiFrequencyTesting: false, ttiFrequencyMessage: '', ttiFrequencyError: false,
                     markerBusy: false,
                     markerError: '',
                     markerMessage: '',
@@ -2491,6 +2553,46 @@
                         slave.testing = false;
                     }
                 },
+                async testTtiConnection() {
+                    this.ttiTesting = true;
+                    this.ttiTestMessage = '';
+                    this.ttiTestError = false;
+                    try {
+                        const res = await axios.post('/settings/tti/test', {
+                            host: String(this.s.tti_host || '').trim(),
+                            port: Number(this.s.tti_port || 9221),
+                            timeout_s: Number(this.s.tti_timeout_s || 3)
+                        });
+                        this.ttiTestMessage = `Connected: ${res.data?.data?.identity || 'TG5012A'}`;
+                    } catch (error) {
+                        this.ttiTestError = true;
+                        this.ttiTestMessage = error.response?.data?.detail || error.message || 'Connection failed';
+                    } finally {
+                        this.ttiTesting = false;
+                    }
+                },
+                async setTtiTestFrequency() {
+                    this.ttiFrequencyTesting = true;
+                    this.ttiFrequencyMessage = '';
+                    this.ttiFrequencyError = false;
+                    try {
+                        const frequency = Number(this.ttiTestFrequencyHz);
+                        if (!Number.isFinite(frequency)) throw new Error('Enter a finite test frequency.');
+                        const res = await axios.post('/settings/tti/test-frequency', {
+                            host: String(this.s.tti_host || '').trim(),
+                            port: Number(this.s.tti_port || 9221),
+                            timeout_s: Number(this.s.tti_timeout_s || 3),
+                            frequency_hz: frequency
+                        });
+                        const confirmed = Number(res.data?.data?.frequency_hz);
+                        this.ttiFrequencyMessage = `CH1 frequency confirmed at ${Number.isFinite(confirmed) ? confirmed.toPrecision(12) : frequency} Hz.`;
+                    } catch (error) {
+                        this.ttiFrequencyError = true;
+                        this.ttiFrequencyMessage = error.response?.data?.detail || error.message || 'Frequency command failed';
+                    } finally {
+                        this.ttiFrequencyTesting = false;
+                    }
+                },
                 async fetchSettings() {
                     try {
                         const res = await axios.get('/settings/all');
@@ -2751,6 +2853,11 @@
                         });
                     });
                     normalized.update_repo_url = String(normalized.update_repo_url || '').trim();
+                    normalized.tti_host = String(normalized.tti_host || '').trim();
+                    const ttiPort = Number.parseInt(normalized.tti_port ?? 9221, 10);
+                    const ttiTimeout = Number(normalized.tti_timeout_s ?? 3);
+                    normalized.tti_port = Number.isFinite(ttiPort) && ttiPort >= 1 && ttiPort <= 65535 ? ttiPort : 9221;
+                    normalized.tti_timeout_s = Number.isFinite(ttiTimeout) && ttiTimeout >= 0.2 ? ttiTimeout : 3;
                     normalized.sequence_marker_definitions = Array.isArray(normalized.sequence_marker_definitions)
                         ? normalized.sequence_marker_definitions.map(item => ({ ...item }))
                         : [];

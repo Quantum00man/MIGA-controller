@@ -688,10 +688,10 @@
                             v-model="runMode" :disabled="isRunning || isScheduleActive()">
                         <label class="btn btn-outline-secondary" for="runModeLive">Live</label>
                         <input type="radio" class="btn-check" name="runMode" id="runModeScheduled" value="scheduled"
-                            v-model="runMode" :disabled="isRunning || isScheduleActive() || config.mode === 'ac_stark'">
+                            v-model="runMode" :disabled="isRunning || isScheduleActive() || ['ac_stark', 'transfer_function'].includes(config.mode)">
                         <label class="btn btn-outline-secondary" for="runModeScheduled">Scheduled</label>
                         <input type="radio" class="btn-check" name="runMode" id="runModeSync" value="sync"
-                            v-model="runMode" :disabled="isRunning || isScheduleActive() || ['lock_in', 'ac_stark'].includes(config.mode)">
+                            v-model="runMode" :disabled="isRunning || isScheduleActive() || ['lock_in', 'ac_stark', 'transfer_function'].includes(config.mode)">
                         <label class="btn btn-outline-primary" for="runModeSync">SYNC</label>
                     </div>
                     <div class="form-text mt-2" style="font-size: 0.72rem;">
@@ -772,8 +772,8 @@
                 </div>
             </template>
 
-            <span class="section-label">Parameter Source</span>
-            <div class="card p-3 mb-3">
+            <span class="section-label" v-if="config.mode !== 'transfer_function'">Parameter Source</span>
+            <div class="card p-3 mb-3" v-if="config.mode !== 'transfer_function'">
                 <div class="btn-group btn-group-sm w-100" role="group" aria-label="Parameter source">
                     <input type="radio" class="btn-check" id="sourceClassic" value="classic" v-model="config.parameter_source"
                         :disabled="isRunning || isScheduleActive()">
@@ -904,10 +904,10 @@
                             v-model.number="config.scan_dimensions">
                         <label class="btn btn-outline-secondary" for="scan1d">1D</label>
                         <input type="radio" class="btn-check" name="scanDimension" id="scan2d" :value="2"
-                            v-model.number="config.scan_dimensions" :disabled="['ac_stark', 'lock_in'].includes(config.mode)">
+                            v-model.number="config.scan_dimensions" :disabled="['ac_stark', 'lock_in', 'transfer_function'].includes(config.mode)">
                         <label class="btn btn-outline-secondary" for="scan2d">2D</label>
                         <input type="radio" class="btn-check" name="scanDimension" id="scan3d" :value="3"
-                            v-model.number="config.scan_dimensions" :disabled="['ac_stark', 'lock_in'].includes(config.mode)">
+                            v-model.number="config.scan_dimensions" :disabled="['ac_stark', 'lock_in', 'transfer_function'].includes(config.mode)">
                         <label class="btn btn-outline-secondary" for="scan3d">3D</label>
                     </div>
                     <div class="form-text mt-2" v-if="config.scan_dimensions > 1">
@@ -916,8 +916,8 @@
                     </div>
                 </div>
 
-                <span class="section-label" v-if="!['ac_stark', 'lock_in'].includes(config.mode)">Parameter P0</span>
-                <div class="card p-3" v-if="!['ac_stark', 'lock_in'].includes(config.mode)">
+                <span class="section-label" v-if="!['ac_stark', 'lock_in', 'transfer_function'].includes(config.mode)">Parameter P0</span>
+                <div class="card p-3" v-if="!['ac_stark', 'lock_in', 'transfer_function'].includes(config.mode)">
                     <div v-if="config.parameter_source === 'markers'" class="mb-3">
                         <label class="form-label small fw-bold text-primary mb-1">P0 Marker</label>
                         <select class="form-select form-select-sm" v-model="config.marker_axes[0]" @change="applyMarkerDefaults(0)">
@@ -1030,8 +1030,40 @@
                             <option value="bragg_rabi">Bragg Rabi</option>
                             <option value="lock_in" :disabled="isSyncMode()">Lock-in Measurement</option>
                             <option value="ac_stark" :disabled="isSyncMode()">AC Stark Centering</option>
+                            <option value="transfer_function" :disabled="isSyncMode() || isScheduledMode()">Transfer Function</option>
                         </select>
                         <div v-if="isSyncMode()" class="form-text">SYNC supports Standard, Timing, Rabi, Half, Link and Bragg Rabi.</div>
+                    </div>
+                    <div v-if="config.mode === 'transfer_function'" class="mt-1">
+                        <div class="alert alert-light border py-2 px-3 small mb-3">
+                            Live 1D scan. Sets TG5012A CH1 carrier frequency, waits 5 s, then runs the uploaded sequence unchanged.
+                        </div>
+                        <div class="row g-2">
+                            <div class="col-4">
+                                <label class="form-label small text-muted mb-1">Start (Hz)</label>
+                                <input type="number" step="any" class="form-control form-control-sm" v-model.number="config.transfer_frequency_start_hz">
+                            </div>
+                            <div class="col-4">
+                                <label class="form-label small text-muted mb-1">Stop (Hz)</label>
+                                <input type="number" step="any" class="form-control form-control-sm" v-model.number="config.transfer_frequency_stop_hz">
+                            </div>
+                            <div class="col-4">
+                                <label class="form-label small text-muted mb-1">Step (Hz)</label>
+                                <input type="number" step="any" class="form-control form-control-sm" v-model.number="config.transfer_frequency_step_hz">
+                            </div>
+                            <div class="col-8 mt-2">
+                                <label class="form-label small text-muted mb-1">Repeats per frequency</label>
+                                <input type="number" min="2" step="1" class="form-control form-control-sm" v-model.number="config.transfer_repeats">
+                            </div>
+                            <div class="col-4 mt-2">
+                                <label class="form-label small text-muted mb-1">Settling</label>
+                                <div class="input-group input-group-sm">
+                                    <input type="text" class="form-control bg-light" value="5" readonly aria-label="Frequency settling time">
+                                    <span class="input-group-text">s</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="form-text mt-2">Sample standard deviation (n−1) is updated after every shot. Configure the instrument IP in Settings → TG5012A.</div>
                     </div>
                     <div v-if="['timing', 'rabi'].includes(config.mode)">
                         <label class="form-label small text-muted mb-1">Total Parameter</label>
@@ -1341,13 +1373,13 @@
                 <span class="section-label">Execution Control</span>
                 <div class="card p-3 mb-5 border-0 bg-transparent shadow-none ps-0 pe-0">
                     <div class="row g-2 align-items-center mb-3 px-1">
-                        <div class="col-6"><label class="form-label small text-muted mb-1">{{ config.mode === 'ac_stark' ? 'Averages per half-point' : (config.mode === 'lock_in' ? 'ABBA blocks' : 'Averages') }}</label><input
-                                type="number" class="form-control form-control-sm" v-model.number="config.averages"
-                                min="1"></div>
+                        <div class="col-6"><label class="form-label small text-muted mb-1">{{ config.mode === 'transfer_function' ? 'Repeats per frequency' : (config.mode === 'ac_stark' ? 'Averages per half-point' : (config.mode === 'lock_in' ? 'ABBA blocks' : 'Averages')) }}</label><input
+                                v-if="config.mode !== 'transfer_function'" type="number" class="form-control form-control-sm" v-model.number="config.averages"
+                                min="1"><input v-else type="number" class="form-control form-control-sm" v-model.number="config.transfer_repeats" min="2"></div>
                         <div class="col-6">
                             <div class="d-flex align-items-center gap-3 mt-4 flex-wrap">
                                 <div class="form-check mb-0"><input class="form-check-input" type="checkbox"
-                                        v-model="config.randomize" id="randCheck" :disabled="['ac_stark', 'lock_in'].includes(config.mode)"><label
+                                        v-model="config.randomize" id="randCheck" :disabled="['ac_stark', 'lock_in', 'transfer_function'].includes(config.mode)"><label
                                         class="form-check-label small" for="randCheck">Randomize</label></div>
                                 <div class="form-check mb-0"><input class="form-check-input" type="checkbox"
                                         v-model="config.ext_trigger" id="extTriggerCheck"><label
@@ -1592,7 +1624,12 @@
                         ac_stark_total_power: 100,
                         ac_stark_dds_xml_name: '',
                         lock_in_a_value: 1,
-                        lock_in_b_value: 0.5
+                        lock_in_b_value: 0.5,
+                        transfer_frequency_start_hz: 1000,
+                        transfer_frequency_stop_hz: 10000,
+                        transfer_frequency_step_hz: 1000,
+                        transfer_repeats: 10,
+                        transfer_settling_time_s: 5
                     },
                     isRunning: false, isSimulation: false, statusMessage: "IDLE", currentStep: 0, plotRevision: 0, logs: [], ws: null,
                     lastLoggedScheduleErrorKey: '',
@@ -1697,6 +1734,7 @@
                     tabs: [{ id: 'atoms', label: 'Atom Number' }, { id: 'amp', label: 'Max Voltage' }, { id: 'tail', label: 'Tail Mean' }, { id: 'sigma', label: 'Width (ms)' }, { id: 'temp', label: 'Temperature' }, { id: 'arrival', label: 'Arrival Time' }, { id: 'prob', label: 'Transition Prob.' }, { id: 'intf', label: 'Interferometer' }, { id: 'phase', label: 'Interferometer Phase' }],
                     historyMap: {},
                     lockInHistoryMap: {},
+                    transferFunctionHistoryMap: {},
                     layoutResBase: {}, layoutResUp: {}, layoutResDw: {}, layoutOscUp: {}, layoutOscDw: {},
                     isPlotting: false,
                     heatmapColorscale: [[0, '#c62828'], [0.5, '#fff3bf'], [1, '#1565c0']],
@@ -1742,15 +1780,19 @@
                     }
                 },
                 'config.mode'(mode) {
-                    if (this.runMode === 'sync' && ['lock_in', 'ac_stark'].includes(mode)) {
+                    if (this.runMode === 'sync' && ['lock_in', 'ac_stark', 'transfer_function'].includes(mode)) {
                         this.config.mode = 'standard';
                         return;
                     }
                     if (this.config.parameter_source === 'markers' && mode !== 'standard') {
-                        this.config.mode = 'standard';
-                        return;
+                        if (mode === 'transfer_function') {
+                            this.config.parameter_source = 'classic';
+                        } else {
+                            this.config.mode = 'standard';
+                            return;
+                        }
                     }
-                    if (['ac_stark', 'lock_in'].includes(mode)) {
+                    if (['ac_stark', 'lock_in', 'transfer_function'].includes(mode)) {
                         this.config.scan_dimensions = 1;
                         this.config.dim2_enabled = false;
                         this.config.dim3_enabled = false;
@@ -1758,6 +1800,14 @@
                         if (mode === 'ac_stark') {
                             this.runMode = 'live';
                             if (!['atoms', 'prob'].includes(this.currentTab)) this.currentTab = 'atoms';
+                        }
+                        if (mode === 'transfer_function') {
+                            this.runMode = 'live';
+                            this.config.parameter_source = 'classic';
+                            this.config.averages = 1;
+                            this.config.transfer_settling_time_s = 5;
+                            this.showRawData = false;
+                            if (!['atoms', 'intf', 'phase'].includes(this.currentTab)) this.currentTab = 'atoms';
                         }
                     }
                     if (!this.isRunning) {
@@ -1767,7 +1817,7 @@
                 runMode(value) {
                     if (value !== 'live' && this.config.parameter_source === 'markers') this.config.parameter_source = 'classic';
                     if (value === 'sync') {
-                        if (['lock_in', 'ac_stark'].includes(this.config.mode)) this.config.mode = 'standard';
+                        if (['lock_in', 'ac_stark', 'transfer_function'].includes(this.config.mode)) this.config.mode = 'standard';
                         this.fetchSyncConfig();
                         this.$nextTick(() => this.syncViewMode === 'node' ? this.initPlots() : this.renderSyncPlot());
                     }
@@ -2945,9 +2995,9 @@ isStartDisabled() {
     return this.isRunning || this.isScheduleActive() || acStarkMissingXml || acStarkScheduled || syncInvalid || (this.isScheduledMode() && !this.scheduledTasks.length);
 },
 getVisibleTabs() {
-    return this.config.mode === 'ac_stark'
-        ? this.tabs.filter(tab => ['atoms', 'prob'].includes(tab.id))
-        : this.tabs;
+    if (this.config.mode === 'ac_stark') return this.tabs.filter(tab => ['atoms', 'prob'].includes(tab.id));
+    if (this.config.mode === 'transfer_function') return this.tabs.filter(tab => ['atoms', 'intf', 'phase'].includes(tab.id));
+    return this.tabs;
 },
 isStopDisabled() {
     return !this.isRunning && !this.isScheduleActive() && !this.syncRuntime?.active;
@@ -2992,6 +3042,16 @@ getSinglePointDurationSec() {
 },
 getLiveEstimatedShotCount() {
     try {
+        if (this.config.mode === 'transfer_function') {
+            const frequencyCount = this.estimateAxisPointCount({
+                scan_type: 'range', method: 'step_size',
+                start: this.config.transfer_frequency_start_hz,
+                stop: this.config.transfer_frequency_stop_hz,
+                step: this.config.transfer_frequency_step_hz,
+                list: ''
+            });
+            return frequencyCount * Math.max(2, Math.round(Number(this.config.transfer_repeats) || 2));
+        }
         return this.estimateScanStepCount(this.config);
     } catch (error) {
         return 0;
@@ -2999,7 +3059,13 @@ getLiveEstimatedShotCount() {
 },
 getLiveEstimatedDurationSeconds() {
     const shots = this.getLiveEstimatedShotCount();
-    return shots > 0 ? shots * this.getSinglePointDurationSec() : 0;
+    if (shots <= 0) return 0;
+    let seconds = shots * this.getSinglePointDurationSec();
+    if (this.config.mode === 'transfer_function') {
+        const repeats = Math.max(2, Math.round(Number(this.config.transfer_repeats) || 2));
+        seconds += Math.ceil(shots / repeats) * 5;
+    }
+    return seconds;
 },
 getLiveRemainingSeconds() {
     if (!this.isRunning) return this.getLiveEstimatedDurationSeconds();
@@ -3021,6 +3087,10 @@ getLiveHeaderStats() {
 getLiveEstimateSummary() {
     const shots = this.getLiveEstimatedShotCount();
     if (shots <= 0) return 'Estimate unavailable';
+    if (this.config.mode === 'transfer_function') {
+        const repeats = Math.max(2, Math.round(Number(this.config.transfer_repeats) || 2));
+        return `${shots} shots at ${Math.ceil(shots / repeats)} frequencies | ${this.formatDuration(this.getLiveEstimatedDurationSeconds())} incl. 5 s settling/point`;
+    }
     return `${shots} shots | ${this.formatDuration(this.getLiveEstimatedDurationSeconds())} @ ${this.getSinglePointDurationSec().toFixed(3)} s/shot`;
 },
 getSequentialGapSec() {
@@ -3745,6 +3815,26 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     const scanDimensions = Math.max(1, Math.min(3, Number(payload.scan_dimensions || this.resolveScanDimensionsFromConfig(payload)) || 1));
                     payload.run_label = String(payload.run_label || '').trim();
                     payload.sequence_name = String(sequenceNameOverride || payload.sequence_name || this.currentSequenceName || 'sequence.mot').trim();
+                    if (payload.mode === 'transfer_function') {
+                        ['transfer_frequency_start_hz', 'transfer_frequency_stop_hz', 'transfer_frequency_step_hz'].forEach((field) => {
+                            const value = Number(payload[field]);
+                            if (!Number.isFinite(value)) throw new Error(`${field} must be numeric.`);
+                            payload[field] = value;
+                        });
+                        if (payload.transfer_frequency_step_hz === 0) throw new Error('Transfer Function frequency step must not be zero.');
+                        payload.transfer_repeats = Math.round(Number(payload.transfer_repeats));
+                        if (!Number.isInteger(payload.transfer_repeats) || payload.transfer_repeats < 2) {
+                            throw new Error('Transfer Function requires at least 2 repeats per frequency.');
+                        }
+                        payload.transfer_settling_time_s = 5;
+                        payload.scan_dimensions = 1;
+                        payload.dim2_enabled = false;
+                        payload.dim3_enabled = false;
+                        payload.randomize = false;
+                        payload.averages = 1;
+                        payload.parameter_source = 'classic';
+                        payload.marker_axes = [];
+                    }
                     if (payload.mode === 'ac_stark') {
                         const numericFields = [
                             'ac_stark_left_p0', 'ac_stark_right_p0',
@@ -4629,12 +4719,97 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     Plotly.react('resultsPlotUp', up.traces, up.layout);
                     Plotly.react('resultsPlotDw', down.traces, down.layout);
                 },
+                recordTransferFunctionPoint(data) {
+                    const frequency = Number(data.transfer_frequency_hz);
+                    if (!Number.isFinite(frequency)) return;
+                    const key = frequency.toPrecision(15);
+                    if (!this.transferFunctionHistoryMap[key]) {
+                        this.transferFunctionHistoryMap[key] = {
+                            frequency,
+                            atom_number_up: [], atom_number_dw: [],
+                            atom_number_up_nofit: [], atom_number_dw_nofit: [],
+                            intf_p1: [], intf_p2: [], intf_p1_nofit: [], intf_p2_nofit: [],
+                            interferometer_phase: []
+                        };
+                    }
+                    const point = this.transferFunctionHistoryMap[key];
+                    Object.keys(point).forEach((field) => {
+                        if (field === 'frequency') return;
+                        if (field === 'interferometer_phase' && data.interferometer_phase_valid !== true) return;
+                        const value = Number(data[field]);
+                        if (Number.isFinite(value)) point[field].push(value);
+                    });
+                },
+                sampleStandardDeviation(values) {
+                    const valid = (Array.isArray(values) ? values : []).map(Number).filter(Number.isFinite);
+                    if (valid.length < 2) return null;
+                    const mean = valid.reduce((sum, value) => sum + value, 0) / valid.length;
+                    const variance = valid.reduce((sum, value) => sum + ((value - mean) ** 2), 0) / (valid.length - 1);
+                    return Math.sqrt(Math.max(0, variance));
+                },
+                renderTransferFunctionPlot() {
+                    const points = Object.values(this.transferFunctionHistoryMap || {}).sort((a, b) => a.frequency - b.frequency);
+                    const noFit = this.showRawData;
+                    let panelFields;
+                    let label;
+                    if (this.currentTab === 'intf') {
+                        panelFields = noFit ? ['intf_p1_nofit', 'intf_p2_nofit'] : ['intf_p1', 'intf_p2'];
+                        label = 'Interferometer probability';
+                    } else if (this.currentTab === 'phase') {
+                        panelFields = ['interferometer_phase', null];
+                        label = `Calibrated interferometer phase (${this.phaseUnit})`;
+                    } else {
+                        panelFields = noFit ? ['atom_number_up_nofit', 'atom_number_dw_nofit'] : ['atom_number_up', 'atom_number_dw'];
+                        label = 'Atom number';
+                    }
+                    const sourceLabel = this.currentTab === 'phase' ? 'Active calibration' : (noFit ? 'NoFit' : 'Fit');
+                    const makePanel = (field, channel, color, isUp) => {
+                        if (!field) return { traces: [], layout: { ...this.buildCommonAnalysisLayout() } };
+                        const scale = this.currentTab === 'phase' && this.phaseUnit === 'mrad' ? 1000 : 1;
+                        const counts = points.map(point => (point[field] || []).length);
+                        const trace = {
+                            x: points.map(point => point.frequency),
+                            y: points.map(point => {
+                                const value = this.sampleStandardDeviation(point[field]);
+                                return value === null ? null : value * scale;
+                            }),
+                            customdata: counts,
+                            type: 'scatter', mode: 'lines+markers', name: `${channel} standard deviation`,
+                            line: { color, width: 2 }, marker: { color, size: 7 },
+                            connectgaps: false,
+                            hovertemplate: 'Frequency=%{x:.9g} Hz<br>Std=%{y:.6g}<br>n=%{customdata}<extra></extra>'
+                        };
+                        const base = this.buildCommonAnalysisLayout();
+                        return {
+                            traces: [trace],
+                            layout: {
+                                ...base,
+                                margin: isUp ? { t: 38, b: 8, l: 76, r: 20 } : { t: 10, b: 50, l: 76, r: 20 },
+                                xaxis: { ...base.xaxis, title: isUp ? '' : 'TG5012A CH1 frequency (Hz)', showticklabels: !isUp },
+                                yaxis: { ...base.yaxis, title: `${label} standard deviation` },
+                                title: { text: `${channel} | Transfer Function | ${sourceLabel}`, font: { size: 13 }, x: 0.05, y: 0.93 },
+                                showlegend: false
+                            }
+                        };
+                    };
+                    const names = this.currentTab === 'intf' ? ['P1', 'P2'] : (this.currentTab === 'phase' ? ['Phase', ''] : ['UP', 'DOWN / P2']);
+                    const up = makePanel(panelFields[0], names[0], '#c62828', true);
+                    const down = makePanel(panelFields[1], names[1], '#1565c0', false);
+                    this.layoutResUp = up.layout;
+                    this.layoutResDw = down.layout;
+                    Plotly.react('resultsPlotUp', up.traces, up.layout);
+                    Plotly.react('resultsPlotDw', down.traces, down.layout);
+                },
                 renderMainPlot() {
                     if (this.isSyncMode()) {
                         this.renderSyncPlot();
                         return;
                     }
                     if (!document.getElementById('resultsPlotUp') || !document.getElementById('resultsPlotDw')) return;
+                    if (this.config.mode === 'transfer_function') {
+                        this.renderTransferFunctionPlot();
+                        return;
+                    }
                     if (this.config.mode === 'ac_stark') {
                         this.renderAcStarkPlot();
                         return;
@@ -4952,13 +5127,16 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     const scannedParams = this.getScannedParameters(data, scanDimensions);
                     const isAcStarkPoint = Number.isFinite(Number(data.ac_stark_ratio)) && ['left', 'right'].includes(String(data.ac_stark_side || '').toLowerCase());
                     const isLockInPoint = Number.isInteger(Number(data.lock_in_block_index)) && Number(data.lock_in_block_index) > 0;
+                    const isTransferFunctionPoint = Number.isFinite(Number(data.transfer_frequency_hz));
                     const isFinalImmediateStep = !this.isScheduleActive() && !this.isSyncMode() && total > 0 && this.currentStep >= total;
                     this.currentScanDimensions = scanDimensions;
-                    this.statusMessage = isAcStarkPoint
+                    this.statusMessage = isTransferFunctionPoint
+                        ? `Transfer Function: ${Number(data.transfer_frequency_hz).toPrecision(8)} Hz | ${Number(data.transfer_repeat)}/${Number(this.config.transfer_repeats)}`
+                        : (isAcStarkPoint
                         ? `AC Stark: ratio=${Number(data.ac_stark_ratio).toFixed(6)} | ${String(data.ac_stark_side).toUpperCase()}`
                         : (isLockInPoint
                             ? `Lock-in: block ${Number(data.lock_in_block_index)} | ${String(data.lock_in_state).toUpperCase()}${Number(data.lock_in_position)}`
-                            : `Scanning: ${this.formatScanParameters(scannedParams)}`);
+                            : `Scanning: ${this.formatScanParameters(scannedParams)}`));
 
                     if (!data.time_axis || !data.raw_data_up || !data.raw_data_dw || !data.fit_data_up || !data.fit_data_dw) {
                         if (data.error) {
@@ -4988,6 +5166,19 @@ finishScheduledRun(finalStatus = 'IDLE') {
                             Plotly.react('waveformPlotUp', [traceUpRaw, traceUpFit], this.layoutOscUp);
                             this.layoutOscDw.datarevision = this.currentStep; this.layoutOscDw.shapes = shapesDw;
                             Plotly.react('waveformPlotDw', [traceDwRaw, traceDwFit], this.layoutOscDw);
+
+                            if (isTransferFunctionPoint) {
+                                this.recordTransferFunctionPoint(data);
+                                this.plotRevision++;
+                                this.renderMainPlot();
+                                this.addLog(`Transfer Function | ${Number(data.transfer_frequency_hz).toPrecision(9)} Hz | repeat ${Number(data.transfer_repeat)}/${Number(this.config.transfer_repeats)}`);
+                                if (isFinalImmediateStep) {
+                                    this.finalizeImmediateScanCompletion(total);
+                                } else if (this.isRunning) {
+                                    this.fetchStatus();
+                                }
+                                return;
+                            }
 
                             if (isAcStarkPoint) {
                                 this.recordAcStarkPoint(data);
@@ -5242,6 +5433,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
             this.historyMap = {};
             this.acStarkHistoryMap = {};
             this.lockInHistoryMap = {};
+            this.transferFunctionHistoryMap = {};
             this.initPlots();
         }
     }

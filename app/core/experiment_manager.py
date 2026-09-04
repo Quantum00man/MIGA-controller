@@ -23,6 +23,7 @@ from app.drivers import dds_table
 from app.drivers.vcd_parser import VCDParser
 from app.analysis import fitting, physics, interferometer_phase
 from app.analysis.lock_in import build_lock_in_analysis
+from app.analysis.transfer_function import build_transfer_function_summary
 from app.models.schemas import ScanConfig
 from app.core.data_manager import DataManager
 from app.core.structures import ExperimentStatus, ScanResult
@@ -34,6 +35,7 @@ from app.core.sequence_markers import (
     normalize_marker_definitions,
     validate_auto_marker_scan,
 )
+from app.drivers.tti_generator import TtiConnectionSettings, TtiGeneratorClient
 
 class ExperimentManager:
     _instance = None
@@ -583,6 +585,9 @@ class ExperimentManager:
             "sync_shared_token": "",
             "sync_allowed_master_ip": "",
             "sync_slaves": [],
+            "tti_host": "",
+            "tti_port": 9221,
+            "tti_timeout_s": 3.0,
             
             # --- [关键修复] 显式添加这三个参数的默认值 ---
             "intf_alpha": 0.35,
@@ -1172,6 +1177,64 @@ class ExperimentManager:
         scan_config['lock_in_b_value'] = b_value
         return parameters
 
+    def _build_transfer_function_execution(self, scan_config: Dict[str, Any]) -> List[Dict[str, Any]]:
+        if self._resolve_scan_dimensions(scan_config) != 1:
+            raise ValueError("Transfer Function only supports a 1D live scan")
+        if scan_config.get("randomize"):
+            raise ValueError("Transfer Function does not support Randomize")
+        if str(scan_config.get("parameter_source") or "classic").lower() != "classic":
+            raise ValueError("Transfer Function requires classic fixed-sequence execution")
+
+        start = float(scan_config.get("transfer_frequency_start_hz", 0))
+        stop = float(scan_config.get("transfer_frequency_stop_hz", 0))
+        step = float(scan_config.get("transfer_frequency_step_hz", 0))
+        if not all(math.isfinite(value) for value in (start, stop, step)):
+            raise ValueError("Transfer Function frequencies must be finite")
+        if step == 0:
+            raise ValueError("Transfer Function frequency step cannot be zero")
+        repeats = int(scan_config.get("transfer_repeats", 10))
+        if repeats < 2:
+            raise ValueError("Transfer Function requires at least 2 repeats per frequency")
+
+        direction = 1.0 if stop >= start else -1.0
+        effective_step = abs(step) * direction
+        tolerance = abs(effective_step) * 1e-9 + 1e-12
+        compare = (lambda value: value <= stop + tolerance) if direction > 0 else (lambda value: value >= stop - tolerance)
+        frequencies: List[float] = []
+        current = start
+        while compare(current):
+            frequencies.append(round(current, 6))
+            if len(frequencies) > 10000:
+                raise ValueError("Transfer Function scan exceeds 10000 frequency points")
+            current += effective_step
+        if not frequencies:
+            frequencies = [round(start, 6)]
+
+        parameters: List[Dict[str, Any]] = []
+        for frequency_index, frequency in enumerate(frequencies, start=1):
+            for repeat_index in range(1, repeats + 1):
+                parameters.append({
+                    "sequence_parameters": [],
+                    "metadata": {
+                        "display_parameters": [frequency],
+                        "transfer_frequency_hz": frequency,
+                        "transfer_frequency_index": frequency_index,
+                        "transfer_frequency_count": len(frequencies),
+                        "transfer_repeat": repeat_index,
+                        "transfer_repeats": repeats,
+                    },
+                })
+
+        scan_config["scan_dimensions"] = 1
+        scan_config["dim2_enabled"] = False
+        scan_config["dim3_enabled"] = False
+        scan_config["randomize"] = False
+        scan_config["averages"] = 1
+        scan_config["transfer_settling_time_s"] = 5.0
+        scan_config["transfer_frequency_values_hz"] = frequencies
+        scan_config["transfer_repeats"] = repeats
+        return parameters
+
     def _build_ac_stark_execution(self, scan_config: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         if self._resolve_scan_dimensions(scan_config) != 1:
             raise ValueError("AC Stark Centering only supports a 1D live scan")
@@ -1330,6 +1393,8 @@ class ExperimentManager:
                 parameters, ac_stark_context = self._build_ac_stark_execution(scan_config)
             elif scan_config.get('mode') == 'lock_in':
                 parameters = self._build_lock_in_execution(scan_config)
+            elif scan_config.get('mode') == 'transfer_function':
+                parameters = self._build_transfer_function_execution(scan_config)
             else:
                 parameters = self._generate_parameters(scan_config)
             if parameters_override is None or not scan_config.get('_sync_slave'):
@@ -2031,7 +2096,8 @@ class ExperimentManager:
         stream_type: str,
         extra_payload: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        params = job.get('params') or []
+        metadata = job.get('metadata') or {}
+        params = metadata.get('display_parameters') if isinstance(metadata.get('display_parameters'), list) else (job.get('params') or [])
         payload = {
             'stream_type': stream_type,
             'parameter': params[0] if params else None,
@@ -2041,7 +2107,7 @@ class ExperimentManager:
             'current_step': int(job.get('idx', 0)) + 1,
             'total_steps': int(job.get('total', 1) or 1),
         }
-        payload.update(job.get('metadata') or {})
+        payload.update(metadata)
         if extra_payload:
             payload.update(extra_payload)
         return payload
@@ -2068,7 +2134,12 @@ class ExperimentManager:
         params = job.get('params') or []
         metadata = job.get('metadata') or {}
         scan_dimensions = int(job.get('scan_dimensions', 1) or 1)
-        display_params = metadata.get('sync_parameters') if isinstance(metadata.get('sync_parameters'), list) else params
+        if isinstance(metadata.get('sync_parameters'), list):
+            display_params = metadata['sync_parameters']
+        elif isinstance(metadata.get('display_parameters'), list):
+            display_params = metadata['display_parameters']
+        else:
+            display_params = params
         primary_param = display_params[0] if display_params else None
         start_delay = float(job.get('start_delay', 0.0) or 0.0)
         volt_up_raw = job.get('volt_up') or []
@@ -2242,6 +2313,8 @@ class ExperimentManager:
                 fit_data_dw=fit_dw_store,
                 time_axis=time_axis_store,
                 all_parameters=display_params,
+                transfer_frequency_hz=metadata.get('transfer_frequency_hz'),
+                transfer_repeat=metadata.get('transfer_repeat'),
                 ac_stark_ratio=metadata.get('ac_stark_ratio'),
                 ac_stark_side=metadata.get('ac_stark_side'),
                 ac_stark_dds_element=metadata.get('ac_stark_dds_element'),
@@ -2333,8 +2406,19 @@ class ExperimentManager:
         print(f"--- Acquisition Started: {len(parameter_list)} points ---")
         total_steps = len(parameter_list)
         scan_dimensions = self._resolve_scan_dimensions(scan_config)
+        transfer_mode = str(scan_config.get("mode") or "").strip().lower() == "transfer_function"
+        tti_client: Optional[TtiGeneratorClient] = None
+        active_transfer_frequency: Optional[float] = None
 
         try:
+            if transfer_mode and not config.USE_SIMULATION:
+                tti_client = TtiGeneratorClient(TtiConnectionSettings(
+                    host=str(self.settings.get("tti_host") or "").strip(),
+                    port=int(self.settings.get("tti_port", 9221)),
+                    timeout_s=float(self.settings.get("tti_timeout_s", 3.0)),
+                ))
+                identity = tti_client.connect()
+                print(f"[Transfer Function] Connected to {identity}")
             for idx, param_set in enumerate(parameter_list):
                 if self.stop_flag:
                     break
@@ -2343,6 +2427,21 @@ class ExperimentManager:
                 if isinstance(param_set, dict) and 'sequence_parameters' in param_set:
                     sequence_parameters = param_set['sequence_parameters']
                     metadata = param_set.get('metadata') or {}
+                if transfer_mode:
+                    frequency = float((metadata or {}).get("transfer_frequency_hz"))
+                    if active_transfer_frequency is None or frequency != active_transfer_frequency:
+                        self.status.message = f"Setting TG5012A CH1 to {frequency:g} Hz..."
+                        if tti_client is not None:
+                            tti_client.set_ch1_frequency(frequency)
+                        active_transfer_frequency = frequency
+                        settling_time = float(scan_config.get("transfer_settling_time_s", 5.0))
+                        if not config.USE_SIMULATION and settling_time > 0:
+                            self.status.message = f"TG5012A confirmed {frequency:g} Hz; settling {settling_time:g} s..."
+                            deadline = time.monotonic() + settling_time
+                            while not self.stop_flag and time.monotonic() < deadline:
+                                time.sleep(min(0.1, max(0.0, deadline - time.monotonic())))
+                        if self.stop_flag:
+                            break
                 job = self.execute_single_measurement(
                     sequence_parameters,
                     scan_config,
@@ -2358,6 +2457,8 @@ class ExperimentManager:
             self._scan_finalize_error = f"Acquisition loop failed: {exc}"
             print(f"[Acq Error] {traceback.format_exc()}")
         finally:
+            if tti_client is not None:
+                tti_client.close()
             restore_error = self._restore_ac_stark_dds(ac_stark_context)
             if restore_error:
                 self._scan_finalize_error = restore_error
@@ -2441,6 +2542,7 @@ class ExperimentManager:
         print(f"[Fit] Using model: {selected_fit_model['label']} ({selected_fit_model['key']})")
         ac_stark_results: List[ScanResult] = []
         lock_in_results: List[ScanResult] = []
+        transfer_function_results: List[ScanResult] = []
 
         try:
             while True:
@@ -2466,6 +2568,8 @@ class ExperimentManager:
                     ac_stark_results.append(result)
                 if result is not None and result.lock_in_block_index is not None:
                     lock_in_results.append(result)
+                if result is not None and result.transfer_frequency_hz is not None:
+                    transfer_function_results.append(result)
                 self.publish_data(payload)
         finally:
             if ac_stark_results:
@@ -2486,6 +2590,14 @@ class ExperimentManager:
                 except Exception as exc:
                     self._scan_finalize_error = f"Lock-in analysis save failed: {exc}"
                     print(f"[Lock-in] {self._scan_finalize_error}")
+            if scan_config and scan_config.get('mode') == 'transfer_function':
+                try:
+                    self.data_manager.save_transfer_function_summary(
+                        build_transfer_function_summary(transfer_function_results)
+                    )
+                except Exception as exc:
+                    self._scan_finalize_error = f"Transfer Function summary save failed: {exc}"
+                    print(f"[Transfer Function] {self._scan_finalize_error}")
             self.data_manager.close_run()
             self.status.is_running = False
             if self._scan_finalize_error:

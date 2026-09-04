@@ -29,6 +29,7 @@ RESULTS_CSV_HEADER = [
     "LockIn_Block", "LockIn_Position", "LockIn_State", "LockIn_Reference",
     "Workflow_Step", "Workflow_Marker", "Workflow_Point", "Workflow_Repeat",
     "Workflow_Shot", "Workflow_Randomized",
+    "TTI_Frequency_Hz", "Transfer_Repeat",
 ]
 
 
@@ -167,6 +168,18 @@ class DataManager:
             writer.writeheader()
             writer.writerows(rows)
 
+    def save_transfer_function_summary(self, summary_rows: List[Dict[str, Any]]) -> None:
+        if not self.current_run_dir:
+            return
+        with open(self.current_run_dir / "transfer_function_summary.json", "w", encoding="utf-8") as handle:
+            json.dump(summary_rows, handle, ensure_ascii=False, indent=2)
+        if not summary_rows:
+            return
+        with open(self.current_run_dir / "transfer_function_summary.csv", "w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=list(summary_rows[0].keys()))
+            writer.writeheader()
+            writer.writerows(summary_rows)
+
     def _init_csv(self, path: Path):
         self.csv_handle = open(path, 'w', newline='')
         self.csv_writer = csv.writer(self.csv_handle)
@@ -209,6 +222,8 @@ class DataManager:
             workflow_repeat=result.workflow_repeat if result.workflow_repeat is not None else -1,
             workflow_shot=result.workflow_shot if result.workflow_shot is not None else -1,
             workflow_randomized=(1 if result.workflow_randomized else 0) if result.workflow_randomized is not None else -1,
+            transfer_frequency_hz=result.transfer_frequency_hz if result.transfer_frequency_hz is not None else np.nan,
+            transfer_repeat=result.transfer_repeat if result.transfer_repeat is not None else -1,
         )
 
     def _write_csv_row(self, result: ScanResult, step_index: int):
@@ -250,6 +265,8 @@ class DataManager:
             result.workflow_repeat if result.workflow_repeat is not None else "",
             result.workflow_shot if result.workflow_shot is not None else "",
             (1 if result.workflow_randomized else 0) if result.workflow_randomized is not None else "",
+            f(result.transfer_frequency_hz, 6),
+            result.transfer_repeat if result.transfer_repeat is not None else "",
         ]
         self.csv_writer.writerow(row)
         self.csv_handle.flush()

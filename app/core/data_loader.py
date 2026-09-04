@@ -11,6 +11,7 @@ import uuid
 import numpy as np
 
 from app.analysis import fitting, physics, interferometer_phase
+from app.analysis.transfer_function import build_transfer_function_summary
 from app.analysis.lock_in import build_lock_in_analysis
 import config
 
@@ -783,6 +784,8 @@ class DataLoader:
             "workflow_repeat": self._parse_int(row.get("Workflow_Repeat"), -1),
             "workflow_shot": self._parse_int(row.get("Workflow_Shot"), -1),
             "workflow_randomized": self._parse_int(row.get("Workflow_Randomized"), -1),
+            "transfer_frequency_hz": self._parse_float(row.get("TTI_Frequency_Hz")),
+            "transfer_repeat": self._parse_int(row.get("Transfer_Repeat"), -1),
         }
 
     def _read_results_csv(self, run_dir: Path, max_points: Optional[int] = MAX_DISPLAY_POINTS) -> List[Dict[str, Any]]:
@@ -1201,6 +1204,8 @@ class DataLoader:
         is_lock_in = str(config_data.get("mode") or "").strip().lower() == "lock_in"
         expected_lock_in_blocks = self._parse_int(config_data.get("averages"), 0) if is_lock_in else 0
         lock_in_analysis = build_lock_in_analysis(full_points, expected_blocks=expected_lock_in_blocks) if is_lock_in else {}
+        is_transfer_function = str(config_data.get("mode") or "").strip().lower() == "transfer_function"
+        transfer_function_summary = build_transfer_function_summary(full_points) if is_transfer_function else []
         sync_manifest = self._apply_sync_phase_reference_overrides(sync_manifest, phase_contexts)
         return {
             "config": config_data,
@@ -1214,6 +1219,7 @@ class DataLoader:
             ),
             "ac_stark_summary": self._build_ac_stark_summary(full_points),
             "lock_in_analysis": lock_in_analysis,
+            "transfer_function_summary": transfer_function_summary,
             "preview_map": (
                 initial_step.get("preview_map", {})
                 if is_marker_optimization
