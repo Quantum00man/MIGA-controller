@@ -1958,6 +1958,14 @@
                                         :class="plotMode === 'allan' ? 'btn-dark' : 'btn-outline-dark'"
                                         @click="setPlotMode('allan')">Allan</button>
                                 </div>
+                                <div v-if="loadedRunId && isTransferFunctionArchive()" class="btn-group btn-group-sm" role="group" aria-label="Transfer Function statistic">
+                                    <button class="btn" :aria-pressed="transferFunctionStatistic === 'std'"
+                                        :class="transferFunctionStatistic === 'std' ? 'btn-dark' : 'btn-outline-dark'"
+                                        @click="setTransferFunctionStatistic('std')">Standard deviation</button>
+                                    <button class="btn" :aria-pressed="transferFunctionStatistic === 'mean'"
+                                        :class="transferFunctionStatistic === 'mean' ? 'btn-dark' : 'btn-outline-dark'"
+                                        @click="setTransferFunctionStatistic('mean')">Mean value</button>
+                                </div>
                                 <select v-if="currentTab === 'phase'" class="form-select form-select-sm" style="width:auto" v-model="phaseUnit" aria-label="Phase unit">
                                     <option value="rad">rad</option><option value="mrad">mrad</option>
                                 </select>
@@ -2428,7 +2436,7 @@
                         busy: false, message: '', error: false, result: null
                     },
                     showDisplayMenu: false, showTofFitCurve: true, showTofRawCurve: true, showScanFitCurve: true,
-                    showRawData: true, phaseUnit: 'rad', maximizedView: null, currentTab: 'atoms', plotMode: 'series', allanOrder: 1, allanScaleMode: 'absolute', allanXAxisMode: 'linear', allanP0AvailableMin: null, allanP0AvailableMax: null, allanP0Min: null, allanP0Max: null, allanP0MinInput: '', allanP0MaxInput: '', plotRevision: 0,
+                    showRawData: true, phaseUnit: 'rad', maximizedView: null, currentTab: 'atoms', plotMode: 'series', transferFunctionStatistic: 'std', allanOrder: 1, allanScaleMode: 'absolute', allanXAxisMode: 'linear', allanP0AvailableMin: null, allanP0AvailableMax: null, allanP0Min: null, allanP0Max: null, allanP0MinInput: '', allanP0MaxInput: '', plotRevision: 0,
                     tabs: [{ id: 'atoms', label: 'Atom Number' }, { id: 'amp', label: 'Max Voltage' }, { id: 'tail', label: 'Tail Mean' }, { id: 'sigma', label: 'Width (ms)' }, { id: 'temp', label: 'Temperature' }, { id: 'arrival', label: 'Arrival Time' }, { id: 'prob', label: 'Transition Prob.' }, { id: 'intf', label: 'Interferometer' }, { id: 'phase', label: 'Interferometer Phase' }],
                     historyMap: {}, layoutResBase: {}, layoutResUp: {}, layoutResDw: {}, layoutResTot: {}, layoutOscUp: {}, layoutOscDw: {},
                     heatmapColorscale: [[0, '#c62828'], [0.5, '#fff3bf'], [1, '#1565c0']],
@@ -2927,6 +2935,13 @@
                 },
                 setAnalysisSource(useRaw) {
                     this.showRawData = Boolean(useRaw);
+                },
+                setTransferFunctionStatistic(statistic) {
+                    const normalized = statistic === 'mean' ? 'mean' : 'std';
+                    if (this.transferFunctionStatistic === normalized) return;
+                    this.transferFunctionStatistic = normalized;
+                    this.plotRevision++;
+                    this.renderMainPlot();
                 },
                 togglePanel(panelKey) {
                     this.collapsedPanels = {
@@ -7917,23 +7932,26 @@
                     const rows = (Array.isArray(this.transferFunctionSummary) ? this.transferFunctionSummary : [])
                         .slice().sort((a, b) => Number(a.frequency_hz) - Number(b.frequency_hz));
                     const raw = this.showRawData;
+                    const statistic = this.transferFunctionStatistic === 'mean' ? 'mean' : 'std';
+                    const statisticLabel = statistic === 'mean' ? 'mean value' : 'standard deviation';
+                    const hoverStatisticLabel = statistic === 'mean' ? 'Mean' : 'Std';
                     let fields;
                     let labels;
                     let metricLabel;
                     if (this.currentTab === 'intf') {
                         fields = raw
-                            ? ['intf_p1_nofit_std', 'intf_p2_nofit_std', null]
-                            : ['intf_p1_fit_std', 'intf_p2_fit_std', null];
+                            ? [`intf_p1_nofit_${statistic}`, `intf_p2_nofit_${statistic}`, null]
+                            : [`intf_p1_fit_${statistic}`, `intf_p2_fit_${statistic}`, null];
                         labels = ['P1', 'P2', ''];
                         metricLabel = 'Interferometer probability';
                     } else if (this.currentTab === 'phase') {
-                        fields = ['interferometer_phase_std', null, null];
+                        fields = [`interferometer_phase_${statistic}`, null, null];
                         labels = ['Phase', '', ''];
                         metricLabel = `Calibrated interferometer phase (${this.phaseUnit})`;
                     } else {
                         fields = raw
-                            ? ['atom_number_up_nofit_std', 'atom_number_dw_nofit_std', 'atom_number_total_nofit_std']
-                            : ['atom_number_up_fit_std', 'atom_number_dw_fit_std', 'atom_number_total_fit_std'];
+                            ? [`atom_number_up_nofit_${statistic}`, `atom_number_dw_nofit_${statistic}`, `atom_number_total_nofit_${statistic}`]
+                            : [`atom_number_up_fit_${statistic}`, `atom_number_dw_fit_${statistic}`, `atom_number_total_fit_${statistic}`];
                         labels = ['UP', 'DOWN', 'TOTAL (UP+DOWN)'];
                         metricLabel = 'Atom number';
                     }
@@ -7945,7 +7963,7 @@
                             Plotly.react(plotIds[index], [], this[`layoutRes${index === 0 ? 'Up' : index === 1 ? 'Dw' : 'Tot'}`]);
                             return;
                         }
-                        const countField = field.replace('_std', '_count');
+                        const countField = field.replace(`_${statistic}`, '_count');
                         const scale = this.currentTab === 'phase' && this.phaseUnit === 'mrad' ? 1000 : 1;
                         const trace = {
                             x: rows.map(row => Number(row.frequency_hz)),
@@ -7953,10 +7971,10 @@
                             customdata: rows.map(row => this.getHistoryKey([Number(row.frequency_hz)])),
                             text: rows.map(row => Number(row[countField] ?? row.shot_count ?? 0)),
                             type: 'scatter', mode: 'lines+markers',
-                            name: `${labels[index]} standard deviation`,
+                            name: `${labels[index]} ${statisticLabel}`,
                             line: { color: colors[index], width: 2 }, marker: { color: colors[index], size: 7 },
                             connectgaps: false,
-                            hovertemplate: 'Frequency=%{x:.9g} Hz<br>Std=%{y:.6g}<br>n=%{text}<extra></extra>'
+                            hovertemplate: `Frequency=%{x:.9g} Hz<br>${hoverStatisticLabel}=%{y:.6g}<br>n=%{text}<extra></extra>`
                         };
                         const base = this.buildCommonAnalysisLayout();
                         const isLastVisible = (this.currentTab === 'atoms' && index === 2)
@@ -7966,8 +7984,8 @@
                             ...base,
                             margin: isLastVisible ? { t: 10, b: 50, l: 78, r: 20 } : { t: 38, b: 8, l: 78, r: 20 },
                             xaxis: { ...base.xaxis, title: isLastVisible ? this.getArchiveXAxisLabel() : '', showticklabels: isLastVisible },
-                            yaxis: { ...base.yaxis, title: `${metricLabel} standard deviation` },
-                            title: { text: `${labels[index]} | Transfer Function | ${sourceLabel}`, font: { size: 13 }, x: 0.05, y: 0.93 },
+                            yaxis: { ...base.yaxis, title: `${metricLabel} ${statisticLabel}` },
+                            title: { text: `${labels[index]} | Transfer Function | ${sourceLabel} | ${statisticLabel}`, font: { size: 13 }, x: 0.05, y: 0.93 },
                             showlegend: false
                         };
                         if (index === 0) this.layoutResUp = layout;

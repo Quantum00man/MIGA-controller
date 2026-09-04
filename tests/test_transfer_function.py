@@ -163,7 +163,19 @@ class TransferFunctionStatisticsTests(unittest.TestCase):
         self.assertAlmostEqual(summary[0]["atom_number_up_fit_std"], 1.0)
         self.assertAlmostEqual(summary[0]["atom_number_total_fit_std"], 1.0)
         self.assertAlmostEqual(summary[0]["interferometer_phase_std"], 0.1)
+        self.assertAlmostEqual(summary[0]["atom_number_up_fit_mean"], 2.0)
+        self.assertAlmostEqual(summary[0]["atom_number_total_fit_mean"], 10.0)
+        self.assertAlmostEqual(summary[0]["interferometer_phase_mean"], 0.2)
         self.assertEqual(summary[0]["interferometer_phase_count"], 3)
+
+    def test_archive_frontend_can_switch_between_std_and_mean(self):
+        archive_html = (
+            Path(__file__).resolve().parents[1] / "static" / "archive.html"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("transferFunctionStatistic: 'std'", archive_html)
+        self.assertIn("setTransferFunctionStatistic('mean')", archive_html)
+        self.assertIn("`interferometer_phase_${statistic}`", archive_html)
 
     def test_summary_excludes_invalid_calibrated_phase(self):
         rows = [
