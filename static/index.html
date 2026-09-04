@@ -3804,6 +3804,10 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     const parsed = Number(value);
                     return Number.isFinite(parsed) ? parsed : Number.NaN;
                 },
+                hasFiniteNumericValue(value) {
+                    return value !== null && value !== undefined && value !== ''
+                        && Number.isFinite(Number(value));
+                },
                 needsModeParam(mode = this.config.mode, scanDimensions = this.getConfiguredScanDimensions()) {
                     return scanDimensions === 1 && ['timing', 'rabi'].includes(mode);
                 },
@@ -5127,7 +5131,10 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     const scannedParams = this.getScannedParameters(data, scanDimensions);
                     const isAcStarkPoint = Number.isFinite(Number(data.ac_stark_ratio)) && ['left', 'right'].includes(String(data.ac_stark_side || '').toLowerCase());
                     const isLockInPoint = Number.isInteger(Number(data.lock_in_block_index)) && Number(data.lock_in_block_index) > 0;
-                    const isTransferFunctionPoint = Number.isFinite(Number(data.transfer_frequency_hz));
+                    // Optional numeric fields are null outside their scan mode.
+                    // Number(null) is 0, so coercion alone would misclassify an
+                    // ordinary scan point as a 0 Hz Transfer Function point.
+                    const isTransferFunctionPoint = this.hasFiniteNumericValue(data.transfer_frequency_hz);
                     const isFinalImmediateStep = !this.isScheduleActive() && !this.isSyncMode() && total > 0 && this.currentStep >= total;
                     this.currentScanDimensions = scanDimensions;
                     this.statusMessage = isTransferFunctionPoint

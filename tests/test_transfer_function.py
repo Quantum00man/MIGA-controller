@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from app.analysis.transfer_function import build_transfer_function_summary
@@ -79,6 +80,20 @@ class TtiGeneratorClientTests(unittest.TestCase):
 
 
 class TransferFunctionPlanTests(unittest.TestCase):
+    def test_frontend_does_not_treat_null_frequency_as_transfer_function_point(self):
+        index_html = (
+            Path(__file__).resolve().parents[1] / "static" / "index.html"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn(
+            "const isTransferFunctionPoint = this.hasFiniteNumericValue(data.transfer_frequency_hz);",
+            index_html,
+        )
+        self.assertIn(
+            "value !== null && value !== undefined && value !== ''",
+            index_html,
+        )
+
     def setUp(self):
         self.manager = ExperimentManager.__new__(ExperimentManager)
         self.manager.settings = {"tti_model": "TG5012A", "tti_channel": 1}
