@@ -61,10 +61,27 @@ class TtiGeneratorClientTests(unittest.TestCase):
             "CHN 1;FREQ 9876.54321;*OPC?\n",
         ])
 
+    def test_tg5012a_can_set_channel_two(self):
+        fake = FakeSocket(["TTi,TG5012A,1234,1.00", "1"])
+        settings = TtiConnectionSettings("192.168.1.8", model="TG5012A", channel=2)
+        with patch("app.drivers.tti_generator.socket.create_connection", return_value=fake):
+            with TtiGeneratorClient(settings) as client:
+                client.set_frequency(1234.5)
+        self.assertEqual(fake.sent, ["*IDN?\n", "CHN 2;FREQ 1234.5;*OPC?\n"])
+
+    def test_tgf3162_uses_fire_and_forget_frequency_command(self):
+        fake = FakeSocket(["THURLBY THANDAR,TGF3162,1234,1.03"])
+        settings = TtiConnectionSettings("192.168.1.9", model="TGF3162", channel=2)
+        with patch("app.drivers.tti_generator.socket.create_connection", return_value=fake):
+            with TtiGeneratorClient(settings) as client:
+                client.set_frequency(2_000_000)
+        self.assertEqual(fake.sent, ["*IDN?\n", "CHN 2;FREQ 2000000\n"])
+
 
 class TransferFunctionPlanTests(unittest.TestCase):
     def setUp(self):
         self.manager = ExperimentManager.__new__(ExperimentManager)
+        self.manager.settings = {"tti_model": "TG5012A", "tti_channel": 1}
 
     def test_plan_runs_fixed_sequence_repeated_at_each_frequency(self):
         config = {
@@ -88,6 +105,8 @@ class TransferFunctionPlanTests(unittest.TestCase):
         self.assertEqual(config["transfer_frequency_values_hz"], [100.0, 200.0, 300.0])
         self.assertEqual(config["averages"], 1)
         self.assertEqual(config["transfer_settling_time_s"], 5.0)
+        self.assertEqual(config["transfer_generator_model"], "TG5012A")
+        self.assertEqual(config["transfer_generator_channel"], 1)
 
     def test_plan_supports_descending_frequency(self):
         config = {

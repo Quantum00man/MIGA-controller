@@ -1036,7 +1036,7 @@
                     </div>
                     <div v-if="config.mode === 'transfer_function'" class="mt-1">
                         <div class="alert alert-light border py-2 px-3 small mb-3">
-                            Live 1D scan. Sets TG5012A CH1 carrier frequency, waits 5 s, then runs the uploaded sequence unchanged.
+                            Live 1D scan. Sets the configured TTI generator channel frequency, waits 5 s, then runs the uploaded sequence unchanged.
                         </div>
                         <div class="row g-2">
                             <div class="col-4">
@@ -1063,7 +1063,7 @@
                                 </div>
                             </div>
                         </div>
-                        <div class="form-text mt-2">Sample standard deviation (n−1) is updated after every shot. Configure the instrument IP in Settings → TG5012A.</div>
+                        <div class="form-text mt-2">Sample standard deviation (n−1) is updated after every shot. Select the model, channel and IP in Settings → TTI Generator.</div>
                     </div>
                     <div v-if="['timing', 'rabi'].includes(config.mode)">
                         <label class="form-label small text-muted mb-1">Total Parameter</label>
@@ -4785,7 +4785,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                             layout: {
                                 ...base,
                                 margin: isUp ? { t: 38, b: 8, l: 76, r: 20 } : { t: 10, b: 50, l: 76, r: 20 },
-                                xaxis: { ...base.xaxis, title: isUp ? '' : 'TG5012A CH1 frequency (Hz)', showticklabels: !isUp },
+                                xaxis: { ...base.xaxis, title: isUp ? '' : 'TTI carrier frequency (Hz)', showticklabels: !isUp },
                                 yaxis: { ...base.yaxis, title: `${label} standard deviation` },
                                 title: { text: `${channel} | Transfer Function | ${sourceLabel}`, font: { size: 13 }, x: 0.05, y: 0.93 },
                                 showlegend: false
@@ -5131,7 +5131,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     const isFinalImmediateStep = !this.isScheduleActive() && !this.isSyncMode() && total > 0 && this.currentStep >= total;
                     this.currentScanDimensions = scanDimensions;
                     this.statusMessage = isTransferFunctionPoint
-                        ? `Transfer Function: ${Number(data.transfer_frequency_hz).toPrecision(8)} Hz | ${Number(data.transfer_repeat)}/${Number(this.config.transfer_repeats)}`
+                        ? `Transfer Function: ${String(data.transfer_generator_model || 'TTI')} CH${Number(data.transfer_generator_channel || 1)} | ${Number(data.transfer_frequency_hz).toPrecision(8)} Hz | ${Number(data.transfer_repeat)}/${Number(this.config.transfer_repeats)}`
                         : (isAcStarkPoint
                         ? `AC Stark: ratio=${Number(data.ac_stark_ratio).toFixed(6)} | ${String(data.ac_stark_side).toUpperCase()}`
                         : (isLockInPoint
@@ -5171,7 +5171,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                                 this.recordTransferFunctionPoint(data);
                                 this.plotRevision++;
                                 this.renderMainPlot();
-                                this.addLog(`Transfer Function | ${Number(data.transfer_frequency_hz).toPrecision(9)} Hz | repeat ${Number(data.transfer_repeat)}/${Number(this.config.transfer_repeats)}`);
+                                this.addLog(`Transfer Function | ${String(data.transfer_generator_model || 'TTI')} CH${Number(data.transfer_generator_channel || 1)} | ${Number(data.transfer_frequency_hz).toPrecision(9)} Hz | repeat ${Number(data.transfer_repeat)}/${Number(this.config.transfer_repeats)}`);
                                 if (isFinalImmediateStep) {
                                     this.finalizeImmediateScanCompletion(total);
                                 } else if (this.isRunning) {

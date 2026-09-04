@@ -3124,7 +3124,11 @@
                     await this.applyDisplayedPoints(this.loadedPoints, this.savedStats, this.savedPreviewMap, true);
                 },
                 getArchiveXAxisLabel() {
-                    if (this.isTransferFunctionArchive()) return "TG5012A CH1 frequency (Hz)";
+                    if (this.isTransferFunctionArchive()) {
+                        const model = String(this.loadedConfig?.transfer_generator_model || 'TTI');
+                        const channel = Number(this.loadedConfig?.transfer_generator_channel || 1);
+                        return `${model} CH${channel} frequency (Hz)`;
+                    }
                     const step = this.activeOptimizationStep();
                     return step?.marker_name || step?.marker_id || "Parameter P0";
                 },
@@ -7961,7 +7965,7 @@
                         const layout = {
                             ...base,
                             margin: isLastVisible ? { t: 10, b: 50, l: 78, r: 20 } : { t: 38, b: 8, l: 78, r: 20 },
-                            xaxis: { ...base.xaxis, title: isLastVisible ? 'TG5012A CH1 frequency (Hz)' : '', showticklabels: isLastVisible },
+                            xaxis: { ...base.xaxis, title: isLastVisible ? this.getArchiveXAxisLabel() : '', showticklabels: isLastVisible },
                             yaxis: { ...base.yaxis, title: `${metricLabel} standard deviation` },
                             title: { text: `${labels[index]} | Transfer Function | ${sourceLabel}`, font: { size: 13 }, x: 0.05, y: 0.93 },
                             showlegend: false

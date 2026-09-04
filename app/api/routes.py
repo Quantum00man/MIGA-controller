@@ -1254,12 +1254,14 @@ async def test_tti_generator(settings: TtiConnectionTestRequest):
                 host=settings.host,
                 port=settings.port,
                 timeout_s=settings.timeout_s,
+                model=settings.model,
+                channel=settings.channel,
             ),
         )
         return ExperimentResponse(
             status="success",
-            message="TG5012A connection verified",
-            data={"identity": identity},
+            message=f"{settings.model} connection verified",
+            data={"identity": identity, "model": settings.model, "channel": settings.channel},
         )
     except TtiGeneratorError as exc:
         raise HTTPException(502, str(exc))
@@ -1274,13 +1276,20 @@ async def test_tti_generator_frequency(settings: TtiFrequencyTestRequest):
                 host=settings.host,
                 port=settings.port,
                 timeout_s=settings.timeout_s,
+                model=settings.model,
+                channel=settings.channel,
             ),
             settings.frequency_hz,
         )
         return ExperimentResponse(
             status="success",
-            message="TG5012A CH1 test frequency confirmed",
-            data={"identity": identity, "frequency_hz": settings.frequency_hz},
+            message=f"{settings.model} CH{settings.channel} test frequency accepted",
+            data={
+                "identity": identity,
+                "model": settings.model,
+                "channel": settings.channel,
+                "frequency_hz": settings.frequency_hz,
+            },
         )
     except TtiGeneratorError as exc:
         raise HTTPException(502, str(exc))

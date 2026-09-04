@@ -492,10 +492,19 @@ class SystemSettings(BaseModel):
     tti_host: str = Field("")
     tti_port: int = Field(9221, ge=1, le=65535)
     tti_timeout_s: float = Field(3.0, ge=0.2, le=120.0)
+    tti_model: str = Field("TG5012A")
+    tti_channel: int = Field(1, ge=1, le=2)
 
     @validator("tti_host")
     def normalize_tti_host(cls, value):
         return str(value or "").strip()
+
+    @validator("tti_model")
+    def validate_tti_model(cls, value):
+        normalized = str(value or "").strip().upper()
+        if normalized not in {"TG5012A", "TGF3162"}:
+            raise ValueError("TTI model must be TG5012A or TGF3162")
+        return normalized
 
     @validator("sync_role")
     def validate_sync_role(cls, value):
@@ -514,12 +523,21 @@ class TtiConnectionTestRequest(BaseModel):
     host: str
     port: int = Field(9221, ge=1, le=65535)
     timeout_s: float = Field(3.0, ge=0.2, le=120.0)
+    model: str = Field("TG5012A")
+    channel: int = Field(1, ge=1, le=2)
 
     @validator("host")
     def validate_host(cls, value):
         normalized = str(value or "").strip()
         if not normalized:
-            raise ValueError("TG5012A IP address is required")
+            raise ValueError("TTI generator IP address is required")
+        return normalized
+
+    @validator("model")
+    def validate_model(cls, value):
+        normalized = str(value or "").strip().upper()
+        if normalized not in {"TG5012A", "TGF3162"}:
+            raise ValueError("TTI model must be TG5012A or TGF3162")
         return normalized
 
 
@@ -530,7 +548,7 @@ class TtiFrequencyTestRequest(TtiConnectionTestRequest):
     def validate_frequency(cls, value):
         numeric = float(value)
         if not math.isfinite(numeric):
-            raise ValueError("TG5012A test frequency must be finite")
+            raise ValueError("TTI test frequency must be finite")
         return numeric
 
 

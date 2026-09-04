@@ -549,7 +549,21 @@
                 <div v-if="tab==='tti'">
                     <div class="row g-3 align-items-end">
                         <div class="col-md-6">
-                            <label class="form-label fw-bold" for="tti-host">TG5012A IP address</label>
+                            <label class="form-label fw-bold" for="tti-model">Generator model</label>
+                            <select id="tti-model" class="form-select" v-model="s.tti_model">
+                                <option value="TG5012A">TG5012A</option>
+                                <option value="TGF3162">TGF3162</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold" for="tti-channel">Scan channel</label>
+                            <select id="tti-channel" class="form-select" v-model.number="s.tti_channel">
+                                <option :value="1">CH1</option>
+                                <option :value="2">CH2</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold" for="tti-host">Instrument IP address</label>
                             <input id="tti-host" class="form-control font-monospace" v-model.trim="s.tti_host"
                                 placeholder="192.168.1.100" autocomplete="off">
                             <div class="form-text">The controller connects directly to the instrument LAN socket.</div>
@@ -574,7 +588,7 @@
                             </span>
                         </div>
                         <div class="col-12 mt-4 pt-3 border-top">
-                            <label class="form-label fw-bold" for="tti-test-frequency">Test CH1 frequency</label>
+                            <label class="form-label fw-bold" for="tti-test-frequency">Test {{ s.tti_channel === 2 ? 'CH2' : 'CH1' }} frequency</label>
                             <div class="row g-2 align-items-center">
                                 <div class="col-md-6">
                                     <div class="input-group">
@@ -591,7 +605,7 @@
                                     </button>
                                 </div>
                                 <div class="col-12">
-                                    <div class="form-text">This immediately changes the connected TG5012A CH1 carrier frequency and does not restore its previous value.</div>
+                                    <div class="form-text">This immediately changes the selected channel carrier frequency and does not restore its previous value.</div>
                                     <div v-if="ttiFrequencyMessage" class="small mt-2" :class="ttiFrequencyError ? 'text-danger' : 'text-success'">
                                         {{ ttiFrequencyMessage }}
                                     </div>
@@ -600,7 +614,7 @@
                         </div>
                     </div>
                     <div class="alert alert-light border mt-4 mb-0 small">
-                        Transfer Function scans select CH1 and change only its carrier frequency. Waveform, amplitude,
+                        Transfer Function scans select the configured channel and change only its carrier frequency. Waveform, amplitude,
                         phase and output state are left unchanged.
                     </div>
                 </div>
@@ -1553,7 +1567,7 @@
                         { id: 'fitting', label: 'Fitting Models', icon: 'bi-bezier2', description: 'Manage atom-area calculation and the models used for time-of-flight fitting.' },
                         { id: 'phase', label: 'Interferometer Phase', icon: 'bi-activity', description: 'Manage Bragg fringe calibrations, data sources and the fixed T or T² phase reference.' },
                         { id: 'sync', label: 'SYNC', icon: 'bi-bounding-box-circles', description: 'Configure Standalone, Master or Slave operation for synchronized differential measurements.' },
-                        { id: 'tti', label: 'TG5012A', icon: 'bi-soundwave', description: 'Configure and verify the direct LAN connection used by Transfer Function scans.' },
+                        { id: 'tti', label: 'TTI Generator', icon: 'bi-soundwave', description: 'Select a TG5012A or TGF3162, choose its channel, and verify the direct LAN connection used by Transfer Function scans.' },
                         { id: 'net', label: 'Network', icon: 'bi-hdd-network', description: 'Select the acquisition platform and configure device connection limits.' },
                         { id: 'logic', label: 'Logic & Channels', icon: 'bi-diagram-3', description: 'Set launch, trigger and linked-mode channel timing.' },
                         { id: 'paths', label: 'System Paths', icon: 'bi-folder2-open', description: 'Configure executable and default template locations used by the controller.' },
@@ -2561,9 +2575,11 @@
                         const res = await axios.post('/settings/tti/test', {
                             host: String(this.s.tti_host || '').trim(),
                             port: Number(this.s.tti_port || 9221),
-                            timeout_s: Number(this.s.tti_timeout_s || 3)
+                            timeout_s: Number(this.s.tti_timeout_s || 3),
+                            model: String(this.s.tti_model || 'TG5012A'),
+                            channel: Number(this.s.tti_channel || 1)
                         });
-                        this.ttiTestMessage = `Connected: ${res.data?.data?.identity || 'TG5012A'}`;
+                        this.ttiTestMessage = `Connected: ${res.data?.data?.identity || this.s.tti_model || 'TTI generator'}`;
                     } catch (error) {
                         this.ttiTestError = true;
                         this.ttiTestMessage = error.response?.data?.detail || error.message || 'Connection failed';
@@ -2582,10 +2598,15 @@
                             host: String(this.s.tti_host || '').trim(),
                             port: Number(this.s.tti_port || 9221),
                             timeout_s: Number(this.s.tti_timeout_s || 3),
+                            model: String(this.s.tti_model || 'TG5012A'),
+                            channel: Number(this.s.tti_channel || 1),
                             frequency_hz: frequency
                         });
                         const confirmed = Number(res.data?.data?.frequency_hz);
-                        this.ttiFrequencyMessage = `CH1 frequency confirmed at ${Number.isFinite(confirmed) ? confirmed.toPrecision(12) : frequency} Hz.`;
+                        const model = String(res.data?.data?.model || this.s.tti_model || 'TTI');
+                        const channel = Number(res.data?.data?.channel || this.s.tti_channel || 1);
+                        const action = model === 'TGF3162' ? 'accepted' : 'confirmed';
+                        this.ttiFrequencyMessage = `${model} CH${channel} frequency ${action} at ${Number.isFinite(confirmed) ? confirmed.toPrecision(12) : frequency} Hz.`;
                     } catch (error) {
                         this.ttiFrequencyError = true;
                         this.ttiFrequencyMessage = error.response?.data?.detail || error.message || 'Frequency command failed';
@@ -2854,6 +2875,9 @@
                     });
                     normalized.update_repo_url = String(normalized.update_repo_url || '').trim();
                     normalized.tti_host = String(normalized.tti_host || '').trim();
+                    normalized.tti_model = ['TG5012A', 'TGF3162'].includes(String(normalized.tti_model || '').toUpperCase())
+                        ? String(normalized.tti_model).toUpperCase() : 'TG5012A';
+                    normalized.tti_channel = Number(normalized.tti_channel) === 2 ? 2 : 1;
                     const ttiPort = Number.parseInt(normalized.tti_port ?? 9221, 10);
                     const ttiTimeout = Number(normalized.tti_timeout_s ?? 3);
                     normalized.tti_port = Number.isFinite(ttiPort) && ttiPort >= 1 && ttiPort <= 65535 ? ttiPort : 9221;

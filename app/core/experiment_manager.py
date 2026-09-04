@@ -588,6 +588,8 @@ class ExperimentManager:
             "tti_host": "",
             "tti_port": 9221,
             "tti_timeout_s": 3.0,
+            "tti_model": "TG5012A",
+            "tti_channel": 1,
             
             # --- [关键修复] 显式添加这三个参数的默认值 ---
             "intf_alpha": 0.35,
@@ -1231,6 +1233,8 @@ class ExperimentManager:
         scan_config["randomize"] = False
         scan_config["averages"] = 1
         scan_config["transfer_settling_time_s"] = 5.0
+        scan_config["transfer_generator_model"] = str(self.settings.get("tti_model") or "TG5012A").strip().upper()
+        scan_config["transfer_generator_channel"] = int(self.settings.get("tti_channel", 1))
         scan_config["transfer_frequency_values_hz"] = frequencies
         scan_config["transfer_repeats"] = repeats
         return parameters
@@ -2409,6 +2413,8 @@ class ExperimentManager:
         transfer_mode = str(scan_config.get("mode") or "").strip().lower() == "transfer_function"
         tti_client: Optional[TtiGeneratorClient] = None
         active_transfer_frequency: Optional[float] = None
+        transfer_model = str(scan_config.get("transfer_generator_model") or "TG5012A").strip().upper()
+        transfer_channel = int(scan_config.get("transfer_generator_channel", 1))
 
         try:
             if transfer_mode and not config.USE_SIMULATION:
@@ -2416,9 +2422,11 @@ class ExperimentManager:
                     host=str(self.settings.get("tti_host") or "").strip(),
                     port=int(self.settings.get("tti_port", 9221)),
                     timeout_s=float(self.settings.get("tti_timeout_s", 3.0)),
+                    model=transfer_model,
+                    channel=transfer_channel,
                 ))
                 identity = tti_client.connect()
-                print(f"[Transfer Function] Connected to {identity}")
+                print(f"[Transfer Function] Connected to {identity}; using CH{transfer_channel}")
             for idx, param_set in enumerate(parameter_list):
                 if self.stop_flag:
                     break
@@ -2428,15 +2436,18 @@ class ExperimentManager:
                     sequence_parameters = param_set['sequence_parameters']
                     metadata = param_set.get('metadata') or {}
                 if transfer_mode:
+                    metadata["transfer_generator_model"] = transfer_model
+                    metadata["transfer_generator_channel"] = transfer_channel
                     frequency = float((metadata or {}).get("transfer_frequency_hz"))
                     if active_transfer_frequency is None or frequency != active_transfer_frequency:
-                        self.status.message = f"Setting TG5012A CH1 to {frequency:g} Hz..."
+                        self.status.message = f"Setting {transfer_model} CH{transfer_channel} to {frequency:g} Hz..."
                         if tti_client is not None:
-                            tti_client.set_ch1_frequency(frequency)
+                            tti_client.set_frequency(frequency)
                         active_transfer_frequency = frequency
                         settling_time = float(scan_config.get("transfer_settling_time_s", 5.0))
                         if not config.USE_SIMULATION and settling_time > 0:
-                            self.status.message = f"TG5012A confirmed {frequency:g} Hz; settling {settling_time:g} s..."
+                            action = "confirmed" if transfer_model == "TG5012A" else "accepted"
+                            self.status.message = f"{transfer_model} CH{transfer_channel} {action} {frequency:g} Hz; settling {settling_time:g} s..."
                             deadline = time.monotonic() + settling_time
                             while not self.stop_flag and time.monotonic() < deadline:
                                 time.sleep(min(0.1, max(0.0, deadline - time.monotonic())))
