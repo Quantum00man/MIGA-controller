@@ -1063,7 +1063,7 @@
                                 </div>
                             </div>
                         </div>
-                        <div class="form-text mt-2">Sample standard deviation (n−1) is updated after every shot. Select the model, channel and IP in Settings → TTI Generator.</div>
+                        <div class="form-text mt-2">Statistics are updated after every shot. Select the model, channel and 780 nm modulation amplitude in Settings → Transfer Function.</div>
                     </div>
                     <div v-if="['timing', 'rabi'].includes(config.mode)">
                         <label class="form-label small text-muted mb-1">Total Parameter</label>
@@ -1484,7 +1484,19 @@
                     </div>
 
                     <div class="analysis-header-actions">
-                        <select v-if="currentTab === 'phase'" class="form-select form-select-sm" style="width:auto" v-model="phaseUnit" aria-label="Phase unit"><option value="rad">rad</option><option value="mrad">mrad</option></select>
+                        <div v-if="config.mode === 'transfer_function'" class="btn-group btn-group-sm" role="group" aria-label="Transfer Function statistic">
+                            <button class="btn" :aria-pressed="transferFunctionStatistic === 'std'"
+                                :class="transferFunctionStatistic === 'std' ? 'btn-dark' : 'btn-outline-dark'"
+                                @click="setTransferFunctionStatistic('std')">Standard deviation</button>
+                            <button class="btn" :aria-pressed="transferFunctionStatistic === 'mean'"
+                                :class="transferFunctionStatistic === 'mean' ? 'btn-dark' : 'btn-outline-dark'"
+                                @click="setTransferFunctionStatistic('mean')">Mean value</button>
+                            <button class="btn" :aria-pressed="transferFunctionStatistic === 's2'"
+                                :class="transferFunctionStatistic === 's2' ? 'btn-dark' : 'btn-outline-dark'"
+                                :disabled="currentTab !== 'phase'" title="S² is defined for Interferometer Phase"
+                                @click="setTransferFunctionStatistic('s2')">S²</button>
+                        </div>
+                        <select v-if="currentTab === 'phase' && transferFunctionStatistic !== 's2'" class="form-select form-select-sm" style="width:auto" v-model="phaseUnit" aria-label="Phase unit"><option value="rad">rad</option><option value="mrad">mrad</option></select>
                         <button class="btn-icon" @click="toggleMaximize('analysis')"
                             :title="maximizedView === 'analysis' ? 'Restore analysis view' : 'Maximize analysis view'"
                             :aria-label="maximizedView === 'analysis' ? 'Restore analysis view' : 'Maximize analysis view'">
@@ -1730,6 +1742,8 @@
                     maximizedView: null,
                     currentTab: 'atoms',
                     phaseUnit: 'rad',
+                    transferFunctionStatistic: 'std',
+                    transferFrequencyModulationMhz: null,
                     currentScanDimensions: 1,
                     tabs: [{ id: 'atoms', label: 'Atom Number' }, { id: 'amp', label: 'Max Voltage' }, { id: 'tail', label: 'Tail Mean' }, { id: 'sigma', label: 'Width (ms)' }, { id: 'temp', label: 'Temperature' }, { id: 'arrival', label: 'Arrival Time' }, { id: 'prob', label: 'Transition Prob.' }, { id: 'intf', label: 'Interferometer' }, { id: 'phase', label: 'Interferometer Phase' }],
                     historyMap: {},
@@ -1759,7 +1773,13 @@
                 }
             },
             watch: {
-                currentTab() { this.plotRevision++; this.renderMainPlot(); },
+                currentTab(value) {
+                    if (value !== 'phase' && this.transferFunctionStatistic === 's2') {
+                        this.transferFunctionStatistic = 'std';
+                    }
+                    this.plotRevision++;
+                    this.renderMainPlot();
+                },
                 phaseUnit() {
                     const syncPhaseAxis = this.isSyncMode() && this.syncViewMode === 'lissajous'
                         && (this.syncAxisX.metric === 'phase' || this.syncAxisY.metric === 'phase');
@@ -4726,6 +4746,10 @@ finishScheduledRun(finalStatus = 'IDLE') {
                 recordTransferFunctionPoint(data) {
                     const frequency = Number(data.transfer_frequency_hz);
                     if (!Number.isFinite(frequency)) return;
+                    const modulationMhz = Number(data.transfer_frequency_modulation_mhz);
+                    if (Number.isFinite(modulationMhz) && modulationMhz > 0) {
+                        this.transferFrequencyModulationMhz = modulationMhz;
+                    }
                     const key = frequency.toPrecision(15);
                     if (!this.transferFunctionHistoryMap[key]) {
                         this.transferFunctionHistoryMap[key] = {
@@ -4751,6 +4775,25 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     const variance = valid.reduce((sum, value) => sum + ((value - mean) ** 2), 0) / (valid.length - 1);
                     return Math.sqrt(Math.max(0, variance));
                 },
+                sampleMean(values) {
+                    const valid = (Array.isArray(values) ? values : []).map(Number).filter(Number.isFinite);
+                    if (!valid.length) return null;
+                    return valid.reduce((sum, value) => sum + value, 0) / valid.length;
+                },
+                transferBraggPhaseAmplitudeRad() {
+                    const modulationMhz = Number(this.transferFrequencyModulationMhz);
+                    if (!Number.isFinite(modulationMhz) || modulationMhz <= 0) return null;
+                    return (4 * Math.PI * 2.23 / 299792458) * modulationMhz * 1e6;
+                },
+                setTransferFunctionStatistic(statistic) {
+                    const normalized = statistic === 's2' && this.currentTab === 'phase'
+                        ? 's2'
+                        : (statistic === 'mean' ? 'mean' : 'std');
+                    if (this.transferFunctionStatistic === normalized) return;
+                    this.transferFunctionStatistic = normalized;
+                    this.plotRevision++;
+                    this.renderMainPlot();
+                },
                 renderTransferFunctionPlot() {
                     const points = Object.values(this.transferFunctionHistoryMap || {}).sort((a, b) => a.frequency - b.frequency);
                     const noFit = this.showRawData;
@@ -4766,22 +4809,31 @@ finishScheduledRun(finalStatus = 'IDLE') {
                         panelFields = noFit ? ['atom_number_up_nofit', 'atom_number_dw_nofit'] : ['atom_number_up', 'atom_number_dw'];
                         label = 'Atom number';
                     }
+                    const statistic = this.transferFunctionStatistic === 's2' && this.currentTab === 'phase'
+                        ? 's2'
+                        : (this.transferFunctionStatistic === 'mean' ? 'mean' : 'std');
+                    const statisticLabel = statistic === 's2' ? 'S²' : (statistic === 'mean' ? 'mean value' : 'standard deviation');
+                    const hoverStatisticLabel = statistic === 's2' ? 'S²' : (statistic === 'mean' ? 'Mean' : 'Std');
                     const sourceLabel = this.currentTab === 'phase' ? 'Active calibration' : (noFit ? 'NoFit' : 'Fit');
                     const makePanel = (field, channel, color, isUp) => {
                         if (!field) return { traces: [], layout: { ...this.buildCommonAnalysisLayout() } };
-                        const scale = this.currentTab === 'phase' && this.phaseUnit === 'mrad' ? 1000 : 1;
+                        const scale = statistic !== 's2' && this.currentTab === 'phase' && this.phaseUnit === 'mrad' ? 1000 : 1;
+                        const phaseAmplitude = this.transferBraggPhaseAmplitudeRad();
                         const counts = points.map(point => (point[field] || []).length);
                         const trace = {
                             x: points.map(point => point.frequency),
                             y: points.map(point => {
-                                const value = this.sampleStandardDeviation(point[field]);
+                                const mean = this.sampleMean(point[field]);
+                                const value = statistic === 's2'
+                                    ? (mean !== null && phaseAmplitude !== null ? (mean / phaseAmplitude) ** 2 : null)
+                                    : (statistic === 'mean' ? mean : this.sampleStandardDeviation(point[field]));
                                 return value === null ? null : value * scale;
                             }),
                             customdata: counts,
-                            type: 'scatter', mode: 'lines+markers', name: `${channel} standard deviation`,
+                            type: 'scatter', mode: 'lines+markers', name: `${channel} ${statisticLabel}`,
                             line: { color, width: 2 }, marker: { color, size: 7 },
                             connectgaps: false,
-                            hovertemplate: 'Frequency=%{x:.9g} Hz<br>Std=%{y:.6g}<br>n=%{customdata}<extra></extra>'
+                            hovertemplate: `Frequency=%{x:.9g} Hz<br>${hoverStatisticLabel}=%{y:.6g}<br>n=%{customdata}<extra></extra>`
                         };
                         const base = this.buildCommonAnalysisLayout();
                         return {
@@ -4790,8 +4842,8 @@ finishScheduledRun(finalStatus = 'IDLE') {
                                 ...base,
                                 margin: isUp ? { t: 38, b: 8, l: 76, r: 20 } : { t: 10, b: 50, l: 76, r: 20 },
                                 xaxis: { ...base.xaxis, title: isUp ? '' : 'TTI carrier frequency (Hz)', showticklabels: !isUp },
-                                yaxis: { ...base.yaxis, title: `${label} standard deviation` },
-                                title: { text: `${channel} | Transfer Function | ${sourceLabel}`, font: { size: 13 }, x: 0.05, y: 0.93 },
+                                yaxis: { ...base.yaxis, title: statistic === 's2' ? 'S² (dimensionless)' : `${label} ${statisticLabel}` },
+                                title: { text: `${channel} | Transfer Function | ${sourceLabel} | ${statisticLabel}`, font: { size: 13 }, x: 0.05, y: 0.93 },
                                 showlegend: false
                             }
                         };
@@ -5441,6 +5493,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
             this.acStarkHistoryMap = {};
             this.lockInHistoryMap = {};
             this.transferFunctionHistoryMap = {};
+            this.transferFrequencyModulationMhz = null;
             this.initPlots();
         }
     }

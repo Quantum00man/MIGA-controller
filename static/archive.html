@@ -1965,8 +1965,12 @@
                                     <button class="btn" :aria-pressed="transferFunctionStatistic === 'mean'"
                                         :class="transferFunctionStatistic === 'mean' ? 'btn-dark' : 'btn-outline-dark'"
                                         @click="setTransferFunctionStatistic('mean')">Mean value</button>
+                                    <button class="btn" :aria-pressed="transferFunctionStatistic === 's2'"
+                                        :class="transferFunctionStatistic === 's2' ? 'btn-dark' : 'btn-outline-dark'"
+                                        :disabled="currentTab !== 'phase'" title="S² is defined for Interferometer Phase"
+                                        @click="setTransferFunctionStatistic('s2')">S²</button>
                                 </div>
-                                <select v-if="currentTab === 'phase'" class="form-select form-select-sm" style="width:auto" v-model="phaseUnit" aria-label="Phase unit">
+                                <select v-if="currentTab === 'phase' && transferFunctionStatistic !== 's2'" class="form-select form-select-sm" style="width:auto" v-model="phaseUnit" aria-label="Phase unit">
                                     <option value="rad">rad</option><option value="mrad">mrad</option>
                                 </select>
                             </div>
@@ -2444,7 +2448,10 @@
                 }
             },
             watch: {
-                currentTab() {
+                currentTab(value) {
+                    if (value !== 'phase' && this.transferFunctionStatistic === 's2') {
+                        this.transferFunctionStatistic = 'std';
+                    }
                     this.handlePlotContextChange();
                     this.$nextTick(() => this.renderArchivePhaseReferencePlot());
                 },
@@ -2937,7 +2944,9 @@
                     this.showRawData = Boolean(useRaw);
                 },
                 setTransferFunctionStatistic(statistic) {
-                    const normalized = statistic === 'mean' ? 'mean' : 'std';
+                    const normalized = statistic === 's2' && this.currentTab === 'phase'
+                        ? 's2'
+                        : (statistic === 'mean' ? 'mean' : 'std');
                     if (this.transferFunctionStatistic === normalized) return;
                     this.transferFunctionStatistic = normalized;
                     this.plotRevision++;
@@ -7932,9 +7941,11 @@
                     const rows = (Array.isArray(this.transferFunctionSummary) ? this.transferFunctionSummary : [])
                         .slice().sort((a, b) => Number(a.frequency_hz) - Number(b.frequency_hz));
                     const raw = this.showRawData;
-                    const statistic = this.transferFunctionStatistic === 'mean' ? 'mean' : 'std';
-                    const statisticLabel = statistic === 'mean' ? 'mean value' : 'standard deviation';
-                    const hoverStatisticLabel = statistic === 'mean' ? 'Mean' : 'Std';
+                    const statistic = this.transferFunctionStatistic === 's2' && this.currentTab === 'phase'
+                        ? 's2'
+                        : (this.transferFunctionStatistic === 'mean' ? 'mean' : 'std');
+                    const statisticLabel = statistic === 's2' ? 'S²' : (statistic === 'mean' ? 'mean value' : 'standard deviation');
+                    const hoverStatisticLabel = statistic === 's2' ? 'S²' : (statistic === 'mean' ? 'Mean' : 'Std');
                     let fields;
                     let labels;
                     let metricLabel;
@@ -7964,10 +7975,15 @@
                             return;
                         }
                         const countField = field.replace(`_${statistic}`, '_count');
-                        const scale = this.currentTab === 'phase' && this.phaseUnit === 'mrad' ? 1000 : 1;
+                        const scale = statistic !== 's2' && this.currentTab === 'phase' && this.phaseUnit === 'mrad' ? 1000 : 1;
                         const trace = {
                             x: rows.map(row => Number(row.frequency_hz)),
-                            y: rows.map(row => Number.isFinite(Number(row[field])) ? Number(row[field]) * scale : null),
+                            y: rows.map(row => {
+                                const value = row[field];
+                                return value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value))
+                                    ? Number(value) * scale
+                                    : null;
+                            }),
                             customdata: rows.map(row => this.getHistoryKey([Number(row.frequency_hz)])),
                             text: rows.map(row => Number(row[countField] ?? row.shot_count ?? 0)),
                             type: 'scatter', mode: 'lines+markers',
@@ -7984,7 +8000,7 @@
                             ...base,
                             margin: isLastVisible ? { t: 10, b: 50, l: 78, r: 20 } : { t: 38, b: 8, l: 78, r: 20 },
                             xaxis: { ...base.xaxis, title: isLastVisible ? this.getArchiveXAxisLabel() : '', showticklabels: isLastVisible },
-                            yaxis: { ...base.yaxis, title: `${metricLabel} ${statisticLabel}` },
+                            yaxis: { ...base.yaxis, title: statistic === 's2' ? 'S² (dimensionless)' : `${metricLabel} ${statisticLabel}` },
                             title: { text: `${labels[index]} | Transfer Function | ${sourceLabel} | ${statisticLabel}`, font: { size: 13 }, x: 0.05, y: 0.93 },
                             showlegend: false
                         };

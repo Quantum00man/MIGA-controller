@@ -563,6 +563,15 @@
                             </select>
                         </div>
                         <div class="col-md-6">
+                            <label class="form-label fw-bold" for="transfer-frequency-modulation">780 nm frequency modulation amplitude</label>
+                            <div class="input-group">
+                                <input id="transfer-frequency-modulation" type="number" min="0.000001" step="any"
+                                    class="form-control" v-model.number="s.transfer_frequency_modulation_mhz">
+                                <span class="input-group-text">MHz</span>
+                            </div>
+                            <div class="form-text">Actual peak FM at 780 nm. Using Eq. (14) with L = 2.23 m, 1 MHz corresponds to approximately 0.09348 rad.</div>
+                        </div>
+                        <div class="col-md-6">
                             <label class="form-label fw-bold" for="tti-host">Instrument IP address</label>
                             <input id="tti-host" class="form-control font-monospace" v-model.trim="s.tti_host"
                                 placeholder="192.168.1.100" autocomplete="off">
@@ -1567,7 +1576,7 @@
                         { id: 'fitting', label: 'Fitting Models', icon: 'bi-bezier2', description: 'Manage atom-area calculation and the models used for time-of-flight fitting.' },
                         { id: 'phase', label: 'Interferometer Phase', icon: 'bi-activity', description: 'Manage Bragg fringe calibrations, data sources and the fixed T or T² phase reference.' },
                         { id: 'sync', label: 'SYNC', icon: 'bi-bounding-box-circles', description: 'Configure Standalone, Master or Slave operation for synchronized differential measurements.' },
-                        { id: 'tti', label: 'TTI Generator', icon: 'bi-soundwave', description: 'Select a TG5012A or TGF3162, choose its channel, and verify the direct LAN connection used by Transfer Function scans.' },
+                        { id: 'tti', label: 'Transfer Function', icon: 'bi-soundwave', description: 'Configure the generator connection and the actual 780 nm frequency-modulation amplitude used to normalize Transfer Function scans.' },
                         { id: 'net', label: 'Network', icon: 'bi-hdd-network', description: 'Select the acquisition platform and configure device connection limits.' },
                         { id: 'logic', label: 'Logic & Channels', icon: 'bi-diagram-3', description: 'Set launch, trigger and linked-mode channel timing.' },
                         { id: 'paths', label: 'System Paths', icon: 'bi-folder2-open', description: 'Configure executable and default template locations used by the controller.' },
@@ -2878,6 +2887,9 @@
                     normalized.tti_model = ['TG5012A', 'TGF3162'].includes(String(normalized.tti_model || '').toUpperCase())
                         ? String(normalized.tti_model).toUpperCase() : 'TG5012A';
                     normalized.tti_channel = Number(normalized.tti_channel) === 2 ? 2 : 1;
+                    const transferFrequencyModulationMhz = Number(normalized.transfer_frequency_modulation_mhz ?? 1);
+                    normalized.transfer_frequency_modulation_mhz = Number.isFinite(transferFrequencyModulationMhz) && transferFrequencyModulationMhz > 0
+                        ? transferFrequencyModulationMhz : 1;
                     const ttiPort = Number.parseInt(normalized.tti_port ?? 9221, 10);
                     const ttiTimeout = Number(normalized.tti_timeout_s ?? 3);
                     normalized.tti_port = Number.isFinite(ttiPort) && ttiPort >= 1 && ttiPort <= 65535 ? ttiPort : 9221;

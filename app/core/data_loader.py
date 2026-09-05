@@ -1205,7 +1205,14 @@ class DataLoader:
         expected_lock_in_blocks = self._parse_int(config_data.get("averages"), 0) if is_lock_in else 0
         lock_in_analysis = build_lock_in_analysis(full_points, expected_blocks=expected_lock_in_blocks) if is_lock_in else {}
         is_transfer_function = str(config_data.get("mode") or "").strip().lower() == "transfer_function"
-        transfer_function_summary = build_transfer_function_summary(full_points) if is_transfer_function else []
+        transfer_function_summary = (
+            build_transfer_function_summary(
+                full_points,
+                config_data.get("transfer_frequency_modulation_mhz"),
+            )
+            if is_transfer_function
+            else []
+        )
         sync_manifest = self._apply_sync_phase_reference_overrides(sync_manifest, phase_contexts)
         return {
             "config": config_data,

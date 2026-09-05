@@ -494,6 +494,7 @@ class SystemSettings(BaseModel):
     tti_timeout_s: float = Field(3.0, ge=0.2, le=120.0)
     tti_model: str = Field("TG5012A")
     tti_channel: int = Field(1, ge=1, le=2)
+    transfer_frequency_modulation_mhz: float = Field(1.0, gt=0)
 
     @validator("tti_host")
     def normalize_tti_host(cls, value):

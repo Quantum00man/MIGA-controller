@@ -590,6 +590,7 @@ class ExperimentManager:
             "tti_timeout_s": 3.0,
             "tti_model": "TG5012A",
             "tti_channel": 1,
+            "transfer_frequency_modulation_mhz": 1.0,
             
             # --- [关键修复] 显式添加这三个参数的默认值 ---
             "intf_alpha": 0.35,
@@ -1197,6 +1198,9 @@ class ExperimentManager:
         repeats = int(scan_config.get("transfer_repeats", 10))
         if repeats < 2:
             raise ValueError("Transfer Function requires at least 2 repeats per frequency")
+        frequency_modulation_mhz = float(self.settings.get("transfer_frequency_modulation_mhz", 1.0))
+        if not math.isfinite(frequency_modulation_mhz) or frequency_modulation_mhz <= 0:
+            raise ValueError("780 nm frequency modulation amplitude must be greater than zero")
 
         direction = 1.0 if stop >= start else -1.0
         effective_step = abs(step) * direction
@@ -1224,6 +1228,7 @@ class ExperimentManager:
                         "transfer_frequency_count": len(frequencies),
                         "transfer_repeat": repeat_index,
                         "transfer_repeats": repeats,
+                        "transfer_frequency_modulation_mhz": frequency_modulation_mhz,
                     },
                 })
 
@@ -1235,6 +1240,7 @@ class ExperimentManager:
         scan_config["transfer_settling_time_s"] = 5.0
         scan_config["transfer_generator_model"] = str(self.settings.get("tti_model") or "TG5012A").strip().upper()
         scan_config["transfer_generator_channel"] = int(self.settings.get("tti_channel", 1))
+        scan_config["transfer_frequency_modulation_mhz"] = frequency_modulation_mhz
         scan_config["transfer_frequency_values_hz"] = frequencies
         scan_config["transfer_repeats"] = repeats
         return parameters
@@ -2604,7 +2610,10 @@ class ExperimentManager:
             if scan_config and scan_config.get('mode') == 'transfer_function':
                 try:
                     self.data_manager.save_transfer_function_summary(
-                        build_transfer_function_summary(transfer_function_results)
+                        build_transfer_function_summary(
+                            transfer_function_results,
+                            scan_config.get("transfer_frequency_modulation_mhz"),
+                        )
                     )
                 except Exception as exc:
                     self._scan_finalize_error = f"Transfer Function summary save failed: {exc}"

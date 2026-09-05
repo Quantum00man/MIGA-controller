@@ -2,7 +2,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from app.analysis.transfer_function import build_transfer_function_summary
+from app.analysis.transfer_function import bragg_phase_modulation_rad, build_transfer_function_summary
 from app.core.experiment_manager import ExperimentManager
 from app.drivers.tti_generator import (
     set_tti_test_frequency,
@@ -122,6 +122,11 @@ class TransferFunctionPlanTests(unittest.TestCase):
         self.assertEqual(config["transfer_settling_time_s"], 5.0)
         self.assertEqual(config["transfer_generator_model"], "TG5012A")
         self.assertEqual(config["transfer_generator_channel"], 1)
+        self.assertEqual(config["transfer_frequency_modulation_mhz"], 1.0)
+        self.assertTrue(all(
+            point["metadata"]["transfer_frequency_modulation_mhz"] == 1.0
+            for point in plan
+        ))
 
     def test_plan_supports_descending_frequency(self):
         config = {
@@ -168,14 +173,48 @@ class TransferFunctionStatisticsTests(unittest.TestCase):
         self.assertAlmostEqual(summary[0]["interferometer_phase_mean"], 0.2)
         self.assertEqual(summary[0]["interferometer_phase_count"], 3)
 
-    def test_archive_frontend_can_switch_between_std_and_mean(self):
+    def test_frontends_can_switch_between_std_mean_and_s2(self):
         archive_html = (
             Path(__file__).resolve().parents[1] / "static" / "archive.html"
+        ).read_text(encoding="utf-8")
+        index_html = (
+            Path(__file__).resolve().parents[1] / "static" / "index.html"
         ).read_text(encoding="utf-8")
 
         self.assertIn("transferFunctionStatistic: 'std'", archive_html)
         self.assertIn("setTransferFunctionStatistic('mean')", archive_html)
+        self.assertIn("setTransferFunctionStatistic('s2')", archive_html)
         self.assertIn("`interferometer_phase_${statistic}`", archive_html)
+        self.assertIn("transferFunctionStatistic: 'std'", index_html)
+        self.assertIn("setTransferFunctionStatistic('s2')", index_html)
+        self.assertIn("transferBraggPhaseAmplitudeRad()", index_html)
+
+    def test_summary_calculates_s2_from_780_nm_frequency_modulation(self):
+        rows = [
+            {
+                "transfer_frequency_hz": 100.0,
+                "interferometer_phase": phase,
+                "interferometer_phase_valid": True,
+            }
+            for phase in (0.05, 0.15)
+        ]
+        phase_amplitude = bragg_phase_modulation_rad(1.0)
+        summary = build_transfer_function_summary(rows, frequency_modulation_mhz=1.0)
+
+        self.assertIsNotNone(phase_amplitude)
+        self.assertAlmostEqual(summary[0]["bragg_phase_modulation_rad"], phase_amplitude)
+        self.assertAlmostEqual(summary[0]["interferometer_phase_s2"], (0.1 / phase_amplitude) ** 2)
+        self.assertEqual(summary[0]["frequency_modulation_mhz"], 1.0)
+
+    def test_s2_is_unavailable_without_archived_modulation_amplitude(self):
+        summary = build_transfer_function_summary([
+            {
+                "transfer_frequency_hz": 100.0,
+                "interferometer_phase": 0.1,
+                "interferometer_phase_valid": True,
+            }
+        ])
+        self.assertIsNone(summary[0]["interferometer_phase_s2"])
 
     def test_summary_excludes_invalid_calibrated_phase(self):
         rows = [
