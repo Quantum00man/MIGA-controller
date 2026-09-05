@@ -245,6 +245,19 @@ class TransferFunctionStatisticsTests(unittest.TestCase):
         self.assertIn('id="transferPhase0"', index_html)
         self.assertIn('id="transferPhase90"', index_html)
 
+    def test_archive_csv_uses_transfer_function_frequency_summary(self):
+        archive_html = (
+            Path(__file__).resolve().parents[1] / "static" / "archive.html"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("await this.exportTransferFunctionCSV()", archive_html)
+        self.assertIn("['Atom_Number_Total_Fit_Mean', 'atom_number_total_fit_mean']", archive_html)
+        self.assertIn("['Interferometer_P1_Fit_Std', 'intf_p1_fit_std']", archive_html)
+        self.assertIn("['Interferometer_Phase_Mean_Rad', 'interferometer_phase_mean']", archive_html)
+        self.assertIn("['S2_0deg', 'interferometer_phase_0deg_s2']", archive_html)
+        self.assertIn("['S2_90deg', 'interferometer_phase_90deg_s2']", archive_html)
+        self.assertIn("['S2_Quadrature_Sum', 'interferometer_phase_s2']", archive_html)
+
     def test_summary_calculates_s2_from_780_nm_frequency_modulation(self):
         rows = [
             {

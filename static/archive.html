@@ -7390,6 +7390,10 @@
                         await this.exportLockInCSV();
                         return;
                     }
+                    if (this.isTransferFunctionArchive()) {
+                        await this.exportTransferFunctionCSV();
+                        return;
+                    }
                     if (Object.keys(this.historyMap).length === 0) return;
                     const stats = this.getStatsArray();
                     const scanDimensions = this.getActiveScanDimensions();
@@ -7452,6 +7456,73 @@
                         const link = document.createElement("a"); link.setAttribute("href", url); link.setAttribute("download", `analysis_${this.selectedDay}_${this.selectedRun}.csv`);
                         document.body.appendChild(link); link.click(); document.body.removeChild(link);
                     }
+                },
+
+                async exportTransferFunctionCSV() {
+                    const rows = Array.isArray(this.transferFunctionSummary)
+                        ? this.transferFunctionSummary
+                        : [];
+                    if (!rows.length) {
+                        this.errorMsg = 'Transfer Function CSV export failed: no frequency summary is available.';
+                        return;
+                    }
+                    const columns = [
+                        ['Frequency_Hz', 'frequency_hz'],
+                        ['Shot_Count', 'shot_count'],
+                        ['Frequency_Modulation_MHz_780nm', 'frequency_modulation_mhz'],
+                        ['Bragg_Phase_Modulation_Rad', 'bragg_phase_modulation_rad'],
+                        ['Atom_Number_UP_Fit_Count', 'atom_number_up_fit_count'],
+                        ['Atom_Number_UP_Fit_Mean', 'atom_number_up_fit_mean'],
+                        ['Atom_Number_UP_Fit_Std', 'atom_number_up_fit_std'],
+                        ['Atom_Number_DW_Fit_Count', 'atom_number_dw_fit_count'],
+                        ['Atom_Number_DW_Fit_Mean', 'atom_number_dw_fit_mean'],
+                        ['Atom_Number_DW_Fit_Std', 'atom_number_dw_fit_std'],
+                        ['Atom_Number_Total_Fit_Count', 'atom_number_total_fit_count'],
+                        ['Atom_Number_Total_Fit_Mean', 'atom_number_total_fit_mean'],
+                        ['Atom_Number_Total_Fit_Std', 'atom_number_total_fit_std'],
+                        ['Atom_Number_UP_NoFit_Count', 'atom_number_up_nofit_count'],
+                        ['Atom_Number_UP_NoFit_Mean', 'atom_number_up_nofit_mean'],
+                        ['Atom_Number_UP_NoFit_Std', 'atom_number_up_nofit_std'],
+                        ['Atom_Number_DW_NoFit_Count', 'atom_number_dw_nofit_count'],
+                        ['Atom_Number_DW_NoFit_Mean', 'atom_number_dw_nofit_mean'],
+                        ['Atom_Number_DW_NoFit_Std', 'atom_number_dw_nofit_std'],
+                        ['Atom_Number_Total_NoFit_Count', 'atom_number_total_nofit_count'],
+                        ['Atom_Number_Total_NoFit_Mean', 'atom_number_total_nofit_mean'],
+                        ['Atom_Number_Total_NoFit_Std', 'atom_number_total_nofit_std'],
+                        ['Interferometer_P1_Fit_Count', 'intf_p1_fit_count'],
+                        ['Interferometer_P1_Fit_Mean', 'intf_p1_fit_mean'],
+                        ['Interferometer_P1_Fit_Std', 'intf_p1_fit_std'],
+                        ['Interferometer_P2_Fit_Count', 'intf_p2_fit_count'],
+                        ['Interferometer_P2_Fit_Mean', 'intf_p2_fit_mean'],
+                        ['Interferometer_P2_Fit_Std', 'intf_p2_fit_std'],
+                        ['Interferometer_P1_NoFit_Count', 'intf_p1_nofit_count'],
+                        ['Interferometer_P1_NoFit_Mean', 'intf_p1_nofit_mean'],
+                        ['Interferometer_P1_NoFit_Std', 'intf_p1_nofit_std'],
+                        ['Interferometer_P2_NoFit_Count', 'intf_p2_nofit_count'],
+                        ['Interferometer_P2_NoFit_Mean', 'intf_p2_nofit_mean'],
+                        ['Interferometer_P2_NoFit_Std', 'intf_p2_nofit_std'],
+                        ['Interferometer_Phase_Count', 'interferometer_phase_count'],
+                        ['Interferometer_Phase_Mean_Rad', 'interferometer_phase_mean'],
+                        ['Interferometer_Phase_Std_Rad', 'interferometer_phase_std'],
+                        ['Phase_0deg_Count', 'interferometer_phase_0deg_count'],
+                        ['Phase_0deg_Mean_Rad', 'interferometer_phase_0deg_mean_rad'],
+                        ['Phase_0deg_Std_Rad', 'interferometer_phase_0deg_std_rad'],
+                        ['S2_0deg', 'interferometer_phase_0deg_s2'],
+                        ['Phase_90deg_Count', 'interferometer_phase_90deg_count'],
+                        ['Phase_90deg_Mean_Rad', 'interferometer_phase_90deg_mean_rad'],
+                        ['Phase_90deg_Std_Rad', 'interferometer_phase_90deg_std_rad'],
+                        ['S2_90deg', 'interferometer_phase_90deg_s2'],
+                        ['S2_Quadrature_Sum', 'interferometer_phase_s2'],
+                    ];
+                    const csvRows = [
+                        columns.map(([label]) => this.csvCell(label)).join(','),
+                        ...rows.map(row => columns.map(([, field]) => this.csvCell(row?.[field] ?? '')).join(',')),
+                    ];
+                    const runPart = this.sanitizeFilenamePart(this.selectedRun || this.loadedRunId || 'archive');
+                    await this.downloadCsvContent(
+                        '\uFEFF' + csvRows.join('\n'),
+                        `transfer_function_${runPart}.csv`
+                    );
                 },
 
                 async exportLockInCSV() {
