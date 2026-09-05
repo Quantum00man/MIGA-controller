@@ -182,11 +182,15 @@ class TransferFunctionStatisticsTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
         self.assertIn("transferFunctionStatistic: 'std'", archive_html)
+        self.assertIn("transferFunctionYAxisScale: 'linear'", archive_html)
         self.assertIn("setTransferFunctionStatistic('mean')", archive_html)
         self.assertIn("setTransferFunctionStatistic('s2')", archive_html)
+        self.assertIn("setTransferFunctionYAxisScale('log')", archive_html)
         self.assertIn("`interferometer_phase_${statistic}`", archive_html)
         self.assertIn("transferFunctionStatistic: 'std'", index_html)
+        self.assertIn("transferFunctionYAxisScale: 'linear'", index_html)
         self.assertIn("setTransferFunctionStatistic('s2')", index_html)
+        self.assertIn("setTransferFunctionYAxisScale('log')", index_html)
         self.assertIn("transferBraggPhaseAmplitudeRad()", index_html)
 
     def test_summary_calculates_s2_from_780_nm_frequency_modulation(self):

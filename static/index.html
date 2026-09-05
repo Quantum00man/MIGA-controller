@@ -1496,6 +1496,15 @@
                                 :disabled="currentTab !== 'phase'" title="S² is defined for Interferometer Phase"
                                 @click="setTransferFunctionStatistic('s2')">S²</button>
                         </div>
+                        <div v-if="config.mode === 'transfer_function'" class="btn-group btn-group-sm" role="group" aria-label="Transfer Function y-axis scale">
+                            <button class="btn" :aria-pressed="transferFunctionYAxisScale === 'linear'"
+                                :class="transferFunctionYAxisScale === 'linear' ? 'btn-secondary' : 'btn-outline-secondary'"
+                                @click="setTransferFunctionYAxisScale('linear')">Linear Y</button>
+                            <button class="btn" :aria-pressed="transferFunctionYAxisScale === 'log'"
+                                :class="transferFunctionYAxisScale === 'log' ? 'btn-secondary' : 'btn-outline-secondary'"
+                                title="Log Y displays positive values only"
+                                @click="setTransferFunctionYAxisScale('log')">Log Y</button>
+                        </div>
                         <select v-if="currentTab === 'phase' && transferFunctionStatistic !== 's2'" class="form-select form-select-sm" style="width:auto" v-model="phaseUnit" aria-label="Phase unit"><option value="rad">rad</option><option value="mrad">mrad</option></select>
                         <button class="btn-icon" @click="toggleMaximize('analysis')"
                             :title="maximizedView === 'analysis' ? 'Restore analysis view' : 'Maximize analysis view'"
@@ -1743,6 +1752,7 @@
                     currentTab: 'atoms',
                     phaseUnit: 'rad',
                     transferFunctionStatistic: 'std',
+                    transferFunctionYAxisScale: 'linear',
                     transferFrequencyModulationMhz: null,
                     currentScanDimensions: 1,
                     tabs: [{ id: 'atoms', label: 'Atom Number' }, { id: 'amp', label: 'Max Voltage' }, { id: 'tail', label: 'Tail Mean' }, { id: 'sigma', label: 'Width (ms)' }, { id: 'temp', label: 'Temperature' }, { id: 'arrival', label: 'Arrival Time' }, { id: 'prob', label: 'Transition Prob.' }, { id: 'intf', label: 'Interferometer' }, { id: 'phase', label: 'Interferometer Phase' }],
@@ -4794,6 +4804,13 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     this.plotRevision++;
                     this.renderMainPlot();
                 },
+                setTransferFunctionYAxisScale(scale) {
+                    const normalized = scale === 'log' ? 'log' : 'linear';
+                    if (this.transferFunctionYAxisScale === normalized) return;
+                    this.transferFunctionYAxisScale = normalized;
+                    this.plotRevision++;
+                    this.renderMainPlot();
+                },
                 renderTransferFunctionPlot() {
                     const points = Object.values(this.transferFunctionHistoryMap || {}).sort((a, b) => a.frequency - b.frequency);
                     const noFit = this.showRawData;
@@ -4842,7 +4859,11 @@ finishScheduledRun(finalStatus = 'IDLE') {
                                 ...base,
                                 margin: isUp ? { t: 38, b: 8, l: 76, r: 20 } : { t: 10, b: 50, l: 76, r: 20 },
                                 xaxis: { ...base.xaxis, title: isUp ? '' : 'TTI carrier frequency (Hz)', showticklabels: !isUp },
-                                yaxis: { ...base.yaxis, title: statistic === 's2' ? 'S² (dimensionless)' : `${label} ${statisticLabel}` },
+                                yaxis: {
+                                    ...base.yaxis,
+                                    type: this.transferFunctionYAxisScale,
+                                    title: statistic === 's2' ? 'S² (dimensionless)' : `${label} ${statisticLabel}`
+                                },
                                 title: { text: `${channel} | Transfer Function | ${sourceLabel} | ${statisticLabel}`, font: { size: 13 }, x: 0.05, y: 0.93 },
                                 showlegend: false
                             }

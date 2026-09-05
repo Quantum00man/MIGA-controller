@@ -1970,6 +1970,15 @@
                                         :disabled="currentTab !== 'phase'" title="S² is defined for Interferometer Phase"
                                         @click="setTransferFunctionStatistic('s2')">S²</button>
                                 </div>
+                                <div v-if="loadedRunId && isTransferFunctionArchive()" class="btn-group btn-group-sm" role="group" aria-label="Transfer Function y-axis scale">
+                                    <button class="btn" :aria-pressed="transferFunctionYAxisScale === 'linear'"
+                                        :class="transferFunctionYAxisScale === 'linear' ? 'btn-secondary' : 'btn-outline-secondary'"
+                                        @click="setTransferFunctionYAxisScale('linear')">Linear Y</button>
+                                    <button class="btn" :aria-pressed="transferFunctionYAxisScale === 'log'"
+                                        :class="transferFunctionYAxisScale === 'log' ? 'btn-secondary' : 'btn-outline-secondary'"
+                                        title="Log Y displays positive values only"
+                                        @click="setTransferFunctionYAxisScale('log')">Log Y</button>
+                                </div>
                                 <select v-if="currentTab === 'phase' && transferFunctionStatistic !== 's2'" class="form-select form-select-sm" style="width:auto" v-model="phaseUnit" aria-label="Phase unit">
                                     <option value="rad">rad</option><option value="mrad">mrad</option>
                                 </select>
@@ -2440,7 +2449,7 @@
                         busy: false, message: '', error: false, result: null
                     },
                     showDisplayMenu: false, showTofFitCurve: true, showTofRawCurve: true, showScanFitCurve: true,
-                    showRawData: true, phaseUnit: 'rad', maximizedView: null, currentTab: 'atoms', plotMode: 'series', transferFunctionStatistic: 'std', allanOrder: 1, allanScaleMode: 'absolute', allanXAxisMode: 'linear', allanP0AvailableMin: null, allanP0AvailableMax: null, allanP0Min: null, allanP0Max: null, allanP0MinInput: '', allanP0MaxInput: '', plotRevision: 0,
+                    showRawData: true, phaseUnit: 'rad', maximizedView: null, currentTab: 'atoms', plotMode: 'series', transferFunctionStatistic: 'std', transferFunctionYAxisScale: 'linear', allanOrder: 1, allanScaleMode: 'absolute', allanXAxisMode: 'linear', allanP0AvailableMin: null, allanP0AvailableMax: null, allanP0Min: null, allanP0Max: null, allanP0MinInput: '', allanP0MaxInput: '', plotRevision: 0,
                     tabs: [{ id: 'atoms', label: 'Atom Number' }, { id: 'amp', label: 'Max Voltage' }, { id: 'tail', label: 'Tail Mean' }, { id: 'sigma', label: 'Width (ms)' }, { id: 'temp', label: 'Temperature' }, { id: 'arrival', label: 'Arrival Time' }, { id: 'prob', label: 'Transition Prob.' }, { id: 'intf', label: 'Interferometer' }, { id: 'phase', label: 'Interferometer Phase' }],
                     historyMap: {}, layoutResBase: {}, layoutResUp: {}, layoutResDw: {}, layoutResTot: {}, layoutOscUp: {}, layoutOscDw: {},
                     heatmapColorscale: [[0, '#c62828'], [0.5, '#fff3bf'], [1, '#1565c0']],
@@ -2949,6 +2958,13 @@
                         : (statistic === 'mean' ? 'mean' : 'std');
                     if (this.transferFunctionStatistic === normalized) return;
                     this.transferFunctionStatistic = normalized;
+                    this.plotRevision++;
+                    this.renderMainPlot();
+                },
+                setTransferFunctionYAxisScale(scale) {
+                    const normalized = scale === 'log' ? 'log' : 'linear';
+                    if (this.transferFunctionYAxisScale === normalized) return;
+                    this.transferFunctionYAxisScale = normalized;
                     this.plotRevision++;
                     this.renderMainPlot();
                 },
@@ -8000,7 +8016,11 @@
                             ...base,
                             margin: isLastVisible ? { t: 10, b: 50, l: 78, r: 20 } : { t: 38, b: 8, l: 78, r: 20 },
                             xaxis: { ...base.xaxis, title: isLastVisible ? this.getArchiveXAxisLabel() : '', showticklabels: isLastVisible },
-                            yaxis: { ...base.yaxis, title: statistic === 's2' ? 'S² (dimensionless)' : `${metricLabel} ${statisticLabel}` },
+                            yaxis: {
+                                ...base.yaxis,
+                                type: this.transferFunctionYAxisScale,
+                                title: statistic === 's2' ? 'S² (dimensionless)' : `${metricLabel} ${statisticLabel}`
+                            },
                             title: { text: `${labels[index]} | Transfer Function | ${sourceLabel} | ${statisticLabel}`, font: { size: 13 }, x: 0.05, y: 0.93 },
                             showlegend: false
                         };
