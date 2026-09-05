@@ -1201,6 +1201,18 @@ class ExperimentManager:
         frequency_modulation_mhz = float(self.settings.get("transfer_frequency_modulation_mhz", 1.0))
         if not math.isfinite(frequency_modulation_mhz) or frequency_modulation_mhz <= 0:
             raise ValueError("780 nm frequency modulation amplitude must be greater than zero")
+        try:
+            phase_degrees = [float(value) for value in scan_config.get("transfer_phase_degrees", [0.0, 90.0])]
+        except (TypeError, ValueError):
+            phase_degrees = []
+        if (
+            not phase_degrees
+            or len(phase_degrees) > 2
+            or len(set(phase_degrees)) != len(phase_degrees)
+            or any(value not in {0.0, 90.0} for value in phase_degrees)
+        ):
+            raise ValueError("Select at least one Transfer Function phase from 0 and 90 degrees")
+        phase_degrees = sorted(set(phase_degrees))
 
         direction = 1.0 if stop >= start else -1.0
         effective_step = abs(step) * direction
@@ -1217,20 +1229,25 @@ class ExperimentManager:
             frequencies = [round(start, 6)]
 
         parameters: List[Dict[str, Any]] = []
-        for frequency_index, frequency in enumerate(frequencies, start=1):
-            for repeat_index in range(1, repeats + 1):
-                parameters.append({
-                    "sequence_parameters": [],
-                    "metadata": {
-                        "display_parameters": [frequency],
-                        "transfer_frequency_hz": frequency,
-                        "transfer_frequency_index": frequency_index,
-                        "transfer_frequency_count": len(frequencies),
-                        "transfer_repeat": repeat_index,
-                        "transfer_repeats": repeats,
-                        "transfer_frequency_modulation_mhz": frequency_modulation_mhz,
-                    },
-                })
+        for phase_index, phase_deg in enumerate(phase_degrees, start=1):
+            for frequency_index, frequency in enumerate(frequencies, start=1):
+                for repeat_index in range(1, repeats + 1):
+                    parameters.append({
+                        "sequence_parameters": [],
+                        "metadata": {
+                            "display_parameters": [frequency],
+                            "transfer_frequency_hz": frequency,
+                            "transfer_frequency_index": frequency_index,
+                            "transfer_frequency_count": len(frequencies),
+                            "transfer_repeat": repeat_index,
+                            "transfer_repeats": repeats,
+                            "transfer_frequency_modulation_mhz": frequency_modulation_mhz,
+                            "transfer_phase_deg": phase_deg,
+                            "transfer_phase_index": phase_index,
+                            "transfer_phase_count": len(phase_degrees),
+                            "transfer_phase_degrees": phase_degrees,
+                        },
+                    })
 
         scan_config["scan_dimensions"] = 1
         scan_config["dim2_enabled"] = False
@@ -1241,6 +1258,7 @@ class ExperimentManager:
         scan_config["transfer_generator_model"] = str(self.settings.get("tti_model") or "TG5012A").strip().upper()
         scan_config["transfer_generator_channel"] = int(self.settings.get("tti_channel", 1))
         scan_config["transfer_frequency_modulation_mhz"] = frequency_modulation_mhz
+        scan_config["transfer_phase_degrees"] = phase_degrees
         scan_config["transfer_frequency_values_hz"] = frequencies
         scan_config["transfer_repeats"] = repeats
         return parameters
@@ -2325,6 +2343,7 @@ class ExperimentManager:
                 all_parameters=display_params,
                 transfer_frequency_hz=metadata.get('transfer_frequency_hz'),
                 transfer_repeat=metadata.get('transfer_repeat'),
+                transfer_phase_deg=metadata.get('transfer_phase_deg'),
                 ac_stark_ratio=metadata.get('ac_stark_ratio'),
                 ac_stark_side=metadata.get('ac_stark_side'),
                 ac_stark_dds_element=metadata.get('ac_stark_dds_element'),
@@ -2419,6 +2438,7 @@ class ExperimentManager:
         transfer_mode = str(scan_config.get("mode") or "").strip().lower() == "transfer_function"
         tti_client: Optional[TtiGeneratorClient] = None
         active_transfer_frequency: Optional[float] = None
+        active_transfer_phase: Optional[float] = None
         transfer_model = str(scan_config.get("transfer_generator_model") or "TG5012A").strip().upper()
         transfer_channel = int(scan_config.get("transfer_generator_channel", 1))
 
@@ -2444,16 +2464,23 @@ class ExperimentManager:
                 if transfer_mode:
                     metadata["transfer_generator_model"] = transfer_model
                     metadata["transfer_generator_channel"] = transfer_channel
+                    phase_deg = float((metadata or {}).get("transfer_phase_deg"))
+                    phase_changed = active_transfer_phase is None or phase_deg != active_transfer_phase
+                    if phase_changed:
+                        active_transfer_phase = phase_deg
+                        active_transfer_frequency = None
                     frequency = float((metadata or {}).get("transfer_frequency_hz"))
                     if active_transfer_frequency is None or frequency != active_transfer_frequency:
-                        self.status.message = f"Setting {transfer_model} CH{transfer_channel} to {frequency:g} Hz..."
+                        self.status.message = f"Setting {transfer_model} CH{transfer_channel} to {frequency:g} Hz at {phase_deg:g}°..."
                         if tti_client is not None:
                             tti_client.set_frequency(frequency)
+                            if phase_changed:
+                                tti_client.set_phase(phase_deg)
                         active_transfer_frequency = frequency
                         settling_time = float(scan_config.get("transfer_settling_time_s", 5.0))
                         if not config.USE_SIMULATION and settling_time > 0:
                             action = "confirmed" if transfer_model == "TG5012A" else "accepted"
-                            self.status.message = f"{transfer_model} CH{transfer_channel} {action} {frequency:g} Hz; settling {settling_time:g} s..."
+                            self.status.message = f"{transfer_model} CH{transfer_channel} {action} {frequency:g} Hz at {phase_deg:g}°; settling {settling_time:g} s..."
                             deadline = time.monotonic() + settling_time
                             while not self.stop_flag and time.monotonic() < deadline:
                                 time.sleep(min(0.1, max(0.0, deadline - time.monotonic())))
@@ -2613,6 +2640,7 @@ class ExperimentManager:
                         build_transfer_function_summary(
                             transfer_function_results,
                             scan_config.get("transfer_frequency_modulation_mhz"),
+                            scan_config.get("transfer_phase_degrees"),
                         )
                     )
                 except Exception as exc:

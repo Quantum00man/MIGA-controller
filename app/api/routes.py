@@ -55,6 +55,7 @@ from app.core.sync_manager import SyncManager
 from app.drivers.dds_table import DdsTableError, validate_dds_table
 from app.drivers.tti_generator import (
     set_tti_test_frequency,
+    set_tti_test_phase,
     TtiConnectionSettings,
     TtiGeneratorError,
     test_tti_connection,
@@ -102,6 +103,7 @@ from app.models.schemas import (
     SystemUpdateRequest,
     TtiConnectionTestRequest,
     TtiFrequencyTestRequest,
+    TtiPhaseTestRequest,
     SyncNodeCommandRequest,
     SyncNodePrepareRequest,
     SyncNodeTestRequest,
@@ -1289,6 +1291,34 @@ async def test_tti_generator_frequency(settings: TtiFrequencyTestRequest):
                 "model": settings.model,
                 "channel": settings.channel,
                 "frequency_hz": settings.frequency_hz,
+            },
+        )
+    except TtiGeneratorError as exc:
+        raise HTTPException(502, str(exc))
+
+
+@router.post("/settings/tti/test-phase", response_model=ExperimentResponse)
+async def test_tti_generator_phase(settings: TtiPhaseTestRequest):
+    try:
+        identity = await run_in_threadpool(
+            set_tti_test_phase,
+            TtiConnectionSettings(
+                host=settings.host,
+                port=settings.port,
+                timeout_s=settings.timeout_s,
+                model=settings.model,
+                channel=settings.channel,
+            ),
+            settings.phase_degrees,
+        )
+        return ExperimentResponse(
+            status="success",
+            message=f"{settings.model} CH{settings.channel} test phase accepted",
+            data={
+                "identity": identity,
+                "model": settings.model,
+                "channel": settings.channel,
+                "phase_degrees": settings.phase_degrees,
             },
         )
     except TtiGeneratorError as exc:

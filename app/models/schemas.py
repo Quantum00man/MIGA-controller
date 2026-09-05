@@ -86,6 +86,7 @@ class ScanConfig(BaseModel):
     transfer_frequency_step_hz: float = Field(1000.0)
     transfer_repeats: int = Field(10, ge=2, le=100000)
     transfer_settling_time_s: float = Field(5.0, ge=0.0, le=3600.0)
+    transfer_phase_degrees: List[float] = Field(default_factory=lambda: [0.0, 90.0])
     parameter_source: str = Field("classic")
     marker_axes: List[str] = Field(default_factory=list)
     interferometer_phase_calibration_override: Optional[Dict[str, Any]] = Field(None)
@@ -106,6 +107,15 @@ class ScanConfig(BaseModel):
             if marker_id:
                 normalized.append(marker_id)
         return normalized
+
+    @validator("transfer_phase_degrees", pre=True)
+    def validate_transfer_phase_degrees(cls, value):
+        phases = [float(item) for item in ([0.0, 90.0] if value is None else value)]
+        if not phases or len(phases) > 2 or not all(math.isfinite(item) for item in phases):
+            raise ValueError("Select at least one Transfer Function phase")
+        if any(item not in {0.0, 90.0} for item in phases) or len(set(phases)) != len(phases):
+            raise ValueError("Transfer Function phases must be unique selections from 0 and 90 degrees")
+        return sorted(phases)
 
     @validator("ac_stark_raman_group")
     def normalize_ac_stark_raman_group(cls, value):
@@ -550,6 +560,19 @@ class TtiFrequencyTestRequest(TtiConnectionTestRequest):
         numeric = float(value)
         if not math.isfinite(numeric):
             raise ValueError("TTI test frequency must be finite")
+        return numeric
+
+
+class TtiPhaseTestRequest(TtiConnectionTestRequest):
+    phase_degrees: float
+
+    @validator("phase_degrees")
+    def validate_phase(cls, value):
+        numeric = float(value)
+        if not math.isfinite(numeric):
+            raise ValueError("TTI test phase must be finite")
+        if numeric < -360.0 or numeric > 360.0:
+            raise ValueError("TTI test phase must be between -360 and 360 degrees")
         return numeric
 
 

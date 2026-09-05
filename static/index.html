@@ -1036,7 +1036,7 @@
                     </div>
                     <div v-if="config.mode === 'transfer_function'" class="mt-1">
                         <div class="alert alert-light border py-2 px-3 small mb-3">
-                            Live 1D scan. Sets the configured TTI generator channel frequency, waits 5 s, then runs the uploaded sequence unchanged.
+                            Live 1D quadrature scan. Completes the full frequency sweep at the first TTI phase, then repeats it at the orthogonal phase.
                         </div>
                         <div class="row g-2">
                             <div class="col-4">
@@ -1063,7 +1063,7 @@
                                 </div>
                             </div>
                         </div>
-                        <div class="form-text mt-2">Statistics are updated after every shot. Select the model, channel and 780 nm modulation amplitude in Settings → Transfer Function.</div>
+                        <div class="form-text mt-2">Runs one complete frequency scan at each configured quadrature phase. Statistics are updated after every shot.</div>
                     </div>
                     <div v-if="['timing', 'rabi'].includes(config.mode)">
                         <label class="form-label small text-muted mb-1">Total Parameter</label>
@@ -1387,6 +1387,24 @@
                             </div>
                         </div>
                     </div>
+                    <div v-if="config.mode === 'transfer_function'" class="mb-3 px-1">
+                        <label class="form-label small text-muted mb-1">TTI phase scans</label>
+                        <div class="d-flex align-items-center gap-4 border rounded px-3 py-2 bg-white">
+                            <div class="form-check mb-0">
+                                <input id="transferPhase0" class="form-check-input" type="checkbox" :value="0"
+                                    v-model="config.transfer_phase_degrees"
+                                    :disabled="config.transfer_phase_degrees.length === 1 && config.transfer_phase_degrees.includes(0)">
+                                <label class="form-check-label fw-bold" for="transferPhase0">0°</label>
+                            </div>
+                            <div class="form-check mb-0">
+                                <input id="transferPhase90" class="form-check-input" type="checkbox" :value="90"
+                                    v-model="config.transfer_phase_degrees"
+                                    :disabled="config.transfer_phase_degrees.length === 1 && config.transfer_phase_degrees.includes(90)">
+                                <label class="form-check-label fw-bold" for="transferPhase90">90°</label>
+                            </div>
+                            <span class="small text-muted">Each selected phase runs a complete frequency scan; both are required for the quadrature sum.</span>
+                        </div>
+                    </div>
                     <div class="mb-3 px-1">
                         <label class="form-label small text-muted mb-1">Run Label</label>
                         <input type="text" class="form-control form-control-sm" v-model="config.run_label"
@@ -1650,7 +1668,8 @@
                         transfer_frequency_stop_hz: 10000,
                         transfer_frequency_step_hz: 1000,
                         transfer_repeats: 10,
-                        transfer_settling_time_s: 5
+                        transfer_settling_time_s: 5,
+                        transfer_phase_degrees: [0, 90]
                     },
                     isRunning: false, isSimulation: false, statusMessage: "IDLE", currentStep: 0, plotRevision: 0, logs: [], ws: null,
                     lastLoggedScheduleErrorKey: '',
@@ -1754,6 +1773,7 @@
                     transferFunctionStatistic: 'std',
                     transferFunctionYAxisScale: 'linear',
                     transferFrequencyModulationMhz: null,
+                    transferPhaseDegrees: [],
                     currentScanDimensions: 1,
                     tabs: [{ id: 'atoms', label: 'Atom Number' }, { id: 'amp', label: 'Max Voltage' }, { id: 'tail', label: 'Tail Mean' }, { id: 'sigma', label: 'Width (ms)' }, { id: 'temp', label: 'Temperature' }, { id: 'arrival', label: 'Arrival Time' }, { id: 'prob', label: 'Transition Prob.' }, { id: 'intf', label: 'Interferometer' }, { id: 'phase', label: 'Interferometer Phase' }],
                     historyMap: {},
@@ -3080,7 +3100,9 @@ getLiveEstimatedShotCount() {
                 step: this.config.transfer_frequency_step_hz,
                 list: ''
             });
-            return frequencyCount * Math.max(2, Math.round(Number(this.config.transfer_repeats) || 2));
+            const phaseCount = Array.isArray(this.config.transfer_phase_degrees) && this.config.transfer_phase_degrees.length
+                ? this.config.transfer_phase_degrees.length : 2;
+            return frequencyCount * Math.max(2, Math.round(Number(this.config.transfer_repeats) || 2)) * phaseCount;
         }
         return this.estimateScanStepCount(this.config);
     } catch (error) {
@@ -3517,7 +3539,13 @@ loadScheduledTaskIntoEditor(taskId) {
         this.runMode = 'scheduled';
     }
     const restoredConfig = this.cloneConfig(task.config);
-    this.config = { ...this.config, ...restoredConfig };
+                            this.config = { ...this.config, ...restoredConfig };
+                            const restoredTransferPhases = Array.isArray(this.config.transfer_phase_degrees)
+                                ? this.config.transfer_phase_degrees.map(Number).filter(value => value === 0 || value === 90)
+                                : [];
+                            this.config.transfer_phase_degrees = restoredTransferPhases.length
+                                ? [...new Set(restoredTransferPhases)].sort((a, b) => a - b)
+                                : [0, 90];
     this.config.scan_dimensions = this.resolveScanDimensionsFromConfig(this.config);
     this.config.dim2_enabled = this.config.scan_dimensions >= 2;
     this.config.dim3_enabled = this.config.scan_dimensions >= 3;
@@ -3860,6 +3888,11 @@ finishScheduledRun(finalStatus = 'IDLE') {
                         if (!Number.isInteger(payload.transfer_repeats) || payload.transfer_repeats < 2) {
                             throw new Error('Transfer Function requires at least 2 repeats per frequency.');
                         }
+                        const phases = Array.isArray(payload.transfer_phase_degrees)
+                            ? [...new Set(payload.transfer_phase_degrees.map(Number))].filter(value => value === 0 || value === 90).sort((a, b) => a - b)
+                            : [];
+                        if (!phases.length) throw new Error('Select at least one TTI phase: 0° or 90°.');
+                        payload.transfer_phase_degrees = phases;
                         payload.transfer_settling_time_s = 5;
                         payload.scan_dimensions = 1;
                         payload.dim2_enabled = false;
@@ -4760,6 +4793,15 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     if (Number.isFinite(modulationMhz) && modulationMhz > 0) {
                         this.transferFrequencyModulationMhz = modulationMhz;
                     }
+                    const configuredPhases = Array.isArray(data.transfer_phase_degrees)
+                        ? data.transfer_phase_degrees.map(Number).filter(Number.isFinite)
+                        : [];
+                    const phaseDeg = Number(data.transfer_phase_deg);
+                    if (configuredPhases.length) {
+                        this.transferPhaseDegrees = configuredPhases;
+                    } else if (Number.isFinite(phaseDeg) && !this.transferPhaseDegrees.some(value => Math.abs(value - phaseDeg) < 1e-9)) {
+                        this.transferPhaseDegrees.push(phaseDeg);
+                    }
                     const key = frequency.toPrecision(15);
                     if (!this.transferFunctionHistoryMap[key]) {
                         this.transferFunctionHistoryMap[key] = {
@@ -4767,15 +4809,29 @@ finishScheduledRun(finalStatus = 'IDLE') {
                             atom_number_up: [], atom_number_dw: [],
                             atom_number_up_nofit: [], atom_number_dw_nofit: [],
                             intf_p1: [], intf_p2: [], intf_p1_nofit: [], intf_p2_nofit: [],
-                            interferometer_phase: []
+                            interferometer_phase: [], phaseData: {}
                         };
                     }
                     const point = this.transferFunctionHistoryMap[key];
-                    Object.keys(point).forEach((field) => {
-                        if (field === 'frequency') return;
+                    const fields = [
+                        'atom_number_up', 'atom_number_dw', 'atom_number_up_nofit', 'atom_number_dw_nofit',
+                        'intf_p1', 'intf_p2', 'intf_p1_nofit', 'intf_p2_nofit', 'interferometer_phase'
+                    ];
+                    let phasePoint = null;
+                    if (Number.isFinite(phaseDeg)) {
+                        const phaseKey = phaseDeg.toPrecision(15);
+                        if (!point.phaseData[phaseKey]) {
+                            point.phaseData[phaseKey] = Object.fromEntries(fields.map(field => [field, []]));
+                        }
+                        phasePoint = point.phaseData[phaseKey];
+                    }
+                    fields.forEach((field) => {
                         if (field === 'interferometer_phase' && data.interferometer_phase_valid !== true) return;
                         const value = Number(data[field]);
-                        if (Number.isFinite(value)) point[field].push(value);
+                        if (Number.isFinite(value)) {
+                            point[field].push(value);
+                            if (phasePoint) phasePoint[field].push(value);
+                        }
                     });
                 },
                 sampleStandardDeviation(values) {
@@ -4836,25 +4892,59 @@ finishScheduledRun(finalStatus = 'IDLE') {
                         if (!field) return { traces: [], layout: { ...this.buildCommonAnalysisLayout() } };
                         const scale = statistic !== 's2' && this.currentTab === 'phase' && this.phaseUnit === 'mrad' ? 1000 : 1;
                         const phaseAmplitude = this.transferBraggPhaseAmplitudeRad();
-                        const counts = points.map(point => (point[field] || []).length);
-                        const trace = {
-                            x: points.map(point => point.frequency),
-                            y: points.map(point => {
-                                const mean = this.sampleMean(point[field]);
-                                const value = statistic === 's2'
-                                    ? (mean !== null && phaseAmplitude !== null ? (mean / phaseAmplitude) ** 2 : null)
-                                    : (statistic === 'mean' ? mean : this.sampleStandardDeviation(point[field]));
-                                return value === null ? null : value * scale;
-                            }),
-                            customdata: counts,
-                            type: 'scatter', mode: 'lines+markers', name: `${channel} ${statisticLabel}`,
-                            line: { color, width: 2 }, marker: { color, size: 7 },
-                            connectgaps: false,
-                            hovertemplate: `Frequency=%{x:.9g} Hz<br>${hoverStatisticLabel}=%{y:.6g}<br>n=%{customdata}<extra></extra>`
-                        };
+                        let traces;
+                        if (statistic === 's2') {
+                            const phases = this.transferPhaseDegrees.slice(0, 2);
+                            const componentColors = ['#c62828', '#1565c0'];
+                            const componentValue = (point, phaseDeg) => {
+                                const phaseValues = point.phaseData?.[Number(phaseDeg).toPrecision(15)]?.[field] || [];
+                                const mean = this.sampleMean(phaseValues);
+                                return mean !== null && phaseAmplitude !== null ? (mean / phaseAmplitude) ** 2 : null;
+                            };
+                            traces = phases.map((phaseDeg, index) => ({
+                                x: points.map(point => point.frequency),
+                                y: points.map(point => componentValue(point, phaseDeg)),
+                                customdata: points.map(point => (point.phaseData?.[Number(phaseDeg).toPrecision(15)]?.[field] || []).length),
+                                type: 'scatter', mode: 'lines+markers', name: `S² at ${phaseDeg}°`,
+                                line: { color: componentColors[index], width: 2 }, marker: { color: componentColors[index], size: 7 },
+                                connectgaps: false,
+                                hovertemplate: `Frequency=%{x:.9g} Hz<br>${phaseDeg}° component=%{y:.6g}<br>n=%{customdata}<extra></extra>`
+                            }));
+                            if (phases.length === 2) {
+                                traces.push({
+                                    x: points.map(point => point.frequency),
+                                    y: points.map(point => {
+                                        const values = phases.map(phaseDeg => componentValue(point, phaseDeg));
+                                        return values.every(value => value !== null) ? values[0] + values[1] : null;
+                                    }),
+                                    customdata: points.map(point => phases.map(phaseDeg => (
+                                        point.phaseData?.[Number(phaseDeg).toPrecision(15)]?.[field] || []
+                                    ).length).join('/')),
+                                    type: 'scatter', mode: 'lines+markers', name: 'S² quadrature sum',
+                                    line: { color: '#198754', width: 3 }, marker: { color: '#198754', size: 8, symbol: 'diamond' },
+                                    connectgaps: false,
+                                    hovertemplate: 'Frequency=%{x:.9g} Hz<br>S² sum=%{y:.6g}<br>n=%{customdata}<extra></extra>'
+                                });
+                            }
+                        } else {
+                            const counts = points.map(point => (point[field] || []).length);
+                            traces = [{
+                                x: points.map(point => point.frequency),
+                                y: points.map(point => {
+                                    const mean = this.sampleMean(point[field]);
+                                    const value = statistic === 'mean' ? mean : this.sampleStandardDeviation(point[field]);
+                                    return value === null ? null : value * scale;
+                                }),
+                                customdata: counts,
+                                type: 'scatter', mode: 'lines+markers', name: `${channel} ${statisticLabel}`,
+                                line: { color, width: 2 }, marker: { color, size: 7 },
+                                connectgaps: false,
+                                hovertemplate: `Frequency=%{x:.9g} Hz<br>${hoverStatisticLabel}=%{y:.6g}<br>n=%{customdata}<extra></extra>`
+                            }];
+                        }
                         const base = this.buildCommonAnalysisLayout();
                         return {
-                            traces: [trace],
+                            traces,
                             layout: {
                                 ...base,
                                 margin: isUp ? { t: 38, b: 8, l: 76, r: 20 } : { t: 10, b: 50, l: 76, r: 20 },
@@ -4865,7 +4955,8 @@ finishScheduledRun(finalStatus = 'IDLE') {
                                     title: statistic === 's2' ? 'S² (dimensionless)' : `${label} ${statisticLabel}`
                                 },
                                 title: { text: `${channel} | Transfer Function | ${sourceLabel} | ${statisticLabel}`, font: { size: 13 }, x: 0.05, y: 0.93 },
-                                showlegend: false
+                                showlegend: statistic === 's2' && traces.length > 0,
+                                legend: statistic === 's2' ? { orientation: 'h', x: 0.5, xanchor: 'center', y: 1.12 } : base.legend
                             }
                         };
                     };
@@ -5211,7 +5302,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     const isFinalImmediateStep = !this.isScheduleActive() && !this.isSyncMode() && total > 0 && this.currentStep >= total;
                     this.currentScanDimensions = scanDimensions;
                     this.statusMessage = isTransferFunctionPoint
-                        ? `Transfer Function: ${String(data.transfer_generator_model || 'TTI')} CH${Number(data.transfer_generator_channel || 1)} | ${Number(data.transfer_frequency_hz).toPrecision(8)} Hz | ${Number(data.transfer_repeat)}/${Number(this.config.transfer_repeats)}`
+                        ? `Transfer Function: ${String(data.transfer_generator_model || 'TTI')} CH${Number(data.transfer_generator_channel || 1)} | ${Number(data.transfer_phase_deg).toPrecision(6)}° | ${Number(data.transfer_frequency_hz).toPrecision(8)} Hz | ${Number(data.transfer_repeat)}/${Number(this.config.transfer_repeats)}`
                         : (isAcStarkPoint
                         ? `AC Stark: ratio=${Number(data.ac_stark_ratio).toFixed(6)} | ${String(data.ac_stark_side).toUpperCase()}`
                         : (isLockInPoint
@@ -5251,7 +5342,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                                 this.recordTransferFunctionPoint(data);
                                 this.plotRevision++;
                                 this.renderMainPlot();
-                                this.addLog(`Transfer Function | ${String(data.transfer_generator_model || 'TTI')} CH${Number(data.transfer_generator_channel || 1)} | ${Number(data.transfer_frequency_hz).toPrecision(9)} Hz | repeat ${Number(data.transfer_repeat)}/${Number(this.config.transfer_repeats)}`);
+                                this.addLog(`Transfer Function | ${String(data.transfer_generator_model || 'TTI')} CH${Number(data.transfer_generator_channel || 1)} | ${Number(data.transfer_phase_deg).toPrecision(6)}° | ${Number(data.transfer_frequency_hz).toPrecision(9)} Hz | repeat ${Number(data.transfer_repeat)}/${Number(this.config.transfer_repeats)}`);
                                 if (isFinalImmediateStep) {
                                     this.finalizeImmediateScanCompletion(total);
                                 } else if (this.isRunning) {
@@ -5515,6 +5606,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
             this.lockInHistoryMap = {};
             this.transferFunctionHistoryMap = {};
             this.transferFrequencyModulationMhz = null;
+            this.transferPhaseDegrees = [];
             this.initPlots();
         }
     }

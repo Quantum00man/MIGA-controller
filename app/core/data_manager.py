@@ -29,7 +29,7 @@ RESULTS_CSV_HEADER = [
     "LockIn_Block", "LockIn_Position", "LockIn_State", "LockIn_Reference",
     "Workflow_Step", "Workflow_Marker", "Workflow_Point", "Workflow_Repeat",
     "Workflow_Shot", "Workflow_Randomized",
-    "TTI_Frequency_Hz", "Transfer_Repeat",
+    "TTI_Frequency_Hz", "Transfer_Repeat", "TTI_Phase_Deg",
 ]
 
 
@@ -176,7 +176,11 @@ class DataManager:
         if not summary_rows:
             return
         with open(self.current_run_dir / "transfer_function_summary.csv", "w", newline="", encoding="utf-8") as handle:
-            writer = csv.DictWriter(handle, fieldnames=list(summary_rows[0].keys()))
+            fieldnames = [
+                key for key in summary_rows[0].keys()
+                if key != "interferometer_phase_s2_components"
+            ]
+            writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
             writer.writeheader()
             writer.writerows(summary_rows)
 
@@ -224,6 +228,7 @@ class DataManager:
             workflow_randomized=(1 if result.workflow_randomized else 0) if result.workflow_randomized is not None else -1,
             transfer_frequency_hz=result.transfer_frequency_hz if result.transfer_frequency_hz is not None else np.nan,
             transfer_repeat=result.transfer_repeat if result.transfer_repeat is not None else -1,
+            transfer_phase_deg=result.transfer_phase_deg if result.transfer_phase_deg is not None else np.nan,
         )
 
     def _write_csv_row(self, result: ScanResult, step_index: int):
@@ -267,6 +272,7 @@ class DataManager:
             (1 if result.workflow_randomized else 0) if result.workflow_randomized is not None else "",
             f(result.transfer_frequency_hz, 6),
             result.transfer_repeat if result.transfer_repeat is not None else "",
+            f(result.transfer_phase_deg, 6),
         ]
         self.csv_writer.writerow(row)
         self.csv_handle.flush()
@@ -322,6 +328,11 @@ class DataManager:
                     f('ac_stark_actual_power_r1'), f('ac_stark_actual_power_r2'),
                     pt.get('lock_in_block_index', ''), pt.get('lock_in_position', ''),
                     str(pt.get('lock_in_state') or ''), pt.get('lock_in_reference', ''),
+                    pt.get('workflow_step', ''), str(pt.get('workflow_marker') or ''),
+                    pt.get('workflow_point', ''), pt.get('workflow_repeat', ''),
+                    pt.get('workflow_shot', ''), pt.get('workflow_randomized', ''),
+                    f('transfer_frequency_hz', 6), pt.get('transfer_repeat', ''),
+                    f('transfer_phase_deg', 6),
                 ]
                 writer.writerow(row)
         

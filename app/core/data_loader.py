@@ -786,6 +786,7 @@ class DataLoader:
             "workflow_randomized": self._parse_int(row.get("Workflow_Randomized"), -1),
             "transfer_frequency_hz": self._parse_float(row.get("TTI_Frequency_Hz")),
             "transfer_repeat": self._parse_int(row.get("Transfer_Repeat"), -1),
+            "transfer_phase_deg": self._parse_float(row.get("TTI_Phase_Deg")),
         }
 
     def _read_results_csv(self, run_dir: Path, max_points: Optional[int] = MAX_DISPLAY_POINTS) -> List[Dict[str, Any]]:
@@ -1209,6 +1210,7 @@ class DataLoader:
             build_transfer_function_summary(
                 full_points,
                 config_data.get("transfer_frequency_modulation_mhz"),
+                config_data.get("transfer_phase_degrees"),
             )
             if is_transfer_function
             else []

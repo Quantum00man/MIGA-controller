@@ -7985,6 +7985,9 @@
                     const sourceLabel = this.currentTab === 'phase' ? 'Active calibration' : (raw ? 'NoFit' : 'Fit');
                     const colors = ['#c62828', '#1565c0', '#198754'];
                     const plotIds = ['resultsPlotUp', 'resultsPlotDw', 'resultsPlotTotal'];
+                    const configuredPhases = Array.isArray(this.loadedConfig?.transfer_phase_degrees)
+                        ? this.loadedConfig.transfer_phase_degrees.map(Number).filter(Number.isFinite).slice(0, 2)
+                        : [];
                     fields.forEach((field, index) => {
                         if (!field) {
                             Plotly.react(plotIds[index], [], this[`layoutRes${index === 0 ? 'Up' : index === 1 ? 'Dw' : 'Tot'}`]);
@@ -7992,22 +7995,57 @@
                         }
                         const countField = field.replace(`_${statistic}`, '_count');
                         const scale = statistic !== 's2' && this.currentTab === 'phase' && this.phaseUnit === 'mrad' ? 1000 : 1;
-                        const trace = {
-                            x: rows.map(row => Number(row.frequency_hz)),
-                            y: rows.map(row => {
-                                const value = row[field];
-                                return value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value))
-                                    ? Number(value) * scale
-                                    : null;
-                            }),
-                            customdata: rows.map(row => this.getHistoryKey([Number(row.frequency_hz)])),
-                            text: rows.map(row => Number(row[countField] ?? row.shot_count ?? 0)),
-                            type: 'scatter', mode: 'lines+markers',
-                            name: `${labels[index]} ${statisticLabel}`,
-                            line: { color: colors[index], width: 2 }, marker: { color: colors[index], size: 7 },
-                            connectgaps: false,
-                            hovertemplate: `Frequency=%{x:.9g} Hz<br>${hoverStatisticLabel}=%{y:.6g}<br>n=%{text}<extra></extra>`
-                        };
+                        const numericOrNull = value => value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value))
+                            ? Number(value)
+                            : null;
+                        let traces;
+                        if (statistic === 's2' && configuredPhases.length > 0) {
+                            const componentFor = (row, phaseDeg) => (
+                                Array.isArray(row.interferometer_phase_s2_components)
+                                    ? row.interferometer_phase_s2_components.find(component => (
+                                        Number.isFinite(Number(component?.phase_deg))
+                                        && Math.abs(Number(component.phase_deg) - phaseDeg) < 1e-9
+                                    ))
+                                    : null
+                            );
+                            traces = configuredPhases.map((phaseDeg, phaseIndex) => ({
+                                x: rows.map(row => Number(row.frequency_hz)),
+                                y: rows.map(row => numericOrNull(componentFor(row, phaseDeg)?.s2)),
+                                customdata: rows.map(row => this.getHistoryKey([Number(row.frequency_hz)])),
+                                text: rows.map(row => Number(componentFor(row, phaseDeg)?.count || 0)),
+                                type: 'scatter', mode: 'lines+markers', name: `S² at ${phaseDeg}°`,
+                                line: { color: colors[phaseIndex], width: 2 }, marker: { color: colors[phaseIndex], size: 7 },
+                                connectgaps: false,
+                                hovertemplate: `Frequency=%{x:.9g} Hz<br>${phaseDeg}° component=%{y:.6g}<br>n=%{text}<extra></extra>`
+                            }));
+                            if (configuredPhases.length === 2) {
+                                traces.push({
+                                    x: rows.map(row => Number(row.frequency_hz)),
+                                    y: rows.map(row => numericOrNull(row.interferometer_phase_s2)),
+                                    customdata: rows.map(row => this.getHistoryKey([Number(row.frequency_hz)])),
+                                    text: rows.map(row => configuredPhases.map(phaseDeg => Number(componentFor(row, phaseDeg)?.count || 0)).join('/')),
+                                    type: 'scatter', mode: 'lines+markers', name: 'S² quadrature sum',
+                                    line: { color: colors[2], width: 3 }, marker: { color: colors[2], size: 8, symbol: 'diamond' },
+                                    connectgaps: false,
+                                    hovertemplate: 'Frequency=%{x:.9g} Hz<br>S² sum=%{y:.6g}<br>n=%{text}<extra></extra>'
+                                });
+                            }
+                        } else {
+                            traces = [{
+                                x: rows.map(row => Number(row.frequency_hz)),
+                                y: rows.map(row => {
+                                    const value = numericOrNull(row[field]);
+                                    return value === null ? null : value * scale;
+                                }),
+                                customdata: rows.map(row => this.getHistoryKey([Number(row.frequency_hz)])),
+                                text: rows.map(row => Number(row[countField] ?? row.shot_count ?? 0)),
+                                type: 'scatter', mode: 'lines+markers',
+                                name: `${labels[index]} ${statisticLabel}`,
+                                line: { color: colors[index], width: 2 }, marker: { color: colors[index], size: 7 },
+                                connectgaps: false,
+                                hovertemplate: `Frequency=%{x:.9g} Hz<br>${hoverStatisticLabel}=%{y:.6g}<br>n=%{text}<extra></extra>`
+                            }];
+                        }
                         const base = this.buildCommonAnalysisLayout();
                         const isLastVisible = (this.currentTab === 'atoms' && index === 2)
                             || (this.currentTab === 'intf' && index === 1)
@@ -8022,12 +8060,13 @@
                                 title: statistic === 's2' ? 'S² (dimensionless)' : `${metricLabel} ${statisticLabel}`
                             },
                             title: { text: `${labels[index]} | Transfer Function | ${sourceLabel} | ${statisticLabel}`, font: { size: 13 }, x: 0.05, y: 0.93 },
-                            showlegend: false
+                            showlegend: statistic === 's2' && configuredPhases.length > 0,
+                            legend: statistic === 's2' ? { orientation: 'h', x: 0.5, xanchor: 'center', y: 1.12 } : base.legend
                         };
                         if (index === 0) this.layoutResUp = layout;
                         else if (index === 1) this.layoutResDw = layout;
                         else this.layoutResTot = layout;
-                        Plotly.react(plotIds[index], [trace], layout);
+                        Plotly.react(plotIds[index], traces, layout);
                     });
                 },
                 renderMainPlot() {

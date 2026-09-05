@@ -1,11 +1,15 @@
 import unittest
+import csv
+import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
 from app.analysis.transfer_function import bragg_phase_modulation_rad, build_transfer_function_summary
 from app.core.experiment_manager import ExperimentManager
+from app.core.data_manager import DataManager, RESULTS_CSV_HEADER
 from app.drivers.tti_generator import (
     set_tti_test_frequency,
+    set_tti_test_phase,
     TtiConnectionSettings,
     TtiGeneratorClient,
     TtiGeneratorError,
@@ -78,6 +82,29 @@ class TtiGeneratorClientTests(unittest.TestCase):
                 client.set_frequency(2_000_000)
         self.assertEqual(fake.sent, ["*IDN?\n", "CHN 2;FREQ 2000000\n"])
 
+    def test_tg5012a_phase_command_is_confirmed(self):
+        fake = FakeSocket(["TTi,TG5012A,1234,1.00", "1"])
+        with patch("app.drivers.tti_generator.socket.create_connection", return_value=fake):
+            with TtiGeneratorClient(TtiConnectionSettings("192.168.1.8", channel=2)) as client:
+                client.set_phase(90)
+        self.assertEqual(fake.sent, ["*IDN?\n", "CHN 2;PHASE 90;*OPC?\n"])
+
+    def test_settings_phase_action_connects_and_sets_only_selected_phase(self):
+        fake = FakeSocket(["TTi,TG5012A,1234,1.00", "1"])
+        settings = TtiConnectionSettings("192.168.1.8", model="TG5012A", channel=2)
+        with patch("app.drivers.tti_generator.socket.create_connection", return_value=fake):
+            identity = set_tti_test_phase(settings, 90)
+        self.assertIn("TG5012A", identity)
+        self.assertEqual(fake.sent, ["*IDN?\n", "CHN 2;PHASE 90;*OPC?\n"])
+
+    def test_tgf3162_phase_command_is_fire_and_forget(self):
+        fake = FakeSocket(["THURLBY THANDAR,TGF3162,1234,1.03"])
+        settings = TtiConnectionSettings("192.168.1.9", model="TGF3162", channel=1)
+        with patch("app.drivers.tti_generator.socket.create_connection", return_value=fake):
+            with TtiGeneratorClient(settings) as client:
+                client.set_phase(0)
+        self.assertEqual(fake.sent, ["*IDN?\n", "CHN 1;PHASE 0\n"])
+
 
 class TransferFunctionPlanTests(unittest.TestCase):
     def test_frontend_does_not_treat_null_frequency_as_transfer_function_point(self):
@@ -111,11 +138,15 @@ class TransferFunctionPlanTests(unittest.TestCase):
             "transfer_settling_time_s": 0,
         }
         plan = self.manager._build_transfer_function_execution(config)
-        self.assertEqual(len(plan), 9)
+        self.assertEqual(len(plan), 18)
         self.assertTrue(all(point["sequence_parameters"] == [] for point in plan))
         self.assertEqual(
             [point["metadata"]["transfer_frequency_hz"] for point in plan],
-            [100.0] * 3 + [200.0] * 3 + [300.0] * 3,
+            ([100.0] * 3 + [200.0] * 3 + [300.0] * 3) * 2,
+        )
+        self.assertEqual(
+            [point["metadata"]["transfer_phase_deg"] for point in plan],
+            [0.0] * 9 + [90.0] * 9,
         )
         self.assertEqual(config["transfer_frequency_values_hz"], [100.0, 200.0, 300.0])
         self.assertEqual(config["averages"], 1)
@@ -123,6 +154,7 @@ class TransferFunctionPlanTests(unittest.TestCase):
         self.assertEqual(config["transfer_generator_model"], "TG5012A")
         self.assertEqual(config["transfer_generator_channel"], 1)
         self.assertEqual(config["transfer_frequency_modulation_mhz"], 1.0)
+        self.assertEqual(config["transfer_phase_degrees"], [0.0, 90.0])
         self.assertTrue(all(
             point["metadata"]["transfer_frequency_modulation_mhz"] == 1.0
             for point in plan
@@ -141,8 +173,23 @@ class TransferFunctionPlanTests(unittest.TestCase):
         plan = self.manager._build_transfer_function_execution(config)
         self.assertEqual(
             [point["metadata"]["transfer_frequency_hz"] for point in plan],
-            [3.0, 3.0, 2.0, 2.0, 1.0, 1.0],
+            [3.0, 3.0, 2.0, 2.0, 1.0, 1.0] * 2,
         )
+
+    def test_plan_can_run_only_one_selected_phase(self):
+        config = {
+            "scan_dimensions": 1,
+            "parameter_source": "classic",
+            "randomize": False,
+            "transfer_frequency_start_hz": 100,
+            "transfer_frequency_stop_hz": 200,
+            "transfer_frequency_step_hz": 100,
+            "transfer_repeats": 2,
+            "transfer_phase_degrees": [90],
+        }
+        plan = self.manager._build_transfer_function_execution(config)
+        self.assertEqual(len(plan), 4)
+        self.assertTrue(all(point["metadata"]["transfer_phase_deg"] == 90.0 for point in plan))
 
 
 class TransferFunctionStatisticsTests(unittest.TestCase):
@@ -187,11 +234,16 @@ class TransferFunctionStatisticsTests(unittest.TestCase):
         self.assertIn("setTransferFunctionStatistic('s2')", archive_html)
         self.assertIn("setTransferFunctionYAxisScale('log')", archive_html)
         self.assertIn("`interferometer_phase_${statistic}`", archive_html)
+        self.assertIn("S² quadrature sum", archive_html)
         self.assertIn("transferFunctionStatistic: 'std'", index_html)
         self.assertIn("transferFunctionYAxisScale: 'linear'", index_html)
         self.assertIn("setTransferFunctionStatistic('s2')", index_html)
         self.assertIn("setTransferFunctionYAxisScale('log')", index_html)
         self.assertIn("transferBraggPhaseAmplitudeRad()", index_html)
+        self.assertIn("S² quadrature sum", index_html)
+        self.assertIn('v-model="config.transfer_phase_degrees"', index_html)
+        self.assertIn('id="transferPhase0"', index_html)
+        self.assertIn('id="transferPhase90"', index_html)
 
     def test_summary_calculates_s2_from_780_nm_frequency_modulation(self):
         rows = [
@@ -219,6 +271,61 @@ class TransferFunctionStatisticsTests(unittest.TestCase):
             }
         ])
         self.assertIsNone(summary[0]["interferometer_phase_s2"])
+
+    def test_summary_contains_two_phase_components_and_quadrature_sum(self):
+        rows = [
+            {
+                "transfer_frequency_hz": 100.0,
+                "transfer_phase_deg": phase_deg,
+                "interferometer_phase": value,
+                "interferometer_phase_valid": True,
+            }
+            for phase_deg, value in [(0.0, 0.1), (0.0, 0.2), (90.0, 0.3), (90.0, 0.5)]
+        ]
+        phase_amplitude = bragg_phase_modulation_rad(1.0)
+        summary = build_transfer_function_summary(rows, 1.0, [0.0, 90.0])
+        components = summary[0]["interferometer_phase_s2_components"]
+
+        self.assertEqual([component["phase_deg"] for component in components], [0.0, 90.0])
+        self.assertAlmostEqual(components[0]["s2"], (0.15 / phase_amplitude) ** 2)
+        self.assertAlmostEqual(components[1]["s2"], (0.4 / phase_amplitude) ** 2)
+        self.assertAlmostEqual(summary[0]["interferometer_phase_s2"], components[0]["s2"] + components[1]["s2"])
+        self.assertAlmostEqual(summary[0]["interferometer_phase_0deg_s2"], components[0]["s2"])
+        self.assertAlmostEqual(summary[0]["interferometer_phase_90deg_s2"], components[1]["s2"])
+
+    def test_single_phase_summary_does_not_report_quadrature_sum(self):
+        summary = build_transfer_function_summary([
+            {
+                "transfer_frequency_hz": 100.0,
+                "transfer_phase_deg": 0.0,
+                "interferometer_phase": 0.1,
+                "interferometer_phase_valid": True,
+            }
+        ], 1.0, [0.0])
+        self.assertIsNotNone(summary[0]["interferometer_phase_0deg_s2"])
+        self.assertIsNone(summary[0]["interferometer_phase_s2"])
+
+    def test_transfer_csv_exports_phase_and_flat_s2_columns(self):
+        self.assertIn("TTI_Phase_Deg", RESULTS_CSV_HEADER)
+        summary = build_transfer_function_summary([
+            {
+                "transfer_frequency_hz": 100.0,
+                "transfer_phase_deg": phase,
+                "interferometer_phase": 0.1,
+                "interferometer_phase_valid": True,
+            }
+            for phase in (0.0, 90.0)
+        ], 1.0, [0.0, 90.0])
+        with tempfile.TemporaryDirectory() as directory:
+            manager = DataManager()
+            manager.current_run_dir = Path(directory)
+            manager.save_transfer_function_summary(summary)
+            with open(Path(directory) / "transfer_function_summary.csv", newline="", encoding="utf-8") as handle:
+                row = next(csv.DictReader(handle))
+        self.assertIn("interferometer_phase_0deg_s2", row)
+        self.assertIn("interferometer_phase_90deg_s2", row)
+        self.assertIn("interferometer_phase_s2", row)
+        self.assertNotIn("interferometer_phase_s2_components", row)
 
     def test_summary_excludes_invalid_calibrated_phase(self):
         rows = [

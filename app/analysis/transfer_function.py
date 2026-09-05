@@ -64,8 +64,13 @@ def bragg_phase_modulation_rad(frequency_modulation_mhz: Any) -> Optional[float]
 def build_transfer_function_summary(
     results: Iterable[Any],
     frequency_modulation_mhz: Any = None,
+    phase_degrees: Any = None,
 ) -> List[Dict[str, Any]]:
     phase_amplitude = bragg_phase_modulation_rad(frequency_modulation_mhz)
+    try:
+        expected_phases = [float(value) for value in phase_degrees] if phase_degrees is not None else []
+    except (TypeError, ValueError):
+        expected_phases = []
     grouped: Dict[float, List[Any]] = {}
     for result in results:
         raw_frequency = (
@@ -97,10 +102,57 @@ def build_transfer_function_summary(
             float(frequency_modulation_mhz) if phase_amplitude is not None else None
         )
         row["bragg_phase_modulation_rad"] = phase_amplitude
-        row["interferometer_phase_s2"] = (
-            float((phase_mean / phase_amplitude) ** 2)
-            if phase_mean is not None and phase_amplitude is not None
-            else None
-        )
+        for phase_label in ("0deg", "90deg"):
+            row[f"interferometer_phase_{phase_label}_count"] = 0
+            row[f"interferometer_phase_{phase_label}_mean_rad"] = None
+            row[f"interferometer_phase_{phase_label}_std_rad"] = None
+            row[f"interferometer_phase_{phase_label}_s2"] = None
+        phase_components: List[Dict[str, Any]] = []
+        for phase_deg in expected_phases:
+            phase_samples = []
+            for item in samples:
+                raw_phase = item.get("transfer_phase_deg") if isinstance(item, dict) else getattr(item, "transfer_phase_deg", None)
+                try:
+                    matches_phase = math.isclose(float(raw_phase), phase_deg, abs_tol=1e-9)
+                except (TypeError, ValueError):
+                    matches_phase = False
+                if matches_phase:
+                    value = _value(item, ("interferometer_phase",))
+                    if value is not None:
+                        phase_samples.append(value)
+            component_mean = float(np.mean(phase_samples)) if phase_samples else None
+            component_std = float(np.std(phase_samples, ddof=1)) if len(phase_samples) >= 2 else None
+            component_s2 = (
+                float((component_mean / phase_amplitude) ** 2)
+                if component_mean is not None and phase_amplitude is not None
+                else None
+            )
+            phase_components.append({
+                "phase_deg": phase_deg,
+                "count": len(phase_samples),
+                "mean_rad": component_mean,
+                "std_rad": component_std,
+                "s2": component_s2,
+            })
+            if phase_deg in {0.0, 90.0}:
+                phase_label = f"{int(phase_deg)}deg"
+                row[f"interferometer_phase_{phase_label}_count"] = len(phase_samples)
+                row[f"interferometer_phase_{phase_label}_mean_rad"] = component_mean
+                row[f"interferometer_phase_{phase_label}_std_rad"] = component_std
+                row[f"interferometer_phase_{phase_label}_s2"] = component_s2
+        row["interferometer_phase_s2_components"] = phase_components
+        if len(phase_components) == 2:
+            component_values = [component.get("s2") for component in phase_components]
+            row["interferometer_phase_s2"] = (
+                float(sum(component_values)) if all(value is not None for value in component_values) else None
+            )
+        elif not phase_components:
+            row["interferometer_phase_s2"] = (
+                float((phase_mean / phase_amplitude) ** 2)
+                if phase_mean is not None and phase_amplitude is not None
+                else None
+            )
+        else:
+            row["interferometer_phase_s2"] = None
         rows.append(row)
     return rows

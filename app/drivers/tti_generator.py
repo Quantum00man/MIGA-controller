@@ -1,4 +1,4 @@
-"""Minimal Aim-TTi TG5012A/TGF3162 carrier-frequency control over raw LAN."""
+"""Minimal Aim-TTi TG5012A/TGF3162 frequency and phase control over raw LAN."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ class TtiConnectionSettings:
 
 
 class TtiGeneratorClient:
-    """Serialized socket client that changes only the selected carrier frequency."""
+    """Serialized socket client for the selected carrier frequency and phase."""
 
     def __init__(self, settings: TtiConnectionSettings):
         self.settings = settings
@@ -144,6 +144,30 @@ class TtiGeneratorClient:
             raise TtiGeneratorError("set_ch1_frequency requires channel 1")
         return self.set_frequency(frequency_hz)
 
+    def set_phase(self, phase_degrees: float) -> float:
+        try:
+            value = float(phase_degrees)
+        except (TypeError, ValueError) as exc:
+            raise TtiGeneratorError("TTI phase must be numeric") from exc
+        if not value == value or value in (float("inf"), float("-inf")):
+            raise TtiGeneratorError("TTI phase must be finite")
+        if value < -360.0 or value > 360.0:
+            raise TtiGeneratorError("TTI phase must be between -360 and 360 degrees")
+        channel = int(self.settings.channel)
+        if channel not in (1, 2):
+            raise TtiGeneratorError("TTI channel must be 1 or 2")
+        model = str(self.settings.model or "TG5012A").strip().upper()
+        command = f"CHN {channel};PHASE {value:.12g}"
+        if model == "TGF3162":
+            self.write(command)
+        else:
+            response = self.query(f"{command};*OPC?")
+            if response.strip() != "1":
+                raise TtiGeneratorError(
+                    f"{model} did not confirm the phase command (reply: {response!r})"
+                )
+        return value
+
 
 def test_tti_connection(settings: TtiConnectionSettings) -> str:
     with TtiGeneratorClient(settings) as client:
@@ -154,4 +178,11 @@ def set_tti_test_frequency(settings: TtiConnectionSettings, frequency_hz: float)
     """Connect, verify the model, and set only the selected carrier frequency."""
     with TtiGeneratorClient(settings) as client:
         client.set_frequency(frequency_hz)
+        return client.identity
+
+
+def set_tti_test_phase(settings: TtiConnectionSettings, phase_degrees: float) -> str:
+    """Connect, verify the model, and set only the selected channel phase."""
+    with TtiGeneratorClient(settings) as client:
+        client.set_phase(phase_degrees)
         return client.identity

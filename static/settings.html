@@ -588,7 +588,7 @@
                                 v-model.number="s.tti_timeout_s">
                         </div>
                         <div class="col-12 d-flex align-items-center gap-3 flex-wrap">
-                            <button type="button" class="btn btn-outline-primary" @click="testTtiConnection" :disabled="ttiTesting || ttiFrequencyTesting">
+                            <button type="button" class="btn btn-outline-primary" @click="testTtiConnection" :disabled="ttiTesting || ttiFrequencyTesting || ttiPhaseTesting">
                                 <span v-if="ttiTesting" class="spinner-border spinner-border-sm me-2"></span>
                                 {{ ttiTesting ? 'Testing...' : 'Test Connection' }}
                             </button>
@@ -608,7 +608,7 @@
                                 </div>
                                 <div class="col-md-6 d-grid">
                                     <button type="button" class="btn btn-outline-warning" @click="setTtiTestFrequency"
-                                        :disabled="ttiTesting || ttiFrequencyTesting">
+                                        :disabled="ttiTesting || ttiFrequencyTesting || ttiPhaseTesting">
                                         <span v-if="ttiFrequencyTesting" class="spinner-border spinner-border-sm me-2"></span>
                                         {{ ttiFrequencyTesting ? 'Setting frequency...' : 'Set Test Frequency' }}
                                     </button>
@@ -621,10 +621,35 @@
                                 </div>
                             </div>
                         </div>
+                        <div class="col-12 mt-4 pt-3 border-top">
+                            <label class="form-label fw-bold" for="tti-test-phase">Test {{ s.tti_channel === 2 ? 'CH2' : 'CH1' }} phase</label>
+                            <div class="row g-2 align-items-center">
+                                <div class="col-md-6">
+                                    <div class="input-group">
+                                        <input id="tti-test-phase" type="number" min="-360" max="360" step="0.1"
+                                            class="form-control" v-model.number="ttiTestPhaseDeg">
+                                        <span class="input-group-text">degrees</span>
+                                    </div>
+                                </div>
+                                <div class="col-md-6 d-grid">
+                                    <button type="button" class="btn btn-outline-warning" @click="setTtiTestPhase"
+                                        :disabled="ttiTesting || ttiFrequencyTesting || ttiPhaseTesting">
+                                        <span v-if="ttiPhaseTesting" class="spinner-border spinner-border-sm me-2"></span>
+                                        {{ ttiPhaseTesting ? 'Setting phase...' : 'Set Test Phase' }}
+                                    </button>
+                                </div>
+                                <div class="col-12">
+                                    <div class="form-text">This immediately changes the selected channel phase and does not restore its previous value.</div>
+                                    <div v-if="ttiPhaseMessage" class="small mt-2" :class="ttiPhaseError ? 'text-danger' : 'text-success'">
+                                        {{ ttiPhaseMessage }}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                     <div class="alert alert-light border mt-4 mb-0 small">
-                        Transfer Function scans select the configured channel and change only its carrier frequency. Waveform, amplitude,
-                        phase and output state are left unchanged.
+                        Transfer Function scans select the configured channel and change its carrier frequency and phase. Waveform,
+                        amplitude and output state are left unchanged.
                     </div>
                 </div>
 
@@ -1585,6 +1610,7 @@
                     updateInfo: {}, updateMsg: '', updateIsError: false, updateBusy: false,
                     ttiTesting: false, ttiTestMessage: '', ttiTestError: false,
                     ttiTestFrequencyHz: 1000, ttiFrequencyTesting: false, ttiFrequencyMessage: '', ttiFrequencyError: false,
+                    ttiTestPhaseDeg: 0, ttiPhaseTesting: false, ttiPhaseMessage: '', ttiPhaseError: false,
                     markerBusy: false,
                     markerError: '',
                     markerMessage: '',
@@ -2621,6 +2647,34 @@
                         this.ttiFrequencyMessage = error.response?.data?.detail || error.message || 'Frequency command failed';
                     } finally {
                         this.ttiFrequencyTesting = false;
+                    }
+                },
+                async setTtiTestPhase() {
+                    this.ttiPhaseTesting = true;
+                    this.ttiPhaseMessage = '';
+                    this.ttiPhaseError = false;
+                    try {
+                        const phase = Number(this.ttiTestPhaseDeg);
+                        if (!Number.isFinite(phase)) throw new Error('Enter a finite test phase.');
+                        if (phase < -360 || phase > 360) throw new Error('Test phase must be between -360 and 360 degrees.');
+                        const res = await axios.post('/settings/tti/test-phase', {
+                            host: String(this.s.tti_host || '').trim(),
+                            port: Number(this.s.tti_port || 9221),
+                            timeout_s: Number(this.s.tti_timeout_s || 3),
+                            model: String(this.s.tti_model || 'TG5012A'),
+                            channel: Number(this.s.tti_channel || 1),
+                            phase_degrees: phase
+                        });
+                        const confirmed = Number(res.data?.data?.phase_degrees);
+                        const model = String(res.data?.data?.model || this.s.tti_model || 'TTI');
+                        const channel = Number(res.data?.data?.channel || this.s.tti_channel || 1);
+                        const action = model === 'TGF3162' ? 'accepted' : 'confirmed';
+                        this.ttiPhaseMessage = `${model} CH${channel} phase ${action} at ${Number.isFinite(confirmed) ? confirmed : phase} degrees.`;
+                    } catch (error) {
+                        this.ttiPhaseError = true;
+                        this.ttiPhaseMessage = error.response?.data?.detail || error.message || 'Phase command failed';
+                    } finally {
+                        this.ttiPhaseTesting = false;
                     }
                 },
                 async fetchSettings() {
