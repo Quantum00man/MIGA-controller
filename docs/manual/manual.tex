@@ -82,7 +82,7 @@
 \newcommand{\ui}[1]{\textbf{#1}}
 \newcommand{\pathcode}[1]{\nolinkurl{#1}}
 \newcommand{\branchname}{\texttt{marker-optimization}}
-\newcommand{\commitid}{\texttt{f60eef0}}
+\newcommand{\commitid}{\texttt{5dd5503}}
 \newcommand{\warningtext}[1]{\par\medskip\noindent
   \fcolorbox{MigaRed}{MigaRed!5}{\parbox{0.93\linewidth}{\textbf{Caution.} #1}}\par\medskip}
 \newcommand{\notetext}[1]{\par\medskip\noindent
@@ -182,8 +182,8 @@ dual-channel acquisition, fit-based and integration-based analysis, live visuali
 archiving and offline re-analysis. The \branchname{} branch adds two complementary
 closed-loop workflows: deterministic sequential marker optimization and Ax-based Bayesian
 optimization. It also includes synchronized master/slave scans, scheduled runs, AC Stark
-and lock-in modes, Bragg pulse generation, Bragg phase-space analysis, archive collections
-and overlapping Allan deviation.
+and lock-in modes, phase-resolved Bragg transfer-function scans, Bragg pulse generation,
+Bragg phase-space analysis, archive collections and overlapping Allan deviation.
 
 \section{Functional map}
 \begin{figure}[htbp]
@@ -781,6 +781,7 @@ trial $k$, a window $w$ stops when
 quality depends on the bounded grid, metric stability, initialization and trial budget.}
 
 \chapter{Bragg, AC Stark, lock-in and transfer-function workflows}\label{ch:special}
+\markboth{Specialized workflows}{}
 
 \section{Calibrated Bragg pulse generation}
 The Bragg generator writes channel 32 with a sampled Gaussian or Blackman envelope. For a
@@ -856,30 +857,157 @@ Fit and NoFit metric receives block values plus mean, sample standard deviation 
 \end{figure}
 
 \section{Bragg transfer-function scan}
-Transfer Function is a Live, one-dimensional, ordered scan of the carrier frequency on
-a selected channel of an Aim-TTi TG5012A or TGF3162. Configure the model, channel and
-instrument address under \ui{Settings $>$ TTI Generator}, select Transfer Function under \ui{Scan Logic}, and enter the
-frequency start, stop, step and repetitions per frequency. The uploaded \code{.mot}
-sequence is executed unchanged and therefore requires no \code{PARAMETER} placeholder.
-The TTI Generator settings tab also provides a test-frequency action: it connects with the
-currently displayed address, verifies the selected model and immediately sets only the selected channel's
-carrier frequency. The previous frequency is not restored.
+\subsection{Purpose and physical normalization}
+Transfer Function measures the response of the atom-interferometer phase to a sinusoidal
+frequency modulation applied through a selected channel of an Aim-TTi TG5012A or TGF3162.
+The value entered in \ui{Settings $>$ Transfer Function} is the calibrated, actual optical
+frequency-modulation amplitude at \SI{780}{\nano\meter}, denoted by $\Delta\nu_{780}$; it
+is not the modulation of the \SI{1560}{\nano\meter} fundamental and not merely the voltage
+applied to the PID error input.
 
-The controller opens one instrument LAN connection on TCP port 9221 for the scan. At each
-new frequency it selects the configured channel and sends only the \code{FREQ} command.
-TG5012A waits for the instrument's operation-complete reply; TGF3162 uses the established
-fire-and-forget write because some firmware does not reliably answer \code{*OPC?}. The
-controller then waits a fixed five seconds before the first sequence. It does not
-change waveform, amplitude, phase or output state and does not restore the original
-frequency after the scan.
+For an atom-to-retro-mirror distance $L=\SI{2.23}{\meter}$, the round-trip propagation
+delay converts a sinusoidal optical-frequency modulation into a Bragg phase modulation.
+The exact amplitude is
+\begin{equation}
+  \phi_\omega(f)=\frac{4\pi\Delta\nu_{780}}{2\pi f}
+  \sin\!\left(\frac{2\pi fL}{c}\right).
+\end{equation}
+In the Hz--kHz range, $2\pi fL/c\ll1$, giving the low-frequency relation used by the
+controller,
+\begin{equation}
+  \boxed{\phi_\omega\simeq\frac{4\pi L}{c}\Delta\nu_{780}}.
+  \label{eq:transfer-bragg-phase}
+\end{equation}
+Thus \SI{1}{\mega\hertz} of actual \SI{780}{\nano\meter} modulation corresponds to
+$\phi_\omega\simeq\SI{0.0935}{\radian}$. This is the normalization represented by the
+\code{Bragg_Phase_Modulation_Rad} CSV column.
 
-For every frequency, the live and Archive plots show the sample standard deviation
-($n-1$ denominator) of atom number, interferometer probabilities $P_1/P_2$, and calibrated
-interferometer phase. Fit is the default source; NoFit is available for atom number and
-$P_1/P_2$. Phase follows the active calibration snapshot for the run. One complete
-frequency sweep is stored as one Archive run, including every shot and waveform plus
-\pathcode{transfer_function_summary.csv} and
-\pathcode{transfer_function_summary.json}.
+At generator phase $\psi$, the controller forms the squared response component from the
+mean valid calibrated interferometer phase,
+\begin{equation}
+  S_\psi^2(f)=\left[\frac{\overline{\Phi}_\psi(f)}{\phi_\omega}\right]^2.
+  \label{eq:transfer-component}
+\end{equation}
+When both orthogonal phases are acquired, the reported quadrature result is
+\begin{equation}
+  S_{\mathrm{quad}}^2(f)=S_0^2(f)+S_{90}^2(f),
+  \label{eq:transfer-quadrature}
+\end{equation}
+which corresponds to the reconstructed squared transfer-function magnitude. Only phase
+samples marked valid by the active interferometer calibration contribute to these means.
+
+\subsection{Configuration and test controls}
+Select \ui{Transfer Function} under \ui{Scan Logic}. Enter the inclusive carrier-frequency
+start, stop and nonzero step, then set \ui{Repeats per frequency}; at least two repeats are
+required so that a sample standard deviation can be evaluated. Immediately below that
+field, select one or both generator phases. The defaults are \ang{0} and \ang{90}; the UI
+does not allow the final selected phase to be cleared. Transfer Function is an ordered,
+one-dimensional Live scan. Randomization and alternate parameter sources are disabled,
+and the uploaded \code{.mot} sequence is executed unchanged, so it requires no
+\code{PARAMETER} placeholder.
+
+The Settings tab contains three independent commissioning actions:
+\begin{itemize}
+  \item \ui{Test Connection} opens the configured socket and verifies that \code{*IDN?}
+  contains the selected model name.
+  \item \ui{Set Test Frequency} immediately changes the selected channel carrier frequency.
+  \item \ui{Set Test Phase} immediately sets a phase from \ang{-360} to \ang{360}.
+\end{itemize}
+Each test uses a short-lived TCP connection. Frequency and phase tests do not restore the
+previous instrument value; verify the physical output before using either action.
+
+\subsection{Execution order and instrument communication}
+The execution plan is phase-major, frequency-minor, repeat-minor. With the default phase
+selection, the controller completes the entire \ang{0} frequency sweep and then completes
+the entire \ang{90} sweep:
+\begin{equation}
+  \underbrace{(0^\circ,f_1)^{\times r},\ldots,(0^\circ,f_N)^{\times r}}_{
+    \text{first complete sweep}},\quad
+  \underbrace{(90^\circ,f_1)^{\times r},\ldots,(90^\circ,f_N)^{\times r}}_{
+    \text{second complete sweep}}.
+\end{equation}
+This ordering is deliberately preserved in the archive metadata. Interleaving the two
+phases at every frequency can reduce sensitivity to slow drift, but that ordering is an
+experimental recommendation and is not implemented by this revision.
+
+The controller opens one raw-LAN socket, normally on TCP port 9221, and retains it for the
+complete scan. At the start of a phase sweep it first returns to $f_1$, then sends the
+phase command. For each subsequent frequency it sends only the new frequency. The command
+forms are \code{CHN n;FREQ value} and \code{CHN n;PHASE value}. TG5012A appends
+\code{;*OPC?} and requires a reply of \code{1}; TGF3162 treats a completed socket write as
+acceptance because its firmware may not answer \code{*OPC?} reliably. After every frequency
+change the controller waits five seconds before acquiring the first repeat. Any connection,
+identity, command or confirmation failure aborts the run. The socket is closed in all exit
+paths, but carrier frequency and phase are not restored. Waveform, amplitude and output
+state are never changed by this workflow.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[node distance=7mm and 7mm]
+  \node[primary] (connect) {Connect once\\verify model};
+  \node[block,right=of connect] (phase) {Program point\\FREQ; PHASE only\\at new phase};
+  \node[block,right=of phase] (settle) {Wait \SI{5}{\second}\\at new frequency};
+  \node[analysis,below=of settle] (shots) {Acquire $r$ shots\\save every result};
+  \node[block,left=of shots] (nextf) {Next frequency\\or next phase};
+  \node[store,left=of nextf] (close) {Summarize\\close socket};
+  \draw[flow] (connect)--(phase); \draw[flow] (phase)--(settle);
+  \draw[flow] (settle)--(shots); \draw[flow] (shots)--(nextf);
+  \draw[feedback] (nextf) to[bend left=28] (phase);
+  \draw[flow] (nextf)--(close);
+\end{tikzpicture}
+\caption{Transfer Function generator communication and acquisition lifecycle. The loop
+returns to the programming step while another frequency or phase remains.}
+\label{fig:transfer-execution}
+\end{figure}
+
+\subsection{Plots, statistics and CSV data}
+Live and Archive views group shots by carrier frequency. The metric tabs provide UP, DOWN
+and total atom number; interferometer probabilities $P_1/P_2$; and calibrated
+interferometer phase. Fit is the default source, while Fit/NoFit switching is available
+for atom number and $P_1/P_2$. The statistic selector displays mean or sample standard
+deviation,
+\begin{equation}
+  s=\sqrt{\frac{1}{n-1}\sum_{i=1}^{n}(x_i-\bar{x})^2},
+\end{equation}
+and the phase tab additionally displays $S^2$. Its three curves are the \ang{0} component,
+the \ang{90} component and their quadrature sum. All Transfer Function plots can switch
+the vertical axis between linear and logarithmic scale.
+
+The run archive retains two complementary CSV products:
+\begin{itemize}
+  \item \pathcode{results.csv} contains every shot, including Fit/NoFit atom numbers,
+  interferometer $N_1/N_2$ and $P_1/P_2$, calibrated phase and validity, TTI frequency,
+  phase and repeat index.
+  \item \pathcode{transfer_function_summary.csv} contains one row per frequency with
+  count, mean and sample standard deviation for Fit/NoFit atom numbers and $P_1/P_2$,
+  calibrated phase statistics, the \ang{0}/\ang{90} phase statistics and $S^2$ components,
+  the quadrature sum, $\Delta\nu_{780}$ and $\phi_\omega$.
+\end{itemize}
+The Archive \ui{CSV} action automatically selects this frequency-summary format for a
+Transfer Function run. For a legacy run, the Archive rebuilds the summary from its raw
+\pathcode{results.csv}; quantities that were never recorded, or $S^2$ without a usable
+modulation calibration, remain empty rather than being replaced by zero.
+
+\begin{procedure}{acquire a phase-resolved transfer function}
+  \item Calibrate the actual \SI{780}{\nano\meter} optical FM and enter its amplitude in
+  \ui{Settings $>$ Transfer Function}.
+  \item Select model, channel, address, port and timeout; run the connection test, then use
+  the frequency and phase tests only if changing the live generator is safe.
+  \item In the Control Console select \ui{Transfer Function}, define the frequency grid,
+  choose at least two repeats, and select \ang{0}, \ang{90} or both.
+  \item Verify that the continuous generator waveform is synchronized to the first Bragg
+  pulse and that its amplitude, waveform and output state are already correct.
+  \item Start the scan and monitor valid phase counts as well as atom number and $P_1/P_2$;
+  stop if diffraction efficiency or contrast changes with modulation.
+  \item In Archive compare mean, standard deviation and $S^2$ using both linear and log
+  axes, then export the dedicated CSV and retain the complete run directory.
+\end{procedure}
+
+\warningtext{A constant injected PID voltage does not guarantee a frequency-independent
+$\Delta\nu_{780}(f)$ near the servo bandwidth. The current controller normalizes all scan
+frequencies with the single configured actual-FM amplitude. If the calibrated optical FM
+varies appreciably with frequency, apply a frequency-dependent external correction before
+interpreting the curve quantitatively.}
 
 \chapter{Synchronized multi-controller operation}\label{ch:sync}
 
@@ -1105,9 +1233,12 @@ starting from the Reference and Target nodes' respective effective calibrations.
 $\omega$, $\phi_0$, reference $T^2$, monotonic slope and signal-source selection fixed.
 Reversing the displayed difference swaps Reference and Target roles but never causes the
 nodes to share calibration parameters.
-The Archive page submits the selected nodes and controls to
-\code{/archive/sync-phase-calibration-optimize}; the server reads the paired raw signal
-fields and both effective calibrations from the selected archive.
+The Archive page submits the selected nodes and controls to the endpoint
+\begin{center}
+\pathcode{/archive/sync-phase-calibration-optimize}.
+\end{center}
+The server reads the paired raw signal fields and both effective calibrations from the
+selected archive.
 
 \subsection{Objective and constraints}
 The selectable SYNC metric $m(d)$ is
@@ -1230,8 +1361,9 @@ compensation and embedded metadata.\\
 Fitting Models & Atom-area method, baseline points, waveform model formulas, guesses,
 roles and fixed/free parameters.\\
 SYNC & Standalone/Master/Slave role, node name, token, allowed IP and slave endpoints.\\
-TTI Generator & TG5012A/TGF3162 selection, CH1/CH2 selection, direct instrument IP, TCP
-port, timeout, connection test and frequency test for Transfer Function scans.\\
+Transfer Function & Actual \SI{780}{\nano\meter} frequency-modulation amplitude,
+TG5012A/TGF3162 and CH1/CH2 selection, direct instrument IP, TCP port, timeout, connection
+test, and immediate frequency/phase tests.\\
 Network & Acquisition platform, Red Pitaya addresses, DAQ rate and timeout.\\
 Logic \& Channels & Launch/trigger channel IDs and linked-mode timing constant.\\
 System Paths & \code{tmot4}, arguments, \code{cmot4}, default template and DDS writer.\\
@@ -1273,8 +1405,9 @@ Optimized marker sequence & Final baseline after all accepted marker steps.\\
 \pathcode{optimization_report.json} & Optimization configuration and final status.\\
 Best sequence & Classic placeholder template rendered with best Bayesian parameters.\\
 AC Stark XML and plan & Original/generated DDS tables and requested/actual power ratios.\\
-Transfer Function CSV/JSON & Per-frequency valid sample counts, means and sample standard
-deviations for Fit, NoFit and calibrated phase metrics.\\
+Transfer Function CSV/JSON & Per-shot frequency/phase metadata plus per-frequency counts,
+means and sample standard deviations for atom number, $P_1/P_2$ and calibrated phase;
+\ang{0}/\ang{90} components and quadrature $S^2$; optical-FM normalization.\\
 \pathcode{sync_manifest.json} & Node identities, progress, paired data and replication state.\\
 \bottomrule
 \end{tabularx}
@@ -1410,7 +1543,7 @@ include shared tokens or unrelated credentials in a support bundle.
 
 \chapter{Formula and unit reference}
 
-\begin{longtable}{l l l}
+\begin{longtable}{p{0.16\textwidth} p{0.47\textwidth} p{0.27\textwidth}}
 \caption{Core symbols.}\\
 \toprule Symbol & Meaning & Unit / convention\\ \midrule
 \endfirsthead
@@ -1428,6 +1561,10 @@ $k_{\mathrm{eff}}$ & Effective Bragg wave vector & rad \si{\per\meter}\\
 $R^2$ & Marker fit coefficient of determination & dimensionless\\
 $s$, SEM & Repeat dispersion and standard error & objective units\\
 $n$ & Allan averaging order & shots\\
+$\Delta\nu_{780}$ & Actual optical frequency-modulation amplitude & \si{\hertz}\\
+$\phi_\omega$ & Equivalent retro-Bragg phase-modulation amplitude & \si{\radian}\\
+$S_\psi^2$ & Squared response at generator phase $\psi$ & dimensionless\\
+$S_{\mathrm{quad}}^2$ & $S_0^2+S_{90}^2$ & dimensionless\\
 \bottomrule
 \end{longtable}
 
@@ -1451,7 +1588,8 @@ Marker optimization & Catalog, workflow start/stop/status, presets and artifact 
 Sync & Configuration, connectivity test, master start/stop/status, slave health/prepare/
 start/stop/status and archive transfer.\\
 Settings/system & Simulation mode, all/analysis settings, folder browser and controlled
-repository update status/fetch/apply, plus TTI generator connection/frequency tests.\\
+repository update status/fetch/apply, plus TTI generator connection, frequency and phase
+tests.\\
 Fitting & Default waveform models, default scan models and saved custom scan model.\\
 Archive & Tree, load, sequence/waveform, recalculate, overwrite, Allan, scan fit, Bragg
 phase space, reusable calibrations, SYNC $A/C$ phase-calibration preview and sync retry.\\
@@ -1486,11 +1624,13 @@ replication.\\
 \pathcode{app/core/data_loader.py} & Archive loading, recalculation, Allan and sync nodes.\\
 \pathcode{app/core/pulse_generator.py} & Calibrated Gaussian/Blackman Bragg pulses.\\
 \pathcode{app/drivers/dds_table.py} & DDS XML, Raman calibration inversion and write/verify.\\
-\pathcode{app/drivers/tti_generator.py} & TG5012A/TGF3162 identity checks and selected-channel carrier-frequency command.\\
+\pathcode{app/drivers/tti_generator.py} & TG5012A/TGF3162 identity checks and selected-channel
+carrier-frequency/phase commands.\\
 \pathcode{app/analysis/fitting.py} & Waveform/scan models, safe formulas and Bragg fringe.\\
 \pathcode{app/analysis/physics.py} & $K$, atom numbers, probabilities, arrival and temperature.\\
 \pathcode{app/analysis/lock_in.py} & ABBA validation and demodulation statistics.\\
-\pathcode{app/analysis/transfer_function.py} & Per-frequency Fit/NoFit and phase sample statistics.\\
+\pathcode{app/analysis/transfer_function.py} & Per-frequency Fit/NoFit and phase sample
+statistics, Eq.~\eqref{eq:transfer-bragg-phase} normalization and quadrature $S^2$.\\
 \pathcode{app/analysis/phase_space.py} & Bragg phase inversion and quality statistics.\\
 \pathcode{app/analysis/interferometer_phase.py} & Monotonic half-fringe Archive phase
 conversion and reference subtraction.\\
