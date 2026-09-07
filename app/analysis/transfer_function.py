@@ -84,6 +84,18 @@ def build_transfer_function_summary(
             continue
         if math.isfinite(frequency):
             grouped.setdefault(frequency, []).append(result)
+    if not expected_phases:
+        inferred_phases = set()
+        for samples in grouped.values():
+            for item in samples:
+                raw_phase = item.get("transfer_phase_deg") if isinstance(item, dict) else getattr(item, "transfer_phase_deg", None)
+                try:
+                    numeric_phase = float(raw_phase)
+                except (TypeError, ValueError):
+                    continue
+                if math.isfinite(numeric_phase) and numeric_phase in {0.0, 90.0}:
+                    inferred_phases.add(numeric_phase)
+        expected_phases = sorted(inferred_phases)
 
     rows: List[Dict[str, Any]] = []
     for frequency in sorted(grouped):
@@ -102,6 +114,14 @@ def build_transfer_function_summary(
             float(frequency_modulation_mhz) if phase_amplitude is not None else None
         )
         row["bragg_phase_modulation_rad"] = phase_amplitude
+        for output_name in METRIC_FIELDS:
+            if output_name == "interferometer_phase_std":
+                continue
+            metric_name = output_name.removesuffix("_std")
+            for phase_label in ("0deg", "90deg"):
+                row[f"{metric_name}_{phase_label}_count"] = 0
+                row[f"{metric_name}_{phase_label}_mean"] = None
+                row[f"{metric_name}_{phase_label}_std"] = None
         for phase_label in ("0deg", "90deg"):
             row[f"interferometer_phase_{phase_label}_count"] = 0
             row[f"interferometer_phase_{phase_label}_mean_rad"] = None
@@ -109,7 +129,7 @@ def build_transfer_function_summary(
             row[f"interferometer_phase_{phase_label}_s2"] = None
         phase_components: List[Dict[str, Any]] = []
         for phase_deg in expected_phases:
-            phase_samples = []
+            selected_samples = []
             for item in samples:
                 raw_phase = item.get("transfer_phase_deg") if isinstance(item, dict) else getattr(item, "transfer_phase_deg", None)
                 try:
@@ -117,9 +137,26 @@ def build_transfer_function_summary(
                 except (TypeError, ValueError):
                     matches_phase = False
                 if matches_phase:
-                    value = _value(item, ("interferometer_phase",))
-                    if value is not None:
-                        phase_samples.append(value)
+                    selected_samples.append(item)
+            if phase_deg in {0.0, 90.0}:
+                phase_label = f"{int(phase_deg)}deg"
+                for output_name, fields in METRIC_FIELDS.items():
+                    if output_name == "interferometer_phase_std":
+                        continue
+                    metric_name = output_name.removesuffix("_std")
+                    values = [
+                        value for item in selected_samples
+                        if (value := _value(item, fields)) is not None
+                    ]
+                    row[f"{metric_name}_{phase_label}_count"] = len(values)
+                    row[f"{metric_name}_{phase_label}_mean"] = float(np.mean(values)) if values else None
+                    row[f"{metric_name}_{phase_label}_std"] = (
+                        float(np.std(values, ddof=1)) if len(values) >= 2 else None
+                    )
+            phase_samples = [
+                value for item in selected_samples
+                if (value := _value(item, ("interferometer_phase",))) is not None
+            ]
             component_mean = float(np.mean(phase_samples)) if phase_samples else None
             component_std = float(np.std(phase_samples, ddof=1)) if len(phase_samples) >= 2 else None
             component_s2 = (

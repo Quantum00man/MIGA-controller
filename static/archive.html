@@ -8056,9 +8056,17 @@
                     const sourceLabel = this.currentTab === 'phase' ? 'Active calibration' : (raw ? 'NoFit' : 'Fit');
                     const colors = ['#c62828', '#1565c0', '#198754'];
                     const plotIds = ['resultsPlotUp', 'resultsPlotDw', 'resultsPlotTotal'];
-                    const configuredPhases = Array.isArray(this.loadedConfig?.transfer_phase_degrees)
+                    const savedPhases = Array.isArray(this.loadedConfig?.transfer_phase_degrees)
                         ? this.loadedConfig.transfer_phase_degrees.map(Number).filter(Number.isFinite).slice(0, 2)
                         : [];
+                    const summaryPhases = rows.flatMap(row => (
+                        Array.isArray(row.interferometer_phase_s2_components)
+                            ? row.interferometer_phase_s2_components.map(component => Number(component?.phase_deg)).filter(Number.isFinite)
+                            : []
+                    ));
+                    const configuredPhases = savedPhases.length
+                        ? savedPhases
+                        : [...new Set(summaryPhases)].sort((a, b) => a - b).slice(0, 2);
                     fields.forEach((field, index) => {
                         if (!field) {
                             Plotly.react(plotIds[index], [], this[`layoutRes${index === 0 ? 'Up' : index === 1 ? 'Dw' : 'Tot'}`]);
@@ -8069,16 +8077,16 @@
                         const numericOrNull = value => value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value))
                             ? Number(value)
                             : null;
+                        const componentFor = (row, phaseDeg) => (
+                            Array.isArray(row.interferometer_phase_s2_components)
+                                ? row.interferometer_phase_s2_components.find(component => (
+                                    Number.isFinite(Number(component?.phase_deg))
+                                    && Math.abs(Number(component.phase_deg) - phaseDeg) < 1e-9
+                                ))
+                                : null
+                        );
                         let traces;
                         if (statistic === 's2' && configuredPhases.length > 0) {
-                            const componentFor = (row, phaseDeg) => (
-                                Array.isArray(row.interferometer_phase_s2_components)
-                                    ? row.interferometer_phase_s2_components.find(component => (
-                                        Number.isFinite(Number(component?.phase_deg))
-                                        && Math.abs(Number(component.phase_deg) - phaseDeg) < 1e-9
-                                    ))
-                                    : null
-                            );
                             traces = configuredPhases.map((phaseDeg, phaseIndex) => ({
                                 x: rows.map(row => Number(row.frequency_hz)),
                                 y: rows.map(row => numericOrNull(componentFor(row, phaseDeg)?.s2)),
@@ -8101,6 +8109,35 @@
                                     hovertemplate: 'Frequency=%{x:.9g} Hz<br>S² sum=%{y:.6g}<br>n=%{text}<extra></extra>'
                                 });
                             }
+                        } else if (configuredPhases.length > 0) {
+                            const fieldBase = field.slice(0, -(statistic.length + 1));
+                            const phaseValue = (row, phaseDeg) => {
+                                if (this.currentTab === 'phase') {
+                                    const component = componentFor(row, phaseDeg);
+                                    return numericOrNull(statistic === 'mean' ? component?.mean_rad : component?.std_rad);
+                                }
+                                const phaseLabel = `${Math.round(phaseDeg)}deg`;
+                                return numericOrNull(row[`${fieldBase}_${phaseLabel}_${statistic}`]);
+                            };
+                            const phaseCount = (row, phaseDeg) => {
+                                if (this.currentTab === 'phase') return Number(componentFor(row, phaseDeg)?.count || 0);
+                                const phaseLabel = `${Math.round(phaseDeg)}deg`;
+                                return Number(row[`${fieldBase}_${phaseLabel}_count`] || 0);
+                            };
+                            traces = configuredPhases.map((phaseDeg, phaseIndex) => ({
+                                x: rows.map(row => Number(row.frequency_hz)),
+                                y: rows.map(row => {
+                                    const value = phaseValue(row, phaseDeg);
+                                    return value === null ? null : value * scale;
+                                }),
+                                customdata: rows.map(row => this.getHistoryKey([Number(row.frequency_hz)])),
+                                text: rows.map(row => phaseCount(row, phaseDeg)),
+                                type: 'scatter', mode: 'lines+markers',
+                                name: `${labels[index]} ${statisticLabel} at ${phaseDeg}°`,
+                                line: { color: colors[phaseIndex], width: 2 }, marker: { color: colors[phaseIndex], size: 7 },
+                                connectgaps: false,
+                                hovertemplate: `Frequency=%{x:.9g} Hz<br>Phase=${phaseDeg}°<br>${hoverStatisticLabel}=%{y:.6g}<br>n=%{text}<extra></extra>`
+                            }));
                         } else {
                             traces = [{
                                 x: rows.map(row => Number(row.frequency_hz)),
@@ -8110,8 +8147,7 @@
                                 }),
                                 customdata: rows.map(row => this.getHistoryKey([Number(row.frequency_hz)])),
                                 text: rows.map(row => Number(row[countField] ?? row.shot_count ?? 0)),
-                                type: 'scatter', mode: 'lines+markers',
-                                name: `${labels[index]} ${statisticLabel}`,
+                                type: 'scatter', mode: 'lines+markers', name: `${labels[index]} ${statisticLabel}`,
                                 line: { color: colors[index], width: 2 }, marker: { color: colors[index], size: 7 },
                                 connectgaps: false,
                                 hovertemplate: `Frequency=%{x:.9g} Hz<br>${hoverStatisticLabel}=%{y:.6g}<br>n=%{text}<extra></extra>`
@@ -8131,8 +8167,8 @@
                                 title: statistic === 's2' ? 'S² (dimensionless)' : `${metricLabel} ${statisticLabel}`
                             },
                             title: { text: `${labels[index]} | Transfer Function | ${sourceLabel} | ${statisticLabel}`, font: { size: 13 }, x: 0.05, y: 0.93 },
-                            showlegend: statistic === 's2' && configuredPhases.length > 0,
-                            legend: statistic === 's2' ? { orientation: 'h', x: 0.5, xanchor: 'center', y: 1.12 } : base.legend
+                            showlegend: configuredPhases.length > 0,
+                            legend: configuredPhases.length > 0 ? { orientation: 'h', x: 0.5, xanchor: 'center', y: 1.12 } : base.legend
                         };
                         if (index === 0) this.layoutResUp = layout;
                         else if (index === 1) this.layoutResDw = layout;

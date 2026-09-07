@@ -4927,15 +4927,36 @@ finishScheduledRun(finalStatus = 'IDLE') {
                                 });
                             }
                         } else {
-                            const counts = points.map(point => (point[field] || []).length);
-                            traces = [{
+                            const phases = this.transferPhaseDegrees.slice(0, 2);
+                            const componentColors = ['#c62828', '#1565c0'];
+                            const valuesFor = (point, phaseDeg) => (
+                                point.phaseData?.[Number(phaseDeg).toPrecision(15)]?.[field] || []
+                            );
+                            traces = phases.length ? phases.map((phaseDeg, index) => ({
                                 x: points.map(point => point.frequency),
                                 y: points.map(point => {
-                                    const mean = this.sampleMean(point[field]);
-                                    const value = statistic === 'mean' ? mean : this.sampleStandardDeviation(point[field]);
+                                    const values = valuesFor(point, phaseDeg);
+                                    const value = statistic === 'mean'
+                                        ? this.sampleMean(values)
+                                        : this.sampleStandardDeviation(values);
                                     return value === null ? null : value * scale;
                                 }),
-                                customdata: counts,
+                                customdata: points.map(point => valuesFor(point, phaseDeg).length),
+                                type: 'scatter', mode: 'lines+markers',
+                                name: `${channel} ${statisticLabel} at ${phaseDeg}°`,
+                                line: { color: componentColors[index], width: 2 },
+                                marker: { color: componentColors[index], size: 7 },
+                                connectgaps: false,
+                                hovertemplate: `Frequency=%{x:.9g} Hz<br>Phase=${phaseDeg}°<br>${hoverStatisticLabel}=%{y:.6g}<br>n=%{customdata}<extra></extra>`
+                            })) : [{
+                                x: points.map(point => point.frequency),
+                                y: points.map(point => {
+                                    const value = statistic === 'mean'
+                                        ? this.sampleMean(point[field])
+                                        : this.sampleStandardDeviation(point[field]);
+                                    return value === null ? null : value * scale;
+                                }),
+                                customdata: points.map(point => (point[field] || []).length),
                                 type: 'scatter', mode: 'lines+markers', name: `${channel} ${statisticLabel}`,
                                 line: { color, width: 2 }, marker: { color, size: 7 },
                                 connectgaps: false,
@@ -4955,8 +4976,8 @@ finishScheduledRun(finalStatus = 'IDLE') {
                                     title: statistic === 's2' ? 'S² (dimensionless)' : `${label} ${statisticLabel}`
                                 },
                                 title: { text: `${channel} | Transfer Function | ${sourceLabel} | ${statisticLabel}`, font: { size: 13 }, x: 0.05, y: 0.93 },
-                                showlegend: statistic === 's2' && traces.length > 0,
-                                legend: statistic === 's2' ? { orientation: 'h', x: 0.5, xanchor: 'center', y: 1.12 } : base.legend
+                                showlegend: this.transferPhaseDegrees.length > 0 && traces.length > 0,
+                                legend: this.transferPhaseDegrees.length > 0 ? { orientation: 'h', x: 0.5, xanchor: 'center', y: 1.12 } : base.legend
                             }
                         };
                     };

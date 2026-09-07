@@ -235,12 +235,15 @@ class TransferFunctionStatisticsTests(unittest.TestCase):
         self.assertIn("setTransferFunctionYAxisScale('log')", archive_html)
         self.assertIn("`interferometer_phase_${statistic}`", archive_html)
         self.assertIn("S² quadrature sum", archive_html)
+        self.assertIn("`${fieldBase}_${phaseLabel}_${statistic}`", archive_html)
+        self.assertIn("`${labels[index]} ${statisticLabel} at ${phaseDeg}°`", archive_html)
         self.assertIn("transferFunctionStatistic: 'std'", index_html)
         self.assertIn("transferFunctionYAxisScale: 'linear'", index_html)
         self.assertIn("setTransferFunctionStatistic('s2')", index_html)
         self.assertIn("setTransferFunctionYAxisScale('log')", index_html)
         self.assertIn("transferBraggPhaseAmplitudeRad()", index_html)
         self.assertIn("S² quadrature sum", index_html)
+        self.assertIn("`${channel} ${statisticLabel} at ${phaseDeg}°`", index_html)
         self.assertIn('v-model="config.transfer_phase_degrees"', index_html)
         self.assertIn('id="transferPhase0"', index_html)
         self.assertIn('id="transferPhase90"', index_html)
@@ -305,6 +308,52 @@ class TransferFunctionStatisticsTests(unittest.TestCase):
         self.assertAlmostEqual(summary[0]["interferometer_phase_s2"], components[0]["s2"] + components[1]["s2"])
         self.assertAlmostEqual(summary[0]["interferometer_phase_0deg_s2"], components[0]["s2"])
         self.assertAlmostEqual(summary[0]["interferometer_phase_90deg_s2"], components[1]["s2"])
+
+    def test_summary_contains_per_phase_statistics_for_each_plotted_metric(self):
+        rows = [
+            {
+                "transfer_frequency_hz": 100.0,
+                "transfer_phase_deg": phase_deg,
+                "atom_number_up": value,
+                "atom_number_dw": value * 2,
+                "intf_p1": value / 10,
+                "intf_p2": value / 20,
+                "interferometer_phase": value / 100,
+                "interferometer_phase_valid": True,
+            }
+            for phase_deg, value in ((0.0, 10.0), (0.0, 12.0), (90.0, 20.0), (90.0, 24.0))
+        ]
+        summary = build_transfer_function_summary(rows, 1.0, [0.0, 90.0])[0]
+
+        self.assertEqual(summary["atom_number_up_fit_0deg_count"], 2)
+        self.assertAlmostEqual(summary["atom_number_up_fit_0deg_mean"], 11.0)
+        self.assertAlmostEqual(summary["atom_number_up_fit_0deg_std"], 2 ** 0.5)
+        self.assertEqual(summary["atom_number_up_fit_90deg_count"], 2)
+        self.assertAlmostEqual(summary["atom_number_up_fit_90deg_mean"], 22.0)
+        self.assertAlmostEqual(summary["atom_number_up_fit_90deg_std"], 2 * (2 ** 0.5))
+        self.assertAlmostEqual(summary["intf_p1_fit_0deg_mean"], 1.1)
+        self.assertAlmostEqual(summary["intf_p1_fit_90deg_mean"], 2.2)
+        self.assertAlmostEqual(summary["interferometer_phase_0deg_mean_rad"], 0.11)
+        self.assertAlmostEqual(summary["interferometer_phase_90deg_mean_rad"], 0.22)
+
+    def test_summary_infers_phases_from_archived_points_when_config_is_missing(self):
+        summary = build_transfer_function_summary([
+            {
+                "transfer_frequency_hz": 100.0,
+                "transfer_phase_deg": phase_deg,
+                "atom_number_up": value,
+                "interferometer_phase": value / 100,
+                "interferometer_phase_valid": True,
+            }
+            for phase_deg, value in ((0.0, 10.0), (0.0, 12.0), (90.0, 20.0), (90.0, 24.0))
+        ], 1.0)
+
+        self.assertEqual(
+            [component["phase_deg"] for component in summary[0]["interferometer_phase_s2_components"]],
+            [0.0, 90.0],
+        )
+        self.assertAlmostEqual(summary[0]["atom_number_up_fit_0deg_mean"], 11.0)
+        self.assertAlmostEqual(summary[0]["atom_number_up_fit_90deg_mean"], 22.0)
 
     def test_single_phase_summary_does_not_report_quadrature_sum(self):
         summary = build_transfer_function_summary([
