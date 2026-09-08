@@ -409,6 +409,7 @@ Timing & $[P_0,P_{\mathrm{tot}}-P_0]$ & Maintains a fixed total timing; a numeri
 Rabi & $[P_0,P_{\mathrm{tot}}-P_0/2]$ & Couples pulse duration to a compensating timing.\\
 Half & $[P_0,P_0/2]$ & Supplies the half-value as the second placeholder.\\
 Link & $[P_0,f_1(P_0),f_2(P_0,P_1),\ldots]$ & Evaluates ordered formulas with \code{math}, \code{numpy}, and preceding parameters.\\
+Phase Noise Analyze & Selected mid-fringe $P_0$ values plus Link formulas & Measures every selected $T^2$ consecutively for a configurable number of repeats and applies a per-point mid-fringe phase reference.\\
 Bragg Rabi & Derived MOT content & Generates a calibrated Gaussian or Blackman pulse and timing compensation.\\
 Lock-in & ABBA blocks & Repeats two parameter states in the order A--B--B--A.\\
 AC Stark & Interleaved ratio plan & Coordinates MOT placeholders with generated DDS elements.\\
@@ -1157,6 +1158,28 @@ Mid-fringe locations satisfy
   \Delta x_{\mathrm{mid}}=\frac{\pi}{\omega}.
 \end{equation}
 Valid Bragg fit results can be saved as named reusable phase calibrations.
+
+\section{Phase-noise scan}
+Phase Noise Analyze uses the active Bragg calibration and lets the operator select one or
+more fitted mid-fringe intersections. For each selected value, the controller sets
+$P_0=T^2$, evaluates the ordinary Link formulas for subsequent parameters, completes all
+requested repeats, and only then advances to the next value. Randomization is disabled.
+Each shot uses its own mid-fringe reference and monotonic branch for phase inversion.
+
+The configured detection background is converted at mid fringe using
+\begin{equation}
+  \sigma_{\phi,\mathrm{det}}=\frac{\sigma_{P,\mathrm{interferometer}}}{|A|},
+\end{equation}
+where the signal-noise value and fitted amplitude must use the calibration's saved data
+source and units. The fixed laser-frequency contribution is combined in quadrature,
+\begin{equation}
+  \sigma_{\phi,\mathrm{expected}}=
+  \sqrt{\sigma_{\phi,\mathrm{det}}^2+\sigma_{\phi,\mathrm{laser}}^2}.
+\end{equation}
+The measured value is the sample standard deviation of valid converted phases at each
+mid fringe and requires at least two valid shots. Archive plots compare measured,
+expected, detection and laser-frequency noise, with a switch between $T^2$ in
+\si{\micro\second\squared} and $T$ in milliseconds.
 
 \section{Phase-space conversion}
 For a measured value $y_i$, calibration amplitude $A$ and corrected offset $C$, the

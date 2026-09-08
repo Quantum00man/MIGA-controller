@@ -21,7 +21,7 @@ import config
 from app.drivers.hardware import SequenceEditor, ExperimentDriver, RedPitayaDriver
 from app.drivers import dds_table
 from app.drivers.vcd_parser import VCDParser
-from app.analysis import fitting, physics, interferometer_phase
+from app.analysis import fitting, physics, interferometer_phase, phase_noise
 from app.analysis.lock_in import build_lock_in_analysis
 from app.analysis.transfer_function import build_transfer_function_summary
 from app.models.schemas import ScanConfig
@@ -592,6 +592,8 @@ class ExperimentManager:
             "tti_channel": 1,
             "transfer_frequency_modulation_mhz": 1.0,
             "transfer_atom_mirror_distance_m": 2.23,
+            "std_p_interferometer": 1.1,
+            "laser_frequency_phase_noise_mrad": 100.0,
             
             # --- [关键修复] 显式添加这三个参数的默认值 ---
             "intf_alpha": 0.35,
@@ -1406,6 +1408,45 @@ class ExperimentManager:
             )
         return self._generate_parameters(payload)
 
+    def _build_phase_noise_execution(self, scan_config: Dict[str, Any]) -> List[Dict[str, Any]]:
+        calibration = scan_config.get("interferometer_phase_calibration_override")
+        if not isinstance(calibration, dict):
+            calibration = self.get_active_bragg_phase_calibration()
+        if not isinstance(calibration, dict):
+            raise ValueError("Phase Noise Analyze requires an active Bragg phase calibration")
+        selected = phase_noise.validate_mid_fringe_values(
+            calibration, scan_config.get("phase_noise_mid_fringe_values") or []
+        )
+        repeats = int(scan_config.get("phase_noise_repeats", 10))
+        if repeats < 2 or repeats > 100000:
+            raise ValueError("Phase Noise Analyze repeats must be between 2 and 100000")
+
+        link_payload = dict(scan_config)
+        link_payload.update({
+            "mode": "link", "scan_dimensions": 1, "averages": 1, "randomize": False,
+            "dim1_type": "list", "custom_list": ",".join(str(value) for value in selected),
+            "param_type": "float", "dim2_enabled": False, "dim3_enabled": False,
+        })
+        parameter_sets = self._generate_parameters(link_payload)
+        plan: List[Dict[str, Any]] = []
+        for parameters in parameter_sets:
+            t2 = float(parameters[0])
+            for repeat in range(1, repeats + 1):
+                plan.append({
+                    "sequence_parameters": parameters,
+                    "metadata": {
+                        "phase_noise_t2_us2": t2,
+                        "phase_noise_repeat": repeat,
+                        "phase_noise_total_repeats": repeats,
+                    },
+                })
+        scan_config["phase_noise_mid_fringe_values"] = selected
+        scan_config["phase_noise_repeats"] = repeats
+        scan_config["averages"] = 1
+        scan_config["randomize"] = False
+        scan_config["interferometer_phase_calibration_override"] = deepcopy(calibration)
+        return plan
+
     def start_scan(
         self,
         scan_config: Dict[str, Any],
@@ -1429,6 +1470,8 @@ class ExperimentManager:
                 parameters = self._build_lock_in_execution(scan_config)
             elif scan_config.get('mode') == 'transfer_function':
                 parameters = self._build_transfer_function_execution(scan_config)
+            elif scan_config.get('mode') == 'phase_noise':
+                parameters = self._build_phase_noise_execution(scan_config)
             else:
                 parameters = self._generate_parameters(scan_config)
             if parameters_override is None or not scan_config.get('_sync_slave'):
@@ -2322,9 +2365,12 @@ class ExperimentManager:
                 'intf_p1_nofit': i_p1_nf, 'intf_p2_nofit': i_p2_nf,
             }
             phase_manager = data_manager or self.data_manager
-            phase_result = interferometer_phase.calculate_phase(
-                phase_input, getattr(phase_manager, 'phase_calibration_snapshot', None)
-            )
+            phase_calibration = getattr(phase_manager, 'phase_calibration_snapshot', None)
+            if metadata.get("phase_noise_t2_us2") is not None and isinstance(phase_calibration, dict):
+                phase_calibration = phase_noise.calibration_at_mid_fringe(
+                    phase_calibration, metadata["phase_noise_t2_us2"]
+                )
+            phase_result = interferometer_phase.calculate_phase(phase_input, phase_calibration)
 
             manager_for_save = data_manager or self.data_manager
             volt_up_store = volt_up[::storage_step]
@@ -2593,6 +2639,7 @@ class ExperimentManager:
         ac_stark_results: List[ScanResult] = []
         lock_in_results: List[ScanResult] = []
         transfer_function_results: List[ScanResult] = []
+        phase_noise_results: List[ScanResult] = []
 
         try:
             while True:
@@ -2620,6 +2667,8 @@ class ExperimentManager:
                     lock_in_results.append(result)
                 if result is not None and result.transfer_frequency_hz is not None:
                     transfer_function_results.append(result)
+                if result is not None and (scan_config or {}).get('mode') == 'phase_noise':
+                    phase_noise_results.append(result)
                 self.publish_data(payload)
         finally:
             if ac_stark_results:
@@ -2653,6 +2702,18 @@ class ExperimentManager:
                 except Exception as exc:
                     self._scan_finalize_error = f"Transfer Function summary save failed: {exc}"
                     print(f"[Transfer Function] {self._scan_finalize_error}")
+            if scan_config and scan_config.get('mode') == 'phase_noise':
+                try:
+                    summary = phase_noise.build_phase_noise_summary(
+                        phase_noise_results,
+                        self.data_manager.phase_calibration_snapshot,
+                        (scan_config.get("_system_settings_snapshot") or {}).get("std_p_interferometer", 1.1),
+                        (scan_config.get("_system_settings_snapshot") or {}).get("laser_frequency_phase_noise_mrad", 100.0),
+                    )
+                    self.data_manager.save_phase_noise_summary(summary)
+                except Exception as exc:
+                    self._scan_finalize_error = f"Phase Noise summary save failed: {exc}"
+                    print(f"[Phase Noise] {self._scan_finalize_error}")
             self.data_manager.close_run()
             self.status.is_running = False
             if self._scan_finalize_error:

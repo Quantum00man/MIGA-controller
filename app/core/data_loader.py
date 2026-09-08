@@ -10,7 +10,7 @@ import uuid
 
 import numpy as np
 
-from app.analysis import fitting, physics, interferometer_phase
+from app.analysis import fitting, physics, interferometer_phase, phase_noise
 from app.analysis.transfer_function import build_transfer_function_summary
 from app.analysis.lock_in import build_lock_in_analysis
 import config
@@ -1216,6 +1216,17 @@ class DataLoader:
             if is_transfer_function
             else []
         )
+        is_phase_noise = str(config_data.get("mode") or "").strip().lower() == "phase_noise"
+        settings_snapshot = config_data.get("_system_settings_snapshot") or {}
+        phase_noise_summary = (
+            phase_noise.build_phase_noise_summary(
+                full_points,
+                phase_calibration,
+                settings_snapshot.get("std_p_interferometer", 1.1),
+                settings_snapshot.get("laser_frequency_phase_noise_mrad", 100.0),
+            )
+            if is_phase_noise else []
+        )
         sync_manifest = self._apply_sync_phase_reference_overrides(sync_manifest, phase_contexts)
         return {
             "config": config_data,
@@ -1230,6 +1241,7 @@ class DataLoader:
             "ac_stark_summary": self._build_ac_stark_summary(full_points),
             "lock_in_analysis": lock_in_analysis,
             "transfer_function_summary": transfer_function_summary,
+            "phase_noise_summary": phase_noise_summary,
             "preview_map": (
                 initial_step.get("preview_map", {})
                 if is_marker_optimization
@@ -1458,6 +1470,13 @@ class DataLoader:
             waveform = self._load_waveform_arrays(run_dir, int(point["step"]))
             result = self._recalculate_point(point, waveform, settings, original_settings)
             if result is not None:
+                if str(config_data.get("mode") or "").strip().lower() == "phase_noise":
+                    reference = point.get("interferometer_phase_reference_t2_us2")
+                    calibration = settings.get("_interferometer_phase_calibration")
+                    if reference is not None and isinstance(calibration, dict):
+                        result = interferometer_phase.apply_phase(
+                            result, phase_noise.calibration_at_mid_fringe(calibration, reference)
+                        )
                 recalculated_points.append(result)
         return recalculated_points
 
@@ -1882,6 +1901,13 @@ class DataLoader:
             waveform = self._load_waveform_arrays(run_dir, int(point["step"]))
             result = self._recalculate_point(point, waveform, settings, original_settings)
             if result is not None:
+                if str(config_data.get("mode") or "").strip().lower() == "phase_noise":
+                    reference = point.get("interferometer_phase_reference_t2_us2")
+                    calibration = settings.get("_interferometer_phase_calibration")
+                    if reference is not None and isinstance(calibration, dict):
+                        result = interferometer_phase.apply_phase(
+                            result, phase_noise.calibration_at_mid_fringe(calibration, reference)
+                        )
                 recalculated_points.append(result)
 
         sampled_points = self._sample_sequence(recalculated_points, max_points)
@@ -1905,6 +1931,16 @@ class DataLoader:
             if is_transfer_function
             else []
         )
+        is_phase_noise = str(config_data.get("mode") or "").strip().lower() == "phase_noise"
+        phase_noise_summary = (
+            phase_noise.build_phase_noise_summary(
+                recalculated_points,
+                settings.get("_interferometer_phase_calibration"),
+                settings.get("std_p_interferometer", 1.1),
+                settings.get("laser_frequency_phase_noise_mrad", 100.0),
+            )
+            if is_phase_noise else []
+        )
 
         return {
             "config": config_data,
@@ -1915,6 +1951,7 @@ class DataLoader:
             "ac_stark_summary": self._build_ac_stark_summary(recalculated_points),
             "lock_in_analysis": lock_in_analysis,
             "transfer_function_summary": transfer_function_summary,
+            "phase_noise_summary": phase_noise_summary,
             "preview_map": self._build_preview_map(recalculated_points, scan_dimensions=scan_dimensions),
             "total_points": len(recalculated_points),
             "interferometer_phase_calibration": settings.get("_interferometer_phase_calibration"),

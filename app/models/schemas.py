@@ -53,6 +53,8 @@ class ScanConfig(BaseModel):
     mode: str = Field("standard")
     mode_param: Optional[float] = Field(None)
     link_formulas: List[str] = Field(default_factory=list)
+    phase_noise_mid_fringe_values: List[float] = Field(default_factory=list, max_length=200)
+    phase_noise_repeats: int = Field(10, ge=2, le=100000)
 
     @validator("mode_param", pre=True)
     def normalize_mode_param(cls, value):
@@ -434,6 +436,8 @@ class ArchiveAnalysisSettings(AnalysisSettings):
     fit_models: List[FitModelDefinition] = Field(default_factory=list)
     transfer_frequency_modulation_mhz: float = Field(1.0, gt=0)
     transfer_atom_mirror_distance_m: float = Field(2.23, gt=0)
+    std_p_interferometer: float = Field(1.1, ge=0)
+    laser_frequency_phase_noise_mrad: float = Field(100.0, ge=0)
 
 
 class SyncSlaveSettings(BaseModel):
@@ -508,6 +512,8 @@ class SystemSettings(BaseModel):
     tti_channel: int = Field(1, ge=1, le=2)
     transfer_frequency_modulation_mhz: float = Field(1.0, gt=0)
     transfer_atom_mirror_distance_m: float = Field(2.23, gt=0)
+    std_p_interferometer: float = Field(1.1, ge=0)
+    laser_frequency_phase_noise_mrad: float = Field(100.0, ge=0)
 
     @validator("tti_host")
     def normalize_tti_host(cls, value):

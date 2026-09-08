@@ -904,10 +904,10 @@
                             v-model.number="config.scan_dimensions">
                         <label class="btn btn-outline-secondary" for="scan1d">1D</label>
                         <input type="radio" class="btn-check" name="scanDimension" id="scan2d" :value="2"
-                            v-model.number="config.scan_dimensions" :disabled="['ac_stark', 'lock_in', 'transfer_function'].includes(config.mode)">
+                            v-model.number="config.scan_dimensions" :disabled="['ac_stark', 'lock_in', 'transfer_function', 'phase_noise'].includes(config.mode)">
                         <label class="btn btn-outline-secondary" for="scan2d">2D</label>
                         <input type="radio" class="btn-check" name="scanDimension" id="scan3d" :value="3"
-                            v-model.number="config.scan_dimensions" :disabled="['ac_stark', 'lock_in', 'transfer_function'].includes(config.mode)">
+                            v-model.number="config.scan_dimensions" :disabled="['ac_stark', 'lock_in', 'transfer_function', 'phase_noise'].includes(config.mode)">
                         <label class="btn btn-outline-secondary" for="scan3d">3D</label>
                     </div>
                     <div class="form-text mt-2" v-if="config.scan_dimensions > 1">
@@ -916,8 +916,8 @@
                     </div>
                 </div>
 
-                <span class="section-label" v-if="!['ac_stark', 'lock_in', 'transfer_function'].includes(config.mode)">Parameter P0</span>
-                <div class="card p-3" v-if="!['ac_stark', 'lock_in', 'transfer_function'].includes(config.mode)">
+                <span class="section-label" v-if="!['ac_stark', 'lock_in', 'transfer_function', 'phase_noise'].includes(config.mode)">Parameter P0</span>
+                <div class="card p-3" v-if="!['ac_stark', 'lock_in', 'transfer_function', 'phase_noise'].includes(config.mode)">
                     <div v-if="config.parameter_source === 'markers'" class="mb-3">
                         <label class="form-label small fw-bold text-primary mb-1">P0 Marker</label>
                         <select class="form-select form-select-sm" v-model="config.marker_axes[0]" @change="applyMarkerDefaults(0)">
@@ -1027,6 +1027,7 @@
                             <option value="rabi">Rabi (Tot-P0/2)</option>
                             <option value="half">Half (P0/2)</option>
                             <option value="link">Link (Custom Formula)</option>
+                            <option value="phase_noise" :disabled="isSyncMode()">Phase Noise Analyze</option>
                             <option value="bragg_rabi">Bragg Rabi</option>
                             <option value="lock_in" :disabled="isSyncMode()">Lock-in Measurement</option>
                             <option value="ac_stark" :disabled="isSyncMode()">AC Stark Centering</option>
@@ -1075,7 +1076,7 @@
                             Timing/Rabi mode requires a numeric Total Parameter.
                         </div>
                     </div>
-                    <div v-if="config.mode === 'link'" class="mt-1">
+                    <div v-if="['link', 'phase_noise'].includes(config.mode)" class="mt-1">
                         <label class="form-label small text-muted mb-2">Python Formulas</label>
                         <div v-for="(formula, index) in config.link_formulas" :key="index"
                             class="input-group input-group-sm mb-2">
@@ -1087,7 +1088,7 @@
                         </div>
                         <button class="btn btn-sm btn-light w-100 text-muted border border-dashed" @click="addFormula">+
                             Add Parameter</button>
-                        <div class="mt-3 pt-3 border-top">
+                        <div v-if="config.mode === 'link'" class="mt-3 pt-3 border-top">
                             <div class="row g-2 align-items-end">
                                 <div class="col-md-4">
                                     <label class="form-label small mb-1 fw-bold text-primary">Export P0</label>
@@ -1118,6 +1119,34 @@
                                 {{ linkExportMessage }}
                             </div>
                         </div>
+                    </div>
+                    <div v-if="config.mode === 'phase_noise'" class="mt-3 pt-3 border-top">
+                        <div class="alert alert-light border py-2 px-3 small mb-3">
+                            P0 is taken from selected mid fringes. Each T is measured consecutively before moving to the next T; randomization is disabled.
+                        </div>
+                        <div v-if="phaseNoiseCalibrationError" class="alert alert-warning small py-2">{{ phaseNoiseCalibrationError }}</div>
+                        <template v-else-if="activePhaseNoiseCalibration">
+                            <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+                                <div><div class="small fw-bold">{{ activePhaseNoiseCalibration.name }}</div><div class="small text-muted">Click triangle markers to select or clear mid fringes.</div></div>
+                                <div class="d-flex align-items-center gap-2">
+                                    <span class="badge bg-primary">Active calibration</span>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" @click="fetchPhaseNoiseCalibrations()">
+                                        <i class="fas fa-rotate me-1"></i>Refresh
+                                    </button>
+                                </div>
+                            </div>
+                            <div id="phaseNoiseSelectionPlot" style="height:300px; min-height:240px;"></div>
+                            <div class="small text-muted mt-2">Selected: {{ config.phase_noise_mid_fringe_values.length }} mid fringe(s)</div>
+                            <div class="row g-2 align-items-end mt-1">
+                                <div class="col-8">
+                                    <label class="form-label small text-muted mb-1">Repeats per mid fringe</label>
+                                    <input type="number" min="2" max="100000" step="1" class="form-control form-control-sm" v-model.number="config.phase_noise_repeats">
+                                </div>
+                                <div class="col-4 d-grid">
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" @click="config.phase_noise_mid_fringe_values = []">Clear</button>
+                                </div>
+                            </div>
+                        </template>
                     </div>
                     <div v-if="config.mode === 'lock_in'" class="mt-1">
                         <div class="alert alert-light border py-2 px-3 small mb-3">
@@ -1373,13 +1402,14 @@
                 <span class="section-label">Execution Control</span>
                 <div class="card p-3 mb-5 border-0 bg-transparent shadow-none ps-0 pe-0">
                     <div class="row g-2 align-items-center mb-3 px-1">
-                        <div class="col-6"><label class="form-label small text-muted mb-1">{{ config.mode === 'transfer_function' ? 'Repeats per frequency' : (config.mode === 'ac_stark' ? 'Averages per half-point' : (config.mode === 'lock_in' ? 'ABBA blocks' : 'Averages')) }}</label><input
+                        <div v-if="config.mode !== 'phase_noise'" class="col-6"><label class="form-label small text-muted mb-1">{{ config.mode === 'transfer_function' ? 'Repeats per frequency' : (config.mode === 'ac_stark' ? 'Averages per half-point' : (config.mode === 'lock_in' ? 'ABBA blocks' : 'Averages')) }}</label><input
                                 v-if="config.mode !== 'transfer_function'" type="number" class="form-control form-control-sm" v-model.number="config.averages"
                                 min="1"><input v-else type="number" class="form-control form-control-sm" v-model.number="config.transfer_repeats" min="2"></div>
+                        <div v-else class="col-6"><label class="form-label small text-muted mb-1">Phase Noise plan</label><div class="form-control form-control-sm bg-light">{{ config.phase_noise_mid_fringe_values.length }} T values × {{ config.phase_noise_repeats }} repeats</div></div>
                         <div class="col-6">
                             <div class="d-flex align-items-center gap-3 mt-4 flex-wrap">
                                 <div class="form-check mb-0"><input class="form-check-input" type="checkbox"
-                                        v-model="config.randomize" id="randCheck" :disabled="['ac_stark', 'lock_in', 'transfer_function'].includes(config.mode)"><label
+                                        v-model="config.randomize" id="randCheck" :disabled="['ac_stark', 'lock_in', 'transfer_function', 'phase_noise'].includes(config.mode)"><label
                                         class="form-check-label small" for="randCheck">Randomize</label></div>
                                 <div class="form-check mb-0"><input class="form-check-input" type="checkbox"
                                         v-model="config.ext_trigger" id="extTriggerCheck"><label
@@ -1669,7 +1699,8 @@
                         transfer_frequency_step_hz: 1000,
                         transfer_repeats: 10,
                         transfer_settling_time_s: 5,
-                        transfer_phase_degrees: [0, 90]
+                        transfer_phase_degrees: [0, 90],
+                        phase_noise_mid_fringe_values: [], phase_noise_repeats: 10
                     },
                     isRunning: false, isSimulation: false, statusMessage: "IDLE", currentStep: 0, plotRevision: 0, logs: [], ws: null,
                     lastLoggedScheduleErrorKey: '',
@@ -1684,6 +1715,9 @@
                     linkExportAction: '',
                     linkExportMessage: '',
                     linkExportIsError: false,
+                    phaseNoiseCalibrations: [],
+                    activePhaseNoiseCalibration: null,
+                    phaseNoiseCalibrationError: '',
                     sequenceMarkerBusy: false,
                     sequenceMarkerError: '',
                     sequenceMarkerInspection: { markers: [], lines: [], marker_count: 0, line_count: 0 },
@@ -1888,6 +1922,15 @@
                         this.sequenceMarkerPreview = [];
                     }
                 },
+                'config.mode'(mode) {
+                    if (mode === 'phase_noise') {
+                        this.config.scan_dimensions = 1;
+                        this.config.parameter_source = 'classic';
+                        this.config.randomize = false;
+                        this.fetchPhaseNoiseCalibrations();
+                        this.$nextTick(() => this.renderPhaseNoiseSelectionPlot());
+                    }
+                },
                 sidebarWidth(value) { this.applySidebarWidthCss(value); },
                 currentSequenceName() { this.saveState(); },
                 scheduleSettings: {
@@ -1930,6 +1973,7 @@
                 this.fetchDdsXmlStatus();
                 this.fetchSequenceMarkers();
                 this.fetchSyncConfig();
+                this.fetchPhaseNoiseCalibrations();
                     // Editable scan/queue state is local to this browser. Only the
                     // server-owned execution status is shared between clients.
                     this.sharedStateBootstrapComplete = true;
@@ -3239,6 +3283,11 @@ estimateScanStepCount(configObj = this.config) {
         const averages = Math.max(1, Math.round(Number(configObj.averages) || 1));
         return ratioCount * 2 * averages;
     }
+    if (String(configObj.mode || '') === 'phase_noise') {
+        const midFringeCount = Array.isArray(configObj.phase_noise_mid_fringe_values)
+            ? configObj.phase_noise_mid_fringe_values.length : 0;
+        return midFringeCount * Math.max(2, Math.round(Number(configObj.phase_noise_repeats) || 2));
+    }
     const scanDimensions = this.resolveScanDimensionsFromConfig(configObj);
     const specs = [
         {
@@ -3308,6 +3357,7 @@ getScheduledTaskModeLabel(task) {
         rabi: '1D rabi scan',
         half: '1D half scan',
         link: '1D linked scan',
+        phase_noise: 'Phase Noise Analyze',
         bragg_rabi: '1D Bragg Rabi scan',
         lock_in: 'Lock-in Measurement'
     };
@@ -3815,6 +3865,67 @@ finishScheduledRun(finalStatus = 'IDLE') {
                 },
                 addFormula() { this.config.link_formulas.push(""); },
                 removeFormula(index) { this.config.link_formulas.splice(index, 1); },
+                async fetchPhaseNoiseCalibrations() {
+                    this.phaseNoiseCalibrationError = '';
+                    try {
+                        const response = await axios.get('/settings/interferometer-phase-calibrations');
+                        this.phaseNoiseCalibrations = Array.isArray(response.data?.calibrations) ? response.data.calibrations : [];
+                        this.activePhaseNoiseCalibration = response.data?.active || null;
+                        if (!this.activePhaseNoiseCalibration) {
+                            this.phaseNoiseCalibrationError = 'No active Bragg phase calibration. Activate one in Settings → Interferometer Phase.';
+                            return;
+                        }
+                        const available = (this.activePhaseNoiseCalibration.bragg?.mid_fringe_x || []).map(Number).filter(Number.isFinite);
+                        this.config.phase_noise_mid_fringe_values = (this.config.phase_noise_mid_fringe_values || [])
+                            .map(Number).filter(value => available.some(candidate => Math.abs(candidate - value) <= 1e-9 * Math.max(1, Math.abs(value))));
+                        this.$nextTick(() => this.renderPhaseNoiseSelectionPlot());
+                    } catch (error) {
+                        this.phaseNoiseCalibrationError = this.formatRequestError(error);
+                    }
+                },
+                togglePhaseNoiseMidFringe(value) {
+                    const numeric = Number(value);
+                    const selected = (this.config.phase_noise_mid_fringe_values || []).map(Number);
+                    const index = selected.findIndex(item => Math.abs(item - numeric) <= 1e-9 * Math.max(1, Math.abs(numeric)));
+                    if (index >= 0) selected.splice(index, 1); else selected.push(numeric);
+                    this.config.phase_noise_mid_fringe_values = selected.sort((a, b) => a - b);
+                    this.renderPhaseNoiseSelectionPlot();
+                },
+                phaseNoiseMidFringeSlope(value) {
+                    const calibration = this.activePhaseNoiseCalibration || {};
+                    const A = Number(calibration.parameter_values?.A);
+                    const omega = Number(calibration.bragg?.angular_frequency_rad_per_us2);
+                    const phi0 = Number(calibration.parameter_values?.phi0);
+                    return -A * omega * Math.sin(omega * Number(value) + phi0) >= 0 ? 'positive' : 'negative';
+                },
+                renderPhaseNoiseSelectionPlot() {
+                    if (this.config.mode !== 'phase_noise' || typeof Plotly === 'undefined') return;
+                    const element = document.getElementById('phaseNoiseSelectionPlot');
+                    const calibration = this.activePhaseNoiseCalibration;
+                    if (!element || !calibration) return;
+                    const mid = (calibration.bragg?.mid_fringe_x || []).map(Number).filter(Number.isFinite);
+                    const selectedValues = (this.config.phase_noise_mid_fringe_values || []).map(Number);
+                    const isSelected = value => selectedValues.some(item => Math.abs(item - value) <= 1e-9 * Math.max(1, Math.abs(value)));
+                    const offset = Number(calibration.parameter_values?.C);
+                    const selected = mid.filter(isSelected);
+                    const available = mid.filter(value => !isSelected(value));
+                    Plotly.react(element, [
+                        { x: calibration.fit_x || [], y: calibration.fit_y || [], type: 'scatter', mode: 'lines', name: 'Fitted fringe', line: { color: '#0d6efd', width: 2 } },
+                        { x: available, y: available.map(() => offset), customdata: available, type: 'scatter', mode: 'markers', name: 'Available mid fringes', marker: { color: '#8c98a4', size: 9, symbol: available.map(value => this.phaseNoiseMidFringeSlope(value) === 'positive' ? 'triangle-up' : 'triangle-down') }, hovertemplate: 'T²=%{x:.9g} (μs)²<extra>Click to select</extra>' },
+                        { x: selected, y: selected.map(() => offset), customdata: selected, type: 'scatter', mode: 'markers', name: 'Selected', marker: { color: '#6f42c1', size: 13, line: { color: '#212529', width: 1 }, symbol: selected.map(value => this.phaseNoiseMidFringeSlope(value) === 'positive' ? 'triangle-up' : 'triangle-down') }, hovertemplate: 'T²=%{x:.9g} (μs)²<extra>Selected · click to clear</extra>' }
+                    ], {
+                        margin: { l: 58, r: 15, t: 28, b: 52 }, showlegend: true,
+                        legend: { orientation: 'h', x: 0, y: 1.16 },
+                        xaxis: { title: 'P0 = T² ((μs)²)', showline: true, mirror: true, gridcolor: '#e5e9ef' },
+                        yaxis: { title: calibration.metric_label || 'Calibration signal', showline: true, mirror: true, gridcolor: '#e5e9ef' },
+                        paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)'
+                    }, { responsive: true, displaylogo: false });
+                    element.removeAllListeners?.('plotly_click');
+                    element.on('plotly_click', event => {
+                        const value = Number(event?.points?.[0]?.customdata);
+                        if (Number.isFinite(value)) this.togglePhaseNoiseMidFringe(value);
+                    });
+                },
 
                 initPlots() {
                     const commonLayout = {
@@ -3900,6 +4011,27 @@ finishScheduledRun(finalStatus = 'IDLE') {
                         payload.dim3_enabled = false;
                         payload.randomize = false;
                         payload.averages = 1;
+                        payload.parameter_source = 'classic';
+                        payload.marker_axes = [];
+                    }
+                    if (payload.mode === 'phase_noise') {
+                        if (!this.activePhaseNoiseCalibration) throw new Error('Phase Noise Analyze requires an active Bragg phase calibration.');
+                        const selected = Array.isArray(payload.phase_noise_mid_fringe_values)
+                            ? [...new Set(payload.phase_noise_mid_fringe_values.map(Number).filter(Number.isFinite))].sort((a, b) => a - b)
+                            : [];
+                        if (!selected.length) throw new Error('Select at least one mid fringe for Phase Noise Analyze.');
+                        const repeats = Math.round(Number(payload.phase_noise_repeats));
+                        if (!Number.isInteger(repeats) || repeats < 2 || repeats > 100000) {
+                            throw new Error('Phase Noise Analyze repeats must be between 2 and 100000.');
+                        }
+                        payload.phase_noise_mid_fringe_values = selected;
+                        payload.phase_noise_repeats = repeats;
+                        payload.interferometer_phase_calibration_override = JSON.parse(JSON.stringify(this.activePhaseNoiseCalibration));
+                        payload.scan_dimensions = 1;
+                        payload.dim2_enabled = false;
+                        payload.dim3_enabled = false;
+                        payload.averages = 1;
+                        payload.randomize = false;
                         payload.parameter_source = 'classic';
                         payload.marker_axes = [];
                     }

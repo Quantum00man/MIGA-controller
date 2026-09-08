@@ -2000,9 +2000,13 @@
                                         title="Log Y displays positive values only"
                                         @click="setTransferFunctionYAxisScale('log')">Log Y</button>
                                 </div>
-                                <select v-if="currentTab === 'phase' && transferFunctionStatistic !== 's2'" class="form-select form-select-sm" style="width:auto" v-model="phaseUnit" aria-label="Phase unit">
+                                <select v-if="currentTab === 'phase' && transferFunctionStatistic !== 's2' && !isPhaseNoiseArchive()" class="form-select form-select-sm" style="width:auto" v-model="phaseUnit" aria-label="Phase unit">
                                     <option value="rad">rad</option><option value="mrad">mrad</option>
                                 </select>
+                                <div v-if="loadedRunId && isPhaseNoiseArchive()" class="btn-group btn-group-sm" role="group" aria-label="Phase Noise x axis">
+                                    <button class="btn" :class="phaseNoiseXAxis === 't2' ? 'btn-primary' : 'btn-outline-primary'" @click="phaseNoiseXAxis = 't2'">T²</button>
+                                    <button class="btn" :class="phaseNoiseXAxis === 't' ? 'btn-primary' : 'btn-outline-primary'" @click="phaseNoiseXAxis = 't'">T (ms)</button>
+                                </div>
                             </div>
                         </div>
                         <div class="analysis-metric-nav-wrap">
@@ -2436,6 +2440,7 @@
                     acStarkSummary: [], savedAcStarkSummary: [], recalculatedAcStarkSummary: [],
                     lockInAnalysis: {}, savedLockInAnalysis: {}, recalculatedLockInAnalysis: {},
                     transferFunctionSummary: [], savedTransferFunctionSummary: [], recalculatedTransferFunctionSummary: [],
+                    phaseNoiseSummary: [], savedPhaseNoiseSummary: [], recalculatedPhaseNoiseSummary: [], phaseNoiseXAxis: 't2',
                     savedAllanCache: {}, recalculatedAllanCache: {}, currentAllanData: null,
                     defaultFitModels: [], defaultScanFitModels: [],
                     collapsedPanels: { reanalysis: true, scanFitting: true },
@@ -2498,6 +2503,9 @@
                         if (this.syncArchiveViewMode === 'node') this.renderSyncArchiveNodePlots();
                         else this.resetSyncArchiveAxisRange();
                     });
+                },
+                phaseNoiseXAxis() {
+                    if (this.isPhaseNoiseArchive()) this.renderPhaseNoiseArchivePlot();
                 },
                 showRawData() {
                     this.handlePlotContextChange();
@@ -2845,7 +2853,8 @@
                         max_low: 0.0001, voltage_limit: 0.015,
                         intf_alpha: 0.35, intf_beta: 0.07636, intf_gamma: 0.25,
                         atom_area_method: 'legacy', atom_area_baseline_points: 2,
-                        fit_model_key: 'gaussian', fit_models: []
+                        fit_model_key: 'gaussian', fit_models: [],
+                        std_p_interferometer: 1.1, laser_frequency_phase_noise_mrad: 100
                     };
                 },
                 baseFitParameter() {
@@ -2904,6 +2913,10 @@
                     normalized.transfer_frequency_modulation_mhz = Number.isFinite(modulationMhz) && modulationMhz > 0 ? modulationMhz : 1;
                     const distanceM = Number(normalized.transfer_atom_mirror_distance_m ?? 2.23);
                     normalized.transfer_atom_mirror_distance_m = Number.isFinite(distanceM) && distanceM > 0 ? distanceM : 2.23;
+                    const detectionNoise = Number(normalized.std_p_interferometer ?? 1.1);
+                    normalized.std_p_interferometer = Number.isFinite(detectionNoise) && detectionNoise >= 0 ? detectionNoise : 1.1;
+                    const laserNoise = Number(normalized.laser_frequency_phase_noise_mrad ?? 100);
+                    normalized.laser_frequency_phase_noise_mrad = Number.isFinite(laserNoise) && laserNoise >= 0 ? laserNoise : 100;
                     normalized.fit_models = this.normalizeFitModels(normalized.fit_models);
                     if (!normalized.fit_models.length && this.defaultFitModels.length) {
                         normalized.fit_models = this.cloneFitModels(this.defaultFitModels);
@@ -3142,9 +3155,13 @@
                 isTransferFunctionArchive() {
                     return String(this.loadedConfig?.mode || "").trim().toLowerCase() === "transfer_function";
                 },
+                isPhaseNoiseArchive() {
+                    return String(this.loadedConfig?.mode || "").trim().toLowerCase() === "phase_noise";
+                },
                 getVisibleTabs() {
                     if (this.isAcStarkArchive()) return this.tabs.filter(tab => ["atoms", "prob"].includes(tab.id));
                     if (this.isTransferFunctionArchive()) return this.tabs.filter(tab => ["atoms", "intf", "phase"].includes(tab.id));
+                    if (this.isPhaseNoiseArchive()) return this.tabs.filter(tab => tab.id === "phase");
                     return this.tabs;
                 },
                 isMarkerOptimizationArchive() {
@@ -3208,7 +3225,7 @@
                     return this.getActiveScanDimensions() === 3;
                 },
                 canUseAllanMode() {
-                    return !this.isAcStarkArchive() && !this.isLockInArchive() && !this.isTransferFunctionArchive() && !this.isMarkerOptimizationArchive() && this.getActiveScanDimensions() === 1 && !Boolean(this.loadedConfig?.randomize);
+                    return !this.isAcStarkArchive() && !this.isLockInArchive() && !this.isTransferFunctionArchive() && !this.isPhaseNoiseArchive() && !this.isMarkerOptimizationArchive() && this.getActiveScanDimensions() === 1 && !Boolean(this.loadedConfig?.randomize);
                 },
                 normalizeAllanScaleMode(mode) {
                     return mode === 'relative' ? 'relative' : 'absolute';
@@ -4983,6 +5000,9 @@
                     this.transferFunctionSummary = [];
                     this.savedTransferFunctionSummary = [];
                     this.recalculatedTransferFunctionSummary = [];
+                    this.phaseNoiseSummary = [];
+                    this.savedPhaseNoiseSummary = [];
+                    this.recalculatedPhaseNoiseSummary = [];
                     this.selectedPointKey = '';
                     this.selectedPointKeys = [];
                     this.selectedPointLabel = '';
@@ -5081,6 +5101,11 @@
                             this.showRawData = false;
                             this.plotMode = "series";
                         }
+                        if (this.isPhaseNoiseArchive()) {
+                            this.currentTab = "phase";
+                            this.phaseUnit = "mrad";
+                            this.plotMode = "series";
+                        }
                         this.currentScanDimensions = this.resolveScanDimensions(res.data.scan_dimensions, this.loadedConfig);
                         const transferNormalization = {
                             transfer_frequency_modulation_mhz: this.loadedConfig.transfer_frequency_modulation_mhz
@@ -5099,6 +5124,8 @@
                         this.lockInAnalysis = this.savedLockInAnalysis;
                         this.savedTransferFunctionSummary = Array.isArray(res.data.transfer_function_summary) ? res.data.transfer_function_summary : [];
                         this.transferFunctionSummary = this.savedTransferFunctionSummary;
+                        this.savedPhaseNoiseSummary = Array.isArray(res.data.phase_noise_summary) ? res.data.phase_noise_summary : [];
+                        this.phaseNoiseSummary = this.savedPhaseNoiseSummary;
                         this.savedPreviewMap = res.data.preview_map && typeof res.data.preview_map === 'object' ? res.data.preview_map : {};
                         this.savedDataCount = Number.isFinite(res.data.total_points) ? res.data.total_points : this.loadedPoints.length;
                         this.dataCount = this.savedDataCount;
@@ -5172,6 +5199,8 @@
                         this.lockInAnalysis = this.recalculatedLockInAnalysis;
                         this.recalculatedTransferFunctionSummary = Array.isArray(res.data.transfer_function_summary) ? res.data.transfer_function_summary : [];
                         this.transferFunctionSummary = this.recalculatedTransferFunctionSummary;
+                        this.recalculatedPhaseNoiseSummary = Array.isArray(res.data.phase_noise_summary) ? res.data.phase_noise_summary : [];
+                        this.phaseNoiseSummary = this.recalculatedPhaseNoiseSummary;
                         this.recalculatedPreviewMap = res.data.preview_map && typeof res.data.preview_map === 'object' ? res.data.preview_map : {};
                         this.dataCount = Number.isFinite(res.data.total_points) ? res.data.total_points : res.data.data.length;
                         this.displayMode = 'recalculated';
@@ -5209,6 +5238,7 @@
                     this.acStarkSummary = this.savedAcStarkSummary;
                     this.lockInAnalysis = this.savedLockInAnalysis;
                     this.transferFunctionSummary = this.savedTransferFunctionSummary;
+                    this.phaseNoiseSummary = this.savedPhaseNoiseSummary;
                     await this.applyDisplayedPoints(this.loadedPoints, this.savedStats, this.savedPreviewMap, false);
                     if (this.plotMode === 'allan') {
                         this.syncCurrentAllanData();
@@ -8218,7 +8248,43 @@
                         Plotly.react(plotIds[index], traces, layout);
                     });
                 },
+                renderPhaseNoiseArchivePlot() {
+                    const rows = Array.isArray(this.phaseNoiseSummary) ? this.phaseNoiseSummary : [];
+                    const xField = this.phaseNoiseXAxis === 't' ? 't_ms' : 't2_us2';
+                    const xTitle = this.phaseNoiseXAxis === 't' ? 'Interferometer time T (ms)' : 'P0 = T² ((μs)²)';
+                    const definitions = [
+                        ['measured_phase_noise_rad', 'Measured total', '#6f42c1', 'circle'],
+                        ['expected_total_phase_noise_rad', 'Expected total', '#212529', 'diamond'],
+                        ['detection_phase_noise_rad', 'Detection', '#0d6efd', 'square'],
+                        ['laser_phase_noise_rad', 'Laser frequency', '#dc3545', 'triangle-up'],
+                    ];
+                    const traces = definitions.map(([field, name, color, symbol]) => ({
+                        x: rows.map(row => Number(row[xField])),
+                        y: rows.map(row => row[field] == null ? null : Number(row[field]) * 1000),
+                        customdata: rows.map(row => [row.t2_us2, row.t_ms, row.valid_phase_count, row.shot_count]),
+                        type: 'scatter', mode: 'lines+markers', name,
+                        line: { color, width: name.includes('total') ? 2.8 : 1.8, dash: name === 'Expected total' ? 'dash' : 'solid' },
+                        marker: { color, size: name === 'Measured total' ? 9 : 7, symbol },
+                        connectgaps: false,
+                        hovertemplate: `${xTitle}=%{x:.9g}<br>σφ=%{y:.6g} mrad<br>T²=%{customdata[0]:.9g} (μs)²<br>T=%{customdata[1]:.6g} ms<br>valid N=%{customdata[2]}/%{customdata[3]}<extra>${name}</extra>`
+                    }));
+                    const base = this.buildCommonAnalysisLayout();
+                    this.layoutResUp = {
+                        ...base, margin: { t: 45, b: 58, l: 78, r: 20 },
+                        title: { text: 'Phase Noise Analyze · measured and configured noise', font: { size: 14 }, x: 0.04 },
+                        xaxis: { ...base.xaxis, title: xTitle },
+                        yaxis: { ...base.yaxis, title: 'Phase noise σφ (mrad)' },
+                        legend: { orientation: 'h', x: 0.5, xanchor: 'center', y: 1.16 }
+                    };
+                    Plotly.react('resultsPlotUp', traces, this.layoutResUp, { responsive: true, displaylogo: false });
+                    Plotly.react('resultsPlotDw', [], { ...base, title: '' }, { responsive: true, displaylogo: false });
+                    Plotly.react('resultsPlotTotal', [], { ...base, title: '' }, { responsive: true, displaylogo: false });
+                },
                 renderMainPlot() {
+                    if (this.isPhaseNoiseArchive()) {
+                        this.renderPhaseNoiseArchivePlot();
+                        return;
+                    }
                     if (this.isTransferFunctionArchive()) {
                         this.renderTransferFunctionArchivePlot();
                         return;

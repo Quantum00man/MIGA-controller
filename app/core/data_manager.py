@@ -184,6 +184,17 @@ class DataManager:
             writer.writeheader()
             writer.writerows(summary_rows)
 
+    def save_phase_noise_summary(self, summary_rows: List[Dict[str, Any]]) -> None:
+        if not self.current_run_dir:
+            return
+        with open(self.current_run_dir / "phase_noise_summary.json", "w", encoding="utf-8") as handle:
+            json.dump(summary_rows, handle, ensure_ascii=False, indent=2)
+        if summary_rows:
+            with open(self.current_run_dir / "phase_noise_summary.csv", "w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(handle, fieldnames=list(summary_rows[0].keys()))
+                writer.writeheader()
+                writer.writerows(summary_rows)
+
     def _init_csv(self, path: Path):
         self.csv_handle = open(path, 'w', newline='')
         self.csv_writer = csv.writer(self.csv_handle)

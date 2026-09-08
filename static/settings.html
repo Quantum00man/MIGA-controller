@@ -498,6 +498,35 @@
                     </template>
                 </div>
 
+                <div v-if="tab==='phase-noise'">
+                    <div class="row g-3">
+                        <div class="col-lg-6">
+                            <div class="card border shadow-sm h-100"><div class="card-body">
+                                <h6 class="fw-bold mb-2">Detection noise</h6>
+                                <p class="small text-muted">Background standard deviation of the interferometer signal. Its unit follows the data source saved in the active Bragg calibration; for probability-like signals, enter percentage points.</p>
+                                <div class="input-group">
+                                    <span class="input-group-text">std P</span>
+                                    <input type="number" min="0" step="any" class="form-control" v-model.number="s.std_p_interferometer">
+                                    <span class="input-group-text">%</span>
+                                </div>
+                                <div class="form-text">At mid fringe: σφ,det = std P / |A|, where A comes from the active calibration.</div>
+                            </div></div>
+                        </div>
+                        <div class="col-lg-6">
+                            <div class="card border shadow-sm h-100"><div class="card-body">
+                                <h6 class="fw-bold mb-2">Laser-frequency phase noise</h6>
+                                <p class="small text-muted">Fixed phase-noise contribution used as the current laser-frequency-noise baseline.</p>
+                                <div class="input-group">
+                                    <span class="input-group-text">σφ,laser</span>
+                                    <input type="number" min="0" step="any" class="form-control" v-model.number="s.laser_frequency_phase_noise_mrad">
+                                    <span class="input-group-text">mrad</span>
+                                </div>
+                                <div class="form-text">Expected total: √(σ²φ,det + σ²φ,laser).</div>
+                            </div></div>
+                        </div>
+                    </div>
+                </div>
+
 
                 <div v-if="tab==='sync'">
                     <div class="row g-3">
@@ -1609,6 +1638,7 @@
                         { id: 'markers', label: 'Sequence Markers', icon: 'bi-tags', description: 'Mark DDS, DAC, duration and ON/OFF values visually, then define their execution rules.' },
                         { id: 'fitting', label: 'Fitting Models', icon: 'bi-bezier2', description: 'Manage atom-area calculation and the models used for time-of-flight fitting.' },
                         { id: 'phase', label: 'Interferometer Phase', icon: 'bi-activity', description: 'Manage Bragg fringe calibrations, data sources and the fixed T or T² phase reference.' },
+                        { id: 'phase-noise', label: 'Phase Noise Analyze', icon: 'bi-graph-up', description: 'Configure the detection and laser-frequency baselines used to compare phase noise across mid fringes.' },
                         { id: 'sync', label: 'SYNC', icon: 'bi-bounding-box-circles', description: 'Configure Standalone, Master or Slave operation for synchronized differential measurements.' },
                         { id: 'tti', label: 'Transfer Function', icon: 'bi-soundwave', description: 'Configure the generator connection and the actual 780 nm frequency-modulation amplitude used to normalize Transfer Function scans.' },
                         { id: 'net', label: 'Network', icon: 'bi-hdd-network', description: 'Select the acquisition platform and configure device connection limits.' },
@@ -2956,6 +2986,10 @@
                     const transferAtomMirrorDistanceM = Number(normalized.transfer_atom_mirror_distance_m ?? 2.23);
                     normalized.transfer_atom_mirror_distance_m = Number.isFinite(transferAtomMirrorDistanceM) && transferAtomMirrorDistanceM > 0
                         ? transferAtomMirrorDistanceM : 2.23;
+                    const detectionNoise = Number(normalized.std_p_interferometer ?? 1.1);
+                    normalized.std_p_interferometer = Number.isFinite(detectionNoise) && detectionNoise >= 0 ? detectionNoise : 1.1;
+                    const laserPhaseNoise = Number(normalized.laser_frequency_phase_noise_mrad ?? 100);
+                    normalized.laser_frequency_phase_noise_mrad = Number.isFinite(laserPhaseNoise) && laserPhaseNoise >= 0 ? laserPhaseNoise : 100;
                     const ttiPort = Number.parseInt(normalized.tti_port ?? 9221, 10);
                     const ttiTimeout = Number(normalized.tti_timeout_s ?? 3);
                     normalized.tti_port = Number.isFinite(ttiPort) && ttiPort >= 1 && ttiPort <= 65535 ? ttiPort : 9221;
