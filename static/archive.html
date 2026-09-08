@@ -2237,7 +2237,7 @@
                         </div>
                     </div>
                     <div class="labplot-metric-grid mb-3">
-                        <div v-for="tab in tabs" :key="`labplot-${tab.id}`" class="form-check mb-0">
+                        <div v-for="tab in getVisibleTabs()" :key="`labplot-${tab.id}`" class="form-check mb-0">
                             <input class="form-check-input" type="checkbox" :id="`labplot-metric-${tab.id}`" :value="tab.id" v-model="labPlotExport.metrics">
                             <label class="form-check-label" :for="`labplot-metric-${tab.id}`">{{ tab.label }}</label>
                         </div>
@@ -2251,7 +2251,7 @@
                             </select>
                         </div>
                         <div class="col-sm-6 d-flex flex-column justify-content-end gap-2">
-                            <div class="form-check form-switch mb-0">
+                            <div v-if="!isTransferFunctionArchive()" class="form-check form-switch mb-0">
                                 <input id="labplot-include-fits" class="form-check-input" type="checkbox" v-model="labPlotExport.includeFits">
                                 <label class="form-check-label" for="labplot-include-fits">Include fringe and ellipse fit curves</label>
                             </div>
@@ -2262,7 +2262,12 @@
                         </div>
                     </div>
                     <div class="labplot-summary mb-3">
-                        LabPlot 2.12.1 project. UP and DOWN use stacked plots. SYNC differential exports Every Shot and Average as separate worksheets using Interferometer P UP.
+                        <template v-if="isTransferFunctionArchive()">
+                            Transfer Function uses TTI carrier frequency as the x-axis. Mean and standard-deviation worksheets contain separate phase curves; Interferometer Phase also exports 0°, 90° and quadrature-sum S².
+                        </template>
+                        <template v-else>
+                            LabPlot 2.12.1 project. UP and DOWN use stacked plots. SYNC differential exports Every Shot and Average as separate worksheets using Interferometer P UP.
+                        </template>
                     </div>
                     <div v-if="labPlotExport.error" class="alert alert-danger small py-2">{{ labPlotExport.error }}</div>
                     <div class="d-flex justify-content-end gap-2">
@@ -7371,12 +7376,12 @@
                 },
 
                 selectAllLabPlotMetrics() {
-                    this.labPlotExport.metrics = this.tabs.map(tab => tab.id);
+                    this.labPlotExport.metrics = this.getVisibleTabs().map(tab => tab.id);
                 },
                 openLabPlotExport() {
                     this.labPlotExport = {
                         open: true,
-                        metrics: this.tabs.map(tab => tab.id),
+                        metrics: this.getVisibleTabs().map(tab => tab.id),
                         source: 'fit',
                         includeFits: true,
                         includeDifferential: Boolean(this.syncManifest),
@@ -7401,7 +7406,10 @@
                             source: this.labPlotExport.source,
                             include_fits: this.labPlotExport.includeFits,
                             include_differential: this.labPlotExport.includeDifferential,
-                            current_fit: currentFit
+                            current_fit: currentFit,
+                            transfer_function_summary: this.isTransferFunctionArchive() && this.transferFunctionSummary.length
+                                ? this.transferFunctionSummary
+                                : null
                         }, { responseType: 'blob' });
                         const fallbackName = `miga_${this.sanitizeFilenamePart(this.selectedRun || this.loadedRunId || 'archive')}.lml`;
                         const suggestedName = this.getFilenameFromDisposition(response.headers?.['content-disposition']) || fallbackName;

@@ -68,6 +68,47 @@ class FakeLoader:
         return payload
 
 
+class TransferFunctionLoader:
+    def __init__(self, summary=None):
+        self.summary = summary or []
+
+    def load_run(self, year, month, day, run_id, node_id=None, current_phase_calibration=None):
+        return {
+            "config": {"mode": "transfer_function"},
+            "transfer_function_summary": self.summary,
+        }
+
+
+def transfer_summary():
+    rows = []
+    for index, frequency in enumerate((10.0, 20.0, 30.0), start=1):
+        row = {
+            "frequency_hz": frequency,
+            "interferometer_phase_s2_components": [],
+            "interferometer_phase_s2": index * 10.0,
+        }
+        for phase_deg, factor in ((0.0, 1.0), (90.0, 2.0)):
+            phase_label = f"{int(phase_deg)}deg"
+            component = {
+                "phase_deg": phase_deg,
+                "mean_rad": factor * index / 10,
+                "std_rad": factor * index / 100,
+                "s2": factor * index,
+            }
+            row["interferometer_phase_s2_components"].append(component)
+            for source, source_factor in (("fit", 1.0), ("nofit", 100.0)):
+                for channel, channel_factor in (("up", 1.0), ("dw", 2.0), ("total", 3.0)):
+                    base = f"atom_number_{channel}_{source}_{phase_label}"
+                    row[f"{base}_mean"] = source_factor * channel_factor * factor * index
+                    row[f"{base}_std"] = source_factor * channel_factor * factor * index / 10
+                for channel, channel_factor in (("p1", 1.0), ("p2", 2.0)):
+                    base = f"intf_{channel}_{source}_{phase_label}"
+                    row[f"{base}_mean"] = source_factor * channel_factor * factor * index
+                    row[f"{base}_std"] = source_factor * channel_factor * factor * index / 10
+        rows.append(row)
+    return rows
+
+
 class LabPlotExportTests(unittest.TestCase):
     def parse(self, payload):
         return ET.fromstring(lzma.decompress(payload))
@@ -133,6 +174,53 @@ class LabPlotExportTests(unittest.TestCase):
         first_column = next(spreadsheet.iter("column"))
         values = struct.unpack("=6d", base64.b64decode(first_column.find("output_filter").tail))
         self.assertEqual(values[0], 120.0)
+
+    def test_transfer_function_uses_frequency_axis_and_exports_all_phase_statistics(self):
+        payload = build_archive_project(
+            TransferFunctionLoader(transfer_summary()),
+            "2026", "09", "08", "run_tf", ["atoms", "intf", "phase"],
+        )
+        root = self.parse(payload)
+        worksheets = {item.attrib["name"]: item for item in root.iter("worksheet")}
+        self.assertEqual(set(worksheets), {
+            "Atom Number - Mean",
+            "Atom Number - Standard Deviation",
+            "Interferometer P - Mean",
+            "Interferometer P - Standard Deviation",
+            "Interferometer Phase - Mean",
+            "Interferometer Phase - Standard Deviation",
+            "Transfer Function S2",
+        })
+        s2_curves = [item.attrib["name"] for item in worksheets["Transfer Function S2"].iter("xyCurve")]
+        self.assertEqual(s2_curves, ["0 deg", "90 deg", "Quadrature sum"])
+        spreadsheet = next(
+            item for item in root.iter("spreadsheet")
+            if item.attrib["name"] == "Data - Transfer Function S2"
+        )
+        first_column = next(spreadsheet.iter("column"))
+        frequencies = struct.unpack("=3d", base64.b64decode(first_column.find("output_filter").tail))
+        self.assertEqual(frequencies, (10.0, 20.0, 30.0))
+
+    def test_transfer_function_uses_current_recalculated_summary_and_nofit_source(self):
+        saved = transfer_summary()
+        current = transfer_summary()
+        current[0]["frequency_hz"] = 1234.0
+        payload = build_archive_project(
+            TransferFunctionLoader(saved),
+            "2026", "09", "08", "run_tf", ["atoms"], source="nofit",
+            transfer_function_summary=current,
+        )
+        root = self.parse(payload)
+        spreadsheet = next(
+            item for item in root.iter("spreadsheet")
+            if item.attrib["name"] == "Data - Atom Number - Mean"
+        )
+        columns = list(spreadsheet.iter("column"))
+        x_values = struct.unpack("=3d", base64.b64decode(columns[0].find("output_filter").tail))
+        y_values = struct.unpack("=3d", base64.b64decode(columns[1].find("output_filter").tail))
+        self.assertEqual(x_values[0], 20.0)
+        self.assertEqual(x_values[-1], 1234.0)
+        self.assertEqual(y_values, (200.0, 300.0, 100.0))
 
 
 if __name__ == "__main__":

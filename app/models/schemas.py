@@ -753,6 +753,7 @@ class ArchiveLabPlotExportRequest(BaseModel):
     include_fits: bool = Field(True)
     include_differential: bool = Field(True)
     current_fit: Optional[Dict[str, Any]] = Field(None)
+    transfer_function_summary: Optional[List[Dict[str, Any]]] = Field(None)
 
 
 class ArchiveMidFringeScheduleRequest(BaseModel):

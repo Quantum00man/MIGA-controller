@@ -2244,6 +2244,7 @@ async def export_archive_labplot(req: ArchiveLabPlotExportRequest):
             req.include_differential,
             manager.get_active_bragg_phase_calibration(),
             req.current_fit,
+            req.transfer_function_summary,
         )
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc))

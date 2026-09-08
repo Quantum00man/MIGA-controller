@@ -27,6 +27,11 @@ COLORS = [
     (111, 66, 193), (32, 150, 160), (108, 117, 125), (214, 51, 132),
 ]
 
+TRANSFER_PHASE_COLORS = {
+    0.0: (220, 53, 69),
+    90.0: (13, 110, 253),
+}
+
 
 def _finite(value: Any) -> Optional[float]:
     try:
@@ -129,6 +134,180 @@ def _metric_worksheet(
     return Worksheet(metric["label"], plots) if any(plot.curves for plot in plots) else None
 
 
+def _transfer_phase_degrees(rows: Sequence[Dict[str, Any]]) -> List[float]:
+    phases = set()
+    for row in rows:
+        for component in row.get("interferometer_phase_s2_components") or []:
+            phase = _finite(component.get("phase_deg")) if isinstance(component, dict) else None
+            if phase is not None:
+                phases.add(phase)
+        for phase, label in ((0.0, "0deg"), (90.0, "90deg")):
+            if any(f"_{label}_" in str(key) and row.get(key) is not None for key in row):
+                phases.add(phase)
+    return sorted(phases)
+
+
+def _transfer_component(row: Dict[str, Any], phase_deg: float) -> Dict[str, Any]:
+    for component in row.get("interferometer_phase_s2_components") or []:
+        if not isinstance(component, dict):
+            continue
+        component_phase = _finite(component.get("phase_deg"))
+        if component_phase is not None and math.isclose(component_phase, phase_deg, abs_tol=1e-9):
+            return component
+    return {}
+
+
+def _transfer_curve(
+    rows: Sequence[Dict[str, Any]],
+    field: str,
+    label: str,
+    color: Tuple[int, int, int],
+) -> Optional[Curve]:
+    x_values: List[float] = []
+    y_values: List[float] = []
+    for row in rows:
+        x = _finite(row.get("frequency_hz"))
+        y = _finite(row.get(field))
+        if x is not None and y is not None:
+            x_values.append(x)
+            y_values.append(y)
+    return Curve(label, x_values, y_values, color) if x_values else None
+
+
+def _transfer_phase_curve(
+    rows: Sequence[Dict[str, Any]],
+    phase_deg: float,
+    statistic: str,
+) -> Optional[Curve]:
+    phase_label = f"{int(round(phase_deg))}deg"
+    nested_key = {"mean": "mean_rad", "std": "std_rad", "s2": "s2"}[statistic]
+    flat_key = {
+        "mean": f"interferometer_phase_{phase_label}_mean_rad",
+        "std": f"interferometer_phase_{phase_label}_std_rad",
+        "s2": f"interferometer_phase_{phase_label}_s2",
+    }[statistic]
+    x_values: List[float] = []
+    y_values: List[float] = []
+    for row in rows:
+        x = _finite(row.get("frequency_hz"))
+        component = _transfer_component(row, phase_deg)
+        y = _finite(component.get(nested_key))
+        if y is None:
+            y = _finite(row.get(flat_key))
+        if x is not None and y is not None:
+            x_values.append(x)
+            y_values.append(y)
+    color = TRANSFER_PHASE_COLORS.get(phase_deg, COLORS[len(TRANSFER_PHASE_COLORS) % len(COLORS)])
+    return Curve(f"{phase_deg:g} deg", x_values, y_values, color) if x_values else None
+
+
+def _transfer_statistic_curves(
+    rows: Sequence[Dict[str, Any]],
+    field_base: str,
+    statistic: str,
+    phases: Sequence[float],
+) -> List[Curve]:
+    curves: List[Curve] = []
+    for phase_index, phase_deg in enumerate(phases):
+        phase_label = f"{int(round(phase_deg))}deg"
+        curve = _transfer_curve(
+            rows,
+            f"{field_base}_{phase_label}_{statistic}",
+            f"{phase_deg:g} deg",
+            TRANSFER_PHASE_COLORS.get(phase_deg, COLORS[phase_index % len(COLORS)]),
+        )
+        if curve:
+            curves.append(curve)
+    if not curves:
+        curve = _transfer_curve(rows, f"{field_base}_{statistic}", "All shots", COLORS[0])
+        if curve:
+            curves.append(curve)
+    return curves
+
+
+def _transfer_function_worksheets(
+    metrics: Sequence[str], source: str, rows: Sequence[Dict[str, Any]]
+) -> List[Worksheet]:
+    ordered_rows = sorted(
+        (row for row in rows if isinstance(row, dict)),
+        key=lambda row: _finite(row.get("frequency_hz")) or 0.0,
+    )
+    phases = _transfer_phase_degrees(ordered_rows)
+    worksheets: List[Worksheet] = []
+    x_label = "TTI carrier frequency (Hz)"
+
+    if "atoms" in metrics:
+        suffix = "nofit" if source == "nofit" else "fit"
+        channels = (("up", "UP"), ("dw", "DOWN"), ("total", "TOTAL (UP+DOWN)"))
+        for statistic, statistic_label in (("mean", "Mean"), ("std", "Standard Deviation")):
+            plots = [
+                Plot(
+                    f"Atom Number {channel_label} - {statistic_label}",
+                    x_label,
+                    f"Atom number {statistic_label.lower()}",
+                    _transfer_statistic_curves(
+                        ordered_rows, f"atom_number_{channel}_{suffix}", statistic, phases
+                    ),
+                )
+                for channel, channel_label in channels
+            ]
+            worksheets.append(Worksheet(f"Atom Number - {statistic_label}", plots))
+
+    if "intf" in metrics:
+        suffix = "nofit" if source == "nofit" else "fit"
+        channels = (("p1", "P1"), ("p2", "P2"))
+        for statistic, statistic_label in (("mean", "Mean"), ("std", "Standard Deviation")):
+            plots = [
+                Plot(
+                    f"Interferometer {channel_label} - {statistic_label}",
+                    x_label,
+                    f"Interferometer probability {statistic_label.lower()}",
+                    _transfer_statistic_curves(
+                        ordered_rows, f"intf_{channel}_{suffix}", statistic, phases
+                    ),
+                )
+                for channel, channel_label in channels
+            ]
+            worksheets.append(Worksheet(f"Interferometer P - {statistic_label}", plots))
+
+    if "phase" in metrics:
+        for statistic, statistic_label in (("mean", "Mean"), ("std", "Standard Deviation")):
+            curves = [
+                curve for phase_deg in phases
+                if (curve := _transfer_phase_curve(ordered_rows, phase_deg, statistic))
+            ]
+            if not curves:
+                fallback = _transfer_curve(
+                    ordered_rows,
+                    f"interferometer_phase_{statistic}",
+                    "All shots",
+                    COLORS[0],
+                )
+                curves = [fallback] if fallback else []
+            worksheets.append(Worksheet(
+                f"Interferometer Phase - {statistic_label}",
+                [Plot(
+                    f"Interferometer Phase - {statistic_label}", x_label,
+                    f"Interferometer phase {statistic_label.lower()} (rad)", curves,
+                )],
+            ))
+        s2_curves = [
+            curve for phase_deg in phases
+            if (curve := _transfer_phase_curve(ordered_rows, phase_deg, "s2"))
+        ]
+        quadrature = _transfer_curve(
+            ordered_rows, "interferometer_phase_s2", "Quadrature sum", (25, 135, 84)
+        )
+        if quadrature:
+            s2_curves.append(quadrature)
+        worksheets.append(Worksheet(
+            "Transfer Function S2",
+            [Plot("Transfer Function S2", x_label, "S2 (dimensionless)", s2_curves)],
+        ))
+
+    return [worksheet for worksheet in worksheets if any(plot.curves for plot in worksheet.plots)]
+
+
 def _pair_records(manifest: Dict[str, Any], slave_id: str) -> List[Dict[str, Any]]:
     return [
         row for row in (manifest.get("pairs") or [])
@@ -224,10 +403,38 @@ def build_archive_project(
     include_differential: bool = True,
     current_phase_calibration: Optional[Dict[str, Any]] = None,
     current_fit: Optional[Dict[str, Any]] = None,
+    transfer_function_summary: Optional[Sequence[Dict[str, Any]]] = None,
 ) -> bytes:
     loaded_root = loader.load_run(
         year, month, day, run_id, current_phase_calibration=current_phase_calibration
     )
+    config_data = loaded_root.get("config") or {}
+    is_transfer_function = str(config_data.get("mode") or "").strip().lower() == "transfer_function"
+    if is_transfer_function:
+        selected = [item for item in metrics if item in {"atoms", "intf", "phase"}]
+        summary = (
+            list(transfer_function_summary)
+            if transfer_function_summary is not None
+            else loaded_root.get("transfer_function_summary") or []
+        )
+        worksheets = _transfer_function_worksheets(selected, source, summary)
+        project_name = f"MIGA Transfer Function {day} {run_id}"
+        normalization = summary[0] if summary else {}
+        modulation_mhz = _finite(normalization.get("frequency_modulation_mhz"))
+        distance_m = _finite(normalization.get("atom_mirror_distance_m"))
+        phase_amplitude = _finite(normalization.get("bragg_phase_modulation_rad"))
+        normalization_comment = "; ".join(filter(None, (
+            f"780nm FM={modulation_mhz:g} MHz" if modulation_mhz is not None else "",
+            f"L={distance_m:g} m" if distance_m is not None else "",
+            f"phi={phase_amplitude:g} rad" if phase_amplitude is not None else "",
+        )))
+        comment = (
+            f"Transfer Function archive {year}-{month}-{day}/{run_id}; source={source}; "
+            f"x=TTI carrier frequency{'; ' + normalization_comment if normalization_comment else ''}; "
+            "generated for LabPlot 2.12.1"
+        )
+        return build_project(project_name, worksheets, comment=comment)
+
     manifest = loaded_root.get("sync_manifest")
     node_payloads = []
     for node_id in _archive_node_ids(manifest):
