@@ -1026,13 +1026,21 @@ class ExperimentManager:
 
     def update_interferometer_beta(self, beta: float) -> float:
         """Persist only the interferometer beta coefficient."""
-        value = float(beta)
-        if not math.isfinite(value) or value < 0.0 or value > 1.0:
-            raise ValueError("Interferometer beta must be between 0 and 1")
-        self.settings["intf_beta"] = value
+        return self.update_optimized_analysis_parameter("intf_beta", beta)
+
+    def update_optimized_analysis_parameter(self, parameter: str, value: float) -> float:
+        """Persist one coefficient supported by Archive mean optimization."""
+        normalized = str(parameter or "").strip().lower()
+        labels = {"alpha": "ALPHA", "beta": "BETA", "intf_beta": "Interferometer beta"}
+        if normalized not in labels:
+            raise ValueError("Optimized parameter must be alpha, beta, or intf_beta")
+        parsed = float(value)
+        if not math.isfinite(parsed) or parsed < 0.0 or parsed > 1.0:
+            raise ValueError(f"{labels[normalized]} must be between 0 and 1")
+        self.settings[normalized] = parsed
         self._apply_runtime_settings()
         self._save_settings_to_disk()
-        return value
+        return parsed
     
 
     def get_analysis_config(self) -> Dict[str, Any]:

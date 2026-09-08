@@ -1575,59 +1575,149 @@ class DataLoader:
         channel: str = "up",
         target_mean: float = 0.0,
     ) -> Dict[str, Any]:
+        result = self._optimize_analysis_parameter_from_points(
+            points,
+            settings,
+            parameter="intf_beta",
+            metric="intf",
+            source=source,
+            channel=channel,
+            target_mean=target_mean,
+        )
+        result["optimized_beta"] = result["optimized_value"]
+        result["initial_beta"] = result["initial_value"]
+        result["beta_min"] = result["parameter_min"]
+        result["beta_max"] = result["parameter_max"]
+        result["singular_beta"] = result["singular_value"]
+        return result
+
+    def _optimize_analysis_parameter_from_points(
+        self,
+        points: List[Dict[str, Any]],
+        settings: Dict[str, Any],
+        parameter: str = "intf_beta",
+        metric: str = "intf",
+        source: str = "fit",
+        channel: str = "up",
+        target_mean: float = 0.0,
+    ) -> Dict[str, Any]:
+        normalized_parameter = str(parameter or "intf_beta").strip().lower()
+        normalized_metric = str(metric or "intf").strip().lower()
         normalized_source = str(source or "fit").strip().lower()
         normalized_channel = str(channel or "up").strip().lower()
+        if normalized_parameter not in {"alpha", "beta", "intf_beta"}:
+            raise ValueError("Optimized parameter must be alpha, beta, or intf_beta")
+        allowed_metrics = {"intf"} if normalized_parameter == "intf_beta" else {"atoms", "prob", "intf"}
+        if normalized_metric not in allowed_metrics:
+            raise ValueError(f"{normalized_parameter} does not affect the selected metric")
         if normalized_source not in {"fit", "raw"}:
-            raise ValueError("Interferometer beta source must be fit or raw")
-        if normalized_channel not in {"up", "dw"}:
-            raise ValueError("Interferometer beta channel must be up or dw")
+            raise ValueError("Mean optimization source must be fit or raw")
+        allowed_channels = {"up", "dw", "total"} if normalized_metric == "atoms" else {"up", "dw"}
+        if normalized_channel not in allowed_channels:
+            raise ValueError("The selected channel is unavailable for this metric")
         target = float(target_mean)
         if not math.isfinite(target):
             raise ValueError("Target mean must be finite")
 
-        alpha = self._safe_scalar(settings.get("intf_alpha"), 0.35)
-        gamma = self._safe_scalar(settings.get("intf_gamma"), 0.25)
-        initial_beta = self._safe_scalar(settings.get("intf_beta"), 0.07636)
-        singular_margin = 1e-9
+        atom_alpha = self._safe_scalar(settings.get("alpha"), 0.0151)
+        atom_beta = self._safe_scalar(settings.get("beta"), 0.0188)
+        ratio = self._safe_scalar(settings.get("R"), 1.1)
+        conversion = self._safe_scalar(settings.get("K"), 7000.0)
+        determinant = 1.0 - atom_alpha * atom_beta
+        if abs(ratio) < 1e-12 or abs(conversion) < 1e-12 or abs(determinant) < 1e-12:
+            raise ValueError("Current ALPHA/BETA/R/K settings cannot reconstruct detector areas")
+
+        suffix = "_nofit" if normalized_source == "raw" else ""
+        areas_up: List[float] = []
+        areas_dw: List[float] = []
+        for point in points:
+            n_f2 = self._parse_float(point.get(f"atom_number_up{suffix}"))
+            n_f1 = self._parse_float(point.get(f"atom_number_dw{suffix}"))
+            if n_f2 is None or n_f1 is None:
+                continue
+            scaled_up = n_f2 / conversion
+            scaled_dw = n_f1 / (ratio * conversion)
+            area_up = (scaled_up + atom_alpha * scaled_dw) / determinant
+            area_dw = (scaled_dw + atom_beta * scaled_up) / determinant
+            if math.isfinite(area_up) and math.isfinite(area_dw):
+                areas_up.append(float(area_up))
+                areas_dw.append(float(area_dw))
+        if not areas_up:
+            raise ValueError("No valid samples are available for mean optimization")
+
+        area_up_values = np.asarray(areas_up, dtype=float)
+        area_dw_values = np.asarray(areas_dw, dtype=float)
+        intf_alpha = self._safe_scalar(settings.get("intf_alpha"), 0.35)
+        intf_beta = self._safe_scalar(settings.get("intf_beta"), 0.07636)
+        intf_gamma = self._safe_scalar(settings.get("intf_gamma"), 0.25)
+        initial_value = self._safe_scalar(settings.get(normalized_parameter), 0.0)
+        singular_margin = 1e-8
 
         def evaluate(beta: float) -> Tuple[Optional[float], int]:
-            if abs(beta - alpha) < singular_margin:
-                return None, 0
-            return self._interferometer_beta_mean(
-                points, beta, alpha, gamma, normalized_source, normalized_channel
-            )
+            current_atom_alpha = beta if normalized_parameter == "alpha" else atom_alpha
+            current_atom_beta = beta if normalized_parameter == "beta" else atom_beta
+            current_intf_beta = beta if normalized_parameter == "intf_beta" else intf_beta
+            n_f2 = (area_up_values - area_dw_values * current_atom_alpha) * conversion
+            n_f1 = (area_dw_values - area_up_values * current_atom_beta) * ratio * conversion
 
-        initial_mean, _initial_count = evaluate(initial_beta)
-        segments: List[Tuple[float, float]] = []
-        if 0.0 < alpha < 1.0:
-            left = max(0.0, alpha - singular_margin)
-            right = min(1.0, alpha + singular_margin)
-            if left > 0.0:
-                segments.append((0.0, left))
-            if right < 1.0:
-                segments.append((right, 1.0))
-        else:
-            lower = singular_margin if alpha == 0.0 else 0.0
-            upper = 1.0 - singular_margin if alpha == 1.0 else 1.0
-            if lower <= upper:
-                segments.append((lower, upper))
+            if normalized_metric == "atoms":
+                if normalized_channel == "up":
+                    values = n_f2
+                elif normalized_channel == "dw":
+                    values = n_f1
+                else:
+                    values = n_f2 + n_f1
+            elif normalized_metric == "prob":
+                total = n_f2 + n_f1
+                values = np.zeros_like(total)
+                valid_total = np.abs(total) >= 1e-9
+                numerator = n_f2 if normalized_channel == "up" else n_f1
+                values[valid_total] = 100.0 * numerator[valid_total] / total[valid_total]
+            else:
+                denominator = (current_intf_beta - intf_alpha) * (1.0 + intf_gamma)
+                if abs(denominator) < 1e-9:
+                    return None, 0
+                corrected_n1 = (
+                    current_intf_beta * n_f1 - (1.0 - current_intf_beta + intf_gamma) * n_f2
+                ) / denominator
+                corrected_n2 = (
+                    (1.0 - intf_alpha + intf_gamma) * n_f2 - intf_alpha * n_f1
+                ) / denominator
+                corrected_total = corrected_n1 + corrected_n2
+                values = np.zeros_like(corrected_total)
+                valid_total = np.abs(corrected_total) >= 1e-9
+                numerator = corrected_n1 if normalized_channel == "up" else corrected_n2
+                values[valid_total] = 100.0 * numerator[valid_total] / corrected_total[valid_total]
+
+            finite = values[np.isfinite(values)]
+            if finite.size == 0:
+                return None, 0
+            return float(np.mean(finite)), int(finite.size)
+
+        initial_mean, _initial_count = evaluate(initial_value)
+        grid = np.linspace(0.0, 1.0, 401)
+        if normalized_parameter == "intf_beta" and 0.0 <= intf_alpha <= 1.0:
+            grid = grid[np.abs(grid - intf_alpha) >= singular_margin]
 
         candidates: List[Tuple[float, float, int]] = []
-        for lower, upper in segments:
-            lower_mean, lower_count = evaluate(lower)
-            upper_mean, upper_count = evaluate(upper)
-            if lower_mean is not None:
-                candidates.append((lower, lower_mean, lower_count))
-            if upper_mean is not None:
-                candidates.append((upper, upper_mean, upper_count))
-            if lower_mean is None or upper_mean is None:
+        evaluated: List[Tuple[float, float, int]] = []
+        for raw_value in grid:
+            value = float(raw_value)
+            mean, count = evaluate(value)
+            if mean is not None:
+                item = (value, mean, count)
+                evaluated.append(item)
+                candidates.append(item)
+
+        for left, right in zip(evaluated, evaluated[1:]):
+            lo, lo_mean, _lo_count = left
+            hi, hi_mean, _hi_count = right
+            if normalized_parameter == "intf_beta" and lo < intf_alpha < hi:
                 continue
-            lower_error = lower_mean - target
-            upper_error = upper_mean - target
-            if lower_error == 0.0 or upper_error == 0.0 or lower_error * upper_error > 0.0:
+            lo_error = lo_mean - target
+            hi_error = hi_mean - target
+            if lo_error == 0.0 or hi_error == 0.0 or lo_error * hi_error > 0.0:
                 continue
-            lo, hi = lower, upper
-            lo_error = lower_error
             for _ in range(80):
                 mid = (lo + hi) / 2.0
                 mid_mean, mid_count = evaluate(mid)
@@ -1643,16 +1733,16 @@ class DataLoader:
                     lo, lo_error = mid, mid_error
 
         if not candidates:
-            raise ValueError("No valid Interferometer P samples are available for beta optimization")
-        optimized_beta, achieved_mean, sample_count = min(
-            candidates, key=lambda item: (abs(item[1] - target), abs(item[0] - initial_beta))
+            raise ValueError("No valid samples are available for mean optimization")
+        optimized_value, achieved_mean, sample_count = min(
+            candidates, key=lambda item: (abs(item[1] - target), abs(item[0] - initial_value))
         )
         residual = float(achieved_mean - target)
         exact = abs(residual) <= 1e-9
-        at_boundary = abs(optimized_beta) <= 1e-9 or abs(optimized_beta - 1.0) <= 1e-9
+        at_boundary = abs(optimized_value) <= 1e-9 or abs(optimized_value - 1.0) <= 1e-9
         return {
-            "optimized_beta": float(optimized_beta),
-            "initial_beta": float(initial_beta),
+            "optimized_value": float(optimized_value),
+            "initial_value": float(initial_value),
             "initial_mean": initial_mean,
             "achieved_mean": float(achieved_mean),
             "target_mean": target,
@@ -1660,11 +1750,13 @@ class DataLoader:
             "exact": exact,
             "at_boundary": at_boundary,
             "sample_count": sample_count,
+            "parameter": normalized_parameter,
+            "metric": normalized_metric,
             "source": normalized_source,
             "channel": normalized_channel,
-            "beta_min": 0.0,
-            "beta_max": 1.0,
-            "singular_beta": alpha if 0.0 <= alpha <= 1.0 else None,
+            "parameter_min": 0.0,
+            "parameter_max": 1.0,
+            "singular_value": intf_alpha if normalized_parameter == "intf_beta" and 0.0 <= intf_alpha <= 1.0 else None,
         }
 
     def optimize_archive_interferometer_beta(
@@ -1676,6 +1768,8 @@ class DataLoader:
         new_settings: Dict[str, Any],
         p0_min: Optional[float] = None,
         p0_max: Optional[float] = None,
+        parameter: str = "intf_beta",
+        metric: str = "intf",
         source: str = "fit",
         channel: str = "up",
         target_mean: float = 0.0,
@@ -1697,9 +1791,17 @@ class DataLoader:
         )
         if not filtered:
             raise ValueError("No shots are available in the selected P0 range")
-        result = self._optimize_interferometer_beta_from_points(
-            filtered, settings, source=source, channel=channel, target_mean=target_mean
+        result = self._optimize_analysis_parameter_from_points(
+            filtered,
+            settings,
+            parameter=parameter,
+            metric=metric,
+            source=source,
+            channel=channel,
+            target_mean=target_mean,
         )
+        if result["parameter"] == "intf_beta":
+            result["optimized_beta"] = result["optimized_value"]
         result.update({
             "total_points": len(points),
             "filtered_points": len(filtered),

@@ -1,11 +1,14 @@
 import asyncio
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
-from app.api.routes import update_interferometer_beta
+from app.analysis import physics
+from app.api.routes import update_interferometer_beta, update_optimized_analysis_parameter
 from app.core.data_loader import DataLoader
-from app.models.schemas import InterferometerBetaApplyRequest
+from app.core.experiment_manager import ExperimentManager
+from app.models.schemas import AnalysisParameterApplyRequest, InterferometerBetaApplyRequest
 
 
 class ArchiveInterferometerBetaOptimizationTests(unittest.TestCase):
@@ -53,6 +56,48 @@ class ArchiveInterferometerBetaOptimizationTests(unittest.TestCase):
         self.assertTrue(result["at_boundary"])
         self.assertAlmostEqual(result["optimized_beta"], 1.0)
 
+    def test_alpha_can_zero_fit_atom_number_up_mean(self):
+        settings = {**self.settings, "alpha": 0.1, "beta": 0.05, "R": 1.1, "K": 10.0}
+        points = []
+        for area_up, area_dw in [(0.2, 1.0), (0.4, 2.0)]:
+            n_f2, n_f1 = physics.calculate_atom_numbers(
+                area_up, area_dw, 1.0, 1.0,
+                settings["alpha"], settings["beta"], settings["R"], settings["K"], 0.0,
+            )
+            points.append({"atom_number_up": n_f2, "atom_number_dw": n_f1})
+
+        result = self.loader._optimize_analysis_parameter_from_points(
+            points, settings, parameter="alpha", metric="atoms", channel="up"
+        )
+
+        self.assertAlmostEqual(result["optimized_value"], 0.2, places=9)
+        self.assertAlmostEqual(result["achieved_mean"], 0.0, places=9)
+        self.assertTrue(result["exact"])
+
+    def test_beta_can_zero_raw_atom_number_down_mean(self):
+        settings = {**self.settings, "alpha": 0.1, "beta": 0.05, "R": 1.1, "K": 10.0}
+        n_f2, n_f1 = physics.calculate_atom_numbers(
+            1.0, 0.3, 1.0, 1.0,
+            settings["alpha"], settings["beta"], settings["R"], settings["K"], 0.0,
+        )
+        points = [{"atom_number_up_nofit": n_f2, "atom_number_dw_nofit": n_f1}]
+
+        result = self.loader._optimize_analysis_parameter_from_points(
+            points, settings, parameter="beta", metric="atoms", source="raw", channel="dw"
+        )
+
+        self.assertAlmostEqual(result["optimized_value"], 0.3, places=9)
+        self.assertTrue(result["exact"])
+
+    def test_interferometer_beta_rejects_unaffected_metric(self):
+        with self.assertRaisesRegex(ValueError, "does not affect"):
+            self.loader._optimize_analysis_parameter_from_points(
+                [{"atom_number_up": 1.0, "atom_number_dw": 2.0}],
+                self.settings,
+                parameter="intf_beta",
+                metric="atoms",
+            )
+
     def test_settings_endpoint_updates_only_interferometer_beta(self):
         with patch("app.api.routes.manager.update_interferometer_beta", return_value=0.2) as update:
             response = asyncio.run(update_interferometer_beta(InterferometerBetaApplyRequest(beta=0.2)))
@@ -60,14 +105,37 @@ class ArchiveInterferometerBetaOptimizationTests(unittest.TestCase):
         update.assert_called_once_with(0.2)
         self.assertEqual(response.data, {"intf_beta": 0.2})
 
+    def test_generic_settings_endpoint_updates_selected_parameter(self):
+        with patch("app.api.routes.manager.update_optimized_analysis_parameter", return_value=0.2) as update:
+            response = asyncio.run(update_optimized_analysis_parameter(
+                AnalysisParameterApplyRequest(parameter="alpha", value=0.2)
+            ))
+
+        update.assert_called_once_with("alpha", 0.2)
+        self.assertEqual(response.data, {"parameter": "alpha", "value": 0.2})
+
+    def test_generic_settings_update_preserves_every_other_setting(self):
+        manager = SimpleNamespace(
+            settings={"alpha": 0.1, "beta": 0.05, "sentinel": "unchanged"},
+            _apply_runtime_settings=lambda: None,
+            _save_settings_to_disk=lambda: None,
+        )
+
+        result = ExperimentManager.update_optimized_analysis_parameter(manager, "alpha", 0.2)
+
+        self.assertEqual(result, 0.2)
+        self.assertEqual(manager.settings, {"alpha": 0.2, "beta": 0.05, "sentinel": "unchanged"})
+
     def test_archive_ui_exposes_preview_and_settings_actions(self):
         archive_html = (Path(__file__).resolve().parents[1] / "static" / "archive.html").read_text(encoding="utf-8")
 
-        self.assertIn("ALLAN MEAN β OPTIMIZATION", archive_html)
-        self.assertIn("/archive/interferometer-beta/optimize", archive_html)
+        self.assertIn("ALLAN PHYSICAL MEAN OPTIMIZATION", archive_html)
+        self.assertIn("/archive/mean-parameter/optimize", archive_html)
         self.assertIn("optimizeInterferometerBeta", archive_html)
-        self.assertIn("Apply β to Settings", archive_html)
-        self.assertIn("/settings/interferometer-beta", archive_html)
+        self.assertIn("Apply Parameter to Settings", archive_html)
+        self.assertIn("/settings/analysis-parameter", archive_html)
+        self.assertIn('<option value="alpha">ALPHA</option>', archive_html)
+        self.assertIn('<option value="beta">BETA</option>', archive_html)
 
 
 if __name__ == "__main__":

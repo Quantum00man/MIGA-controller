@@ -1044,10 +1044,26 @@
                             <div class="col-12 mt-3" v-if="canUseAllanMode()">
                                 <div class="border rounded bg-white p-2">
                                     <div class="d-flex justify-content-between align-items-center gap-2 mb-2">
-                                        <span class="form-label-small text-primary fw-bold mb-0">ALLAN MEAN β OPTIMIZATION</span>
-                                        <span class="badge bg-light text-dark border">β range 0–1</span>
+                                        <span class="form-label-small text-primary fw-bold mb-0">ALLAN PHYSICAL MEAN OPTIMIZATION</span>
+                                        <span class="badge bg-light text-dark border">parameter range 0–1</span>
                                     </div>
                                     <div class="row g-2">
+                                        <div class="col-6">
+                                            <label class="form-label-small">PARAMETER</label>
+                                            <select class="form-select form-select-sm" v-model="betaOptimization.parameter"
+                                                @change="handleMeanOptimizationParameterChange">
+                                                <option value="intf_beta">I_Beta</option>
+                                                <option value="alpha">ALPHA</option>
+                                                <option value="beta">BETA</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-6">
+                                            <label class="form-label-small">PHYSICAL RESULT</label>
+                                            <select class="form-select form-select-sm" v-model="betaOptimization.metric"
+                                                @change="handleMeanOptimizationMetricChange">
+                                                <option v-for="option in meanOptimizationMetricOptions()" :key="option.value" :value="option.value">{{ option.label }}</option>
+                                            </select>
+                                        </div>
                                         <div class="col-4">
                                             <label class="form-label-small">SOURCE</label>
                                             <select class="form-select form-select-sm" v-model="betaOptimization.source">
@@ -1060,6 +1076,7 @@
                                             <select class="form-select form-select-sm" v-model="betaOptimization.channel">
                                                 <option value="up">UP</option>
                                                 <option value="dw">DOWN</option>
+                                                <option v-if="betaOptimization.metric === 'atoms'" value="total">TOTAL</option>
                                             </select>
                                         </div>
                                         <div class="col-4">
@@ -1068,17 +1085,17 @@
                                                 v-model.number="betaOptimization.targetMean">
                                         </div>
                                     </div>
-                                    <div class="form-text mt-2">Uses valid shots in the currently applied Allan P0 range. The optimized β is previewed through Recalculate and is not saved automatically.</div>
+                                    <div class="form-text mt-2">ALPHA/BETA support Atom Number, Transition Probability and Interferometer P. I_Beta supports Interferometer P. Uses valid shots in the applied Allan P0 range.</div>
                                     <div class="d-grid gap-2 mt-2">
                                         <button class="btn btn-outline-primary btn-sm fw-bold" @click="optimizeInterferometerBeta"
                                             :disabled="betaOptimization.loading || isLoading">
                                             <span v-if="betaOptimization.loading" class="spinner-border spinner-border-sm me-1"></span>
-                                            <i v-else class="bi bi-bullseye me-1"></i>{{ betaOptimization.loading ? 'Optimizing...' : 'Optimize I_Beta' }}
+                                            <i v-else class="bi bi-bullseye me-1"></i>{{ betaOptimization.loading ? 'Optimizing...' : 'Optimize Parameter' }}
                                         </button>
                                         <button v-if="betaOptimization.result" class="btn btn-outline-success btn-sm fw-bold"
                                             @click="applyOptimizedBetaToSettings" :disabled="betaOptimization.applying">
                                             <span v-if="betaOptimization.applying" class="spinner-border spinner-border-sm me-1"></span>
-                                            <i v-else class="bi bi-gear me-1"></i>{{ betaOptimization.applying ? 'Applying...' : 'Apply β to Settings' }}
+                                            <i v-else class="bi bi-gear me-1"></i>{{ betaOptimization.applying ? 'Applying...' : 'Apply Parameter to Settings' }}
                                         </button>
                                     </div>
                                     <div v-if="betaOptimization.message" class="small mt-2"
@@ -2489,7 +2506,7 @@
                     phaseNoiseSummary: [], savedPhaseNoiseSummary: [], recalculatedPhaseNoiseSummary: [], phaseNoiseXAxis: 't2',
                     savedAllanCache: {}, recalculatedAllanCache: {}, currentAllanData: null,
                     betaOptimization: {
-                        source: 'fit', channel: 'up', targetMean: 0,
+                        parameter: 'intf_beta', metric: 'intf', source: 'fit', channel: 'up', targetMean: 0,
                         loading: false, applying: false, error: false, message: '', result: null
                     },
                     defaultFitModels: [], defaultScanFitModels: [],
@@ -5289,23 +5306,26 @@
                     this.betaOptimization.result = null;
                     try {
                         this.analysis = this.normalizeAnalysis(this.analysis);
-                        const response = await axios.post('/archive/interferometer-beta/optimize', this.buildArchivePayload({
+                        const response = await axios.post('/archive/mean-parameter/optimize', this.buildArchivePayload({
                             p0_min: normalizedRange?.min ?? null,
                             p0_max: normalizedRange?.max ?? null,
+                            parameter: this.betaOptimization.parameter,
+                            metric: this.betaOptimization.metric,
                             source: this.betaOptimization.source,
                             channel: this.betaOptimization.channel,
                             target_mean: Number(this.betaOptimization.targetMean ?? 0)
                         }));
                         const result = response.data || {};
-                        const optimizedBeta = Number(result.optimized_beta);
-                        if (!Number.isFinite(optimizedBeta)) throw new Error('Optimizer returned an invalid beta value');
+                        const optimizedValue = Number(result.optimized_value ?? result.optimized_beta);
+                        if (!Number.isFinite(optimizedValue)) throw new Error('Optimizer returned an invalid parameter value');
                         this.betaOptimization.result = result;
-                        this.analysis.intf_beta = optimizedBeta;
-                        this.currentTab = 'intf';
+                        this.analysis[result.parameter] = optimizedValue;
+                        this.currentTab = result.metric;
                         this.showRawData = this.betaOptimization.source === 'raw';
+                        const parameterLabel = this.meanOptimizationParameterLabel(result.parameter);
                         this.betaOptimization.message = result.exact
-                            ? `β=${optimizedBeta.toPrecision(10)} gives mean=${Number(result.achieved_mean).toPrecision(6)} using ${Number(result.sample_count)} shots.`
-                            : `No exact target exists in β ∈ [0,1]. Best β=${optimizedBeta.toPrecision(10)}, mean=${Number(result.achieved_mean).toPrecision(6)}, residual=${Number(result.residual).toPrecision(6)}.`;
+                            ? `${parameterLabel}=${optimizedValue.toPrecision(10)} gives mean=${Number(result.achieved_mean).toPrecision(6)} using ${Number(result.sample_count)} shots.`
+                            : `No exact target exists in [0,1]. Best ${parameterLabel}=${optimizedValue.toPrecision(10)}, mean=${Number(result.achieved_mean).toPrecision(6)}, residual=${Number(result.residual).toPrecision(6)}.`;
                         await this.recalculate();
                         if (this.plotMode !== 'allan') await this.setPlotMode('allan');
                     } catch (error) {
@@ -5317,21 +5337,53 @@
                 },
 
                 async applyOptimizedBetaToSettings() {
-                    const beta = Number(this.betaOptimization.result?.optimized_beta);
-                    if (!Number.isFinite(beta)) return;
-                    if (!window.confirm(`Apply I_Beta=${beta.toPrecision(10)} to the global Settings?`)) return;
+                    const parameter = String(this.betaOptimization.result?.parameter || '');
+                    const value = Number(this.betaOptimization.result?.optimized_value ?? this.betaOptimization.result?.optimized_beta);
+                    if (!parameter || !Number.isFinite(value)) return;
+                    const parameterLabel = this.meanOptimizationParameterLabel(parameter);
+                    if (!window.confirm(`Apply ${parameterLabel}=${value.toPrecision(10)} to the global Settings?`)) return;
                     this.betaOptimization.applying = true;
                     this.betaOptimization.error = false;
                     try {
-                        const response = await axios.post('/settings/interferometer-beta', { beta });
-                        const savedBeta = Number(response.data?.data?.intf_beta ?? beta);
-                        this.betaOptimization.message = `I_Beta=${savedBeta.toPrecision(10)} was applied to Settings. The archive remains in preview mode until Save to Disk is used.`;
+                        const response = await axios.post('/settings/analysis-parameter', { parameter, value });
+                        const savedValue = Number(response.data?.data?.value ?? value);
+                        this.betaOptimization.message = `${parameterLabel}=${savedValue.toPrecision(10)} was applied to Settings. The archive remains in preview mode until Save to Disk is used.`;
                     } catch (error) {
                         this.betaOptimization.error = true;
                         this.betaOptimization.message = error.response?.data?.detail || error.message || 'Applying beta to Settings failed';
                     } finally {
                         this.betaOptimization.applying = false;
                     }
+                },
+
+                meanOptimizationMetricOptions() {
+                    if (this.betaOptimization.parameter === 'intf_beta') {
+                        return [{ value: 'intf', label: 'Interferometer P' }];
+                    }
+                    return [
+                        { value: 'atoms', label: 'Atom Number' },
+                        { value: 'prob', label: 'Transition Probability' },
+                        { value: 'intf', label: 'Interferometer P' }
+                    ];
+                },
+
+                meanOptimizationParameterLabel(parameter) {
+                    return ({ intf_beta: 'I_Beta', alpha: 'ALPHA', beta: 'BETA' })[parameter] || String(parameter || 'Parameter');
+                },
+
+                handleMeanOptimizationParameterChange() {
+                    const available = this.meanOptimizationMetricOptions().map(option => option.value);
+                    if (!available.includes(this.betaOptimization.metric)) this.betaOptimization.metric = available[0];
+                    this.handleMeanOptimizationMetricChange();
+                },
+
+                handleMeanOptimizationMetricChange() {
+                    if (this.betaOptimization.metric !== 'atoms' && this.betaOptimization.channel === 'total') {
+                        this.betaOptimization.channel = 'up';
+                    }
+                    this.betaOptimization.error = false;
+                    this.betaOptimization.message = '';
+                    this.betaOptimization.result = null;
                 },
 
                 async showSavedResults() {

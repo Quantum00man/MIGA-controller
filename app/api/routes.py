@@ -75,6 +75,7 @@ from app.models.schemas import (
     InterferometerPhaseCalibrationUpdateRequest,
     InterferometerPhaseCalibrationActivateRequest,
     InterferometerBetaApplyRequest,
+    AnalysisParameterApplyRequest,
     ArchiveScanFitRequest,
     ArchiveSyncDifferentialFitRequest,
     ArchiveSyncPhaseCalibrationOptimizeRequest,
@@ -1348,6 +1349,19 @@ async def update_interferometer_beta(req: InterferometerBetaApplyRequest):
     except ValueError as exc:
         raise HTTPException(400, str(exc))
 
+
+@router.post("/settings/analysis-parameter", response_model=ExperimentResponse)
+async def update_optimized_analysis_parameter(req: AnalysisParameterApplyRequest):
+    try:
+        value = manager.update_optimized_analysis_parameter(req.parameter, req.value)
+        return ExperimentResponse(
+            status="success",
+            message=f"{req.parameter} updated",
+            data={"parameter": req.parameter, "value": value},
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
 @router.get("/system/update/status", response_model=ExperimentResponse)
 async def get_system_update_status():
     try:
@@ -1889,6 +1903,7 @@ async def calculate_archived_allan(req: ArchiveAllanRequest):
 
 
 @router.post("/archive/interferometer-beta/optimize")
+@router.post("/archive/mean-parameter/optimize")
 async def optimize_archived_interferometer_beta(req: ArchiveInterferometerBetaOptimizeRequest):
     try:
         settings = req.new_settings.dict()
@@ -1901,6 +1916,8 @@ async def optimize_archived_interferometer_beta(req: ArchiveInterferometerBetaOp
             settings,
             p0_min=req.p0_min,
             p0_max=req.p0_max,
+            parameter=req.parameter,
+            metric=req.metric,
             source=req.source,
             channel=req.channel,
             target_mean=req.target_mean,
