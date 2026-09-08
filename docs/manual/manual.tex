@@ -1355,6 +1355,15 @@ filtered sequence length. The UI supports absolute or mean-normalized values, li
 logarithmic order axes, and displays valid-window count, mean, RMS and sample standard
 deviation for Fit and raw channels.
 
+For interferometer probability, the Archive Re-Analysis panel can optimize
+$\beta_I\in[0,1]$ so that the selected sequence mean reaches a requested target. The
+default target is zero for Fit \ui{Interferometer P UP}. The calculation uses only valid
+shots inside the currently applied Allan $P_0$ range and excludes the singular point
+$\beta_I=\alpha_I$. The result is first applied as a recalculation preview; it does not
+overwrite the archive. A separate \ui{Apply $\beta$ to Settings} action persists only
+\pathcode{intf_beta} to the global Settings configuration. If the target is unreachable
+inside the allowed interval, the closest feasible result and its residual are reported.
+
 \chapter{Settings, calibration and maintenance}\label{ch:settings}
 
 \begin{figure}[htbp]

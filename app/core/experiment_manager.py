@@ -1023,6 +1023,16 @@ class ExperimentManager:
         self._apply_runtime_settings()
         self._save_settings_to_disk()
         print(f">>> System Settings Updated: {self.settings}")
+
+    def update_interferometer_beta(self, beta: float) -> float:
+        """Persist only the interferometer beta coefficient."""
+        value = float(beta)
+        if not math.isfinite(value) or value < 0.0 or value > 1.0:
+            raise ValueError("Interferometer beta must be between 0 and 1")
+        self.settings["intf_beta"] = value
+        self._apply_runtime_settings()
+        self._save_settings_to_disk()
+        return value
     
 
     def get_analysis_config(self) -> Dict[str, Any]:

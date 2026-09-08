@@ -1543,6 +1543,173 @@ class DataLoader:
         )
         return payload
 
+    def _interferometer_beta_mean(
+        self,
+        points: List[Dict[str, Any]],
+        beta: float,
+        alpha: float,
+        gamma: float,
+        source: str,
+        channel: str,
+    ) -> Tuple[Optional[float], int]:
+        suffix = "_nofit" if source == "raw" else ""
+        values: List[float] = []
+        for point in points:
+            n_f1 = self._parse_float(point.get(f"atom_number_dw{suffix}"))
+            n_f2 = self._parse_float(point.get(f"atom_number_up{suffix}"))
+            if n_f1 is None or n_f2 is None:
+                continue
+            _n1, _n2, p1, p2 = physics.calculate_interferometer_output(
+                n_f1, n_f2, alpha, beta, gamma
+            )
+            value = p1 if channel == "up" else p2
+            if value is not None and math.isfinite(value):
+                values.append(float(value))
+        return (float(np.mean(values)), len(values)) if values else (None, 0)
+
+    def _optimize_interferometer_beta_from_points(
+        self,
+        points: List[Dict[str, Any]],
+        settings: Dict[str, Any],
+        source: str = "fit",
+        channel: str = "up",
+        target_mean: float = 0.0,
+    ) -> Dict[str, Any]:
+        normalized_source = str(source or "fit").strip().lower()
+        normalized_channel = str(channel or "up").strip().lower()
+        if normalized_source not in {"fit", "raw"}:
+            raise ValueError("Interferometer beta source must be fit or raw")
+        if normalized_channel not in {"up", "dw"}:
+            raise ValueError("Interferometer beta channel must be up or dw")
+        target = float(target_mean)
+        if not math.isfinite(target):
+            raise ValueError("Target mean must be finite")
+
+        alpha = self._safe_scalar(settings.get("intf_alpha"), 0.35)
+        gamma = self._safe_scalar(settings.get("intf_gamma"), 0.25)
+        initial_beta = self._safe_scalar(settings.get("intf_beta"), 0.07636)
+        singular_margin = 1e-9
+
+        def evaluate(beta: float) -> Tuple[Optional[float], int]:
+            if abs(beta - alpha) < singular_margin:
+                return None, 0
+            return self._interferometer_beta_mean(
+                points, beta, alpha, gamma, normalized_source, normalized_channel
+            )
+
+        initial_mean, _initial_count = evaluate(initial_beta)
+        segments: List[Tuple[float, float]] = []
+        if 0.0 < alpha < 1.0:
+            left = max(0.0, alpha - singular_margin)
+            right = min(1.0, alpha + singular_margin)
+            if left > 0.0:
+                segments.append((0.0, left))
+            if right < 1.0:
+                segments.append((right, 1.0))
+        else:
+            lower = singular_margin if alpha == 0.0 else 0.0
+            upper = 1.0 - singular_margin if alpha == 1.0 else 1.0
+            if lower <= upper:
+                segments.append((lower, upper))
+
+        candidates: List[Tuple[float, float, int]] = []
+        for lower, upper in segments:
+            lower_mean, lower_count = evaluate(lower)
+            upper_mean, upper_count = evaluate(upper)
+            if lower_mean is not None:
+                candidates.append((lower, lower_mean, lower_count))
+            if upper_mean is not None:
+                candidates.append((upper, upper_mean, upper_count))
+            if lower_mean is None or upper_mean is None:
+                continue
+            lower_error = lower_mean - target
+            upper_error = upper_mean - target
+            if lower_error == 0.0 or upper_error == 0.0 or lower_error * upper_error > 0.0:
+                continue
+            lo, hi = lower, upper
+            lo_error = lower_error
+            for _ in range(80):
+                mid = (lo + hi) / 2.0
+                mid_mean, mid_count = evaluate(mid)
+                if mid_mean is None:
+                    break
+                candidates.append((mid, mid_mean, mid_count))
+                mid_error = mid_mean - target
+                if abs(mid_error) <= 1e-12:
+                    break
+                if lo_error * mid_error <= 0.0:
+                    hi = mid
+                else:
+                    lo, lo_error = mid, mid_error
+
+        if not candidates:
+            raise ValueError("No valid Interferometer P samples are available for beta optimization")
+        optimized_beta, achieved_mean, sample_count = min(
+            candidates, key=lambda item: (abs(item[1] - target), abs(item[0] - initial_beta))
+        )
+        residual = float(achieved_mean - target)
+        exact = abs(residual) <= 1e-9
+        at_boundary = abs(optimized_beta) <= 1e-9 or abs(optimized_beta - 1.0) <= 1e-9
+        return {
+            "optimized_beta": float(optimized_beta),
+            "initial_beta": float(initial_beta),
+            "initial_mean": initial_mean,
+            "achieved_mean": float(achieved_mean),
+            "target_mean": target,
+            "residual": residual,
+            "exact": exact,
+            "at_boundary": at_boundary,
+            "sample_count": sample_count,
+            "source": normalized_source,
+            "channel": normalized_channel,
+            "beta_min": 0.0,
+            "beta_max": 1.0,
+            "singular_beta": alpha if 0.0 <= alpha <= 1.0 else None,
+        }
+
+    def optimize_archive_interferometer_beta(
+        self,
+        year: str,
+        month: str,
+        day: str,
+        run_id: str,
+        new_settings: Dict[str, Any],
+        p0_min: Optional[float] = None,
+        p0_max: Optional[float] = None,
+        source: str = "fit",
+        channel: str = "up",
+        target_mean: float = 0.0,
+        node_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        root_run_dir = self._get_run_dir(year, month, day, run_id)
+        run_dir = self._resolve_archive_node_dir(root_run_dir, node_id)
+        config_data = self._load_config_data(run_dir)
+        if self._resolve_scan_dimensions(config_data) != 1:
+            raise ValueError("Interferometer beta optimization is only available for 1D scans")
+        if bool(config_data.get("randomize", False)):
+            raise ValueError("Interferometer beta optimization is only available for non-random scans")
+
+        original_settings = config_data.get("_system_settings_snapshot") or config_data.get("_analysis_snapshot") or {}
+        settings = self._normalize_archive_settings(new_settings or {}, fallback=original_settings)
+        points = self._load_allan_points(run_dir, config_data, "recalculated", new_settings=settings)
+        filtered, available_min, available_max, selected_min, selected_max = self._filter_allan_points_by_p0_range(
+            points, p0_min=p0_min, p0_max=p0_max
+        )
+        if not filtered:
+            raise ValueError("No shots are available in the selected P0 range")
+        result = self._optimize_interferometer_beta_from_points(
+            filtered, settings, source=source, channel=channel, target_mean=target_mean
+        )
+        result.update({
+            "total_points": len(points),
+            "filtered_points": len(filtered),
+            "available_p0_min": available_min,
+            "available_p0_max": available_max,
+            "selected_p0_min": selected_min,
+            "selected_p0_max": selected_max,
+        })
+        return result
+
     def _load_waveform_arrays(self, run_dir: Path, step_index: int) -> Dict[str, Any]:
         npz_path = run_dir / "waveforms" / f"step_{step_index:04d}.npz"
         if not npz_path.exists():

@@ -1041,6 +1041,52 @@
                                 <label class="form-label-small">I_Gamma</label>
                                 <input type="number" class="form-control form-control-sm" v-model.number="analysis.intf_gamma" step="0.001">
                             </div>
+                            <div class="col-12 mt-3" v-if="canUseAllanMode()">
+                                <div class="border rounded bg-white p-2">
+                                    <div class="d-flex justify-content-between align-items-center gap-2 mb-2">
+                                        <span class="form-label-small text-primary fw-bold mb-0">ALLAN MEAN β OPTIMIZATION</span>
+                                        <span class="badge bg-light text-dark border">β range 0–1</span>
+                                    </div>
+                                    <div class="row g-2">
+                                        <div class="col-4">
+                                            <label class="form-label-small">SOURCE</label>
+                                            <select class="form-select form-select-sm" v-model="betaOptimization.source">
+                                                <option value="fit">Fit</option>
+                                                <option value="raw">NoFit</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-4">
+                                            <label class="form-label-small">CHANNEL</label>
+                                            <select class="form-select form-select-sm" v-model="betaOptimization.channel">
+                                                <option value="up">UP</option>
+                                                <option value="dw">DOWN</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-4">
+                                            <label class="form-label-small">TARGET MEAN</label>
+                                            <input type="number" step="any" class="form-control form-control-sm"
+                                                v-model.number="betaOptimization.targetMean">
+                                        </div>
+                                    </div>
+                                    <div class="form-text mt-2">Uses valid shots in the currently applied Allan P0 range. The optimized β is previewed through Recalculate and is not saved automatically.</div>
+                                    <div class="d-grid gap-2 mt-2">
+                                        <button class="btn btn-outline-primary btn-sm fw-bold" @click="optimizeInterferometerBeta"
+                                            :disabled="betaOptimization.loading || isLoading">
+                                            <span v-if="betaOptimization.loading" class="spinner-border spinner-border-sm me-1"></span>
+                                            <i v-else class="bi bi-bullseye me-1"></i>{{ betaOptimization.loading ? 'Optimizing...' : 'Optimize I_Beta' }}
+                                        </button>
+                                        <button v-if="betaOptimization.result" class="btn btn-outline-success btn-sm fw-bold"
+                                            @click="applyOptimizedBetaToSettings" :disabled="betaOptimization.applying">
+                                            <span v-if="betaOptimization.applying" class="spinner-border spinner-border-sm me-1"></span>
+                                            <i v-else class="bi bi-gear me-1"></i>{{ betaOptimization.applying ? 'Applying...' : 'Apply β to Settings' }}
+                                        </button>
+                                    </div>
+                                    <div v-if="betaOptimization.message" class="small mt-2"
+                                        :class="betaOptimization.error ? 'text-danger' : (betaOptimization.result?.exact ? 'text-success' : 'text-warning')">
+                                        {{ betaOptimization.message }}
+                                    </div>
+                                </div>
+                            </div>
                         </div>
 
                         <div class="row g-2 mb-3 border-top pt-2 mt-2" v-if="isTransferFunctionArchive()">
@@ -2442,6 +2488,10 @@
                     transferFunctionSummary: [], savedTransferFunctionSummary: [], recalculatedTransferFunctionSummary: [],
                     phaseNoiseSummary: [], savedPhaseNoiseSummary: [], recalculatedPhaseNoiseSummary: [], phaseNoiseXAxis: 't2',
                     savedAllanCache: {}, recalculatedAllanCache: {}, currentAllanData: null,
+                    betaOptimization: {
+                        source: 'fit', channel: 'up', targetMean: 0,
+                        loading: false, applying: false, error: false, message: '', result: null
+                    },
                     defaultFitModels: [], defaultScanFitModels: [],
                     collapsedPanels: { reanalysis: true, scanFitting: true },
                     analysis: {
@@ -5008,6 +5058,9 @@
                     this.selectedPointLabel = '';
                     this.selectedAllanWindow = null;
                     this.currentWaveforms = [];
+                    this.betaOptimization.error = false;
+                    this.betaOptimization.message = '';
+                    this.betaOptimization.result = null;
                     this.markerOptimization = null;
                     this.syncManifest = null;
                     this.archivePhaseReferenceContexts = {};
@@ -5224,6 +5277,60 @@
                         }
                     } finally {
                         this.isLoading = false;
+                    }
+                },
+
+                async optimizeInterferometerBeta() {
+                    if (!this.selectedRun || !this.canUseAllanMode()) return;
+                    const normalizedRange = this.normalizeAllanP0RangeValues(this.allanP0Min, this.allanP0Max);
+                    this.betaOptimization.loading = true;
+                    this.betaOptimization.error = false;
+                    this.betaOptimization.message = '';
+                    this.betaOptimization.result = null;
+                    try {
+                        this.analysis = this.normalizeAnalysis(this.analysis);
+                        const response = await axios.post('/archive/interferometer-beta/optimize', this.buildArchivePayload({
+                            p0_min: normalizedRange?.min ?? null,
+                            p0_max: normalizedRange?.max ?? null,
+                            source: this.betaOptimization.source,
+                            channel: this.betaOptimization.channel,
+                            target_mean: Number(this.betaOptimization.targetMean ?? 0)
+                        }));
+                        const result = response.data || {};
+                        const optimizedBeta = Number(result.optimized_beta);
+                        if (!Number.isFinite(optimizedBeta)) throw new Error('Optimizer returned an invalid beta value');
+                        this.betaOptimization.result = result;
+                        this.analysis.intf_beta = optimizedBeta;
+                        this.currentTab = 'intf';
+                        this.showRawData = this.betaOptimization.source === 'raw';
+                        this.betaOptimization.message = result.exact
+                            ? `β=${optimizedBeta.toPrecision(10)} gives mean=${Number(result.achieved_mean).toPrecision(6)} using ${Number(result.sample_count)} shots.`
+                            : `No exact target exists in β ∈ [0,1]. Best β=${optimizedBeta.toPrecision(10)}, mean=${Number(result.achieved_mean).toPrecision(6)}, residual=${Number(result.residual).toPrecision(6)}.`;
+                        await this.recalculate();
+                        if (this.plotMode !== 'allan') await this.setPlotMode('allan');
+                    } catch (error) {
+                        this.betaOptimization.error = true;
+                        this.betaOptimization.message = error.response?.data?.detail || error.message || 'Interferometer beta optimization failed';
+                    } finally {
+                        this.betaOptimization.loading = false;
+                    }
+                },
+
+                async applyOptimizedBetaToSettings() {
+                    const beta = Number(this.betaOptimization.result?.optimized_beta);
+                    if (!Number.isFinite(beta)) return;
+                    if (!window.confirm(`Apply I_Beta=${beta.toPrecision(10)} to the global Settings?`)) return;
+                    this.betaOptimization.applying = true;
+                    this.betaOptimization.error = false;
+                    try {
+                        const response = await axios.post('/settings/interferometer-beta', { beta });
+                        const savedBeta = Number(response.data?.data?.intf_beta ?? beta);
+                        this.betaOptimization.message = `I_Beta=${savedBeta.toPrecision(10)} was applied to Settings. The archive remains in preview mode until Save to Disk is used.`;
+                    } catch (error) {
+                        this.betaOptimization.error = true;
+                        this.betaOptimization.message = error.response?.data?.detail || error.message || 'Applying beta to Settings failed';
+                    } finally {
+                        this.betaOptimization.applying = false;
                     }
                 },
 

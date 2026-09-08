@@ -63,6 +63,7 @@ from app.drivers.tti_generator import (
 from app.models.schemas import (
     AnalysisSettings,
     ArchiveAllanRequest,
+    ArchiveInterferometerBetaOptimizeRequest,
     ArchiveCollectionFolderCreate,
     ArchiveCollectionFolderUpdate,
     ArchiveFavoriteBatchRequest,
@@ -73,6 +74,7 @@ from app.models.schemas import (
     BraggPhaseCalibrationSaveRequest,
     InterferometerPhaseCalibrationUpdateRequest,
     InterferometerPhaseCalibrationActivateRequest,
+    InterferometerBetaApplyRequest,
     ArchiveScanFitRequest,
     ArchiveSyncDifferentialFitRequest,
     ArchiveSyncPhaseCalibrationOptimizeRequest,
@@ -1333,6 +1335,19 @@ async def update_analysis_settings(settings: AnalysisSettings):
     manager.update_analysis_config(settings.dict())
     return ExperimentResponse(status="success", message="Updated")
 
+
+@router.post("/settings/interferometer-beta", response_model=ExperimentResponse)
+async def update_interferometer_beta(req: InterferometerBetaApplyRequest):
+    try:
+        beta = manager.update_interferometer_beta(req.beta)
+        return ExperimentResponse(
+            status="success",
+            message="Interferometer beta updated",
+            data={"intf_beta": beta},
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
 @router.get("/system/update/status", response_model=ExperimentResponse)
 async def get_system_update_status():
     try:
@@ -1864,6 +1879,32 @@ async def calculate_archived_allan(req: ArchiveAllanRequest):
             p0_max=req.p0_max,
             node_id=req.node_id,
             current_phase_calibration=manager.get_active_bragg_phase_calibration(),
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@router.post("/archive/interferometer-beta/optimize")
+async def optimize_archived_interferometer_beta(req: ArchiveInterferometerBetaOptimizeRequest):
+    try:
+        settings = req.new_settings.dict()
+        settings["_interferometer_phase_calibration"] = manager.get_active_bragg_phase_calibration()
+        return data_loader.optimize_archive_interferometer_beta(
+            req.year,
+            req.month,
+            req.day,
+            req.run_id,
+            settings,
+            p0_min=req.p0_min,
+            p0_max=req.p0_max,
+            source=req.source,
+            channel=req.channel,
+            target_mean=req.target_mean,
+            node_id=req.node_id,
         )
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc))

@@ -700,6 +700,24 @@ class ArchiveAllanRequest(BaseModel):
     new_settings: ArchiveAnalysisSettings
 
 
+class ArchiveInterferometerBetaOptimizeRequest(BaseModel):
+    year: str
+    month: str
+    day: str
+    run_id: str
+    node_id: Optional[str] = Field(None)
+    p0_min: Optional[float] = Field(None)
+    p0_max: Optional[float] = Field(None)
+    source: str = Field("fit")
+    channel: str = Field("up")
+    target_mean: float = Field(0.0)
+    new_settings: ArchiveAnalysisSettings
+
+
+class InterferometerBetaApplyRequest(BaseModel):
+    beta: float = Field(..., ge=0.0, le=1.0)
+
+
 class ArchiveScanFitRequest(BaseModel):
     x_values: List[float] = Field(default_factory=list)
     y_values: List[float] = Field(default_factory=list)
