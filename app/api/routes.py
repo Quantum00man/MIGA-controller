@@ -2320,6 +2320,11 @@ async def overwrite_archived_run(req: ReAnalysisRequest):
             req.year, req.month, req.day, req.run_id,
             req.new_settings.dict(),
             recalculated["data"],
+            (
+                recalculated.get("transfer_function_summary")
+                if str(recalculated.get("config", {}).get("mode") or "").strip().lower() == "transfer_function"
+                else None
+            ),
         )
         return ExperimentResponse(status="success", message="Run overwritten successfully")
     except Exception as e:

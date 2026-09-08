@@ -9,7 +9,9 @@ import numpy as np
 
 
 SPEED_OF_LIGHT_M_S = 299_792_458.0
-ATOM_MIRROR_DISTANCE_M = 2.23
+DEFAULT_ATOM_MIRROR_DISTANCE_M = 2.23
+# Backward-compatible name for integrations that imported the former constant.
+ATOM_MIRROR_DISTANCE_M = DEFAULT_ATOM_MIRROR_DISTANCE_M
 
 
 METRIC_FIELDS = {
@@ -50,23 +52,42 @@ def _value(result: Any, fields: Iterable[str]) -> Optional[float]:
     return float(sum(values))
 
 
-def bragg_phase_modulation_rad(frequency_modulation_mhz: Any) -> Optional[float]:
+def bragg_phase_modulation_rad(
+    frequency_modulation_mhz: Any,
+    atom_mirror_distance_m: Any = DEFAULT_ATOM_MIRROR_DISTANCE_M,
+) -> Optional[float]:
     """Return the Eq. (14) Bragg phase amplitude for actual 780-nm FM."""
     try:
         modulation_hz = float(frequency_modulation_mhz) * 1_000_000.0
+        distance_m = float(atom_mirror_distance_m)
     except (TypeError, ValueError):
         return None
-    if not math.isfinite(modulation_hz) or modulation_hz <= 0:
+    if (
+        not math.isfinite(modulation_hz)
+        or modulation_hz <= 0
+        or not math.isfinite(distance_m)
+        or distance_m <= 0
+    ):
         return None
-    return (4.0 * math.pi * ATOM_MIRROR_DISTANCE_M / SPEED_OF_LIGHT_M_S) * modulation_hz
+    return (4.0 * math.pi * distance_m / SPEED_OF_LIGHT_M_S) * modulation_hz
 
 
 def build_transfer_function_summary(
     results: Iterable[Any],
     frequency_modulation_mhz: Any = None,
     phase_degrees: Any = None,
+    atom_mirror_distance_m: Any = DEFAULT_ATOM_MIRROR_DISTANCE_M,
 ) -> List[Dict[str, Any]]:
-    phase_amplitude = bragg_phase_modulation_rad(frequency_modulation_mhz)
+    phase_amplitude = bragg_phase_modulation_rad(
+        frequency_modulation_mhz,
+        atom_mirror_distance_m,
+    )
+    try:
+        distance_m = float(atom_mirror_distance_m)
+    except (TypeError, ValueError):
+        distance_m = None
+    if distance_m is not None and (not math.isfinite(distance_m) or distance_m <= 0):
+        distance_m = None
     try:
         expected_phases = [float(value) for value in phase_degrees] if phase_degrees is not None else []
     except (TypeError, ValueError):
@@ -113,6 +134,7 @@ def build_transfer_function_summary(
         row["frequency_modulation_mhz"] = (
             float(frequency_modulation_mhz) if phase_amplitude is not None else None
         )
+        row["atom_mirror_distance_m"] = distance_m if phase_amplitude is not None else None
         row["bragg_phase_modulation_rad"] = phase_amplitude
         for output_name in METRIC_FIELDS:
             if output_name == "interferometer_phase_std":

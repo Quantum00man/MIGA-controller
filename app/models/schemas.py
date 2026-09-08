@@ -432,6 +432,8 @@ class AnalysisSettings(BaseModel):
 class ArchiveAnalysisSettings(AnalysisSettings):
     fit_model_key: str = Field("gaussian")
     fit_models: List[FitModelDefinition] = Field(default_factory=list)
+    transfer_frequency_modulation_mhz: float = Field(1.0, gt=0)
+    transfer_atom_mirror_distance_m: float = Field(2.23, gt=0)
 
 
 class SyncSlaveSettings(BaseModel):
@@ -505,6 +507,7 @@ class SystemSettings(BaseModel):
     tti_model: str = Field("TG5012A")
     tti_channel: int = Field(1, ge=1, le=2)
     transfer_frequency_modulation_mhz: float = Field(1.0, gt=0)
+    transfer_atom_mirror_distance_m: float = Field(2.23, gt=0)
 
     @validator("tti_host")
     def normalize_tti_host(cls, value):

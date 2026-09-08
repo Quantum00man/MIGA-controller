@@ -1,5 +1,6 @@
 import unittest
 import csv
+import json
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -7,6 +8,7 @@ from unittest.mock import patch
 from app.analysis.transfer_function import bragg_phase_modulation_rad, build_transfer_function_summary
 from app.core.experiment_manager import ExperimentManager
 from app.core.data_manager import DataManager, RESULTS_CSV_HEADER
+from app.core.data_loader import DataLoader
 from app.drivers.tti_generator import (
     set_tti_test_frequency,
     set_tti_test_phase,
@@ -154,9 +156,14 @@ class TransferFunctionPlanTests(unittest.TestCase):
         self.assertEqual(config["transfer_generator_model"], "TG5012A")
         self.assertEqual(config["transfer_generator_channel"], 1)
         self.assertEqual(config["transfer_frequency_modulation_mhz"], 1.0)
+        self.assertEqual(config["transfer_atom_mirror_distance_m"], 2.23)
         self.assertEqual(config["transfer_phase_degrees"], [0.0, 90.0])
         self.assertTrue(all(
             point["metadata"]["transfer_frequency_modulation_mhz"] == 1.0
+            for point in plan
+        ))
+        self.assertTrue(all(
+            point["metadata"]["transfer_atom_mirror_distance_m"] == 2.23
             for point in plan
         ))
 
@@ -260,6 +267,14 @@ class TransferFunctionStatisticsTests(unittest.TestCase):
         self.assertIn("['S2_0deg', 'interferometer_phase_0deg_s2']", archive_html)
         self.assertIn("['S2_90deg', 'interferometer_phase_90deg_s2']", archive_html)
         self.assertIn("['S2_Quadrature_Sum', 'interferometer_phase_s2']", archive_html)
+        self.assertIn("v-model.number=\"analysis.transfer_frequency_modulation_mhz\"", archive_html)
+        self.assertIn("v-model.number=\"analysis.transfer_atom_mirror_distance_m\"", archive_html)
+        self.assertIn("['Atom_Mirror_Distance_M', 'atom_mirror_distance_m']", archive_html)
+
+        settings_html = (
+            Path(__file__).resolve().parents[1] / "static" / "settings.html"
+        ).read_text(encoding="utf-8")
+        self.assertIn("v-model.number=\"s.transfer_atom_mirror_distance_m\"", settings_html)
 
     def test_summary_calculates_s2_from_780_nm_frequency_modulation(self):
         rows = [
@@ -277,6 +292,55 @@ class TransferFunctionStatisticsTests(unittest.TestCase):
         self.assertAlmostEqual(summary[0]["bragg_phase_modulation_rad"], phase_amplitude)
         self.assertAlmostEqual(summary[0]["interferometer_phase_s2"], (0.1 / phase_amplitude) ** 2)
         self.assertEqual(summary[0]["frequency_modulation_mhz"], 1.0)
+        self.assertEqual(summary[0]["atom_mirror_distance_m"], 2.23)
+
+    def test_phase_normalization_uses_user_defined_atom_mirror_distance(self):
+        default_phase = bragg_phase_modulation_rad(1.0, 2.23)
+        doubled_phase = bragg_phase_modulation_rad(1.0, 4.46)
+        summary = build_transfer_function_summary([
+            {
+                "transfer_frequency_hz": 100.0,
+                "interferometer_phase": 0.1,
+                "interferometer_phase_valid": True,
+            }
+        ], 1.0, None, 4.46)
+
+        self.assertAlmostEqual(doubled_phase, 2 * default_phase)
+        self.assertEqual(summary[0]["atom_mirror_distance_m"], 4.46)
+        self.assertAlmostEqual(summary[0]["interferometer_phase_s2"], (0.1 / doubled_phase) ** 2)
+
+    def test_archive_recalculation_rebuilds_summary_with_normalization_overrides(self):
+        loader = DataLoader()
+        recalculated_point = {
+            "step": 0,
+            "parameter": 100.0,
+            "all_parameters": [100.0],
+            "transfer_frequency_hz": 100.0,
+            "transfer_phase_deg": 0.0,
+            "interferometer_phase": 0.2,
+            "interferometer_phase_valid": True,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = Path(directory)
+            (run_dir / "config.json").write_text(json.dumps({
+                "mode": "transfer_function",
+                "scan_dimensions": 1,
+                "transfer_phase_degrees": [0.0],
+            }), encoding="utf-8")
+            with patch.object(loader, "_get_run_dir", return_value=run_dir), \
+                    patch.object(loader, "_read_results_csv", return_value=[{"step": 0}]), \
+                    patch.object(loader, "_load_waveform_arrays", return_value={}), \
+                    patch.object(loader, "_recalculate_point", return_value=recalculated_point):
+                payload = loader.recalculate_run("2026", "09", "08", "run01", {
+                    "transfer_frequency_modulation_mhz": 2.0,
+                    "transfer_atom_mirror_distance_m": 3.0,
+                })
+
+        row = payload["transfer_function_summary"][0]
+        expected_phi = bragg_phase_modulation_rad(2.0, 3.0)
+        self.assertEqual(row["frequency_modulation_mhz"], 2.0)
+        self.assertEqual(row["atom_mirror_distance_m"], 3.0)
+        self.assertAlmostEqual(row["interferometer_phase_0deg_s2"], (0.2 / expected_phi) ** 2)
 
     def test_s2_is_unavailable_without_archived_modulation_amplitude(self):
         summary = build_transfer_function_summary([
@@ -388,6 +452,43 @@ class TransferFunctionStatisticsTests(unittest.TestCase):
         self.assertIn("interferometer_phase_90deg_s2", row)
         self.assertIn("interferometer_phase_s2", row)
         self.assertNotIn("interferometer_phase_s2_components", row)
+
+    def test_archive_overwrite_persists_transfer_normalization_and_summary(self):
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = Path(directory) / "2026" / "09" / "08" / "run01"
+            run_dir.mkdir(parents=True)
+            (run_dir / "config.json").write_text(json.dumps({
+                "mode": "transfer_function",
+                "transfer_frequency_modulation_mhz": 1.0,
+            }), encoding="utf-8")
+            (run_dir / "results.csv").write_text(",".join(RESULTS_CSV_HEADER) + "\n", encoding="utf-8")
+            summary = [{
+                "frequency_hz": 100.0,
+                "frequency_modulation_mhz": 2.0,
+                "atom_mirror_distance_m": 3.0,
+                "interferometer_phase_s2_components": [],
+                "interferometer_phase_s2": 4.0,
+            }]
+            with patch("app.core.data_manager.config.DATA_BASE_DIR", directory):
+                DataManager().overwrite_run(
+                    "2026", "09", "08", "run01",
+                    {
+                        "transfer_frequency_modulation_mhz": 2.0,
+                        "transfer_atom_mirror_distance_m": 3.0,
+                    },
+                    [],
+                    summary,
+                )
+
+            saved_config = json.loads((run_dir / "config.json").read_text(encoding="utf-8"))
+            saved_summary = json.loads((run_dir / "transfer_function_summary.json").read_text(encoding="utf-8"))
+            with open(run_dir / "transfer_function_summary.csv", newline="", encoding="utf-8") as handle:
+                csv_row = next(csv.DictReader(handle))
+        self.assertEqual(saved_config["transfer_frequency_modulation_mhz"], 2.0)
+        self.assertEqual(saved_config["transfer_atom_mirror_distance_m"], 3.0)
+        self.assertEqual(saved_summary[0]["interferometer_phase_s2"], 4.0)
+        self.assertEqual(csv_row["atom_mirror_distance_m"], "3.0")
+        self.assertNotIn("interferometer_phase_s2_components", csv_row)
 
     def test_summary_excludes_invalid_calibrated_phase(self):
         rows = [

@@ -1043,6 +1043,27 @@
                             </div>
                         </div>
 
+                        <div class="row g-2 mb-3 border-top pt-2 mt-2" v-if="isTransferFunctionArchive()">
+                            <div class="col-12"><label class="form-label-small text-primary fw-bold">TRANSFER FUNCTION NORMALIZATION</label></div>
+                            <div class="col-6">
+                                <label class="form-label-small">780 nm FM AMPLITUDE</label>
+                                <div class="input-group input-group-sm">
+                                    <input type="number" min="0.000001" step="any" class="form-control"
+                                        v-model.number="analysis.transfer_frequency_modulation_mhz">
+                                    <span class="input-group-text">MHz</span>
+                                </div>
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label-small">ATOM–MIRROR DISTANCE L</label>
+                                <div class="input-group input-group-sm">
+                                    <input type="number" min="0.000001" step="any" class="form-control"
+                                        v-model.number="analysis.transfer_atom_mirror_distance_m">
+                                    <span class="input-group-text">m</span>
+                                </div>
+                            </div>
+                            <div class="col-12 form-text">Recalculate uses φ = 4πLΔν₇₈₀/c and updates the phase-resolved and quadrature S² curves.</div>
+                        </div>
+
                         <div class="row g-2 mb-3 border-top pt-2 mt-2">
                             <div class="col-12"><label class="form-label-small text-muted fw-bold">SIGNAL FILTERS</label></div>
                             <div class="col-6">
@@ -2422,6 +2443,8 @@
                         max_low: 0.0001, voltage_limit: 0.015,
                         intf_alpha: 0.35, intf_beta: 0.07636, intf_gamma: 0.25,
                         atom_area_method: 'legacy', atom_area_baseline_points: 2,
+                        transfer_frequency_modulation_mhz: 1.0,
+                        transfer_atom_mirror_distance_m: 2.23,
                         fit_model_key: 'gaussian', fit_models: []
                     },
                     scanFit: {
@@ -2872,6 +2895,10 @@
                     normalized.atom_area_method = normalized.atom_area_method === 'edge_line' ? 'edge_line' : 'legacy';
                     const baselinePoints = Number.parseInt(normalized.atom_area_baseline_points ?? 2, 10);
                     normalized.atom_area_baseline_points = Number.isFinite(baselinePoints) && baselinePoints > 0 ? baselinePoints : 2;
+                    const modulationMhz = Number(normalized.transfer_frequency_modulation_mhz ?? 1);
+                    normalized.transfer_frequency_modulation_mhz = Number.isFinite(modulationMhz) && modulationMhz > 0 ? modulationMhz : 1;
+                    const distanceM = Number(normalized.transfer_atom_mirror_distance_m ?? 2.23);
+                    normalized.transfer_atom_mirror_distance_m = Number.isFinite(distanceM) && distanceM > 0 ? distanceM : 2.23;
                     normalized.fit_models = this.normalizeFitModels(normalized.fit_models);
                     if (!normalized.fit_models.length && this.defaultFitModels.length) {
                         normalized.fit_models = this.cloneFitModels(this.defaultFitModels);
@@ -5050,8 +5077,14 @@
                             this.plotMode = "series";
                         }
                         this.currentScanDimensions = this.resolveScanDimensions(res.data.scan_dimensions, this.loadedConfig);
-                        this.originalSettings = this.normalizeAnalysis(snap);
-                        this.analysis = this.normalizeAnalysis({ ...this.analysis, ...snap });
+                        const transferNormalization = {
+                            transfer_frequency_modulation_mhz: this.loadedConfig.transfer_frequency_modulation_mhz
+                                ?? snap.transfer_frequency_modulation_mhz ?? 1,
+                            transfer_atom_mirror_distance_m: this.loadedConfig.transfer_atom_mirror_distance_m
+                                ?? snap.transfer_atom_mirror_distance_m ?? 2.23,
+                        };
+                        this.originalSettings = this.normalizeAnalysis({ ...snap, ...transferNormalization });
+                        this.analysis = this.normalizeAnalysis({ ...this.analysis, ...snap, ...transferNormalization });
 
                         this.loadedPoints = res.data.data;
                         this.savedStats = this.normalizeStatsRows(res.data.stats);
@@ -7470,6 +7503,7 @@
                         ['Frequency_Hz', 'frequency_hz'],
                         ['Shot_Count', 'shot_count'],
                         ['Frequency_Modulation_MHz_780nm', 'frequency_modulation_mhz'],
+                        ['Atom_Mirror_Distance_M', 'atom_mirror_distance_m'],
                         ['Bragg_Phase_Modulation_Rad', 'bragg_phase_modulation_rad'],
                         ['Atom_Number_UP_Fit_Count', 'atom_number_up_fit_count'],
                         ['Atom_Number_UP_Fit_Mean', 'atom_number_up_fit_mean'],

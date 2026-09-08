@@ -1211,6 +1211,7 @@ class DataLoader:
                 full_points,
                 config_data.get("transfer_frequency_modulation_mhz"),
                 config_data.get("transfer_phase_degrees"),
+                config_data.get("transfer_atom_mirror_distance_m", 2.23),
             )
             if is_transfer_function
             else []
@@ -1887,6 +1888,23 @@ class DataLoader:
         is_lock_in = str(config_data.get("mode") or "").strip().lower() == "lock_in"
         expected_lock_in_blocks = self._parse_int(config_data.get("averages"), 0) if is_lock_in else 0
         lock_in_analysis = build_lock_in_analysis(recalculated_points, expected_blocks=expected_lock_in_blocks) if is_lock_in else {}
+        is_transfer_function = str(config_data.get("mode") or "").strip().lower() == "transfer_function"
+        transfer_function_summary = (
+            build_transfer_function_summary(
+                recalculated_points,
+                settings.get(
+                    "transfer_frequency_modulation_mhz",
+                    config_data.get("transfer_frequency_modulation_mhz"),
+                ),
+                config_data.get("transfer_phase_degrees"),
+                settings.get(
+                    "transfer_atom_mirror_distance_m",
+                    config_data.get("transfer_atom_mirror_distance_m", 2.23),
+                ),
+            )
+            if is_transfer_function
+            else []
+        )
 
         return {
             "config": config_data,
@@ -1896,6 +1914,7 @@ class DataLoader:
             "stats": self._build_stats_array(recalculated_points, scan_dimensions=scan_dimensions),
             "ac_stark_summary": self._build_ac_stark_summary(recalculated_points),
             "lock_in_analysis": lock_in_analysis,
+            "transfer_function_summary": transfer_function_summary,
             "preview_map": self._build_preview_map(recalculated_points, scan_dimensions=scan_dimensions),
             "total_points": len(recalculated_points),
             "interferometer_phase_calibration": settings.get("_interferometer_phase_calibration"),

@@ -591,6 +591,7 @@ class ExperimentManager:
             "tti_model": "TG5012A",
             "tti_channel": 1,
             "transfer_frequency_modulation_mhz": 1.0,
+            "transfer_atom_mirror_distance_m": 2.23,
             
             # --- [关键修复] 显式添加这三个参数的默认值 ---
             "intf_alpha": 0.35,
@@ -1201,6 +1202,9 @@ class ExperimentManager:
         frequency_modulation_mhz = float(self.settings.get("transfer_frequency_modulation_mhz", 1.0))
         if not math.isfinite(frequency_modulation_mhz) or frequency_modulation_mhz <= 0:
             raise ValueError("780 nm frequency modulation amplitude must be greater than zero")
+        atom_mirror_distance_m = float(self.settings.get("transfer_atom_mirror_distance_m", 2.23))
+        if not math.isfinite(atom_mirror_distance_m) or atom_mirror_distance_m <= 0:
+            raise ValueError("Transfer Function atom-to-mirror distance L must be greater than zero")
         try:
             phase_degrees = [float(value) for value in scan_config.get("transfer_phase_degrees", [0.0, 90.0])]
         except (TypeError, ValueError):
@@ -1242,6 +1246,7 @@ class ExperimentManager:
                             "transfer_repeat": repeat_index,
                             "transfer_repeats": repeats,
                             "transfer_frequency_modulation_mhz": frequency_modulation_mhz,
+                            "transfer_atom_mirror_distance_m": atom_mirror_distance_m,
                             "transfer_phase_deg": phase_deg,
                             "transfer_phase_index": phase_index,
                             "transfer_phase_count": len(phase_degrees),
@@ -1258,6 +1263,7 @@ class ExperimentManager:
         scan_config["transfer_generator_model"] = str(self.settings.get("tti_model") or "TG5012A").strip().upper()
         scan_config["transfer_generator_channel"] = int(self.settings.get("tti_channel", 1))
         scan_config["transfer_frequency_modulation_mhz"] = frequency_modulation_mhz
+        scan_config["transfer_atom_mirror_distance_m"] = atom_mirror_distance_m
         scan_config["transfer_phase_degrees"] = phase_degrees
         scan_config["transfer_frequency_values_hz"] = frequencies
         scan_config["transfer_repeats"] = repeats
@@ -2641,6 +2647,7 @@ class ExperimentManager:
                             transfer_function_results,
                             scan_config.get("transfer_frequency_modulation_mhz"),
                             scan_config.get("transfer_phase_degrees"),
+                            scan_config.get("transfer_atom_mirror_distance_m", 2.23),
                         )
                     )
                 except Exception as exc:

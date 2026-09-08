@@ -5,7 +5,7 @@ import shutil
 import numpy as np
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 import config
 from app.core.structures import ScanResult
@@ -283,7 +283,16 @@ class DataManager:
             self.csv_handle = None
         print("[DataManager] Run saved and closed.")
 
-    def overwrite_run(self, year, month, day, run_id, new_settings: Dict, new_data: List[Dict]):
+    def overwrite_run(
+        self,
+        year,
+        month,
+        day,
+        run_id,
+        new_settings: Dict,
+        new_data: List[Dict],
+        transfer_function_summary: Optional[List[Dict[str, Any]]] = None,
+    ):
         target_dir = Path(config.DATA_BASE_DIR) / year / month / day / run_id
         if not target_dir.exists(): raise FileNotFoundError(f"Run {run_id} not found")
 
@@ -294,6 +303,10 @@ class DataManager:
             existing_analysis = data.get('_analysis_snapshot') if isinstance(data.get('_analysis_snapshot'), dict) else {}
             data['_system_settings_snapshot'] = {**existing_system, **new_settings}
             data['_analysis_snapshot'] = {**existing_analysis, **new_settings}
+            if str(data.get("mode") or "").strip().lower() == "transfer_function":
+                for key in ("transfer_frequency_modulation_mhz", "transfer_atom_mirror_distance_m"):
+                    if key in new_settings:
+                        data[key] = new_settings[key]
             with open(config_path, 'w') as f: json.dump(data, f, indent=4)
 
         csv_path = target_dir / "results.csv"
@@ -335,6 +348,19 @@ class DataManager:
                     f('transfer_phase_deg', 6),
                 ]
                 writer.writerow(row)
+
+        if transfer_function_summary is not None:
+            with open(target_dir / "transfer_function_summary.json", "w", encoding="utf-8") as handle:
+                json.dump(transfer_function_summary, handle, ensure_ascii=False, indent=2)
+            if transfer_function_summary:
+                fieldnames = [
+                    key for key in transfer_function_summary[0].keys()
+                    if key != "interferometer_phase_s2_components"
+                ]
+                with open(target_dir / "transfer_function_summary.csv", "w", newline="", encoding="utf-8") as handle:
+                    writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
+                    writer.writeheader()
+                    writer.writerows(transfer_function_summary)
         
         print(f"[DataManager] Run {run_id} overwritten.")
     

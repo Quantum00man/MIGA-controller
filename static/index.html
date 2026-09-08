@@ -1773,6 +1773,7 @@
                     transferFunctionStatistic: 'std',
                     transferFunctionYAxisScale: 'linear',
                     transferFrequencyModulationMhz: null,
+                    transferAtomMirrorDistanceM: 2.23,
                     transferPhaseDegrees: [],
                     currentScanDimensions: 1,
                     tabs: [{ id: 'atoms', label: 'Atom Number' }, { id: 'amp', label: 'Max Voltage' }, { id: 'tail', label: 'Tail Mean' }, { id: 'sigma', label: 'Width (ms)' }, { id: 'temp', label: 'Temperature' }, { id: 'arrival', label: 'Arrival Time' }, { id: 'prob', label: 'Transition Prob.' }, { id: 'intf', label: 'Interferometer' }, { id: 'phase', label: 'Interferometer Phase' }],
@@ -4793,6 +4794,10 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     if (Number.isFinite(modulationMhz) && modulationMhz > 0) {
                         this.transferFrequencyModulationMhz = modulationMhz;
                     }
+                    const distanceM = Number(data.transfer_atom_mirror_distance_m);
+                    if (Number.isFinite(distanceM) && distanceM > 0) {
+                        this.transferAtomMirrorDistanceM = distanceM;
+                    }
                     const configuredPhases = Array.isArray(data.transfer_phase_degrees)
                         ? data.transfer_phase_degrees.map(Number).filter(Number.isFinite)
                         : [];
@@ -4848,8 +4853,9 @@ finishScheduledRun(finalStatus = 'IDLE') {
                 },
                 transferBraggPhaseAmplitudeRad() {
                     const modulationMhz = Number(this.transferFrequencyModulationMhz);
-                    if (!Number.isFinite(modulationMhz) || modulationMhz <= 0) return null;
-                    return (4 * Math.PI * 2.23 / 299792458) * modulationMhz * 1e6;
+                    const distanceM = Number(this.transferAtomMirrorDistanceM);
+                    if (!Number.isFinite(modulationMhz) || modulationMhz <= 0 || !Number.isFinite(distanceM) || distanceM <= 0) return null;
+                    return (4 * Math.PI * distanceM / 299792458) * modulationMhz * 1e6;
                 },
                 setTransferFunctionStatistic(statistic) {
                     const normalized = statistic === 's2' && this.currentTab === 'phase'
@@ -5627,6 +5633,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
             this.lockInHistoryMap = {};
             this.transferFunctionHistoryMap = {};
             this.transferFrequencyModulationMhz = null;
+            this.transferAtomMirrorDistanceM = 2.23;
             this.transferPhaseDegrees = [];
             this.initPlots();
         }
