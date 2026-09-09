@@ -139,6 +139,8 @@ class PhaseNoiseAnalyzeTests(unittest.TestCase):
         self.assertIn("expected_total_phase_noise_rad", archive)
         self.assertIn("phaseNoiseAllanOrders", archive)
         self.assertIn("/archive/phase-noise/allan", archive)
+        self.assertIn("phaseNoiseXAxisScale", archive)
+        self.assertIn("phaseNoiseYAxisScale", archive)
 
 
 if __name__ == "__main__":

@@ -2086,6 +2086,14 @@
                                     <button class="btn" :class="phaseNoiseXAxis === 't2' ? 'btn-primary' : 'btn-outline-primary'" @click="phaseNoiseXAxis = 't2'">T²</button>
                                     <button class="btn" :class="phaseNoiseXAxis === 't' ? 'btn-primary' : 'btn-outline-primary'" @click="phaseNoiseXAxis = 't'">T (ms)</button>
                                 </div>
+                                <div v-if="loadedRunId && isPhaseNoiseArchive()" class="btn-group btn-group-sm" role="group" aria-label="Phase Noise x scale">
+                                    <button class="btn" :class="phaseNoiseXAxisScale === 'linear' ? 'btn-secondary' : 'btn-outline-secondary'" @click="setPhaseNoiseAxisScale('x', 'linear')">Linear X</button>
+                                    <button class="btn" :class="phaseNoiseXAxisScale === 'log' ? 'btn-secondary' : 'btn-outline-secondary'" @click="setPhaseNoiseAxisScale('x', 'log')">Log X</button>
+                                </div>
+                                <div v-if="loadedRunId && isPhaseNoiseArchive()" class="btn-group btn-group-sm" role="group" aria-label="Phase Noise y scale">
+                                    <button class="btn" :class="phaseNoiseYAxisScale === 'linear' ? 'btn-secondary' : 'btn-outline-secondary'" @click="setPhaseNoiseAxisScale('y', 'linear')">Linear Y</button>
+                                    <button class="btn" :class="phaseNoiseYAxisScale === 'log' ? 'btn-secondary' : 'btn-outline-secondary'" @click="setPhaseNoiseAxisScale('y', 'log')" title="Log Y displays positive values only">Log Y</button>
+                                </div>
                                 <div v-if="loadedRunId && isPhaseNoiseArchive() && phaseNoiseStatistic === 'allan'" class="d-flex flex-wrap align-items-center gap-1">
                                     <span class="small text-muted me-1">Orders</span>
                                     <button v-for="order in phaseNoiseAllanOrders" :key="`phase-noise-allan-${order}`" type="button"
@@ -2538,6 +2546,7 @@
                     lockInAnalysis: {}, savedLockInAnalysis: {}, recalculatedLockInAnalysis: {},
                     transferFunctionSummary: [], savedTransferFunctionSummary: [], recalculatedTransferFunctionSummary: [],
                     phaseNoiseSummary: [], savedPhaseNoiseSummary: [], recalculatedPhaseNoiseSummary: [], phaseNoiseXAxis: 't2',
+                    phaseNoiseXAxisScale: 'linear', phaseNoiseYAxisScale: 'linear',
                     phaseNoiseStatistic: 'std', phaseNoiseAllanOrders: [1], phaseNoiseAllanOrderDraft: 2,
                     savedAllanCache: {}, recalculatedAllanCache: {}, currentAllanData: null,
                     betaOptimization: {
@@ -2608,6 +2617,12 @@
                     });
                 },
                 phaseNoiseXAxis() {
+                    if (this.isPhaseNoiseArchive()) this.renderPhaseNoiseArchivePlot();
+                },
+                phaseNoiseXAxisScale() {
+                    if (this.isPhaseNoiseArchive()) this.renderPhaseNoiseArchivePlot();
+                },
+                phaseNoiseYAxisScale() {
                     if (this.isPhaseNoiseArchive()) this.renderPhaseNoiseArchivePlot();
                 },
                 phaseNoiseStatistic() {
@@ -5114,6 +5129,8 @@
                     this.phaseNoiseStatistic = 'std';
                     this.phaseNoiseAllanOrders = [1];
                     this.phaseNoiseAllanOrderDraft = 2;
+                    this.phaseNoiseXAxisScale = 'linear';
+                    this.phaseNoiseYAxisScale = 'linear';
                     this.selectedPointKey = '';
                     this.selectedPointKeys = [];
                     this.selectedPointLabel = '';
@@ -8561,10 +8578,26 @@
                     );
                     await this.refreshPhaseNoiseAllan();
                 },
+                setPhaseNoiseAxisScale(axis, scale) {
+                    const normalized = scale === 'log' ? 'log' : 'linear';
+                    if (axis === 'y') this.phaseNoiseYAxisScale = normalized;
+                    else this.phaseNoiseXAxisScale = normalized;
+                    this.plotRevision++;
+                    this.renderPhaseNoiseArchivePlot();
+                },
                 renderPhaseNoiseArchivePlot() {
                     const rows = Array.isArray(this.phaseNoiseSummary) ? this.phaseNoiseSummary : [];
                     const xField = this.phaseNoiseXAxis === 't' ? 't_ms' : 't2_us2';
                     const xTitle = this.phaseNoiseXAxis === 't' ? 'Interferometer time T (ms)' : 'P0 = T² ((μs)²)';
+                    const plotX = value => {
+                        const numeric = Number(value);
+                        return Number.isFinite(numeric) && (this.phaseNoiseXAxisScale !== 'log' || numeric > 0) ? numeric : null;
+                    };
+                    const plotY = value => {
+                        if (value == null) return null;
+                        const numeric = Number(value) * 1000;
+                        return Number.isFinite(numeric) && (this.phaseNoiseYAxisScale !== 'log' || numeric > 0) ? numeric : null;
+                    };
                     let traces;
                     if (this.phaseNoiseStatistic === 'allan') {
                         const colors = ['#6f42c1', '#0d6efd', '#198754', '#dc3545', '#fd7e14', '#20c997', '#495057', '#d63384'];
@@ -8580,8 +8613,8 @@
                                 (row.allan_deviations || []).find(item => Number(item.order) === Number(order)) || {}
                             ));
                             return definitions.map(([field, label, dash, symbol, width]) => ({
-                                x: rows.map(row => Number(row[xField])),
-                                y: allanRows.map(item => item[field] == null ? null : Number(item[field]) * 1000),
+                                x: rows.map(row => plotX(row[xField])),
+                                y: allanRows.map(item => plotY(item[field])),
                                 customdata: rows.map((row, index) => [row.t2_us2, row.t_ms, allanRows[index].valid_window_count || 0, row.shot_count]),
                                 type: 'scatter', mode: 'lines+markers', name: `${label} n=${order}`,
                                 legendgroup: `allan-${order}`,
@@ -8599,8 +8632,8 @@
                             ['laser_phase_noise_rad', 'Laser frequency', '#dc3545', 'triangle-up'],
                         ];
                         traces = definitions.map(([field, name, color, symbol]) => ({
-                            x: rows.map(row => Number(row[xField])),
-                            y: rows.map(row => row[field] == null ? null : Number(row[field]) * 1000),
+                            x: rows.map(row => plotX(row[xField])),
+                            y: rows.map(row => plotY(row[field])),
                             customdata: rows.map(row => [row.t2_us2, row.t_ms, row.valid_phase_count, row.shot_count]),
                             type: 'scatter', mode: 'lines+markers', name,
                             line: { color, width: name.includes('total') ? 2.8 : 1.8, dash: name === 'Expected total' ? 'dash' : 'solid' },
@@ -8613,8 +8646,8 @@
                     this.layoutResUp = {
                         ...base, margin: { t: 45, b: 58, l: 78, r: 20 },
                         title: { text: `Phase Noise Analyze · ${this.phaseNoiseStatistic === 'allan' ? 'overlapping Allan deviation' : 'standard deviation'}`, font: { size: 14 }, x: 0.04 },
-                        xaxis: { ...base.xaxis, title: xTitle },
-                        yaxis: { ...base.yaxis, title: this.phaseNoiseStatistic === 'allan' ? 'Phase Allan deviation σA (mrad)' : 'Phase noise σφ (mrad)' },
+                        xaxis: { ...base.xaxis, title: xTitle, type: this.phaseNoiseXAxisScale },
+                        yaxis: { ...base.yaxis, type: this.phaseNoiseYAxisScale, title: this.phaseNoiseStatistic === 'allan' ? 'Phase Allan deviation σA (mrad)' : 'Phase noise σφ (mrad)' },
                         legend: { orientation: 'h', x: 0.5, xanchor: 'center', y: 1.16 }
                     };
                     Plotly.react('resultsPlotUp', traces, this.layoutResUp, { responsive: true, displaylogo: false });
