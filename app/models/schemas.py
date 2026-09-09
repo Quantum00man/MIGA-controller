@@ -640,10 +640,10 @@ class ReAnalysisRequest(BaseModel):
     phase_noise_allan_orders: Optional[List[int]] = Field(None, max_length=64)
 
     @validator("phase_noise_allan_orders")
-    def validate_phase_noise_allan_orders(cls, values: Optional[List[int]]) -> Optional[List[int]]:
-        if values is None:
+    def validate_phase_noise_allan_orders(cls, value: Optional[List[int]]) -> Optional[List[int]]:
+        if value is None:
             return None
-        normalized = sorted(set(int(value) for value in values))
+        normalized = sorted(set(int(order) for order in value))
         if not normalized or normalized[0] < 1 or normalized[-1] > 100000:
             raise ValueError("Phase-noise Allan orders must be between 1 and 100000")
         return normalized
@@ -723,8 +723,8 @@ class ArchivePhaseNoiseAllanRequest(BaseModel):
     new_settings: ArchiveAnalysisSettings
 
     @validator("orders")
-    def validate_orders(cls, values: List[int]) -> List[int]:
-        normalized = sorted(set(int(value) for value in values))
+    def validate_orders(cls, value: List[int]) -> List[int]:
+        normalized = sorted(set(int(order) for order in value))
         if not normalized or normalized[0] < 1 or normalized[-1] > 100000:
             raise ValueError("Phase-noise Allan orders must be between 1 and 100000")
         return normalized

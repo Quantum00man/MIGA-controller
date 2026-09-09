@@ -9,7 +9,12 @@ from app.analysis.phase_noise import (
     validate_mid_fringe_values,
 )
 from app.core.experiment_manager import ExperimentManager
-from app.models.schemas import ScanConfig, SystemSettings
+from app.models.schemas import (
+    ArchiveAnalysisSettings,
+    ArchivePhaseNoiseAllanRequest,
+    ScanConfig,
+    SystemSettings,
+)
 
 
 class PhaseNoiseAnalyzeTests(unittest.TestCase):
@@ -33,6 +38,18 @@ class PhaseNoiseAnalyzeTests(unittest.TestCase):
         self.assertEqual(fields["laser_frequency_phase_noise_mrad"].default, 100.0)
         scan = ScanConfig(mode="phase_noise")
         self.assertEqual(scan.phase_noise_repeats, 10)
+
+    def test_archive_allan_request_normalizes_selected_orders(self):
+        settings = ArchiveAnalysisSettings(
+            alpha=0.01, beta=0.02, R=1.0, K=1.0, z_up=0.2, z_dw=0.2,
+            launch_velocity=4.0, chan_launch="60", chan_trigger="68",
+            gain_up=-35.0, gain_dw=-35.0,
+        )
+        request = ArchivePhaseNoiseAllanRequest(
+            year="2026", month="09", day="09", run_id="run02",
+            orders=[5, 1, 2, 5], new_settings=settings,
+        )
+        self.assertEqual(request.orders, [1, 2, 5])
 
     def test_mid_fringe_reference_selects_its_own_slope(self):
         first = calibration_at_mid_fringe(self.calibration(), 5.0)
