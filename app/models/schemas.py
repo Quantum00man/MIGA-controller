@@ -710,6 +710,7 @@ class ArchiveInterferometerBetaOptimizeRequest(BaseModel):
     p0_max: Optional[float] = Field(None)
     parameter: str = Field("intf_beta")
     metric: str = Field("intf")
+    statistic: str = Field("mean")
     source: str = Field("fit")
     channel: str = Field("up")
     target_mean: float = Field(0.0)

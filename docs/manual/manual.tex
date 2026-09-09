@@ -1356,11 +1356,12 @@ logarithmic order axes, and displays valid-window count, mean, RMS and sample st
 deviation for Fit and raw channels.
 
 The Archive Re-Analysis panel can optimize one parameter in $[0,1]$ so that a selected
-sequence mean reaches a requested target. The available parameters are the atom-number
+sequence mean or sample standard deviation reaches a requested target. The available parameters are the atom-number
 crosstalk coefficients \ui{ALPHA} and \ui{BETA}, and the interferometer coefficient
 \ui{I\_Beta}. ALPHA and BETA can target Atom Number, Transition Probability or
 Interferometer P; I\_Beta targets Interferometer P. Fit/NoFit and valid channels can be
-selected, with Fit \ui{Interferometer P UP} and target zero as defaults. The calculation
+selected, with Mean, Fit \ui{Interferometer P UP} and target zero as defaults. Standard
+deviation uses the same $N-1$ sample definition as Sequence Statistics. The calculation
 uses only valid shots inside the currently applied Allan $P_0$ range and excludes the
 interferometer singular point $\beta_I=\alpha_I$. The result is first applied as a
 recalculation preview and does not overwrite the archive. A separate Settings action

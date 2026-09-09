@@ -89,6 +89,30 @@ class ArchiveInterferometerBetaOptimizationTests(unittest.TestCase):
         self.assertAlmostEqual(result["optimized_value"], 0.3, places=9)
         self.assertTrue(result["exact"])
 
+    def test_alpha_can_minimize_sample_standard_deviation(self):
+        settings = {**self.settings, "alpha": 0.1, "beta": 0.05, "R": 1.1, "K": 10.0}
+        points = []
+        for area_up, area_dw in [(1.0, 1.0), (2.0685, 6.0)]:
+            n_f2, n_f1 = physics.calculate_atom_numbers(
+                area_up, area_dw, 1.0, 1.0,
+                settings["alpha"], settings["beta"], settings["R"], settings["K"], 0.0,
+            )
+            points.append({"atom_number_up": n_f2, "atom_number_dw": n_f1})
+
+        result = self.loader._optimize_analysis_parameter_from_points(
+            points,
+            settings,
+            parameter="alpha",
+            metric="atoms",
+            statistic="std",
+            channel="up",
+        )
+
+        self.assertAlmostEqual(result["optimized_value"], 0.2137, places=7)
+        self.assertAlmostEqual(result["achieved_statistic"], 0.0, places=7)
+        self.assertEqual(result["statistic"], "std")
+        self.assertTrue(result["exact"])
+
     def test_interferometer_beta_rejects_unaffected_metric(self):
         with self.assertRaisesRegex(ValueError, "does not affect"):
             self.loader._optimize_analysis_parameter_from_points(
@@ -129,13 +153,14 @@ class ArchiveInterferometerBetaOptimizationTests(unittest.TestCase):
     def test_archive_ui_exposes_preview_and_settings_actions(self):
         archive_html = (Path(__file__).resolve().parents[1] / "static" / "archive.html").read_text(encoding="utf-8")
 
-        self.assertIn("ALLAN PHYSICAL MEAN OPTIMIZATION", archive_html)
+        self.assertIn("ALLAN PHYSICAL STATISTIC OPTIMIZATION", archive_html)
         self.assertIn("/archive/mean-parameter/optimize", archive_html)
         self.assertIn("optimizeInterferometerBeta", archive_html)
         self.assertIn("Apply Parameter to Settings", archive_html)
         self.assertIn("/settings/analysis-parameter", archive_html)
         self.assertIn('<option value="alpha">ALPHA</option>', archive_html)
         self.assertIn('<option value="beta">BETA</option>', archive_html)
+        self.assertIn('<option value="std">Standard Deviation</option>', archive_html)
 
 
 if __name__ == "__main__":

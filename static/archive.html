@@ -1044,11 +1044,11 @@
                             <div class="col-12 mt-3" v-if="canUseAllanMode()">
                                 <div class="border rounded bg-white p-2">
                                     <div class="d-flex justify-content-between align-items-center gap-2 mb-2">
-                                        <span class="form-label-small text-primary fw-bold mb-0">ALLAN PHYSICAL MEAN OPTIMIZATION</span>
+                                        <span class="form-label-small text-primary fw-bold mb-0">ALLAN PHYSICAL STATISTIC OPTIMIZATION</span>
                                         <span class="badge bg-light text-dark border">parameter range 0–1</span>
                                     </div>
                                     <div class="row g-2">
-                                        <div class="col-6">
+                                        <div class="col-4">
                                             <label class="form-label-small">PARAMETER</label>
                                             <select class="form-select form-select-sm" v-model="betaOptimization.parameter"
                                                 @change="handleMeanOptimizationParameterChange">
@@ -1057,11 +1057,19 @@
                                                 <option value="beta">BETA</option>
                                             </select>
                                         </div>
-                                        <div class="col-6">
+                                        <div class="col-4">
                                             <label class="form-label-small">PHYSICAL RESULT</label>
                                             <select class="form-select form-select-sm" v-model="betaOptimization.metric"
                                                 @change="handleMeanOptimizationMetricChange">
                                                 <option v-for="option in meanOptimizationMetricOptions()" :key="option.value" :value="option.value">{{ option.label }}</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-4">
+                                            <label class="form-label-small">STATISTIC</label>
+                                            <select class="form-select form-select-sm" v-model="betaOptimization.statistic"
+                                                @change="handleMeanOptimizationStatisticChange">
+                                                <option value="mean">Mean</option>
+                                                <option value="std">Standard Deviation</option>
                                             </select>
                                         </div>
                                         <div class="col-4">
@@ -1080,12 +1088,12 @@
                                             </select>
                                         </div>
                                         <div class="col-4">
-                                            <label class="form-label-small">TARGET MEAN</label>
+                                            <label class="form-label-small">TARGET {{ betaOptimization.statistic === 'std' ? 'STD' : 'MEAN' }}</label>
                                             <input type="number" step="any" class="form-control form-control-sm"
                                                 v-model.number="betaOptimization.targetMean">
                                         </div>
                                     </div>
-                                    <div class="form-text mt-2">ALPHA/BETA support Atom Number, Transition Probability and Interferometer P. I_Beta supports Interferometer P. Uses valid shots in the applied Allan P0 range.</div>
+                                    <div class="form-text mt-2">Optimize Mean or sample STD. ALPHA/BETA support Atom Number, Transition Probability and Interferometer P; I_Beta supports Interferometer P. Uses the applied Allan P0 range.</div>
                                     <div class="d-grid gap-2 mt-2">
                                         <button class="btn btn-outline-primary btn-sm fw-bold" @click="optimizeInterferometerBeta"
                                             :disabled="betaOptimization.loading || isLoading">
@@ -2506,7 +2514,7 @@
                     phaseNoiseSummary: [], savedPhaseNoiseSummary: [], recalculatedPhaseNoiseSummary: [], phaseNoiseXAxis: 't2',
                     savedAllanCache: {}, recalculatedAllanCache: {}, currentAllanData: null,
                     betaOptimization: {
-                        parameter: 'intf_beta', metric: 'intf', source: 'fit', channel: 'up', targetMean: 0,
+                        parameter: 'intf_beta', metric: 'intf', statistic: 'mean', source: 'fit', channel: 'up', targetMean: 0,
                         loading: false, applying: false, error: false, message: '', result: null
                     },
                     defaultFitModels: [], defaultScanFitModels: [],
@@ -5311,6 +5319,7 @@
                             p0_max: normalizedRange?.max ?? null,
                             parameter: this.betaOptimization.parameter,
                             metric: this.betaOptimization.metric,
+                            statistic: this.betaOptimization.statistic,
                             source: this.betaOptimization.source,
                             channel: this.betaOptimization.channel,
                             target_mean: Number(this.betaOptimization.targetMean ?? 0)
@@ -5323,9 +5332,11 @@
                         this.currentTab = result.metric;
                         this.showRawData = this.betaOptimization.source === 'raw';
                         const parameterLabel = this.meanOptimizationParameterLabel(result.parameter);
+                        const statisticLabel = result.statistic === 'std' ? 'STD' : 'mean';
+                        const achievedStatistic = Number(result.achieved_statistic ?? result.achieved_mean);
                         this.betaOptimization.message = result.exact
-                            ? `${parameterLabel}=${optimizedValue.toPrecision(10)} gives mean=${Number(result.achieved_mean).toPrecision(6)} using ${Number(result.sample_count)} shots.`
-                            : `No exact target exists in [0,1]. Best ${parameterLabel}=${optimizedValue.toPrecision(10)}, mean=${Number(result.achieved_mean).toPrecision(6)}, residual=${Number(result.residual).toPrecision(6)}.`;
+                            ? `${parameterLabel}=${optimizedValue.toPrecision(10)} gives ${statisticLabel}=${achievedStatistic.toPrecision(6)} using ${Number(result.sample_count)} shots.`
+                            : `No exact target exists in [0,1]. Best ${parameterLabel}=${optimizedValue.toPrecision(10)}, ${statisticLabel}=${achievedStatistic.toPrecision(6)}, residual=${Number(result.residual).toPrecision(6)}.`;
                         await this.recalculate();
                         if (this.plotMode !== 'allan') await this.setPlotMode('allan');
                     } catch (error) {
@@ -5380,6 +5391,15 @@
                 handleMeanOptimizationMetricChange() {
                     if (this.betaOptimization.metric !== 'atoms' && this.betaOptimization.channel === 'total') {
                         this.betaOptimization.channel = 'up';
+                    }
+                    this.betaOptimization.error = false;
+                    this.betaOptimization.message = '';
+                    this.betaOptimization.result = null;
+                },
+
+                handleMeanOptimizationStatisticChange() {
+                    if (this.betaOptimization.statistic === 'std' && Number(this.betaOptimization.targetMean) < 0) {
+                        this.betaOptimization.targetMean = 0;
                     }
                     this.betaOptimization.error = false;
                     this.betaOptimization.message = '';
