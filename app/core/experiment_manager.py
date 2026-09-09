@@ -592,6 +592,7 @@ class ExperimentManager:
             "tti_channel": 1,
             "transfer_frequency_modulation_mhz": 1.0,
             "transfer_atom_mirror_distance_m": 2.23,
+            "transfer_phase_noise_sigma_mrad": 100.0,
             "std_p_interferometer": 1.1,
             "laser_frequency_phase_noise_mrad": 100.0,
             
@@ -1225,6 +1226,9 @@ class ExperimentManager:
         atom_mirror_distance_m = float(self.settings.get("transfer_atom_mirror_distance_m", 2.23))
         if not math.isfinite(atom_mirror_distance_m) or atom_mirror_distance_m <= 0:
             raise ValueError("Transfer Function atom-to-mirror distance L must be greater than zero")
+        phase_noise_sigma_mrad = float(self.settings.get("transfer_phase_noise_sigma_mrad", 100.0))
+        if not math.isfinite(phase_noise_sigma_mrad) or phase_noise_sigma_mrad < 0:
+            raise ValueError("Transfer Function phase-noise sigma must be non-negative")
         try:
             phase_degrees = [float(value) for value in scan_config.get("transfer_phase_degrees", [0.0, 90.0])]
         except (TypeError, ValueError):
@@ -1267,6 +1271,7 @@ class ExperimentManager:
                             "transfer_repeats": repeats,
                             "transfer_frequency_modulation_mhz": frequency_modulation_mhz,
                             "transfer_atom_mirror_distance_m": atom_mirror_distance_m,
+                            "transfer_phase_noise_sigma_mrad": phase_noise_sigma_mrad,
                             "transfer_phase_deg": phase_deg,
                             "transfer_phase_index": phase_index,
                             "transfer_phase_count": len(phase_degrees),
@@ -1284,6 +1289,7 @@ class ExperimentManager:
         scan_config["transfer_generator_channel"] = int(self.settings.get("tti_channel", 1))
         scan_config["transfer_frequency_modulation_mhz"] = frequency_modulation_mhz
         scan_config["transfer_atom_mirror_distance_m"] = atom_mirror_distance_m
+        scan_config["transfer_phase_noise_sigma_mrad"] = phase_noise_sigma_mrad
         scan_config["transfer_phase_degrees"] = phase_degrees
         scan_config["transfer_frequency_values_hz"] = frequencies
         scan_config["transfer_repeats"] = repeats
@@ -2715,6 +2721,7 @@ class ExperimentManager:
                             scan_config.get("transfer_frequency_modulation_mhz"),
                             scan_config.get("transfer_phase_degrees"),
                             scan_config.get("transfer_atom_mirror_distance_m", 2.23),
+                            scan_config.get("transfer_phase_noise_sigma_mrad", 100.0),
                         )
                     )
                 except Exception as exc:

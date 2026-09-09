@@ -436,6 +436,7 @@ class ArchiveAnalysisSettings(AnalysisSettings):
     fit_models: List[FitModelDefinition] = Field(default_factory=list)
     transfer_frequency_modulation_mhz: float = Field(1.0, gt=0)
     transfer_atom_mirror_distance_m: float = Field(2.23, gt=0)
+    transfer_phase_noise_sigma_mrad: float = Field(100.0, ge=0)
     std_p_interferometer: float = Field(1.1, ge=0)
     laser_frequency_phase_noise_mrad: float = Field(100.0, ge=0)
 
@@ -512,6 +513,7 @@ class SystemSettings(BaseModel):
     tti_channel: int = Field(1, ge=1, le=2)
     transfer_frequency_modulation_mhz: float = Field(1.0, gt=0)
     transfer_atom_mirror_distance_m: float = Field(2.23, gt=0)
+    transfer_phase_noise_sigma_mrad: float = Field(100.0, ge=0)
     std_p_interferometer: float = Field(1.1, ge=0)
     laser_frequency_phase_noise_mrad: float = Field(100.0, ge=0)
 

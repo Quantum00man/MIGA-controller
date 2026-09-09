@@ -193,11 +193,14 @@ def _transfer_phase_curve(
     statistic: str,
 ) -> Optional[Curve]:
     phase_label = f"{int(round(phase_deg))}deg"
-    nested_key = {"mean": "mean_rad", "std": "std_rad", "s2": "s2"}[statistic]
+    nested_key = {
+        "mean": "mean_rad", "std": "std_rad", "s2": "s2", "phase2": "phase2_rad2",
+    }[statistic]
     flat_key = {
         "mean": f"interferometer_phase_{phase_label}_mean_rad",
         "std": f"interferometer_phase_{phase_label}_std_rad",
         "s2": f"interferometer_phase_{phase_label}_s2",
+        "phase2": f"interferometer_phase_{phase_label}_phase2_rad2",
     }[statistic]
     x_values: List[float] = []
     y_values: List[float] = []
@@ -313,19 +316,36 @@ def _transfer_function_worksheets(
         )
         if quadrature:
             s2_curves.append(quadrature)
+        worksheets.append(Worksheet(
+            "Transfer Function S2",
+            [Plot("Transfer Function S2", x_label, "S2 (dimensionless)", s2_curves)],
+        ))
+
+        phase2_curves = [
+            curve for phase_deg in phases
+            if (curve := _transfer_phase_curve(ordered_rows, phase_deg, "phase2"))
+        ]
+        phase2_sum = _transfer_curve(
+            ordered_rows, "interferometer_phase_phase2_rad2", "Quadrature sum", COLORS[2]
+        )
+        if phase2_sum:
+            phase2_curves.append(phase2_sum)
         noise_floor = _transfer_curve(
             ordered_rows,
-            "interferometer_phase_noise_s2",
-            "Phase-noise floor",
+            "interferometer_phase_noise_phase2_rad2",
+            "Allan phase-noise floor",
             FIT_COLOR,
             symbols=False,
             line_style=2,
         )
         if noise_floor:
-            s2_curves.append(noise_floor)
+            phase2_curves.append(noise_floor)
         worksheets.append(Worksheet(
-            "Transfer Function S2",
-            [Plot("Transfer Function S2", x_label, "S2 (dimensionless)", s2_curves)],
+            "Interferometer Phase Squared",
+            [Plot(
+                "Interferometer Phase Squared", x_label,
+                "Delta Phi squared (rad^2)", phase2_curves,
+            )],
         ))
 
     return [worksheet for worksheet in worksheets if any(plot.curves for plot in worksheet.plots)]

@@ -897,17 +897,22 @@ When both orthogonal phases are acquired, the reported quadrature result is
 which corresponds to the reconstructed squared transfer-function magnitude. Only phase
 samples marked valid by the active interferometer calibration contribute to these means.
 
-The phase-noise floor is derived independently from the sample standard deviation at each
-frequency and generator phase. It describes normalized single-shot phase-noise variance,
-not the standard error of the mean, and therefore contains no division by the valid sample
-count:
+Settings defines a fixed per-quadrature Allan phase-noise deviation $\sigma_A$ at the
+current experimental averaging condition, entered in mrad. The unnormalized squared-phase
+view reports
 \begin{equation}
-  S_{\mathrm{noise}}^2(f)=
-  \frac{s_{\Phi,0}^2(f)+s_{\Phi,90}^2(f)}{\phi_\omega^2}.
+  Q_\psi(f)=\overline{\Phi}_\psi^2(f),\qquad
+  Q_{\mathrm{quad}}(f)=Q_0(f)+Q_{90}(f),
+\end{equation}
+and, because the two phase acquisitions are independent and use the same configured
+deviation, the horizontal noise floor is
+\begin{equation}
+  Q_{\mathrm{noise}}=\sigma_{A,0}^2+\sigma_{A,90}^2=2\sigma_A^2.
   \label{eq:transfer-noise-floor}
 \end{equation}
-For a single-phase acquisition, only the available component contributes. The original
-transfer-function result is retained without noise-floor subtraction.
+The mrad setting is converted to rad before squaring. For a single-phase acquisition the
+floor is $\sigma_A^2$. The normalized $S^2$ view contains no noise-floor curve, and neither
+view subtracts the configured floor from the measured result.
 
 \subsection{Configuration and test controls}
 Select \ui{Transfer Function} under \ui{Scan Logic}. Enter the inclusive carrier-frequency
@@ -918,6 +923,8 @@ does not allow the final selected phase to be cleared. Transfer Function is an o
 one-dimensional Live scan. Randomization and alternate parameter sources are disabled,
 and the uploaded \code{.mot} sequence is executed unchanged, so it requires no
 \code{PARAMETER} placeholder.
+Set \ui{Allan phase-noise $\sigma$ at current average} in
+\ui{Settings $>$ Transfer Function}; its default is \SI{100}{\milli\radian}.
 
 The Settings tab contains three independent commissioning actions:
 \begin{itemize}
@@ -982,9 +989,10 @@ deviation,
 \begin{equation}
   s=\sqrt{\frac{1}{n-1}\sum_{i=1}^{n}(x_i-\bar{x})^2},
 \end{equation}
-and the phase tab additionally displays $S^2$. Its three curves are the \ang{0} component,
-the \ang{90} component and their quadrature sum. A charcoal dashed curve shows the
-sample-standard-deviation phase-noise floor from Equation~\eqref{eq:transfer-noise-floor}.
+and the phase tab additionally displays $S^2$ and $\Delta\Phi^2$. The normalized $S^2$
+view contains the \ang{0} component, the \ang{90} component and their quadrature sum. The
+unnormalized $\Delta\Phi^2$ view contains those three squared-phase curves plus a charcoal
+dashed fixed Allan phase-noise floor from Equation~\eqref{eq:transfer-noise-floor}.
 All Transfer Function plots can switch
 the vertical axis between linear and logarithmic scale.
 
@@ -1439,8 +1447,9 @@ Fitting Models & Atom-area method, baseline points, waveform model formulas, gue
 roles and fixed/free parameters.\\
 SYNC & Standalone/Master/Slave role, node name, token, allowed IP and slave endpoints.\\
 Transfer Function & Actual \SI{780}{\nano\meter} frequency-modulation amplitude,
-TG5012A/TGF3162 and CH1/CH2 selection, direct instrument IP, TCP port, timeout, connection
-test, and immediate frequency/phase tests.\\
+atom--mirror distance, fixed Allan phase-noise deviation at the current average,
+TG5012A/TGF3162 and CH1/CH2 selection, direct instrument IP, TCP port, timeout,
+connection test, and immediate frequency/phase tests.\\
 Network & Acquisition platform, Red Pitaya addresses, DAQ rate and timeout.\\
 Logic \& Channels & Launch/trigger channel IDs and linked-mode timing constant.\\
 System Paths & \code{tmot4}, arguments, \code{cmot4}, default template and DDS writer.\\
@@ -1484,7 +1493,8 @@ Best sequence & Classic placeholder template rendered with best Bayesian paramet
 AC Stark XML and plan & Original/generated DDS tables and requested/actual power ratios.\\
 Transfer Function CSV/JSON & Per-shot frequency/phase metadata plus per-frequency counts,
 means and sample standard deviations for atom number, $P_1/P_2$ and calibrated phase;
-\ang{0}/\ang{90} components and quadrature $S^2$; optical-FM normalization.\\
+\ang{0}/\ang{90} components and quadrature $S^2$; unnormalized squared-phase components,
+quadrature sum and fixed Allan noise floor; optical-FM normalization.\\
 \pathcode{sync_manifest.json} & Node identities, progress, paired data and replication state.\\
 \bottomrule
 \end{tabularx}

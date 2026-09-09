@@ -77,6 +77,7 @@ def build_transfer_function_summary(
     frequency_modulation_mhz: Any = None,
     phase_degrees: Any = None,
     atom_mirror_distance_m: Any = DEFAULT_ATOM_MIRROR_DISTANCE_M,
+    phase_noise_sigma_mrad: Any = 100.0,
 ) -> List[Dict[str, Any]]:
     phase_amplitude = bragg_phase_modulation_rad(
         frequency_modulation_mhz,
@@ -88,6 +89,15 @@ def build_transfer_function_summary(
         distance_m = None
     if distance_m is not None and (not math.isfinite(distance_m) or distance_m <= 0):
         distance_m = None
+    try:
+        noise_sigma_mrad = float(phase_noise_sigma_mrad)
+    except (TypeError, ValueError):
+        noise_sigma_mrad = None
+    if noise_sigma_mrad is not None and (
+        not math.isfinite(noise_sigma_mrad) or noise_sigma_mrad < 0
+    ):
+        noise_sigma_mrad = None
+    noise_sigma_rad = noise_sigma_mrad / 1000.0 if noise_sigma_mrad is not None else None
     try:
         expected_phases = [float(value) for value in phase_degrees] if phase_degrees is not None else []
     except (TypeError, ValueError):
@@ -136,6 +146,7 @@ def build_transfer_function_summary(
         )
         row["atom_mirror_distance_m"] = distance_m if phase_amplitude is not None else None
         row["bragg_phase_modulation_rad"] = phase_amplitude
+        row["transfer_phase_noise_sigma_mrad"] = noise_sigma_mrad
         for output_name in METRIC_FIELDS:
             if output_name == "interferometer_phase_std":
                 continue
@@ -149,7 +160,7 @@ def build_transfer_function_summary(
             row[f"interferometer_phase_{phase_label}_mean_rad"] = None
             row[f"interferometer_phase_{phase_label}_std_rad"] = None
             row[f"interferometer_phase_{phase_label}_s2"] = None
-            row[f"interferometer_phase_{phase_label}_noise_s2"] = None
+            row[f"interferometer_phase_{phase_label}_phase2_rad2"] = None
         phase_components: List[Dict[str, Any]] = []
         for phase_deg in expected_phases:
             selected_samples = []
@@ -187,18 +198,14 @@ def build_transfer_function_summary(
                 if component_mean is not None and phase_amplitude is not None
                 else None
             )
-            component_noise_s2 = (
-                float((component_std / phase_amplitude) ** 2)
-                if component_std is not None and phase_amplitude is not None
-                else None
-            )
+            component_phase2 = float(component_mean ** 2) if component_mean is not None else None
             phase_components.append({
                 "phase_deg": phase_deg,
                 "count": len(phase_samples),
                 "mean_rad": component_mean,
                 "std_rad": component_std,
                 "s2": component_s2,
-                "noise_s2": component_noise_s2,
+                "phase2_rad2": component_phase2,
             })
             if phase_deg in {0.0, 90.0}:
                 phase_label = f"{int(phase_deg)}deg"
@@ -206,12 +213,17 @@ def build_transfer_function_summary(
                 row[f"interferometer_phase_{phase_label}_mean_rad"] = component_mean
                 row[f"interferometer_phase_{phase_label}_std_rad"] = component_std
                 row[f"interferometer_phase_{phase_label}_s2"] = component_s2
-                row[f"interferometer_phase_{phase_label}_noise_s2"] = component_noise_s2
+                row[f"interferometer_phase_{phase_label}_phase2_rad2"] = component_phase2
         row["interferometer_phase_s2_components"] = phase_components
-        noise_values = [component.get("noise_s2") for component in phase_components]
-        row["interferometer_phase_noise_s2"] = (
-            float(sum(noise_values))
-            if noise_values and all(value is not None for value in noise_values)
+        phase2_values = [component.get("phase2_rad2") for component in phase_components]
+        row["interferometer_phase_phase2_rad2"] = (
+            float(sum(phase2_values))
+            if len(phase2_values) == 2 and all(value is not None for value in phase2_values)
+            else None
+        )
+        row["interferometer_phase_noise_phase2_rad2"] = (
+            float(len(phase_components) * noise_sigma_rad ** 2)
+            if phase_components and noise_sigma_rad is not None
             else None
         )
         if len(phase_components) == 2:
@@ -225,11 +237,11 @@ def build_transfer_function_summary(
                 if phase_mean is not None and phase_amplitude is not None
                 else None
             )
-            phase_std = row.get("interferometer_phase_std")
-            row["interferometer_phase_noise_s2"] = (
-                float((phase_std / phase_amplitude) ** 2)
-                if phase_std is not None and phase_amplitude is not None
-                else None
+            row["interferometer_phase_phase2_rad2"] = (
+                float(phase_mean ** 2) if phase_mean is not None else None
+            )
+            row["interferometer_phase_noise_phase2_rad2"] = (
+                float(noise_sigma_rad ** 2) if noise_sigma_rad is not None else None
             )
         else:
             row["interferometer_phase_s2"] = None

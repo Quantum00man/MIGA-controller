@@ -2061,6 +2061,10 @@
                                         :class="transferFunctionStatistic === 's2' ? 'btn-dark' : 'btn-outline-dark'"
                                         :disabled="currentTab !== 'phase'" title="S² is defined for Interferometer Phase"
                                         @click="setTransferFunctionStatistic('s2')">S²</button>
+                                    <button class="btn" :aria-pressed="transferFunctionStatistic === 'phase2'"
+                                        :class="transferFunctionStatistic === 'phase2' ? 'btn-dark' : 'btn-outline-dark'"
+                                        :disabled="currentTab !== 'phase'" title="Unnormalized squared phase and fixed Allan noise floor"
+                                        @click="setTransferFunctionStatistic('phase2')">ΔΦ²</button>
                                 </div>
                                 <div v-if="loadedRunId && isTransferFunctionArchive()" class="btn-group btn-group-sm" role="group" aria-label="Transfer Function y-axis scale">
                                     <button class="btn" :aria-pressed="transferFunctionYAxisScale === 'linear'"
@@ -2071,7 +2075,7 @@
                                         title="Log Y displays positive values only"
                                         @click="setTransferFunctionYAxisScale('log')">Log Y</button>
                                 </div>
-                                <select v-if="currentTab === 'phase' && transferFunctionStatistic !== 's2' && !isPhaseNoiseArchive()" class="form-select form-select-sm" style="width:auto" v-model="phaseUnit" aria-label="Phase unit">
+                                <select v-if="currentTab === 'phase' && !['s2', 'phase2'].includes(transferFunctionStatistic) && !isPhaseNoiseArchive()" class="form-select form-select-sm" style="width:auto" v-model="phaseUnit" aria-label="Phase unit">
                                     <option value="rad">rad</option><option value="mrad">mrad</option>
                                 </select>
                                 <div v-if="loadedRunId && isPhaseNoiseArchive()" class="btn-group btn-group-sm" role="group" aria-label="Phase Noise statistic">
@@ -2357,7 +2361,7 @@
                     </div>
                     <div class="labplot-summary mb-3">
                         <template v-if="isTransferFunctionArchive()">
-                            Transfer Function uses TTI carrier frequency as the x-axis. Mean and standard-deviation worksheets contain separate phase curves; Interferometer Phase also exports 0°, 90° and quadrature-sum S².
+                            Transfer Function uses TTI carrier frequency as the x-axis. Mean and standard-deviation worksheets contain separate phase curves; Interferometer Phase also exports S² and an unnormalized ΔΦ² worksheet with the fixed Allan noise floor.
                         </template>
                         <template v-else-if="isPhaseNoiseArchive()">
                             Exports a Standard Deviation worksheet and an Allan Deviation worksheet with one stacked plot per selected order ({{ phaseNoiseAllanOrders.map(order => `n=${order}`).join(', ') }}). The current T/T² x-axis selection is preserved.
@@ -2553,6 +2557,7 @@
                         atom_area_method: 'legacy', atom_area_baseline_points: 2,
                         transfer_frequency_modulation_mhz: 1.0,
                         transfer_atom_mirror_distance_m: 2.23,
+                        transfer_phase_noise_sigma_mrad: 100,
                         fit_model_key: 'gaussian', fit_models: []
                     },
                     scanFit: {
@@ -2589,7 +2594,7 @@
             },
             watch: {
                 currentTab(value) {
-                    if (value !== 'phase' && this.transferFunctionStatistic === 's2') {
+                    if (value !== 'phase' && ['s2', 'phase2'].includes(this.transferFunctionStatistic)) {
                         this.transferFunctionStatistic = 'std';
                     }
                     this.handlePlotContextChange();
@@ -3014,6 +3019,8 @@
                     normalized.transfer_frequency_modulation_mhz = Number.isFinite(modulationMhz) && modulationMhz > 0 ? modulationMhz : 1;
                     const distanceM = Number(normalized.transfer_atom_mirror_distance_m ?? 2.23);
                     normalized.transfer_atom_mirror_distance_m = Number.isFinite(distanceM) && distanceM > 0 ? distanceM : 2.23;
+                    const transferNoiseMrad = Number(normalized.transfer_phase_noise_sigma_mrad ?? 100);
+                    normalized.transfer_phase_noise_sigma_mrad = Number.isFinite(transferNoiseMrad) && transferNoiseMrad >= 0 ? transferNoiseMrad : 100;
                     const detectionNoise = Number(normalized.std_p_interferometer ?? 1.1);
                     normalized.std_p_interferometer = Number.isFinite(detectionNoise) && detectionNoise >= 0 ? detectionNoise : 1.1;
                     const laserNoise = Number(normalized.laser_frequency_phase_noise_mrad ?? 100);
@@ -3099,8 +3106,8 @@
                     this.showRawData = Boolean(useRaw);
                 },
                 setTransferFunctionStatistic(statistic) {
-                    const normalized = statistic === 's2' && this.currentTab === 'phase'
-                        ? 's2'
+                    const normalized = ['s2', 'phase2'].includes(statistic) && this.currentTab === 'phase'
+                        ? statistic
                         : (statistic === 'mean' ? 'mean' : 'std');
                     if (this.transferFunctionStatistic === normalized) return;
                     this.transferFunctionStatistic = normalized;
@@ -5220,6 +5227,8 @@
                                 ?? snap.transfer_frequency_modulation_mhz ?? 1,
                             transfer_atom_mirror_distance_m: this.loadedConfig.transfer_atom_mirror_distance_m
                                 ?? snap.transfer_atom_mirror_distance_m ?? 2.23,
+                            transfer_phase_noise_sigma_mrad: this.loadedConfig.transfer_phase_noise_sigma_mrad
+                                ?? snap.transfer_phase_noise_sigma_mrad ?? 100,
                         };
                         this.originalSettings = this.normalizeAnalysis({ ...snap, ...transferNormalization });
                         this.analysis = this.normalizeAnalysis({ ...this.analysis, ...snap, ...transferNormalization });
@@ -7798,14 +7807,16 @@
                         ['Phase_0deg_Mean_Rad', 'interferometer_phase_0deg_mean_rad'],
                         ['Phase_0deg_Std_Rad', 'interferometer_phase_0deg_std_rad'],
                         ['S2_0deg', 'interferometer_phase_0deg_s2'],
-                        ['S2_Noise_0deg', 'interferometer_phase_0deg_noise_s2'],
+                        ['Delta_Phi2_0deg_Rad2', 'interferometer_phase_0deg_phase2_rad2'],
                         ['Phase_90deg_Count', 'interferometer_phase_90deg_count'],
                         ['Phase_90deg_Mean_Rad', 'interferometer_phase_90deg_mean_rad'],
                         ['Phase_90deg_Std_Rad', 'interferometer_phase_90deg_std_rad'],
                         ['S2_90deg', 'interferometer_phase_90deg_s2'],
-                        ['S2_Noise_90deg', 'interferometer_phase_90deg_noise_s2'],
+                        ['Delta_Phi2_90deg_Rad2', 'interferometer_phase_90deg_phase2_rad2'],
                         ['S2_Quadrature_Sum', 'interferometer_phase_s2'],
-                        ['S2_Phase_Noise_Floor', 'interferometer_phase_noise_s2'],
+                        ['Delta_Phi2_Quadrature_Sum_Rad2', 'interferometer_phase_phase2_rad2'],
+                        ['Allan_Phase_Noise_Sigma_mrad', 'transfer_phase_noise_sigma_mrad'],
+                        ['Delta_Phi2_Allan_Noise_Floor_Rad2', 'interferometer_phase_noise_phase2_rad2'],
                     ];
                     const csvRows = [
                         columns.map(([label]) => this.csvCell(label)).join(','),
@@ -8321,11 +8332,11 @@
                     const rows = (Array.isArray(this.transferFunctionSummary) ? this.transferFunctionSummary : [])
                         .slice().sort((a, b) => Number(a.frequency_hz) - Number(b.frequency_hz));
                     const raw = this.showRawData;
-                    const statistic = this.transferFunctionStatistic === 's2' && this.currentTab === 'phase'
-                        ? 's2'
+                    const statistic = ['s2', 'phase2'].includes(this.transferFunctionStatistic) && this.currentTab === 'phase'
+                        ? this.transferFunctionStatistic
                         : (this.transferFunctionStatistic === 'mean' ? 'mean' : 'std');
-                    const statisticLabel = statistic === 's2' ? 'S²' : (statistic === 'mean' ? 'mean value' : 'standard deviation');
-                    const hoverStatisticLabel = statistic === 's2' ? 'S²' : (statistic === 'mean' ? 'Mean' : 'Std');
+                    const statisticLabel = statistic === 's2' ? 'S²' : (statistic === 'phase2' ? 'ΔΦ²' : (statistic === 'mean' ? 'mean value' : 'standard deviation'));
+                    const hoverStatisticLabel = statistic === 's2' ? 'S²' : (statistic === 'phase2' ? 'ΔΦ²' : (statistic === 'mean' ? 'Mean' : 'Std'));
                     let fields;
                     let labels;
                     let metricLabel;
@@ -8379,40 +8390,48 @@
                                 : null
                         );
                         let traces;
-                        if (statistic === 's2' && configuredPhases.length > 0) {
+                        if (['s2', 'phase2'].includes(statistic) && configuredPhases.length > 0) {
                             traces = configuredPhases.map((phaseDeg, phaseIndex) => ({
                                 x: rows.map(row => Number(row.frequency_hz)),
-                                y: rows.map(row => numericOrNull(componentFor(row, phaseDeg)?.s2)),
+                                y: rows.map(row => numericOrNull(
+                                    statistic === 's2'
+                                        ? componentFor(row, phaseDeg)?.s2
+                                        : componentFor(row, phaseDeg)?.phase2_rad2
+                                )),
                                 customdata: rows.map(row => this.getHistoryKey([Number(row.frequency_hz)])),
                                 text: rows.map(row => Number(componentFor(row, phaseDeg)?.count || 0)),
-                                type: 'scatter', mode: 'lines+markers', name: `S² at ${phaseDeg}°`,
+                                type: 'scatter', mode: 'lines+markers', name: `${statisticLabel} at ${phaseDeg}°`,
                                 line: { color: colors[phaseIndex], width: 2 }, marker: { color: colors[phaseIndex], size: 7 },
                                 connectgaps: false,
-                                hovertemplate: `Frequency=%{x:.9g} Hz<br>${phaseDeg}° component=%{y:.6g}<br>n=%{text}<extra></extra>`
+                                hovertemplate: `Frequency=%{x:.9g} Hz<br>${phaseDeg}° ${hoverStatisticLabel}=%{y:.6g}<br>n=%{text}<extra></extra>`
                             }));
                             if (configuredPhases.length === 2) {
                                 traces.push({
                                     x: rows.map(row => Number(row.frequency_hz)),
-                                    y: rows.map(row => numericOrNull(row.interferometer_phase_s2)),
+                                    y: rows.map(row => numericOrNull(
+                                        statistic === 's2'
+                                            ? row.interferometer_phase_s2
+                                            : row.interferometer_phase_phase2_rad2
+                                    )),
                                     customdata: rows.map(row => this.getHistoryKey([Number(row.frequency_hz)])),
                                     text: rows.map(row => configuredPhases.map(phaseDeg => Number(componentFor(row, phaseDeg)?.count || 0)).join('/')),
-                                    type: 'scatter', mode: 'lines+markers', name: 'S² quadrature sum',
+                                    type: 'scatter', mode: 'lines+markers', name: `${statisticLabel} quadrature sum`,
                                     line: { color: colors[2], width: 3 }, marker: { color: colors[2], size: 8, symbol: 'diamond' },
                                     connectgaps: false,
-                                    hovertemplate: 'Frequency=%{x:.9g} Hz<br>S² sum=%{y:.6g}<br>n=%{text}<extra></extra>'
+                                    hovertemplate: `Frequency=%{x:.9g} Hz<br>${hoverStatisticLabel} sum=%{y:.6g}<br>n=%{text}<extra></extra>`
                                 });
                             }
-                            const noiseFloorValues = rows.map(row => numericOrNull(row.interferometer_phase_noise_s2));
-                            if (noiseFloorValues.some(value => value !== null)) {
+                            if (statistic === 'phase2') {
+                                const noiseFloorValues = rows.map(row => numericOrNull(row.interferometer_phase_noise_phase2_rad2));
                                 traces.push({
                                     x: rows.map(row => Number(row.frequency_hz)),
                                     y: noiseFloorValues,
                                     customdata: rows.map(row => this.getHistoryKey([Number(row.frequency_hz)])),
                                     text: rows.map(row => configuredPhases.map(phaseDeg => Number(componentFor(row, phaseDeg)?.count || 0)).join('/')),
-                                    type: 'scatter', mode: 'lines', name: 'S² phase-noise floor',
+                                    type: 'scatter', mode: 'lines', name: 'Allan phase-noise floor',
                                     line: { color: '#343a40', width: 2.4, dash: 'dash' },
                                     connectgaps: false,
-                                    hovertemplate: 'Frequency=%{x:.9g} Hz<br>S² noise floor=%{y:.6g}<br>n=%{text}<extra></extra>'
+                                    hovertemplate: 'Frequency=%{x:.9g} Hz<br>Noise floor=%{y:.6g} rad²<br>n=%{text}<extra></extra>'
                                 });
                             }
                         } else if (configuredPhases.length > 0) {
@@ -8470,7 +8489,8 @@
                             yaxis: {
                                 ...base.yaxis,
                                 type: this.transferFunctionYAxisScale,
-                                title: statistic === 's2' ? 'S² (dimensionless)' : `${metricLabel} ${statisticLabel}`
+                                title: statistic === 's2' ? 'S² (dimensionless)'
+                                    : (statistic === 'phase2' ? 'ΔΦ² (rad²)' : `${metricLabel} ${statisticLabel}`)
                             },
                             title: { text: `${labels[index]} | Transfer Function | ${sourceLabel} | ${statisticLabel}`, font: { size: 13 }, x: 0.05, y: 0.93 },
                             showlegend: configuredPhases.length > 0,

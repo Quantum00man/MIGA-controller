@@ -610,6 +610,15 @@
                             <div class="form-text">Propagation distance used in Eq. (14), φ = 4πLΔν₇₈₀/c.</div>
                         </div>
                         <div class="col-md-6">
+                            <label class="form-label fw-bold" for="transfer-phase-noise-sigma">Allan phase-noise σ at current average</label>
+                            <div class="input-group">
+                                <input id="transfer-phase-noise-sigma" type="number" min="0" step="any"
+                                    class="form-control" v-model.number="s.transfer_phase_noise_sigma_mrad">
+                                <span class="input-group-text">mrad</span>
+                            </div>
+                            <div class="form-text">Per-quadrature fixed noise. With both phases selected, the ΔΦ² noise floor is 2σ².</div>
+                        </div>
+                        <div class="col-md-6">
                             <label class="form-label fw-bold" for="tti-host">Instrument IP address</label>
                             <input id="tti-host" class="form-control font-monospace" v-model.trim="s.tti_host"
                                 placeholder="192.168.1.100" autocomplete="off">
@@ -2986,6 +2995,9 @@
                     const transferAtomMirrorDistanceM = Number(normalized.transfer_atom_mirror_distance_m ?? 2.23);
                     normalized.transfer_atom_mirror_distance_m = Number.isFinite(transferAtomMirrorDistanceM) && transferAtomMirrorDistanceM > 0
                         ? transferAtomMirrorDistanceM : 2.23;
+                    const transferPhaseNoiseSigmaMrad = Number(normalized.transfer_phase_noise_sigma_mrad ?? 100);
+                    normalized.transfer_phase_noise_sigma_mrad = Number.isFinite(transferPhaseNoiseSigmaMrad) && transferPhaseNoiseSigmaMrad >= 0
+                        ? transferPhaseNoiseSigmaMrad : 100;
                     const detectionNoise = Number(normalized.std_p_interferometer ?? 1.1);
                     normalized.std_p_interferometer = Number.isFinite(detectionNoise) && detectionNoise >= 0 ? detectionNoise : 1.1;
                     const laserPhaseNoise = Number(normalized.laser_frequency_phase_noise_mrad ?? 100);

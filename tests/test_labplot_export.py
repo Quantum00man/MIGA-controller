@@ -95,6 +95,9 @@ def transfer_summary():
             "frequency_hz": frequency,
             "interferometer_phase_s2_components": [],
             "interferometer_phase_s2": index * 10.0,
+            "interferometer_phase_phase2_rad2": 5 * (index / 10) ** 2,
+            "interferometer_phase_noise_phase2_rad2": 0.02,
+            "transfer_phase_noise_sigma_mrad": 100.0,
         }
         for phase_deg, factor in ((0.0, 1.0), (90.0, 2.0)):
             phase_label = f"{int(phase_deg)}deg"
@@ -103,7 +106,7 @@ def transfer_summary():
                 "mean_rad": factor * index / 10,
                 "std_rad": factor * index / 100,
                 "s2": factor * index,
-                "noise_s2": factor * index / 1000,
+                "phase2_rad2": (factor * index / 10) ** 2,
             }
             row["interferometer_phase_s2_components"].append(component)
             for source, source_factor in (("fit", 1.0), ("nofit", 100.0)):
@@ -115,7 +118,6 @@ def transfer_summary():
                     base = f"intf_{channel}_{source}_{phase_label}"
                     row[f"{base}_mean"] = source_factor * channel_factor * factor * index
                     row[f"{base}_std"] = source_factor * channel_factor * factor * index / 10
-        row["interferometer_phase_noise_s2"] = index / 1000
         rows.append(row)
     return rows
 
@@ -250,12 +252,21 @@ class LabPlotExportTests(unittest.TestCase):
             "Interferometer Phase - Mean",
             "Interferometer Phase - Standard Deviation",
             "Transfer Function S2",
+            "Interferometer Phase Squared",
         })
         s2_curves = [item.attrib["name"] for item in worksheets["Transfer Function S2"].iter("xyCurve")]
-        self.assertEqual(s2_curves, ["0 deg", "90 deg", "Quadrature sum", "Phase-noise floor"])
+        self.assertEqual(s2_curves, ["0 deg", "90 deg", "Quadrature sum"])
+        phase2_curves = [
+            item.attrib["name"]
+            for item in worksheets["Interferometer Phase Squared"].iter("xyCurve")
+        ]
+        self.assertEqual(
+            phase2_curves,
+            ["0 deg", "90 deg", "Quadrature sum", "Allan phase-noise floor"],
+        )
         noise_curve = next(
-            item for item in worksheets["Transfer Function S2"].iter("xyCurve")
-            if item.attrib["name"] == "Phase-noise floor"
+            item for item in worksheets["Interferometer Phase Squared"].iter("xyCurve")
+            if item.attrib["name"] == "Allan phase-noise floor"
         )
         self.assertEqual(noise_curve.find("lines").attrib["style"], "2")
         self.assertEqual(noise_curve.find("symbols").attrib["symbolsStyle"], "0")

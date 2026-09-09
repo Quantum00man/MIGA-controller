@@ -1543,6 +1543,10 @@
                                 :class="transferFunctionStatistic === 's2' ? 'btn-dark' : 'btn-outline-dark'"
                                 :disabled="currentTab !== 'phase'" title="S² is defined for Interferometer Phase"
                                 @click="setTransferFunctionStatistic('s2')">S²</button>
+                            <button class="btn" :aria-pressed="transferFunctionStatistic === 'phase2'"
+                                :class="transferFunctionStatistic === 'phase2' ? 'btn-dark' : 'btn-outline-dark'"
+                                :disabled="currentTab !== 'phase'" title="Unnormalized squared phase and fixed Allan noise floor"
+                                @click="setTransferFunctionStatistic('phase2')">ΔΦ²</button>
                         </div>
                         <div v-if="config.mode === 'transfer_function'" class="btn-group btn-group-sm" role="group" aria-label="Transfer Function y-axis scale">
                             <button class="btn" :aria-pressed="transferFunctionYAxisScale === 'linear'"
@@ -1553,7 +1557,7 @@
                                 title="Log Y displays positive values only"
                                 @click="setTransferFunctionYAxisScale('log')">Log Y</button>
                         </div>
-                        <select v-if="currentTab === 'phase' && transferFunctionStatistic !== 's2'" class="form-select form-select-sm" style="width:auto" v-model="phaseUnit" aria-label="Phase unit"><option value="rad">rad</option><option value="mrad">mrad</option></select>
+                        <select v-if="currentTab === 'phase' && !['s2', 'phase2'].includes(transferFunctionStatistic)" class="form-select form-select-sm" style="width:auto" v-model="phaseUnit" aria-label="Phase unit"><option value="rad">rad</option><option value="mrad">mrad</option></select>
                         <button class="btn-icon" @click="toggleMaximize('analysis')"
                             :title="maximizedView === 'analysis' ? 'Restore analysis view' : 'Maximize analysis view'"
                             :aria-label="maximizedView === 'analysis' ? 'Restore analysis view' : 'Maximize analysis view'">
@@ -1808,6 +1812,7 @@
                     transferFunctionYAxisScale: 'linear',
                     transferFrequencyModulationMhz: null,
                     transferAtomMirrorDistanceM: 2.23,
+                    transferPhaseNoiseSigmaMrad: 100,
                     transferPhaseDegrees: [],
                     currentScanDimensions: 1,
                     tabs: [{ id: 'atoms', label: 'Atom Number' }, { id: 'amp', label: 'Max Voltage' }, { id: 'tail', label: 'Tail Mean' }, { id: 'sigma', label: 'Width (ms)' }, { id: 'temp', label: 'Temperature' }, { id: 'arrival', label: 'Arrival Time' }, { id: 'prob', label: 'Transition Prob.' }, { id: 'intf', label: 'Interferometer' }, { id: 'phase', label: 'Interferometer Phase' }],
@@ -1839,7 +1844,7 @@
             },
             watch: {
                 currentTab(value) {
-                    if (value !== 'phase' && this.transferFunctionStatistic === 's2') {
+                    if (value !== 'phase' && ['s2', 'phase2'].includes(this.transferFunctionStatistic)) {
                         this.transferFunctionStatistic = 'std';
                     }
                     this.plotRevision++;
@@ -4930,6 +4935,10 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     if (Number.isFinite(distanceM) && distanceM > 0) {
                         this.transferAtomMirrorDistanceM = distanceM;
                     }
+                    const noiseSigmaMrad = Number(data.transfer_phase_noise_sigma_mrad);
+                    if (Number.isFinite(noiseSigmaMrad) && noiseSigmaMrad >= 0) {
+                        this.transferPhaseNoiseSigmaMrad = noiseSigmaMrad;
+                    }
                     const configuredPhases = Array.isArray(data.transfer_phase_degrees)
                         ? data.transfer_phase_degrees.map(Number).filter(Number.isFinite)
                         : [];
@@ -4990,8 +4999,8 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     return (4 * Math.PI * distanceM / 299792458) * modulationMhz * 1e6;
                 },
                 setTransferFunctionStatistic(statistic) {
-                    const normalized = statistic === 's2' && this.currentTab === 'phase'
-                        ? 's2'
+                    const normalized = ['s2', 'phase2'].includes(statistic) && this.currentTab === 'phase'
+                        ? statistic
                         : (statistic === 'mean' ? 'mean' : 'std');
                     if (this.transferFunctionStatistic === normalized) return;
                     this.transferFunctionStatistic = normalized;
@@ -5020,43 +5029,36 @@ finishScheduledRun(finalStatus = 'IDLE') {
                         panelFields = noFit ? ['atom_number_up_nofit', 'atom_number_dw_nofit'] : ['atom_number_up', 'atom_number_dw'];
                         label = 'Atom number';
                     }
-                    const statistic = this.transferFunctionStatistic === 's2' && this.currentTab === 'phase'
-                        ? 's2'
+                    const statistic = ['s2', 'phase2'].includes(this.transferFunctionStatistic) && this.currentTab === 'phase'
+                        ? this.transferFunctionStatistic
                         : (this.transferFunctionStatistic === 'mean' ? 'mean' : 'std');
-                    const statisticLabel = statistic === 's2' ? 'S²' : (statistic === 'mean' ? 'mean value' : 'standard deviation');
-                    const hoverStatisticLabel = statistic === 's2' ? 'S²' : (statistic === 'mean' ? 'Mean' : 'Std');
+                    const statisticLabel = statistic === 's2' ? 'S²' : (statistic === 'phase2' ? 'ΔΦ²' : (statistic === 'mean' ? 'mean value' : 'standard deviation'));
+                    const hoverStatisticLabel = statistic === 's2' ? 'S²' : (statistic === 'phase2' ? 'ΔΦ²' : (statistic === 'mean' ? 'Mean' : 'Std'));
                     const sourceLabel = this.currentTab === 'phase' ? 'Active calibration' : (noFit ? 'NoFit' : 'Fit');
                     const makePanel = (field, channel, color, isUp) => {
                         if (!field) return { traces: [], layout: { ...this.buildCommonAnalysisLayout() } };
                         const scale = statistic !== 's2' && this.currentTab === 'phase' && this.phaseUnit === 'mrad' ? 1000 : 1;
                         const phaseAmplitude = this.transferBraggPhaseAmplitudeRad();
                         let traces;
-                        if (statistic === 's2') {
+                        if (['s2', 'phase2'].includes(statistic)) {
                             const phases = this.transferPhaseDegrees.slice(0, 2);
                             const componentColors = ['#c62828', '#1565c0'];
                             const componentValue = (point, phaseDeg) => {
                                 const phaseValues = point.phaseData?.[Number(phaseDeg).toPrecision(15)]?.[field] || [];
                                 const mean = this.sampleMean(phaseValues);
-                                return mean !== null && phaseAmplitude !== null ? (mean / phaseAmplitude) ** 2 : null;
-                            };
-                            const noiseFloorValue = point => {
-                                const values = phases.map(phaseDeg => {
-                                    const phaseValues = point.phaseData?.[Number(phaseDeg).toPrecision(15)]?.[field] || [];
-                                    const std = this.sampleStandardDeviation(phaseValues);
-                                    return std !== null && phaseAmplitude !== null ? (std / phaseAmplitude) ** 2 : null;
-                                });
-                                return values.length && values.every(value => value !== null)
-                                    ? values.reduce((sum, value) => sum + value, 0)
-                                    : null;
+                                if (mean === null) return null;
+                                return statistic === 's2'
+                                    ? (phaseAmplitude !== null ? (mean / phaseAmplitude) ** 2 : null)
+                                    : mean ** 2;
                             };
                             traces = phases.map((phaseDeg, index) => ({
                                 x: points.map(point => point.frequency),
                                 y: points.map(point => componentValue(point, phaseDeg)),
                                 customdata: points.map(point => (point.phaseData?.[Number(phaseDeg).toPrecision(15)]?.[field] || []).length),
-                                type: 'scatter', mode: 'lines+markers', name: `S² at ${phaseDeg}°`,
+                                type: 'scatter', mode: 'lines+markers', name: `${statisticLabel} at ${phaseDeg}°`,
                                 line: { color: componentColors[index], width: 2 }, marker: { color: componentColors[index], size: 7 },
                                 connectgaps: false,
-                                hovertemplate: `Frequency=%{x:.9g} Hz<br>${phaseDeg}° component=%{y:.6g}<br>n=%{customdata}<extra></extra>`
+                                hovertemplate: `Frequency=%{x:.9g} Hz<br>${phaseDeg}° ${hoverStatisticLabel}=%{y:.6g}<br>n=%{customdata}<extra></extra>`
                             }));
                             if (phases.length === 2) {
                                 traces.push({
@@ -5068,23 +5070,26 @@ finishScheduledRun(finalStatus = 'IDLE') {
                                     customdata: points.map(point => phases.map(phaseDeg => (
                                         point.phaseData?.[Number(phaseDeg).toPrecision(15)]?.[field] || []
                                     ).length).join('/')),
-                                    type: 'scatter', mode: 'lines+markers', name: 'S² quadrature sum',
+                                    type: 'scatter', mode: 'lines+markers', name: `${statisticLabel} quadrature sum`,
                                     line: { color: '#198754', width: 3 }, marker: { color: '#198754', size: 8, symbol: 'diamond' },
                                     connectgaps: false,
-                                    hovertemplate: 'Frequency=%{x:.9g} Hz<br>S² sum=%{y:.6g}<br>n=%{customdata}<extra></extra>'
+                                    hovertemplate: `Frequency=%{x:.9g} Hz<br>${hoverStatisticLabel} sum=%{y:.6g}<br>n=%{customdata}<extra></extra>`
                                 });
                             }
-                            if (phases.length > 0) {
+                            if (statistic === 'phase2' && phases.length > 0) {
+                                const sigmaRad = Number(this.transferPhaseNoiseSigmaMrad) / 1000;
+                                const noiseFloor = Number.isFinite(sigmaRad) && sigmaRad >= 0
+                                    ? phases.length * sigmaRad ** 2 : null;
                                 traces.push({
                                     x: points.map(point => point.frequency),
-                                    y: points.map(point => noiseFloorValue(point)),
+                                    y: points.map(() => noiseFloor),
                                     customdata: points.map(point => phases.map(phaseDeg => (
                                         point.phaseData?.[Number(phaseDeg).toPrecision(15)]?.[field] || []
                                     ).length).join('/')),
-                                    type: 'scatter', mode: 'lines', name: 'S² phase-noise floor',
+                                    type: 'scatter', mode: 'lines', name: 'Allan phase-noise floor',
                                     line: { color: '#343a40', width: 2.4, dash: 'dash' },
                                     connectgaps: false,
-                                    hovertemplate: 'Frequency=%{x:.9g} Hz<br>S² noise floor=%{y:.6g}<br>n=%{customdata}<extra></extra>'
+                                    hovertemplate: 'Frequency=%{x:.9g} Hz<br>Noise floor=%{y:.6g} rad²<br>n=%{customdata}<extra></extra>'
                                 });
                             }
                         } else {
@@ -5134,7 +5139,8 @@ finishScheduledRun(finalStatus = 'IDLE') {
                                 yaxis: {
                                     ...base.yaxis,
                                     type: this.transferFunctionYAxisScale,
-                                    title: statistic === 's2' ? 'S² (dimensionless)' : `${label} ${statisticLabel}`
+                                    title: statistic === 's2' ? 'S² (dimensionless)'
+                                        : (statistic === 'phase2' ? 'ΔΦ² (rad²)' : `${label} ${statisticLabel}`)
                                 },
                                 title: { text: `${channel} | Transfer Function | ${sourceLabel} | ${statisticLabel}`, font: { size: 13 }, x: 0.05, y: 0.93 },
                                 showlegend: this.transferPhaseDegrees.length > 0 && traces.length > 0,
@@ -5789,6 +5795,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
             this.transferFunctionHistoryMap = {};
             this.transferFrequencyModulationMhz = null;
             this.transferAtomMirrorDistanceM = 2.23;
+            this.transferPhaseNoiseSigmaMrad = 100;
             this.transferPhaseDegrees = [];
             this.initPlots();
         }

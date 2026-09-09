@@ -1221,6 +1221,7 @@ class DataLoader:
                 config_data.get("transfer_frequency_modulation_mhz"),
                 config_data.get("transfer_phase_degrees"),
                 config_data.get("transfer_atom_mirror_distance_m", 2.23),
+                config_data.get("transfer_phase_noise_sigma_mrad", 100.0),
             )
             if is_transfer_function
             else []
@@ -2254,6 +2255,10 @@ class DataLoader:
                 settings.get(
                     "transfer_atom_mirror_distance_m",
                     config_data.get("transfer_atom_mirror_distance_m", 2.23),
+                ),
+                settings.get(
+                    "transfer_phase_noise_sigma_mrad",
+                    config_data.get("transfer_phase_noise_sigma_mrad", 100.0),
                 ),
             )
             if is_transfer_function

@@ -327,7 +327,11 @@ class DataManager:
             data['_system_settings_snapshot'] = {**existing_system, **new_settings}
             data['_analysis_snapshot'] = {**existing_analysis, **new_settings}
             if str(data.get("mode") or "").strip().lower() == "transfer_function":
-                for key in ("transfer_frequency_modulation_mhz", "transfer_atom_mirror_distance_m"):
+                for key in (
+                    "transfer_frequency_modulation_mhz",
+                    "transfer_atom_mirror_distance_m",
+                    "transfer_phase_noise_sigma_mrad",
+                ):
                     if key in new_settings:
                         data[key] = new_settings[key]
             with open(config_path, 'w') as f: json.dump(data, f, indent=4)
