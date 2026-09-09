@@ -63,6 +63,7 @@ from app.drivers.tti_generator import (
 from app.models.schemas import (
     AnalysisSettings,
     ArchiveAllanRequest,
+    ArchivePhaseNoiseAllanRequest,
     ArchiveInterferometerBetaOptimizeRequest,
     ArchiveCollectionFolderCreate,
     ArchiveCollectionFolderUpdate,
@@ -1868,6 +1869,7 @@ async def recalculate_archived_run(req: ReAnalysisRequest):
             req.run_id,
             settings,
             node_id=req.node_id,
+            phase_noise_allan_orders=req.phase_noise_allan_orders,
         )
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc))
@@ -1894,6 +1896,34 @@ async def calculate_archived_allan(req: ArchiveAllanRequest):
             node_id=req.node_id,
             current_phase_calibration=manager.get_active_bragg_phase_calibration(),
         )
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@router.post("/archive/phase-noise/allan")
+async def calculate_archived_phase_noise_allan(req: ArchivePhaseNoiseAllanRequest):
+    settings = req.new_settings.model_dump()
+    settings["_interferometer_phase_calibration"] = manager.get_active_bragg_phase_calibration()
+    try:
+        if str(req.display_mode or "saved").strip().lower() == "recalculated":
+            payload = await run_in_threadpool(
+                data_loader.recalculate_run,
+                req.year, req.month, req.day, req.run_id, settings,
+                None, req.node_id, req.orders,
+            )
+        else:
+            payload = await run_in_threadpool(
+                data_loader.load_run,
+                req.year, req.month, req.day, req.run_id, req.node_id,
+                manager.get_active_bragg_phase_calibration(), req.orders,
+            )
+        if str((payload.get("config") or {}).get("mode") or "").strip().lower() != "phase_noise":
+            raise ValueError("Selected archive is not a Phase Noise Analyze run")
+        return {"orders": req.orders, "phase_noise_summary": payload.get("phase_noise_summary") or []}
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc))
     except ValueError as exc:
@@ -2304,6 +2334,8 @@ async def export_archive_labplot(req: ArchiveLabPlotExportRequest):
             manager.get_active_bragg_phase_calibration(),
             req.current_fit,
             req.transfer_function_summary,
+            req.phase_noise_summary,
+            req.phase_noise_x_axis,
         )
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc))

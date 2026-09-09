@@ -191,9 +191,21 @@ class DataManager:
             json.dump(summary_rows, handle, ensure_ascii=False, indent=2)
         if summary_rows:
             with open(self.current_run_dir / "phase_noise_summary.csv", "w", newline="", encoding="utf-8") as handle:
-                writer = csv.DictWriter(handle, fieldnames=list(summary_rows[0].keys()))
+                fieldnames = [key for key in summary_rows[0].keys() if key != "allan_deviations"]
+                writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
                 writer.writeheader()
                 writer.writerows(summary_rows)
+            allan_rows = [
+                {"t2_us2": row.get("t2_us2"), "t_ms": row.get("t_ms"), **allan}
+                for row in summary_rows
+                for allan in (row.get("allan_deviations") or [])
+                if isinstance(allan, dict)
+            ]
+            if allan_rows:
+                with open(self.current_run_dir / "phase_noise_allan.csv", "w", newline="", encoding="utf-8") as handle:
+                    writer = csv.DictWriter(handle, fieldnames=list(allan_rows[0].keys()))
+                    writer.writeheader()
+                    writer.writerows(allan_rows)
 
     def _init_csv(self, path: Path):
         self.csv_handle = open(path, 'w', newline='')

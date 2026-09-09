@@ -1,5 +1,6 @@
 import base64
 import lzma
+import math
 import struct
 import unittest
 from xml.etree import ElementTree as ET
@@ -76,6 +77,14 @@ class TransferFunctionLoader:
         return {
             "config": {"mode": "transfer_function"},
             "transfer_function_summary": self.summary,
+        }
+
+
+class PhaseNoiseLoader:
+    def load_run(self, year, month, day, run_id, node_id=None, current_phase_calibration=None):
+        return {
+            "config": {"mode": "phase_noise"},
+            "phase_noise_summary": [],
         }
 
 
@@ -278,6 +287,49 @@ class LabPlotExportTests(unittest.TestCase):
         self.assertEqual(x_values[0], 20.0)
         self.assertEqual(x_values[-1], 1234.0)
         self.assertEqual(y_values, (200.0, 300.0, 100.0))
+
+    def test_phase_noise_exports_standard_and_selected_allan_orders(self):
+        rows = []
+        for index, t2 in enumerate((1_000_000.0, 4_000_000.0), start=1):
+            rows.append({
+                "t2_us2": t2,
+                "t_ms": math.sqrt(t2) / 1000.0,
+                "measured_phase_noise_rad": 0.1 * index,
+                "expected_total_phase_noise_rad": 0.08 * index,
+                "detection_phase_noise_rad": 0.03 * index,
+                "laser_phase_noise_rad": 0.05 * index,
+                "allan_deviations": [
+                    {
+                        "order": order,
+                        "measured_phase_noise_rad": 0.1 * index / math.sqrt(order),
+                        "expected_total_phase_noise_rad": 0.08 * index / math.sqrt(order),
+                        "detection_phase_noise_rad": 0.03 * index / math.sqrt(order),
+                        "laser_phase_noise_rad": 0.05 * index / math.sqrt(order),
+                    }
+                    for order in (1, 2)
+                ],
+            })
+        payload = build_archive_project(
+            PhaseNoiseLoader(), "2026", "09", "09", "run_pn", ["phase"],
+            phase_noise_summary=rows, phase_noise_x_axis="t",
+        )
+        root = self.parse(payload)
+        worksheets = {item.attrib["name"]: item for item in root.iter("worksheet")}
+        self.assertEqual(set(worksheets), {
+            "Phase Noise - Standard Deviation", "Phase Noise - Allan Deviation",
+        })
+        allan_plots = list(worksheets["Phase Noise - Allan Deviation"].iter("cartesianPlot"))
+        self.assertEqual(len(allan_plots), 2)
+        self.assertEqual([item.attrib["name"] for item in allan_plots], [
+            "Phase Noise Allan n=1", "Phase Noise Allan n=2",
+        ])
+        spreadsheet = next(
+            item for item in root.iter("spreadsheet")
+            if item.attrib["name"] == "Data - Phase Noise - Standard Deviation"
+        )
+        first_column = next(spreadsheet.iter("column"))
+        x_values = struct.unpack("=2d", base64.b64decode(first_column.find("output_filter").tail))
+        self.assertEqual(x_values, (1.0, 2.0))
 
 
 if __name__ == "__main__":

@@ -635,6 +635,16 @@ class ReAnalysisRequest(BaseModel):
     node_id: Optional[str] = Field(None)
     new_settings: ArchiveAnalysisSettings
     updated_data: Optional[List[Dict[str, Any]]] = None
+    phase_noise_allan_orders: Optional[List[int]] = Field(None, max_length=64)
+
+    @validator("phase_noise_allan_orders")
+    def validate_phase_noise_allan_orders(cls, values: Optional[List[int]]) -> Optional[List[int]]:
+        if values is None:
+            return None
+        normalized = sorted(set(int(value) for value in values))
+        if not normalized or normalized[0] < 1 or normalized[-1] > 100000:
+            raise ValueError("Phase-noise Allan orders must be between 1 and 100000")
+        return normalized
 
 
 class ArchiveRunReference(BaseModel):
@@ -698,6 +708,24 @@ class ArchiveAllanRequest(BaseModel):
     p0_min: Optional[float] = Field(None)
     p0_max: Optional[float] = Field(None)
     new_settings: ArchiveAnalysisSettings
+
+
+class ArchivePhaseNoiseAllanRequest(BaseModel):
+    year: str
+    month: str
+    day: str
+    run_id: str
+    node_id: Optional[str] = Field(None)
+    orders: List[int] = Field(default_factory=lambda: [1], min_length=1, max_length=64)
+    display_mode: str = Field("saved")
+    new_settings: ArchiveAnalysisSettings
+
+    @validator("orders")
+    def validate_orders(cls, values: List[int]) -> List[int]:
+        normalized = sorted(set(int(value) for value in values))
+        if not normalized or normalized[0] < 1 or normalized[-1] > 100000:
+            raise ValueError("Phase-noise Allan orders must be between 1 and 100000")
+        return normalized
 
 
 class ArchiveInterferometerBetaOptimizeRequest(BaseModel):
@@ -786,6 +814,8 @@ class ArchiveLabPlotExportRequest(BaseModel):
     include_differential: bool = Field(True)
     current_fit: Optional[Dict[str, Any]] = Field(None)
     transfer_function_summary: Optional[List[Dict[str, Any]]] = Field(None)
+    phase_noise_summary: Optional[List[Dict[str, Any]]] = Field(None)
+    phase_noise_x_axis: str = Field("t2")
 
 
 class ArchiveMidFringeScheduleRequest(BaseModel):

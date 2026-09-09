@@ -2074,9 +2074,25 @@
                                 <select v-if="currentTab === 'phase' && transferFunctionStatistic !== 's2' && !isPhaseNoiseArchive()" class="form-select form-select-sm" style="width:auto" v-model="phaseUnit" aria-label="Phase unit">
                                     <option value="rad">rad</option><option value="mrad">mrad</option>
                                 </select>
+                                <div v-if="loadedRunId && isPhaseNoiseArchive()" class="btn-group btn-group-sm" role="group" aria-label="Phase Noise statistic">
+                                    <button class="btn" :class="phaseNoiseStatistic === 'std' ? 'btn-dark' : 'btn-outline-dark'" @click="setPhaseNoiseStatistic('std')">Standard deviation</button>
+                                    <button class="btn" :class="phaseNoiseStatistic === 'allan' ? 'btn-dark' : 'btn-outline-dark'" @click="setPhaseNoiseStatistic('allan')">Allan deviation</button>
+                                </div>
                                 <div v-if="loadedRunId && isPhaseNoiseArchive()" class="btn-group btn-group-sm" role="group" aria-label="Phase Noise x axis">
                                     <button class="btn" :class="phaseNoiseXAxis === 't2' ? 'btn-primary' : 'btn-outline-primary'" @click="phaseNoiseXAxis = 't2'">T²</button>
                                     <button class="btn" :class="phaseNoiseXAxis === 't' ? 'btn-primary' : 'btn-outline-primary'" @click="phaseNoiseXAxis = 't'">T (ms)</button>
+                                </div>
+                                <div v-if="loadedRunId && isPhaseNoiseArchive() && phaseNoiseStatistic === 'allan'" class="d-flex flex-wrap align-items-center gap-1">
+                                    <span class="small text-muted me-1">Orders</span>
+                                    <button v-for="order in phaseNoiseAllanOrders" :key="`phase-noise-allan-${order}`" type="button"
+                                        class="btn btn-sm btn-outline-primary" :disabled="phaseNoiseAllanOrders.length === 1"
+                                        @click="removePhaseNoiseAllanOrder(order)" :title="phaseNoiseAllanOrders.length === 1 ? 'At least one order is required' : 'Remove order'">
+                                        n={{ order }} <i class="bi bi-x"></i>
+                                    </button>
+                                    <input type="number" class="form-control form-control-sm ms-1" style="width:78px" min="1"
+                                        :max="phaseNoiseMaxAllanOrder()" v-model.number="phaseNoiseAllanOrderDraft" @keyup.enter="addPhaseNoiseAllanOrder">
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" @click="addPhaseNoiseAllanOrder" :disabled="isLoadingAllan">Add</button>
+                                    <span class="small text-muted">max {{ phaseNoiseMaxAllanOrder() }}</span>
                                 </div>
                             </div>
                         </div>
@@ -2202,6 +2218,9 @@
                                 Compute the full overlapping Allan deviation curve from the unsampled shot sequence.
                                 Relative mode plots Allan / |full-sequence mean|. P0 range is inclusive. The x-axis is Allan order n.
                             </div>
+                            <div class="slice-summary mt-1" v-if="isPhaseNoiseArchive() && phaseNoiseStatistic === 'allan'">
+                                Each selected order is calculated independently inside the chronological repeats for every T. Invalid shots break overlapping windows; white-noise reference curves scale as 1/√n.
+                            </div>
                             <section v-if="showAllanToolbar()" class="allan-statistics mt-2" aria-labelledby="allan-statistics-title">
                                 <div class="allan-statistics-header">
                                     <span id="allan-statistics-title" class="allan-statistics-title">Sequence Statistics</span>
@@ -2318,7 +2337,7 @@
                         </div>
                     </div>
                     <div class="row g-3 mb-3">
-                        <div class="col-sm-6">
+                        <div class="col-sm-6" v-if="!isPhaseNoiseArchive()">
                             <label class="form-label-small" for="labplot-source">Data source</label>
                             <select id="labplot-source" class="form-select form-select-sm" v-model="labPlotExport.source">
                                 <option value="fit">Fit</option>
@@ -2326,7 +2345,7 @@
                             </select>
                         </div>
                         <div class="col-sm-6 d-flex flex-column justify-content-end gap-2">
-                            <div v-if="!isTransferFunctionArchive()" class="form-check form-switch mb-0">
+                            <div v-if="!isTransferFunctionArchive() && !isPhaseNoiseArchive()" class="form-check form-switch mb-0">
                                 <input id="labplot-include-fits" class="form-check-input" type="checkbox" v-model="labPlotExport.includeFits">
                                 <label class="form-check-label" for="labplot-include-fits">Include fringe and ellipse fit curves</label>
                             </div>
@@ -2339,6 +2358,9 @@
                     <div class="labplot-summary mb-3">
                         <template v-if="isTransferFunctionArchive()">
                             Transfer Function uses TTI carrier frequency as the x-axis. Mean and standard-deviation worksheets contain separate phase curves; Interferometer Phase also exports 0°, 90° and quadrature-sum S².
+                        </template>
+                        <template v-else-if="isPhaseNoiseArchive()">
+                            Exports a Standard Deviation worksheet and an Allan Deviation worksheet with one stacked plot per selected order ({{ phaseNoiseAllanOrders.map(order => `n=${order}`).join(', ') }}). The current T/T² x-axis selection is preserved.
                         </template>
                         <template v-else>
                             LabPlot 2.12.1 project. UP and DOWN use stacked plots. SYNC differential exports Every Shot and Average as separate worksheets using Interferometer P UP.
@@ -2512,6 +2534,7 @@
                     lockInAnalysis: {}, savedLockInAnalysis: {}, recalculatedLockInAnalysis: {},
                     transferFunctionSummary: [], savedTransferFunctionSummary: [], recalculatedTransferFunctionSummary: [],
                     phaseNoiseSummary: [], savedPhaseNoiseSummary: [], recalculatedPhaseNoiseSummary: [], phaseNoiseXAxis: 't2',
+                    phaseNoiseStatistic: 'std', phaseNoiseAllanOrders: [1], phaseNoiseAllanOrderDraft: 2,
                     savedAllanCache: {}, recalculatedAllanCache: {}, currentAllanData: null,
                     betaOptimization: {
                         parameter: 'intf_beta', metric: 'intf', statistic: 'mean', source: 'fit', channel: 'up', targetMean: 0,
@@ -2580,6 +2603,9 @@
                     });
                 },
                 phaseNoiseXAxis() {
+                    if (this.isPhaseNoiseArchive()) this.renderPhaseNoiseArchivePlot();
+                },
+                phaseNoiseStatistic() {
                     if (this.isPhaseNoiseArchive()) this.renderPhaseNoiseArchivePlot();
                 },
                 showRawData() {
@@ -5078,6 +5104,9 @@
                     this.phaseNoiseSummary = [];
                     this.savedPhaseNoiseSummary = [];
                     this.recalculatedPhaseNoiseSummary = [];
+                    this.phaseNoiseStatistic = 'std';
+                    this.phaseNoiseAllanOrders = [1];
+                    this.phaseNoiseAllanOrderDraft = 2;
                     this.selectedPointKey = '';
                     this.selectedPointKeys = [];
                     this.selectedPointLabel = '';
@@ -5183,6 +5212,7 @@
                             this.currentTab = "phase";
                             this.phaseUnit = "mrad";
                             this.plotMode = "series";
+                            this.phaseNoiseStatistic = "std";
                         }
                         this.currentScanDimensions = this.resolveScanDimensions(res.data.scan_dimensions, this.loadedConfig);
                         const transferNormalization = {
@@ -5258,7 +5288,9 @@
                     this.scanFitError = '';
                     try {
                         this.analysis = this.normalizeAnalysis(this.analysis);
-                        const res = await axios.post('/archive/recalculate', this.buildArchivePayload());
+                        const res = await axios.post('/archive/recalculate', this.buildArchivePayload(
+                            this.isPhaseNoiseArchive() ? { phase_noise_allan_orders: this.phaseNoiseAllanOrders } : {}
+                        ));
                         if (!res.data || !Array.isArray(res.data.data)) {
                             throw new Error("Invalid recalculation data received from server");
                         }
@@ -5419,6 +5451,9 @@
                     this.transferFunctionSummary = this.savedTransferFunctionSummary;
                     this.phaseNoiseSummary = this.savedPhaseNoiseSummary;
                     await this.applyDisplayedPoints(this.loadedPoints, this.savedStats, this.savedPreviewMap, false);
+                    if (this.isPhaseNoiseArchive() && this.phaseNoiseStatistic === 'allan') {
+                        await this.refreshPhaseNoiseAllan();
+                    }
                     if (this.plotMode === 'allan') {
                         this.syncCurrentAllanData();
                         if (!this.currentAllanData) {
@@ -7618,7 +7653,11 @@
                             current_fit: currentFit,
                             transfer_function_summary: this.isTransferFunctionArchive() && this.transferFunctionSummary.length
                                 ? this.transferFunctionSummary
-                                : null
+                                : null,
+                            phase_noise_summary: this.isPhaseNoiseArchive() && this.phaseNoiseSummary.length
+                                ? this.phaseNoiseSummary
+                                : null,
+                            phase_noise_x_axis: this.phaseNoiseXAxis
                         }, { responseType: 'blob' });
                         const fallbackName = `miga_${this.sanitizeFilenamePart(this.selectedRun || this.loadedRunId || 'archive')}.lml`;
                         const suggestedName = this.getFilenameFromDisposition(response.headers?.['content-disposition']) || fallbackName;
@@ -8443,32 +8482,119 @@
                         Plotly.react(plotIds[index], traces, layout);
                     });
                 },
+                phaseNoiseMaxAllanOrder() {
+                    const maxima = (Array.isArray(this.phaseNoiseSummary) ? this.phaseNoiseSummary : [])
+                        .map(row => Number(row.available_allan_max_order ?? Math.floor(Number(row.shot_count || 0) / 2)))
+                        .filter(value => Number.isFinite(value) && value >= 0);
+                    return maxima.length ? Math.max(1, Math.min(...maxima)) : 1;
+                },
+                normalizePhaseNoiseAllanOrders(values = this.phaseNoiseAllanOrders) {
+                    const maximum = this.phaseNoiseMaxAllanOrder();
+                    const normalized = [...new Set((Array.isArray(values) ? values : [])
+                        .map(value => Math.round(Number(value)))
+                        .filter(value => Number.isFinite(value) && value >= 1 && value <= maximum))]
+                        .sort((a, b) => a - b);
+                    return normalized.length ? normalized : [1];
+                },
+                async refreshPhaseNoiseAllan() {
+                    if (!this.isPhaseNoiseArchive() || !this.loadedRunRef) return;
+                    this.phaseNoiseAllanOrders = this.normalizePhaseNoiseAllanOrders();
+                    this.isLoadingAllan = true;
+                    this.errorMsg = '';
+                    try {
+                        const response = await axios.post('/archive/phase-noise/allan', this.buildArchivePayload({
+                            orders: this.phaseNoiseAllanOrders,
+                            display_mode: this.displayMode,
+                        }));
+                        const summary = Array.isArray(response.data?.phase_noise_summary)
+                            ? response.data.phase_noise_summary : [];
+                        this.phaseNoiseSummary = summary;
+                        if (this.displayMode === 'recalculated') this.recalculatedPhaseNoiseSummary = summary;
+                        else this.savedPhaseNoiseSummary = summary;
+                        this.renderPhaseNoiseArchivePlot();
+                    } catch (error) {
+                        this.errorMsg = 'Phase Noise Allan failed: ' + (error.response?.data?.detail || error.message || 'Unknown error');
+                    } finally {
+                        this.isLoadingAllan = false;
+                    }
+                },
+                async setPhaseNoiseStatistic(statistic) {
+                    this.phaseNoiseStatistic = statistic === 'allan' ? 'allan' : 'std';
+                    if (this.phaseNoiseStatistic === 'allan') await this.refreshPhaseNoiseAllan();
+                    else this.renderPhaseNoiseArchivePlot();
+                },
+                async addPhaseNoiseAllanOrder() {
+                    const order = Math.round(Number(this.phaseNoiseAllanOrderDraft));
+                    const maximum = this.phaseNoiseMaxAllanOrder();
+                    if (!Number.isFinite(order) || order < 1 || order > maximum) {
+                        this.errorMsg = `Phase Noise Allan order must be between 1 and ${maximum}.`;
+                        return;
+                    }
+                    this.phaseNoiseAllanOrders = this.normalizePhaseNoiseAllanOrders([...this.phaseNoiseAllanOrders, order]);
+                    this.phaseNoiseAllanOrderDraft = Math.min(maximum, order + 1);
+                    await this.refreshPhaseNoiseAllan();
+                },
+                async removePhaseNoiseAllanOrder(order) {
+                    if (this.phaseNoiseAllanOrders.length <= 1) return;
+                    this.phaseNoiseAllanOrders = this.normalizePhaseNoiseAllanOrders(
+                        this.phaseNoiseAllanOrders.filter(value => Number(value) !== Number(order))
+                    );
+                    await this.refreshPhaseNoiseAllan();
+                },
                 renderPhaseNoiseArchivePlot() {
                     const rows = Array.isArray(this.phaseNoiseSummary) ? this.phaseNoiseSummary : [];
                     const xField = this.phaseNoiseXAxis === 't' ? 't_ms' : 't2_us2';
                     const xTitle = this.phaseNoiseXAxis === 't' ? 'Interferometer time T (ms)' : 'P0 = T² ((μs)²)';
-                    const definitions = [
-                        ['measured_phase_noise_rad', 'Measured total', '#6f42c1', 'circle'],
-                        ['expected_total_phase_noise_rad', 'Expected total', '#212529', 'diamond'],
-                        ['detection_phase_noise_rad', 'Detection', '#0d6efd', 'square'],
-                        ['laser_phase_noise_rad', 'Laser frequency', '#dc3545', 'triangle-up'],
-                    ];
-                    const traces = definitions.map(([field, name, color, symbol]) => ({
-                        x: rows.map(row => Number(row[xField])),
-                        y: rows.map(row => row[field] == null ? null : Number(row[field]) * 1000),
-                        customdata: rows.map(row => [row.t2_us2, row.t_ms, row.valid_phase_count, row.shot_count]),
-                        type: 'scatter', mode: 'lines+markers', name,
-                        line: { color, width: name.includes('total') ? 2.8 : 1.8, dash: name === 'Expected total' ? 'dash' : 'solid' },
-                        marker: { color, size: name === 'Measured total' ? 9 : 7, symbol },
-                        connectgaps: false,
-                        hovertemplate: `${xTitle}=%{x:.9g}<br>σφ=%{y:.6g} mrad<br>T²=%{customdata[0]:.9g} (μs)²<br>T=%{customdata[1]:.6g} ms<br>valid N=%{customdata[2]}/%{customdata[3]}<extra>${name}</extra>`
-                    }));
+                    let traces;
+                    if (this.phaseNoiseStatistic === 'allan') {
+                        const colors = ['#6f42c1', '#0d6efd', '#198754', '#dc3545', '#fd7e14', '#20c997', '#495057', '#d63384'];
+                        const definitions = [
+                            ['measured_phase_noise_rad', 'Measured', 'solid', 'circle', 2.8],
+                            ['expected_total_phase_noise_rad', 'Expected total', 'dash', 'diamond', 2.2],
+                            ['detection_phase_noise_rad', 'Detection', 'dot', 'square', 1.5],
+                            ['laser_phase_noise_rad', 'Laser frequency', 'dashdot', 'triangle-up', 1.5],
+                        ];
+                        traces = this.phaseNoiseAllanOrders.flatMap((order, orderIndex) => {
+                            const color = colors[orderIndex % colors.length];
+                            const allanRows = rows.map(row => (
+                                (row.allan_deviations || []).find(item => Number(item.order) === Number(order)) || {}
+                            ));
+                            return definitions.map(([field, label, dash, symbol, width]) => ({
+                                x: rows.map(row => Number(row[xField])),
+                                y: allanRows.map(item => item[field] == null ? null : Number(item[field]) * 1000),
+                                customdata: rows.map((row, index) => [row.t2_us2, row.t_ms, allanRows[index].valid_window_count || 0, row.shot_count]),
+                                type: 'scatter', mode: 'lines+markers', name: `${label} n=${order}`,
+                                legendgroup: `allan-${order}`,
+                                line: { color, width, dash }, marker: { color, size: label === 'Measured' ? 8 : 6, symbol },
+                                opacity: label === 'Measured' || label === 'Expected total' ? 1 : 0.72,
+                                connectgaps: false,
+                                hovertemplate: `${xTitle}=%{x:.9g}<br>σA(n=${order})=%{y:.6g} mrad<br>T²=%{customdata[0]:.9g} (μs)²<br>T=%{customdata[1]:.6g} ms<br>valid windows=%{customdata[2]}<br>shots=%{customdata[3]}<extra>${label} n=${order}</extra>`
+                            }));
+                        });
+                    } else {
+                        const definitions = [
+                            ['measured_phase_noise_rad', 'Measured total', '#6f42c1', 'circle'],
+                            ['expected_total_phase_noise_rad', 'Expected total', '#212529', 'diamond'],
+                            ['detection_phase_noise_rad', 'Detection', '#0d6efd', 'square'],
+                            ['laser_phase_noise_rad', 'Laser frequency', '#dc3545', 'triangle-up'],
+                        ];
+                        traces = definitions.map(([field, name, color, symbol]) => ({
+                            x: rows.map(row => Number(row[xField])),
+                            y: rows.map(row => row[field] == null ? null : Number(row[field]) * 1000),
+                            customdata: rows.map(row => [row.t2_us2, row.t_ms, row.valid_phase_count, row.shot_count]),
+                            type: 'scatter', mode: 'lines+markers', name,
+                            line: { color, width: name.includes('total') ? 2.8 : 1.8, dash: name === 'Expected total' ? 'dash' : 'solid' },
+                            marker: { color, size: name === 'Measured total' ? 9 : 7, symbol },
+                            connectgaps: false,
+                            hovertemplate: `${xTitle}=%{x:.9g}<br>σφ=%{y:.6g} mrad<br>T²=%{customdata[0]:.9g} (μs)²<br>T=%{customdata[1]:.6g} ms<br>valid N=%{customdata[2]}/%{customdata[3]}<extra>${name}</extra>`
+                        }));
+                    }
                     const base = this.buildCommonAnalysisLayout();
                     this.layoutResUp = {
                         ...base, margin: { t: 45, b: 58, l: 78, r: 20 },
-                        title: { text: 'Phase Noise Analyze · measured and configured noise', font: { size: 14 }, x: 0.04 },
+                        title: { text: `Phase Noise Analyze · ${this.phaseNoiseStatistic === 'allan' ? 'overlapping Allan deviation' : 'standard deviation'}`, font: { size: 14 }, x: 0.04 },
                         xaxis: { ...base.xaxis, title: xTitle },
-                        yaxis: { ...base.yaxis, title: 'Phase noise σφ (mrad)' },
+                        yaxis: { ...base.yaxis, title: this.phaseNoiseStatistic === 'allan' ? 'Phase Allan deviation σA (mrad)' : 'Phase noise σφ (mrad)' },
                         legend: { orientation: 'h', x: 0.5, xanchor: 'center', y: 1.16 }
                     };
                     Plotly.react('resultsPlotUp', traces, this.layoutResUp, { responsive: true, displaylogo: false });

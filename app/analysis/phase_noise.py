@@ -55,11 +55,55 @@ def _finite(value: Any) -> Optional[float]:
     return numeric if math.isfinite(numeric) else None
 
 
+def normalize_allan_orders(orders: Optional[Iterable[int]]) -> List[int]:
+    """Return unique positive Allan orders in ascending order."""
+    normalized: List[int] = []
+    for raw in orders or []:
+        try:
+            order = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if order >= 1 and order not in normalized:
+            normalized.append(order)
+    return sorted(normalized)
+
+
+def overlapping_allan_deviation(
+    values: Iterable[Optional[float]], order: int,
+) -> tuple[Optional[float], int]:
+    """Calculate overlapping Allan deviation without bridging invalid shots."""
+    n = int(order)
+    if n < 1:
+        raise ValueError("Allan order must be at least 1")
+    samples = np.asarray([
+        value if (value := _finite(raw)) is not None else np.nan
+        for raw in values
+    ], dtype=float)
+    window_count = samples.size - 2 * n + 1
+    if window_count <= 0:
+        return None, 0
+    valid = np.isfinite(samples)
+    safe = np.where(valid, samples, 0.0)
+    value_prefix = np.concatenate(([0.0], np.cumsum(safe)))
+    valid_prefix = np.concatenate(([0], np.cumsum(valid.astype(np.int64))))
+    valid_a = valid_prefix[n:n + window_count] - valid_prefix[:window_count]
+    valid_b = valid_prefix[2 * n:2 * n + window_count] - valid_prefix[n:n + window_count]
+    valid_windows = (valid_a == n) & (valid_b == n)
+    valid_window_count = int(np.count_nonzero(valid_windows))
+    if valid_window_count == 0:
+        return None, 0
+    mean_a = (value_prefix[n:n + window_count] - value_prefix[:window_count]) / n
+    mean_b = (value_prefix[2 * n:2 * n + window_count] - value_prefix[n:n + window_count]) / n
+    differences = (mean_b - mean_a) / math.sqrt(2.0)
+    return float(np.sqrt(np.mean(np.square(differences[valid_windows])))), valid_window_count
+
+
 def build_phase_noise_summary(
     points: Iterable[Any],
     calibration: Optional[Dict[str, Any]],
     detection_noise_signal: float,
     laser_phase_noise_mrad: float,
+    allan_orders: Optional[Iterable[int]] = (1,),
 ) -> List[Dict[str, Any]]:
     """Aggregate measured and configured noise for every scanned mid fringe."""
     params = (calibration or {}).get("parameter_values") or {}
@@ -78,7 +122,7 @@ def build_phase_noise_summary(
         else None
     )
 
-    grouped: Dict[float, List[float]] = {}
+    grouped: Dict[float, List[Optional[float]]] = {}
     counts: Dict[float, int] = {}
     for point in points:
         getter = point.get if isinstance(point, dict) else lambda key, default=None: getattr(point, key, default)
@@ -91,15 +135,29 @@ def build_phase_noise_summary(
         counts[key] = counts.get(key, 0) + 1
         phase = _finite(getter("interferometer_phase"))
         valid = bool(getter("interferometer_phase_valid", False))
-        if valid and phase is not None:
-            grouped.setdefault(key, []).append(phase)
-        else:
-            grouped.setdefault(key, [])
+        grouped.setdefault(key, []).append(phase if valid and phase is not None else None)
 
     result: List[Dict[str, Any]] = []
+    requested_orders = normalize_allan_orders(allan_orders)
     for t2 in sorted(counts):
-        phases = grouped.get(t2, [])
+        sequence = grouped.get(t2, [])
+        phases = [value for value in sequence if value is not None]
         measured = float(np.std(phases, ddof=1)) if len(phases) >= 2 else None
+        allan_rows = []
+        for order in requested_orders:
+            allan_measured, valid_windows = overlapping_allan_deviation(sequence, order)
+            order_scale = math.sqrt(order)
+            allan_detection = detection_rad / order_scale if detection_rad is not None else None
+            allan_laser = laser_rad / order_scale if laser_rad is not None else None
+            allan_expected = expected_rad / order_scale if expected_rad is not None else None
+            allan_rows.append({
+                "order": order,
+                "measured_phase_noise_rad": allan_measured,
+                "valid_window_count": valid_windows,
+                "detection_phase_noise_rad": allan_detection,
+                "laser_phase_noise_rad": allan_laser,
+                "expected_total_phase_noise_rad": allan_expected,
+            })
         result.append({
             "t2_us2": float(t2),
             "t_ms": math.sqrt(t2) / 1000.0,
@@ -109,5 +167,7 @@ def build_phase_noise_summary(
             "detection_phase_noise_rad": detection_rad,
             "laser_phase_noise_rad": laser_rad,
             "expected_total_phase_noise_rad": expected_rad,
+            "available_allan_max_order": len(sequence) // 2,
+            "allan_deviations": allan_rows,
         })
     return result

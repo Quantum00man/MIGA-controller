@@ -1164,6 +1164,7 @@ class DataLoader:
     def load_run(
         self, year: str, month: str, day: str, run_id: str, node_id: Optional[str] = None,
         current_phase_calibration: Optional[Dict[str, Any]] = None,
+        phase_noise_allan_orders: Optional[List[int]] = None,
     ) -> Dict[str, Any]:
         root_run_dir = self._get_run_dir(year, month, day, run_id)
         run_dir = self._resolve_archive_node_dir(root_run_dir, node_id)
@@ -1188,7 +1189,15 @@ class DataLoader:
         )
         has_saved_phase = any(str(point.get("interferometer_phase_calibration_id") or "") for point in full_points)
         if isinstance(phase_calibration, dict) and (has_phase_override or not has_phase_snapshot or not has_saved_phase or legacy_snapshot_conversion):
-            full_points = [interferometer_phase.apply_phase(point, phase_calibration) for point in full_points]
+            is_phase_noise_run = str(config_data.get("mode") or "").strip().lower() == "phase_noise"
+            converted_points = []
+            for point in full_points:
+                point_calibration = phase_calibration
+                reference = point.get("interferometer_phase_reference_t2_us2")
+                if is_phase_noise_run and reference is not None:
+                    point_calibration = phase_noise.calibration_at_mid_fringe(phase_calibration, reference)
+                converted_points.append(interferometer_phase.apply_phase(point, point_calibration))
+            full_points = converted_points
         marker_optimization = self._build_marker_optimization_archive(run_dir, full_points)
         is_marker_optimization = bool(marker_optimization.get("steps")) or (
             run_dir / "marker_optimization_report.json"
@@ -1224,6 +1233,7 @@ class DataLoader:
                 phase_calibration,
                 settings_snapshot.get("std_p_interferometer", 1.1),
                 settings_snapshot.get("laser_frequency_phase_noise_mrad", 100.0),
+                phase_noise_allan_orders if phase_noise_allan_orders is not None else (1,),
             )
             if is_phase_noise else []
         )
@@ -2190,6 +2200,7 @@ class DataLoader:
         new_settings: Dict[str, Any],
         max_points: Optional[int] = MAX_DISPLAY_POINTS,
         node_id: Optional[str] = None,
+        phase_noise_allan_orders: Optional[List[int]] = None,
     ) -> Dict[str, Any]:
         root_run_dir = self._get_run_dir(year, month, day, run_id)
         run_dir = self._resolve_archive_node_dir(root_run_dir, node_id)
@@ -2255,6 +2266,7 @@ class DataLoader:
                 settings.get("_interferometer_phase_calibration"),
                 settings.get("std_p_interferometer", 1.1),
                 settings.get("laser_frequency_phase_noise_mrad", 100.0),
+                phase_noise_allan_orders if phase_noise_allan_orders is not None else (1,),
             )
             if is_phase_noise else []
         )

@@ -1207,6 +1207,21 @@ mid fringe and requires at least two valid shots. Archive plots compare measured
 expected, detection and laser-frequency noise, with a switch between $T^2$ in
 \si{\micro\second\squared} and $T$ in milliseconds.
 
+The Archive phase-noise view can also display selected overlapping Allan orders. For the
+chronological repeat sequence at each individual $T$, order $n$ uses the same adjacent
+overlapping-window definition as the general Allan analysis. A window contributes only
+when all of its $2n$ phase samples are valid; samples from different $T$ values are never
+combined. The theoretical white-noise components scale as
+\begin{equation}
+  \sigma_{\mathrm{det}}(n)=\frac{\sigma_{\mathrm{det}}}{\sqrt n},\qquad
+  \sigma_{\mathrm{laser}}(n)=\frac{\sigma_{\mathrm{laser}}}{\sqrt n},\qquad
+  \sigma_{\mathrm{expected}}(n)=\frac{\sigma_{\mathrm{expected}}}{\sqrt n}.
+\end{equation}
+Operators add or remove explicit orders, up to half the repeat count supported by every
+displayed $T$. LabPlot export produces a standard-deviation worksheet and an Allan
+worksheet with one stacked plot per selected order, using the currently selected $T$ or
+$T^2$ horizontal axis.
+
 \section{Phase-space conversion}
 For a measured value $y_i$, calibration amplitude $A$ and corrected offset $C$, the
 normalized signal is clipped for inversion:

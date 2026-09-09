@@ -331,6 +331,81 @@ def _transfer_function_worksheets(
     return [worksheet for worksheet in worksheets if any(plot.curves for plot in worksheet.plots)]
 
 
+def _phase_noise_curve(
+    rows: Sequence[Dict[str, Any]], x_field: str, field: str, label: str,
+    color: Tuple[int, int, int], *, order: Optional[int] = None,
+    line_style: int = 1,
+) -> Optional[Curve]:
+    x_values: List[float] = []
+    y_values: List[float] = []
+    for row in rows:
+        x = _finite(row.get(x_field))
+        source = row
+        if order is not None:
+            source = next((
+                item for item in row.get("allan_deviations") or []
+                if isinstance(item, dict) and int(item.get("order") or 0) == order
+            ), {})
+        y = _finite(source.get(field))
+        if x is not None and y is not None:
+            x_values.append(x)
+            y_values.append(y * 1000.0)
+    return Curve(label, x_values, y_values, color, line_style=line_style) if x_values else None
+
+
+def _phase_noise_worksheets(
+    rows: Sequence[Dict[str, Any]], x_axis: str,
+) -> List[Worksheet]:
+    ordered_rows = sorted(
+        (row for row in rows if isinstance(row, dict)),
+        key=lambda row: _finite(row.get("t_ms" if x_axis == "t" else "t2_us2")) or 0.0,
+    )
+    x_field = "t_ms" if x_axis == "t" else "t2_us2"
+    x_label = "Interferometer time T (ms)" if x_axis == "t" else "T2 (us2)"
+    definitions = (
+        ("measured_phase_noise_rad", "Measured total", COLORS[4], 1),
+        ("expected_total_phase_noise_rad", "Expected total", FIT_COLOR, 2),
+        ("detection_phase_noise_rad", "Detection", COLORS[0], 3),
+        ("laser_phase_noise_rad", "Laser frequency", COLORS[1], 4),
+    )
+    standard_curves = [
+        curve for field, label, color, style in definitions
+        if (curve := _phase_noise_curve(
+            ordered_rows, x_field, field, label, color, line_style=style,
+        ))
+    ]
+    worksheets: List[Worksheet] = []
+    if standard_curves:
+        worksheets.append(Worksheet(
+            "Phase Noise - Standard Deviation",
+            [Plot("Phase Noise - Standard Deviation", x_label, "Phase noise (mrad)", standard_curves)],
+        ))
+
+    orders = sorted({
+        int(item.get("order"))
+        for row in ordered_rows
+        for item in (row.get("allan_deviations") or [])
+        if isinstance(item, dict) and int(item.get("order") or 0) >= 1
+    })
+    allan_plots = []
+    for order in orders:
+        curves = [
+            curve for field, label, color, style in definitions
+            if (curve := _phase_noise_curve(
+                ordered_rows, x_field, field, label, color,
+                order=order, line_style=style,
+            ))
+        ]
+        if curves:
+            allan_plots.append(Plot(
+                f"Phase Noise Allan n={order}", x_label,
+                "Allan deviation (mrad)", curves,
+            ))
+    if allan_plots:
+        worksheets.append(Worksheet("Phase Noise - Allan Deviation", allan_plots))
+    return worksheets
+
+
 def _pair_records(manifest: Dict[str, Any], slave_id: str) -> List[Dict[str, Any]]:
     return [
         row for row in (manifest.get("pairs") or [])
@@ -430,6 +505,8 @@ def build_archive_project(
     current_phase_calibration: Optional[Dict[str, Any]] = None,
     current_fit: Optional[Dict[str, Any]] = None,
     transfer_function_summary: Optional[Sequence[Dict[str, Any]]] = None,
+    phase_noise_summary: Optional[Sequence[Dict[str, Any]]] = None,
+    phase_noise_x_axis: str = "t2",
 ) -> bytes:
     loaded_root = loader.load_run(
         year, month, day, run_id, current_phase_calibration=current_phase_calibration
@@ -460,6 +537,25 @@ def build_archive_project(
             "generated for LabPlot 2.12.1"
         )
         return build_project(project_name, worksheets, comment=comment)
+
+    is_phase_noise = str(config_data.get("mode") or "").strip().lower() == "phase_noise"
+    if is_phase_noise:
+        selected = [item for item in metrics if item == "phase"]
+        summary = (
+            list(phase_noise_summary)
+            if phase_noise_summary is not None
+            else loaded_root.get("phase_noise_summary") or []
+        )
+        worksheets = _phase_noise_worksheets(
+            summary if selected else [],
+            "t" if str(phase_noise_x_axis).strip().lower() == "t" else "t2",
+        )
+        comment = (
+            f"Phase Noise archive {year}-{month}-{day}/{run_id}; "
+            f"x={'T (ms)' if phase_noise_x_axis == 't' else 'T2 (us2)'}; "
+            "generated for LabPlot 2.12.1"
+        )
+        return build_project(f"MIGA Phase Noise {day} {run_id}", worksheets, comment=comment)
 
     manifest = loaded_root.get("sync_manifest")
     node_payloads = []

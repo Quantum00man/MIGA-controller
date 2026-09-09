@@ -5,6 +5,7 @@ import unittest
 from app.analysis.phase_noise import (
     build_phase_noise_summary,
     calibration_at_mid_fringe,
+    overlapping_allan_deviation,
     validate_mid_fringe_values,
 )
 from app.core.experiment_manager import ExperimentManager
@@ -83,6 +84,31 @@ class PhaseNoiseAnalyzeTests(unittest.TestCase):
         self.assertEqual(rows[1]["valid_phase_count"], 1)
         self.assertEqual(rows[1]["shot_count"], 2)
 
+    def test_overlapping_allan_orders_preserve_invalid_shot_gaps(self):
+        sigma_n1, windows_n1 = overlapping_allan_deviation([0.0, None, 2.0, 3.0], 1)
+        sigma_n2, windows_n2 = overlapping_allan_deviation([0.0, None, 2.0, 3.0], 2)
+        self.assertAlmostEqual(sigma_n1, 1 / math.sqrt(2))
+        self.assertEqual(windows_n1, 1)
+        self.assertIsNone(sigma_n2)
+        self.assertEqual(windows_n2, 0)
+
+    def test_summary_contains_selected_allan_orders_and_scaled_theory(self):
+        points = [
+            {"parameter": 5.0, "interferometer_phase_reference_t2_us2": 5.0,
+             "interferometer_phase": value, "interferometer_phase_valid": True}
+            for value in (0.0, 1.0, 2.0, 3.0)
+        ]
+        row = build_phase_noise_summary(points, self.calibration(), 1.1, 100.0, [2, 1, 2])[0]
+        self.assertEqual(row["available_allan_max_order"], 2)
+        self.assertEqual([item["order"] for item in row["allan_deviations"]], [1, 2])
+        self.assertAlmostEqual(row["allan_deviations"][0]["measured_phase_noise_rad"], 1 / math.sqrt(2))
+        self.assertAlmostEqual(row["allan_deviations"][1]["measured_phase_noise_rad"], math.sqrt(2))
+        self.assertAlmostEqual(
+            row["allan_deviations"][1]["detection_phase_noise_rad"],
+            (1.1 / 20.0) / math.sqrt(2),
+        )
+        self.assertEqual(row["allan_deviations"][1]["valid_window_count"], 1)
+
     def test_pages_expose_new_settings_mode_and_archive_plot(self):
         root = Path(__file__).resolve().parents[1]
         settings = (root / "static" / "settings.html").read_text(encoding="utf-8")
@@ -94,6 +120,8 @@ class PhaseNoiseAnalyzeTests(unittest.TestCase):
         self.assertIn("phaseNoiseSelectionPlot", index)
         self.assertIn("renderPhaseNoiseArchivePlot", archive)
         self.assertIn("expected_total_phase_noise_rad", archive)
+        self.assertIn("phaseNoiseAllanOrders", archive)
+        self.assertIn("/archive/phase-noise/allan", archive)
 
 
 if __name__ == "__main__":
