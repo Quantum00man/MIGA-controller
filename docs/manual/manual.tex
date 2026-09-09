@@ -1120,6 +1120,18 @@ model editor defines formula, parameter guesses, fixed flags and semantic roles.
 are evaluated on 32--4000 points for display. A custom model should first be tested on a
 copy of a run.
 
+\section{LabPlot publication export}
+Archive LabPlot projects use the \emph{Accessible Scientific} preset by default. It uses a
+white background, Arial text, a colour-vision-deficiency-safe palette and restrained
+horizontal reference lines. Axis titles, tick labels and legends are set to 12, 11 and
+10 physical points respectively in the project canvas. Data curves use 1.2-point strokes
+and approximately 5-point markers; fitted curves are shown as charcoal dashed lines so that data and
+models remain distinguishable in greyscale. Redundant plot titles and vertical grid lines
+are hidden, vertical axis titles are rotated correctly, and legends are anchored in the
+upper-right corner. Standard, Transfer Function and SYNC exports
+share this preset. Authors should still verify the effective text size after placing the
+vector graphic at its final manuscript width.
+
 \begin{figure}[htbp]
 \centering
 \begin{tikzpicture}[node distance=7mm]

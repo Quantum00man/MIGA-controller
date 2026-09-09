@@ -23,14 +23,15 @@ METRICS: Dict[str, Dict[str, str]] = {
 }
 
 COLORS = [
-    (220, 53, 69), (13, 110, 253), (25, 135, 84), (255, 128, 0),
-    (111, 66, 193), (32, 150, 160), (108, 117, 125), (214, 51, 132),
+    (0, 114, 178), (213, 94, 0), (0, 158, 115), (230, 159, 0),
+    (204, 121, 167), (86, 180, 233), (0, 0, 0), (117, 117, 117),
 ]
 
 TRANSFER_PHASE_COLORS = {
-    0.0: (220, 53, 69),
-    90.0: (13, 110, 253),
+    0.0: (0, 114, 178),
+    90.0: (213, 94, 0),
 }
+FIT_COLOR = (35, 35, 35)
 
 
 def _finite(value: Any) -> Optional[float]:
@@ -82,7 +83,10 @@ def _calibration_curve(calibration: Any, channel: str, label: str) -> Optional[C
     y = calibration.get("fit_y") or []
     if len(x) < 2 or len(x) != len(y):
         return None
-    return Curve(f"{label} fringe fit", x, y, (255, 128, 0), line=True, symbols=False)
+    return Curve(
+        f"{label} fringe fit", x, y, FIT_COLOR,
+        line=True, symbols=False, line_style=2,
+    )
 
 
 def _current_fit_curve(current_fit: Any, channel: str) -> Optional[Curve]:
@@ -94,7 +98,10 @@ def _current_fit_curve(current_fit: Any, channel: str) -> Optional[Curve]:
     y = current_fit.get("fit_y") or []
     if len(x) < 2 or len(x) != len(y):
         return None
-    return Curve("Current Bragg fringe fit", x, y, (255, 128, 0), line=True, symbols=False)
+    return Curve(
+        "Current Bragg fringe fit", x, y, FIT_COLOR,
+        line=True, symbols=False, line_style=2,
+    )
 
 
 def _metric_worksheet(
@@ -296,7 +303,7 @@ def _transfer_function_worksheets(
             if (curve := _transfer_phase_curve(ordered_rows, phase_deg, "s2"))
         ]
         quadrature = _transfer_curve(
-            ordered_rows, "interferometer_phase_s2", "Quadrature sum", (25, 135, 84)
+            ordered_rows, "interferometer_phase_s2", "Quadrature sum", COLORS[2]
         )
         if quadrature:
             s2_curves.append(quadrature)
@@ -377,11 +384,14 @@ def _differential_worksheets(
     worksheets = []
     for aggregation, aggregate, title_suffix in (("shots", False, "Every Shot"), ("average", True, "Average")):
         x, y = _differential_points(rows, aggregate, source)
-        curves = [Curve("Measured pairs", x, y, (13, 110, 253), line=False, symbols=True)] if x else []
+        curves = [Curve("Measured pairs", x, y, COLORS[0], line=False, symbols=True)] if x else []
         if include_fits:
             fit = _matching_ellipse_fit(fits, slave_id, aggregation, source)
             if fit:
-                curves.append(Curve("Ellipse fit", fit.get("fit_x") or [], fit.get("fit_y") or [], (220, 53, 69), True, False))
+                curves.append(Curve(
+                    "Ellipse fit", fit.get("fit_x") or [], fit.get("fit_y") or [],
+                    FIT_COLOR, True, False, line_style=2,
+                ))
         if curves:
             name = f"Differential - {title_suffix}"
             worksheets.append(Worksheet(name, [Plot(

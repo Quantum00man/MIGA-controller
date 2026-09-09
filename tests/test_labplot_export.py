@@ -141,6 +141,55 @@ class LabPlotExportTests(unittest.TestCase):
         self.assertIn("Archive fringe fit", intf_curves)
         self.assertIn("Current Bragg fringe fit", intf_curves)
 
+    def test_archive_uses_accessible_scientific_publication_theme(self):
+        payload = build_archive_project(
+            FakeLoader(), "2026", "08", "31", "run01", ["intf"],
+        )
+        root = self.parse(payload)
+        plot = next(root.iter("cartesianPlot"))
+        axes = {axis.attrib["name"]: axis for axis in plot.findall("axis")}
+
+        for text_format in root.iter("format"):
+            self.assertEqual(text_format.attrib["fontFamily"], "Arial")
+        for labels in root.iter("labels"):
+            self.assertEqual(labels.attrib["fontFamily"], "Arial")
+            self.assertAlmostEqual(float(labels.attrib["fontPointSize"]), 38.805556, places=5)
+
+        self.assertEqual(axes["x"].find("textLabel/format").attrib["fontPointSize"], "12")
+        self.assertEqual(axes["y"].find("textLabel/format").attrib["fontPointSize"], "12")
+        self.assertEqual(axes["x"].find("textLabel/geometry").attrib["rotationAngle"], "0")
+        self.assertEqual(axes["y"].find("textLabel/geometry").attrib["rotationAngle"], "90")
+        self.assertEqual(axes["x"].find("majorGrid").attrib["style"], "0")
+        self.assertEqual(axes["y"].find("majorGrid").attrib["style"], "1")
+        self.assertTrue(all(grid.attrib["style"] == "0" for grid in root.iter("minorGrid")))
+
+        plot_title = next(label for label in plot.findall("textLabel") if label.attrib["name"].endswith("Title"))
+        self.assertEqual(plot_title.find("geometry").attrib["visible"], "0")
+        legend = plot.find("cartesianPlotLegend/general")
+        self.assertIsNotNone(legend)
+        self.assertEqual(legend.attrib["fontFamily"], "Arial")
+        self.assertAlmostEqual(float(legend.attrib["fontPointSize"]), 35.277778, places=5)
+        legend_geometry = plot.find("cartesianPlotLegend/geometry")
+        self.assertEqual(legend_geometry.attrib["horizontalPosition"], "2")
+        self.assertEqual(legend_geometry.attrib["verticalPosition"], "0")
+
+        data_curve = next(curve for curve in plot.findall("xyCurve") if "FIT" in curve.attrib["name"])
+        self.assertEqual(data_curve.find("lines").attrib["width"], "4.2")
+        self.assertEqual(data_curve.find("symbols").attrib["size"], "18")
+        self.assertEqual(
+            tuple(data_curve.find("lines").attrib[f"color_{channel}"] for channel in ("r", "g", "b")),
+            ("0", "114", "178"),
+        )
+        fit_curve = next(
+            curve for curve in plot.findall("xyCurve")
+            if curve.attrib["name"].lower().endswith("fringe fit")
+        )
+        self.assertEqual(fit_curve.find("lines").attrib["style"], "2")
+        self.assertEqual(
+            tuple(fit_curve.find("lines").attrib[f"color_{channel}"] for channel in ("r", "g", "b")),
+            ("35", "35", "35"),
+        )
+
     def test_sync_archive_exports_all_hosts_and_two_differential_worksheets(self):
         payload = build_archive_project(
             FakeLoader(sync=True), "2026", "08", "31", "run_sync", ["intf"], include_differential=True

@@ -15,6 +15,19 @@ from xml.etree import ElementTree as ET
 
 LABPLOT_VERSION = "2.12.1"
 LABPLOT_XML_VERSION = "16"
+PUBLICATION_FONT = "Arial"
+PLOT_TITLE_POINT_SIZE = "13"
+AXIS_TITLE_POINT_SIZE = "12"
+
+
+def _scene_points(points: float) -> str:
+    """Convert physical points to LabPlot scene units (0.1 mm)."""
+    return f"{points * 25.4 / 72.0 * 10.0:.8g}"
+
+
+AXIS_TICK_POINT_SIZE = _scene_points(11)
+LEGEND_POINT_SIZE = _scene_points(10)
+VALUE_POINT_SIZE = _scene_points(9)
 
 
 @dataclass
@@ -22,9 +35,10 @@ class Curve:
     name: str
     x: Sequence[float]
     y: Sequence[float]
-    color: Tuple[int, int, int] = (13, 110, 253)
+    color: Tuple[int, int, int] = (0, 114, 178)
     line: bool = True
     symbols: bool = True
+    line_style: int = 1
 
 
 @dataclass
@@ -104,22 +118,29 @@ def _background(parent: ET.Element, tag: str = "background", border: bool = Fals
     if border:
         ET.SubElement(element, "border", {
             "borderType": "15", "style": "1", "color_r": "40", "color_g": "40",
-            "color_b": "40", "width": "1.5", "opacity": "1", "borderCornerRadius": "0",
+            "color_b": "40", "width": "2.1", "opacity": "1", "borderCornerRadius": "0",
         })
 
 
-def _label(parent: ET.Element, name: str, text: str, point_size: str = "14") -> None:
+def _label(
+    parent: ET.Element,
+    name: str,
+    text: str,
+    point_size: str = PLOT_TITLE_POINT_SIZE,
+    visible: bool = True,
+    rotation: int = 0,
+) -> None:
     label = _aspect("textLabel", name)
     _comment(label)
     ET.SubElement(label, "geometry", {
         "x": "0", "y": "0", "horizontalPosition": "1", "verticalPosition": "0",
-        "horizontalAlignment": "1", "verticalAlignment": "0", "rotationAngle": "0",
-        "plotRangeIndex": "0", "visible": "1", "coordinateBinding": "0",
+        "horizontalAlignment": "1", "verticalAlignment": "0", "rotationAngle": str(rotation),
+        "plotRangeIndex": "0", "visible": "1" if visible else "0", "coordinateBinding": "0",
         "logicalPosX": "0", "logicalPosY": "0", "locked": "0",
     })
     ET.SubElement(label, "text").text = text
     ET.SubElement(label, "format", {
-        "placeholder": "0", "mode": "0", "fontFamily": "Noto Sans", "fontSize": "-1",
+        "placeholder": "0", "mode": "0", "fontFamily": PUBLICATION_FONT, "fontSize": "-1",
         "fontPointSize": point_size, "fontWeight": "50", "fontItalic": "0",
         "fontColor_r": "30", "fontColor_g": "30", "fontColor_b": "30",
         "backgroundColor_r": "255", "backgroundColor_g": "255", "backgroundColor_b": "255",
@@ -139,33 +160,36 @@ def _axis(parent: ET.Element, name: str, orientation: int, position: int, title:
         "offset": "0", "logicalPosition": "0", "start": "0", "end": "1",
         "majorTicksStartType": "1", "majorTickStartOffset": "0", "majorTickStartValue": "0",
         "scalingFactor": "1", "zeroOffset": "0", "showScaleOffset": "1",
-        "titleOffsetX": "7", "titleOffsetY": "7", "plotRangeIndex": "0", "visible": "1",
+        "titleOffsetX": "12", "titleOffsetY": "12", "plotRangeIndex": "0", "visible": "1",
     })
-    _label(axis, f"{name} title", title, "11")
+    _label(
+        axis, f"{name} title", title, AXIS_TITLE_POINT_SIZE,
+        rotation=90 if orientation == 1 else 0,
+    )
     ET.SubElement(axis, "line", {
-        "style": "1", "color_r": "35", "color_g": "35", "color_b": "35", "width": "1.5",
+        "style": "1", "color_r": "35", "color_g": "35", "color_b": "35", "width": "2.8",
         "opacity": "1", "arrowType": "0", "arrowPosition": "1", "arrowSize": "12",
     })
     ET.SubElement(axis, "majorTicks", {
         "direction": "1", "type": "0", "numberAuto": "1", "number": "6", "increment": "0",
-        "majorTicksColumn": "", "length": "8", "style": "1", "color_r": "35", "color_g": "35",
-        "color_b": "35", "width": "1.2", "opacity": "1",
+        "majorTicksColumn": "", "length": "18", "style": "1", "color_r": "35", "color_g": "35",
+        "color_b": "35", "width": "2.4", "opacity": "1",
     })
     ET.SubElement(axis, "minorTicks", {
         "direction": "1", "type": "0", "numberAuto": "1", "number": "1", "increment": "0",
-        "minorTicksColumn": "", "length": "4", "style": "1", "color_r": "35", "color_g": "35",
-        "color_b": "35", "width": "1", "opacity": "1",
+        "minorTicksColumn": "", "length": "9", "style": "1", "color_r": "35", "color_g": "35",
+        "color_b": "35", "width": "1.8", "opacity": "1",
     })
     ET.SubElement(axis, "labels", {
-        "position": "2", "offset": "8", "rotation": "0", "textType": "0", "labelsTextColumn": "",
+        "position": "2", "offset": "15", "rotation": "0", "textType": "0", "labelsTextColumn": "",
         "format": "0", "formatAuto": "1", "precision": "6", "autoPrecision": "1",
         "dateTimeFormat": "yyyy-MM-dd hh:mm:ss", "color_r": "35", "color_g": "35", "color_b": "35",
-        "fontFamily": "Noto Sans", "fontSize": "-1", "fontPointSize": "10", "fontWeight": "50",
+        "fontFamily": PUBLICATION_FONT, "fontSize": "-1", "fontPointSize": AXIS_TICK_POINT_SIZE, "fontWeight": "50",
         "fontItalic": "0", "prefix": "", "suffix": "", "opacity": "1", "backgroundType": "0",
         "backgroundColor_r": "255", "backgroundColor_g": "255", "backgroundColor_b": "255",
     })
     ET.SubElement(axis, "majorGrid", {
-        "style": "1", "color_r": "220", "color_g": "225", "color_b": "232", "width": "1",
+        "style": "1" if orientation == 1 else "0", "color_r": "218", "color_g": "222", "color_b": "229", "width": "1.6",
         "opacity": "1",
     })
     ET.SubElement(axis, "minorGrid", {
@@ -184,15 +208,15 @@ def _xy_curve(parent: ET.Element, curve: Curve, x_path: str, y_path: str) -> Non
     r, g, b = curve.color
     ET.SubElement(element, "lines", {
         "type": "1" if curve.line else "0", "skipGaps": "0", "increasingXOnly": "0",
-        "interpolationPointsCount": "1", "style": "1", "color_r": str(r), "color_g": str(g),
-        "color_b": str(b), "width": "2.2", "opacity": "1",
+        "interpolationPointsCount": "1", "style": str(curve.line_style), "color_r": str(r), "color_g": str(g),
+        "color_b": str(b), "width": "4.2", "opacity": "1",
     })
     ET.SubElement(element, "dropLines", {
         "type": "0", "style": "1", "color_r": str(r), "color_g": str(g), "color_b": str(b),
         "width": "1", "opacity": "1",
     })
     ET.SubElement(element, "symbols", {
-        "symbolsStyle": "1" if curve.symbols else "0", "opacity": "1", "rotation": "0", "size": "8",
+        "symbolsStyle": "1" if curve.symbols else "0", "opacity": "1", "rotation": "0", "size": "18",
         "brush_style": "1", "brush_color_r": str(r), "brush_color_g": str(g), "brush_color_b": str(b),
         "style": "1", "color_r": str(r), "color_g": str(g), "color_b": str(b), "width": "1",
     })
@@ -200,7 +224,7 @@ def _xy_curve(parent: ET.Element, curve: Curve, x_path: str, y_path: str) -> Non
         "type": "0", "valuesColumn": "", "position": "0", "distance": "8", "rotation": "0",
         "opacity": "1", "numericFormat": "g", "dateTimeFormat": "yyyy-MM-dd", "precision": "6",
         "prefix": "", "suffix": "", "color_r": "0", "color_g": "0", "color_b": "0",
-        "fontFamily": "Noto Sans", "fontSize": "-1", "fontPointSize": "9", "fontWeight": "50",
+        "fontFamily": PUBLICATION_FONT, "fontSize": "-1", "fontPointSize": VALUE_POINT_SIZE, "fontWeight": "50",
         "fontItalic": "0",
     })
     ET.SubElement(element, "filling", {
@@ -212,7 +236,7 @@ def _xy_curve(parent: ET.Element, curve: Curve, x_path: str, y_path: str) -> Non
     ET.SubElement(element, "errorBars", {
         "xErrorType": "0", "xErrorPlusColumn": "", "xErrorMinusColumn": "", "yErrorType": "0",
         "yErrorPlusColumn": "", "yErrorMinusColumn": "", "type": "0", "capSize": "8", "style": "1",
-        "color_r": str(r), "color_g": str(g), "color_b": str(b), "width": "1", "opacity": "1",
+        "color_r": str(r), "color_g": str(g), "color_b": str(b), "width": "3.5", "opacity": "1",
     })
     ET.SubElement(element, "margins", {
         "rugEnabled": "0", "rugOrientation": "2", "rugLength": "8", "rugWidth": "0", "rugOffset": "0",
@@ -225,23 +249,23 @@ def _legend(parent: ET.Element) -> None:
     _comment(legend)
     ET.SubElement(legend, "general", {
         "usePlotColor": "1", "color_r": "35", "color_g": "35", "color_b": "35",
-        "fontFamily": "Noto Sans", "fontSize": "-1", "fontPointSize": "9", "fontWeight": "50",
+        "fontFamily": PUBLICATION_FONT, "fontSize": "-1", "fontPointSize": LEGEND_POINT_SIZE, "fontWeight": "50",
         "fontItalic": "0", "columnMajor": "1", "lineSymbolWidth": "36", "visible": "1",
     })
     ET.SubElement(legend, "geometry", {
-        "x": "0", "y": "0", "horizontalPosition": "1", "verticalPosition": "1",
+        "x": "-18", "y": "18", "horizontalPosition": "2", "verticalPosition": "0",
         "horizontalAlignment": "2", "verticalAlignment": "0", "rotationAngle": "0", "plotRangeIndex": "0",
         "visible": "1", "coordinateBinding": "0", "logicalPosX": "0", "logicalPosY": "0", "locked": "0",
     })
-    _label(legend, "Legend title", "", "9")
+    _label(legend, "Legend title", "", LEGEND_POINT_SIZE)
     _background(legend)
     ET.SubElement(legend, "border", {
-        "style": "1", "color_r": "180", "color_g": "185", "color_b": "190", "width": "1",
+        "style": "1", "color_r": "190", "color_g": "195", "color_b": "202", "width": "1.6",
         "opacity": "1", "borderCornerRadius": "0",
     })
     ET.SubElement(legend, "layout", {
-        "topMargin": "6", "bottomMargin": "6", "leftMargin": "6", "rightMargin": "6",
-        "verticalSpacing": "4", "horizontalSpacing": "8", "columnCount": "1",
+        "topMargin": "10", "bottomMargin": "10", "leftMargin": "10", "rightMargin": "10",
+        "verticalSpacing": "7", "horizontalSpacing": "12", "columnCount": "1",
     })
     parent.append(legend)
 
@@ -255,7 +279,9 @@ def build_project(project_name: str, worksheets: Iterable[Worksheet], comment: s
             for curve in plot.curves:
                 x, y = _finite_pairs(curve.x, curve.y)
                 if x:
-                    curves.append((Curve(curve.name, x, y, curve.color, curve.line, curve.symbols), "", ""))
+                    curves.append((Curve(
+                        curve.name, x, y, curve.color, curve.line, curve.symbols, curve.line_style
+                    ), "", ""))
             plots.append(curves)
         if any(plots):
             prepared.append((worksheet, f"Data - {worksheet.name}", plots))
@@ -293,9 +319,10 @@ def build_project(project_name: str, worksheets: Iterable[Worksheet], comment: s
         sheet = _aspect("worksheet", worksheet.name)
         _comment(sheet)
         plot_count = max(1, len(worksheet.plots))
-        height = 1200 if plot_count == 1 else 1800
+        width = 1800
+        height = 1120 if plot_count == 1 else 1800
         ET.SubElement(sheet, "geometry", {
-            "x": "0", "y": "0", "width": "1600", "height": str(height), "useViewSize": "0", "zoomFit": "0",
+            "x": "0", "y": "0", "width": str(width), "height": str(height), "useViewSize": "0", "zoomFit": "0",
         })
         ET.SubElement(sheet, "layout", {
             "layout": "3", "topMargin": "25", "bottomMargin": "25", "leftMargin": "25", "rightMargin": "25",
@@ -316,7 +343,7 @@ def build_project(project_name: str, worksheets: Iterable[Worksheet], comment: s
                 "style": "1", "color_r": "220", "color_g": "53", "color_b": "69", "width": "1", "opacity": "1",
             })
             ET.SubElement(element, "geometry", {
-                "x": "25", "y": str(25 + index * (plot_height + 24)), "width": "1550",
+                "x": "25", "y": str(25 + index * (plot_height + 24)), "width": str(width - 50),
                 "height": str(plot_height), "visible": "1",
             })
             x_values = [value for curve, _, _ in curves for value in curve.x]
@@ -340,13 +367,13 @@ def build_project(project_name: str, worksheets: Iterable[Worksheet], comment: s
                 "format": "0", "dateTimeFormat": "yyyy-MM-dd hh:mm:ss",
             })
             systems = ET.SubElement(element, "coordinateSystems", {
-                "defaultCoordinateSystem": "0", "horizontalPadding": "90", "verticalPadding": "35",
-                "rightPadding": "30", "bottomPadding": "60", "symmetricPadding": "0", "rangeType": "0",
+                "defaultCoordinateSystem": "0", "horizontalPadding": "155", "verticalPadding": "45",
+                "rightPadding": "55", "bottomPadding": "135", "symmetricPadding": "0", "rangeType": "0",
                 "rangeFirstValues": "1000", "rangeLastValues": "1000", "niceExtend": "1",
             })
             ET.SubElement(systems, "coordinateSystem", {"name": "Default", "xIndex": "0", "yIndex": "0"})
             _background(element, "plotArea", border=True)
-            _label(element, f"{plot.title} - Title", plot.title, "14")
+            _label(element, f"{plot.title} - Title", "", PLOT_TITLE_POINT_SIZE, visible=False)
             _axis(element, "x", 0, 1, plot.x_label)
             _axis(element, "y", 1, 2, plot.y_label)
             for curve, x_path, y_path in curves:
