@@ -141,8 +141,8 @@ class PhaseNoiseAnalyzeTests(unittest.TestCase):
         self.assertIn("/archive/phase-noise/allan", archive)
         self.assertIn("phaseNoiseXAxisScale", archive)
         self.assertIn("phaseNoiseYAxisScale", archive)
-        self.assertIn("phase-noise-square-layout", archive)
-        self.assertIn('v-show="!isPhaseNoiseArchive()" class="card border-0 shadow-sm"', archive)
+        self.assertIn("summary-square-layout", archive)
+        self.assertIn('v-show="!isSquareSummaryArchive()" class="card border-0 shadow-sm"', archive)
 
 
 if __name__ == "__main__":

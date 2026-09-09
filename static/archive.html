@@ -165,23 +165,29 @@
             border-bottom: 1px solid #eee;
         }
 
-        .analysis-card-body.phase-noise-square-layout {
+        .analysis-card-body.summary-square-layout {
             display: flex;
+            flex-direction: column;
+            align-items: center;
             justify-content: center;
+            gap: 12px;
             padding: 12px;
         }
 
-        .analysis-card-body.phase-noise-square-layout #resultsPlotUp {
+        .analysis-card-body.summary-square-layout>#resultsPlotUp,
+        .analysis-card-body.summary-square-layout>#resultsPlotDw,
+        .analysis-card-body.summary-square-layout>#resultsPlotTotal {
             width: min(100%, 760px);
             height: auto !important;
             aspect-ratio: 1 / 1;
-            flex: 0 1 760px;
+            flex: 0 0 auto;
             border-bottom: 0;
         }
 
-        .card.maximized .analysis-card-body.phase-noise-square-layout #resultsPlotUp {
+        .card.maximized .analysis-card-body.summary-square-layout>#resultsPlotUp,
+        .card.maximized .analysis-card-body.summary-square-layout>#resultsPlotDw,
+        .card.maximized .analysis-card-body.summary-square-layout>#resultsPlotTotal {
             width: min(calc(100vw - 24px), calc(100dvh - 150px));
-            flex-basis: min(calc(100vw - 24px), calc(100dvh - 150px));
         }
 
         .analysis-card-body.analysis-3d-layout {
@@ -2294,10 +2300,10 @@
                         </div>
 
                         <div v-show="loadedRunId" class="analysis-card-body"
-                            :class="{'analysis-3d-layout': isThreeDimensionalView(), 'phase-noise-square-layout': isPhaseNoiseArchive()}">
+                            :class="{'analysis-3d-layout': isThreeDimensionalView(), 'summary-square-layout': isSquareSummaryArchive()}">
                             <div id="resultsPlotUp" class="analysis-plot-panel"
                                 :class="{'plot-split-container': !isThreeDimensionalView()}"
-                                :style="{height: isPhaseNoiseArchive() ? 'auto' : getAnalysisPlotHeight('up')}">
+                                :style="{height: isSquareSummaryArchive() ? 'auto' : getAnalysisPlotHeight('up')}">
                             </div>
                             <div id="resultsPlotDw" class="analysis-plot-panel"
                                 :class="{'plot-split-container': showTotalPlot() && !isThreeDimensionalView()}"
@@ -2310,7 +2316,7 @@
                     </div>
                 </div>
 
-                <div v-show="!isPhaseNoiseArchive()" class="card border-0 shadow-sm" :class="{'maximized': maximizedView === 'scope'}">
+                <div v-show="!isSquareSummaryArchive()" class="card border-0 shadow-sm" :class="{'maximized': maximizedView === 'scope'}">
                     <div class="waveform-header card-header bg-light py-2 d-flex justify-content-between align-items-center">
                         <div class="d-flex align-items-center"><i class="bi bi-activity me-2 text-danger"></i><span
                                 class="fw-bold">Selected Waveform</span></div>
@@ -3300,6 +3306,9 @@
                 },
                 isPhaseNoiseArchive() {
                     return String(this.loadedConfig?.mode || "").trim().toLowerCase() === "phase_noise";
+                },
+                isSquareSummaryArchive() {
+                    return this.isPhaseNoiseArchive() || this.isTransferFunctionArchive();
                 },
                 getVisibleTabs() {
                     if (this.isAcStarkArchive()) return this.tabs.filter(tab => ["atoms", "prob"].includes(tab.id));
