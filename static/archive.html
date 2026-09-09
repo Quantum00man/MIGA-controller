@@ -165,6 +165,25 @@
             border-bottom: 1px solid #eee;
         }
 
+        .analysis-card-body.phase-noise-square-layout {
+            display: flex;
+            justify-content: center;
+            padding: 12px;
+        }
+
+        .analysis-card-body.phase-noise-square-layout #resultsPlotUp {
+            width: min(100%, 760px);
+            height: auto !important;
+            aspect-ratio: 1 / 1;
+            flex: 0 1 760px;
+            border-bottom: 0;
+        }
+
+        .card.maximized .analysis-card-body.phase-noise-square-layout #resultsPlotUp {
+            width: min(calc(100vw - 24px), calc(100dvh - 150px));
+            flex-basis: min(calc(100vw - 24px), calc(100dvh - 150px));
+        }
+
         .analysis-card-body.analysis-3d-layout {
             display: flex;
             align-items: stretch;
@@ -2274,10 +2293,11 @@
                             </div>
                         </div>
 
-                        <div v-show="loadedRunId" class="analysis-card-body" :class="{'analysis-3d-layout': isThreeDimensionalView()}">
+                        <div v-show="loadedRunId" class="analysis-card-body"
+                            :class="{'analysis-3d-layout': isThreeDimensionalView(), 'phase-noise-square-layout': isPhaseNoiseArchive()}">
                             <div id="resultsPlotUp" class="analysis-plot-panel"
                                 :class="{'plot-split-container': !isThreeDimensionalView()}"
-                                :style="{height: getAnalysisPlotHeight('up')}">
+                                :style="{height: isPhaseNoiseArchive() ? 'auto' : getAnalysisPlotHeight('up')}">
                             </div>
                             <div id="resultsPlotDw" class="analysis-plot-panel"
                                 :class="{'plot-split-container': showTotalPlot() && !isThreeDimensionalView()}"
@@ -2290,7 +2310,7 @@
                     </div>
                 </div>
 
-                <div class="card border-0 shadow-sm" :class="{'maximized': maximizedView === 'scope'}">
+                <div v-show="!isPhaseNoiseArchive()" class="card border-0 shadow-sm" :class="{'maximized': maximizedView === 'scope'}">
                     <div class="waveform-header card-header bg-light py-2 d-flex justify-content-between align-items-center">
                         <div class="d-flex align-items-center"><i class="bi bi-activity me-2 text-danger"></i><span
                                 class="fw-bold">Selected Waveform</span></div>
