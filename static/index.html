@@ -5039,6 +5039,16 @@ finishScheduledRun(finalStatus = 'IDLE') {
                                 const mean = this.sampleMean(phaseValues);
                                 return mean !== null && phaseAmplitude !== null ? (mean / phaseAmplitude) ** 2 : null;
                             };
+                            const noiseFloorValue = point => {
+                                const values = phases.map(phaseDeg => {
+                                    const phaseValues = point.phaseData?.[Number(phaseDeg).toPrecision(15)]?.[field] || [];
+                                    const std = this.sampleStandardDeviation(phaseValues);
+                                    return std !== null && phaseAmplitude !== null ? (std / phaseAmplitude) ** 2 : null;
+                                });
+                                return values.length && values.every(value => value !== null)
+                                    ? values.reduce((sum, value) => sum + value, 0)
+                                    : null;
+                            };
                             traces = phases.map((phaseDeg, index) => ({
                                 x: points.map(point => point.frequency),
                                 y: points.map(point => componentValue(point, phaseDeg)),
@@ -5062,6 +5072,19 @@ finishScheduledRun(finalStatus = 'IDLE') {
                                     line: { color: '#198754', width: 3 }, marker: { color: '#198754', size: 8, symbol: 'diamond' },
                                     connectgaps: false,
                                     hovertemplate: 'Frequency=%{x:.9g} Hz<br>S² sum=%{y:.6g}<br>n=%{customdata}<extra></extra>'
+                                });
+                            }
+                            if (phases.length > 0) {
+                                traces.push({
+                                    x: points.map(point => point.frequency),
+                                    y: points.map(point => noiseFloorValue(point)),
+                                    customdata: points.map(point => phases.map(phaseDeg => (
+                                        point.phaseData?.[Number(phaseDeg).toPrecision(15)]?.[field] || []
+                                    ).length).join('/')),
+                                    type: 'scatter', mode: 'lines', name: 'S² phase-noise floor',
+                                    line: { color: '#343a40', width: 2.4, dash: 'dash' },
+                                    connectgaps: false,
+                                    hovertemplate: 'Frequency=%{x:.9g} Hz<br>S² noise floor=%{y:.6g}<br>n=%{customdata}<extra></extra>'
                                 });
                             }
                         } else {

@@ -94,6 +94,7 @@ def transfer_summary():
                 "mean_rad": factor * index / 10,
                 "std_rad": factor * index / 100,
                 "s2": factor * index,
+                "noise_s2": factor * index / 1000,
             }
             row["interferometer_phase_s2_components"].append(component)
             for source, source_factor in (("fit", 1.0), ("nofit", 100.0)):
@@ -105,6 +106,7 @@ def transfer_summary():
                     base = f"intf_{channel}_{source}_{phase_label}"
                     row[f"{base}_mean"] = source_factor * channel_factor * factor * index
                     row[f"{base}_std"] = source_factor * channel_factor * factor * index / 10
+        row["interferometer_phase_noise_s2"] = index / 1000
         rows.append(row)
     return rows
 
@@ -241,7 +243,13 @@ class LabPlotExportTests(unittest.TestCase):
             "Transfer Function S2",
         })
         s2_curves = [item.attrib["name"] for item in worksheets["Transfer Function S2"].iter("xyCurve")]
-        self.assertEqual(s2_curves, ["0 deg", "90 deg", "Quadrature sum"])
+        self.assertEqual(s2_curves, ["0 deg", "90 deg", "Quadrature sum", "Phase-noise floor"])
+        noise_curve = next(
+            item for item in worksheets["Transfer Function S2"].iter("xyCurve")
+            if item.attrib["name"] == "Phase-noise floor"
+        )
+        self.assertEqual(noise_curve.find("lines").attrib["style"], "2")
+        self.assertEqual(noise_curve.find("symbols").attrib["symbolsStyle"], "0")
         spreadsheet = next(
             item for item in root.iter("spreadsheet")
             if item.attrib["name"] == "Data - Transfer Function S2"

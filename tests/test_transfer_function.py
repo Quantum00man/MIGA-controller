@@ -242,6 +242,8 @@ class TransferFunctionStatisticsTests(unittest.TestCase):
         self.assertIn("setTransferFunctionYAxisScale('log')", archive_html)
         self.assertIn("`interferometer_phase_${statistic}`", archive_html)
         self.assertIn("S² quadrature sum", archive_html)
+        self.assertIn("S² phase-noise floor", archive_html)
+        self.assertIn("row.interferometer_phase_noise_s2", archive_html)
         self.assertIn("`${fieldBase}_${phaseLabel}_${statistic}`", archive_html)
         self.assertIn("`${labels[index]} ${statisticLabel} at ${phaseDeg}°`", archive_html)
         self.assertIn("transferFunctionStatistic: 'std'", index_html)
@@ -250,6 +252,8 @@ class TransferFunctionStatisticsTests(unittest.TestCase):
         self.assertIn("setTransferFunctionYAxisScale('log')", index_html)
         self.assertIn("transferBraggPhaseAmplitudeRad()", index_html)
         self.assertIn("S² quadrature sum", index_html)
+        self.assertIn("S² phase-noise floor", index_html)
+        self.assertIn("this.sampleStandardDeviation(phaseValues)", index_html)
         self.assertIn("`${channel} ${statisticLabel} at ${phaseDeg}°`", index_html)
         self.assertIn('v-model="config.transfer_phase_degrees"', index_html)
         self.assertIn('id="transferPhase0"', index_html)
@@ -267,6 +271,7 @@ class TransferFunctionStatisticsTests(unittest.TestCase):
         self.assertIn("['S2_0deg', 'interferometer_phase_0deg_s2']", archive_html)
         self.assertIn("['S2_90deg', 'interferometer_phase_90deg_s2']", archive_html)
         self.assertIn("['S2_Quadrature_Sum', 'interferometer_phase_s2']", archive_html)
+        self.assertIn("['S2_Phase_Noise_Floor', 'interferometer_phase_noise_s2']", archive_html)
         self.assertIn("v-model.number=\"analysis.transfer_frequency_modulation_mhz\"", archive_html)
         self.assertIn("v-model.number=\"analysis.transfer_atom_mirror_distance_m\"", archive_html)
         self.assertIn("['Atom_Mirror_Distance_M', 'atom_mirror_distance_m']", archive_html)
@@ -372,6 +377,12 @@ class TransferFunctionStatisticsTests(unittest.TestCase):
         self.assertAlmostEqual(summary[0]["interferometer_phase_s2"], components[0]["s2"] + components[1]["s2"])
         self.assertAlmostEqual(summary[0]["interferometer_phase_0deg_s2"], components[0]["s2"])
         self.assertAlmostEqual(summary[0]["interferometer_phase_90deg_s2"], components[1]["s2"])
+        self.assertAlmostEqual(components[0]["noise_s2"], 0.005 / phase_amplitude ** 2)
+        self.assertAlmostEqual(components[1]["noise_s2"], 0.02 / phase_amplitude ** 2)
+        self.assertAlmostEqual(
+            summary[0]["interferometer_phase_noise_s2"],
+            components[0]["noise_s2"] + components[1]["noise_s2"],
+        )
 
     def test_summary_contains_per_phase_statistics_for_each_plotted_metric(self):
         rows = [
@@ -451,6 +462,9 @@ class TransferFunctionStatisticsTests(unittest.TestCase):
         self.assertIn("interferometer_phase_0deg_s2", row)
         self.assertIn("interferometer_phase_90deg_s2", row)
         self.assertIn("interferometer_phase_s2", row)
+        self.assertIn("interferometer_phase_0deg_noise_s2", row)
+        self.assertIn("interferometer_phase_90deg_noise_s2", row)
+        self.assertIn("interferometer_phase_noise_s2", row)
         self.assertNotIn("interferometer_phase_s2_components", row)
 
     def test_archive_overwrite_persists_transfer_normalization_and_summary(self):

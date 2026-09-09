@@ -7759,11 +7759,14 @@
                         ['Phase_0deg_Mean_Rad', 'interferometer_phase_0deg_mean_rad'],
                         ['Phase_0deg_Std_Rad', 'interferometer_phase_0deg_std_rad'],
                         ['S2_0deg', 'interferometer_phase_0deg_s2'],
+                        ['S2_Noise_0deg', 'interferometer_phase_0deg_noise_s2'],
                         ['Phase_90deg_Count', 'interferometer_phase_90deg_count'],
                         ['Phase_90deg_Mean_Rad', 'interferometer_phase_90deg_mean_rad'],
                         ['Phase_90deg_Std_Rad', 'interferometer_phase_90deg_std_rad'],
                         ['S2_90deg', 'interferometer_phase_90deg_s2'],
+                        ['S2_Noise_90deg', 'interferometer_phase_90deg_noise_s2'],
                         ['S2_Quadrature_Sum', 'interferometer_phase_s2'],
+                        ['S2_Phase_Noise_Floor', 'interferometer_phase_noise_s2'],
                     ];
                     const csvRows = [
                         columns.map(([label]) => this.csvCell(label)).join(','),
@@ -8358,6 +8361,19 @@
                                     line: { color: colors[2], width: 3 }, marker: { color: colors[2], size: 8, symbol: 'diamond' },
                                     connectgaps: false,
                                     hovertemplate: 'Frequency=%{x:.9g} Hz<br>S² sum=%{y:.6g}<br>n=%{text}<extra></extra>'
+                                });
+                            }
+                            const noiseFloorValues = rows.map(row => numericOrNull(row.interferometer_phase_noise_s2));
+                            if (noiseFloorValues.some(value => value !== null)) {
+                                traces.push({
+                                    x: rows.map(row => Number(row.frequency_hz)),
+                                    y: noiseFloorValues,
+                                    customdata: rows.map(row => this.getHistoryKey([Number(row.frequency_hz)])),
+                                    text: rows.map(row => configuredPhases.map(phaseDeg => Number(componentFor(row, phaseDeg)?.count || 0)).join('/')),
+                                    type: 'scatter', mode: 'lines', name: 'S² phase-noise floor',
+                                    line: { color: '#343a40', width: 2.4, dash: 'dash' },
+                                    connectgaps: false,
+                                    hovertemplate: 'Frequency=%{x:.9g} Hz<br>S² noise floor=%{y:.6g}<br>n=%{text}<extra></extra>'
                                 });
                             }
                         } else if (configuredPhases.length > 0) {

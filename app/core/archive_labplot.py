@@ -169,6 +169,9 @@ def _transfer_curve(
     field: str,
     label: str,
     color: Tuple[int, int, int],
+    *,
+    symbols: bool = True,
+    line_style: int = 1,
 ) -> Optional[Curve]:
     x_values: List[float] = []
     y_values: List[float] = []
@@ -178,7 +181,10 @@ def _transfer_curve(
         if x is not None and y is not None:
             x_values.append(x)
             y_values.append(y)
-    return Curve(label, x_values, y_values, color) if x_values else None
+    return Curve(
+        label, x_values, y_values, color,
+        symbols=symbols, line_style=line_style,
+    ) if x_values else None
 
 
 def _transfer_phase_curve(
@@ -307,6 +313,16 @@ def _transfer_function_worksheets(
         )
         if quadrature:
             s2_curves.append(quadrature)
+        noise_floor = _transfer_curve(
+            ordered_rows,
+            "interferometer_phase_noise_s2",
+            "Phase-noise floor",
+            FIT_COLOR,
+            symbols=False,
+            line_style=2,
+        )
+        if noise_floor:
+            s2_curves.append(noise_floor)
         worksheets.append(Worksheet(
             "Transfer Function S2",
             [Plot("Transfer Function S2", x_label, "S2 (dimensionless)", s2_curves)],
