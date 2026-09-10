@@ -635,7 +635,7 @@
                                 v-model.number="s.tti_timeout_s">
                         </div>
                         <div class="col-12 d-flex align-items-center gap-3 flex-wrap">
-                            <button type="button" class="btn btn-outline-primary" @click="testTtiConnection" :disabled="ttiTesting || ttiFrequencyTesting || ttiPhaseTesting">
+                            <button type="button" class="btn btn-outline-primary" @click="testTtiConnection" :disabled="ttiTesting || ttiFrequencyTesting || ttiPhaseTesting || ttiOutputTesting">
                                 <span v-if="ttiTesting" class="spinner-border spinner-border-sm me-2"></span>
                                 {{ ttiTesting ? 'Testing...' : 'Test Connection' }}
                             </button>
@@ -655,7 +655,7 @@
                                 </div>
                                 <div class="col-md-6 d-grid">
                                     <button type="button" class="btn btn-outline-warning" @click="setTtiTestFrequency"
-                                        :disabled="ttiTesting || ttiFrequencyTesting || ttiPhaseTesting">
+                                        :disabled="ttiTesting || ttiFrequencyTesting || ttiPhaseTesting || ttiOutputTesting">
                                         <span v-if="ttiFrequencyTesting" class="spinner-border spinner-border-sm me-2"></span>
                                         {{ ttiFrequencyTesting ? 'Setting frequency...' : 'Set Test Frequency' }}
                                     </button>
@@ -680,7 +680,7 @@
                                 </div>
                                 <div class="col-md-6 d-grid">
                                     <button type="button" class="btn btn-outline-warning" @click="setTtiTestPhase"
-                                        :disabled="ttiTesting || ttiFrequencyTesting || ttiPhaseTesting">
+                                        :disabled="ttiTesting || ttiFrequencyTesting || ttiPhaseTesting || ttiOutputTesting">
                                         <span v-if="ttiPhaseTesting" class="spinner-border spinner-border-sm me-2"></span>
                                         {{ ttiPhaseTesting ? 'Setting phase...' : 'Set Test Phase' }}
                                     </button>
@@ -693,10 +693,35 @@
                                 </div>
                             </div>
                         </div>
+                        <div class="col-12 mt-4 pt-3 border-top">
+                            <label class="form-label fw-bold">Test {{ s.tti_channel === 2 ? 'CH2' : 'CH1' }} OUTPUT</label>
+                            <div class="row g-2 align-items-center">
+                                <div class="col-md-6 d-grid">
+                                    <button type="button" class="btn btn-outline-success" @click="setTtiTestOutput(true)"
+                                        :disabled="ttiTesting || ttiFrequencyTesting || ttiPhaseTesting || ttiOutputTesting">
+                                        <span v-if="ttiOutputTesting && ttiOutputTarget" class="spinner-border spinner-border-sm me-2"></span>
+                                        OUTPUT ON
+                                    </button>
+                                </div>
+                                <div class="col-md-6 d-grid">
+                                    <button type="button" class="btn btn-outline-danger" @click="setTtiTestOutput(false)"
+                                        :disabled="ttiTesting || ttiFrequencyTesting || ttiPhaseTesting || ttiOutputTesting">
+                                        <span v-if="ttiOutputTesting && !ttiOutputTarget" class="spinner-border spinner-border-sm me-2"></span>
+                                        OUTPUT OFF
+                                    </button>
+                                </div>
+                                <div class="col-12">
+                                    <div class="form-text">This immediately changes the selected channel output and leaves it in the requested state.</div>
+                                    <div v-if="ttiOutputMessage" class="small mt-2" :class="ttiOutputError ? 'text-danger' : 'text-success'">
+                                        {{ ttiOutputMessage }}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                     <div class="alert alert-light border mt-4 mb-0 small">
-                        Transfer Function scans select the configured channel and change its carrier frequency and phase. Waveform,
-                        amplitude and output state are left unchanged.
+                        Transfer Function scans select the configured channel and change its carrier frequency and phase. Waveform
+                        and amplitude are left unchanged. OUTPUT is left unchanged unless scan-level OUTPUT control is enabled.
                     </div>
                 </div>
 
@@ -1659,6 +1684,7 @@
                     ttiTesting: false, ttiTestMessage: '', ttiTestError: false,
                     ttiTestFrequencyHz: 1000, ttiFrequencyTesting: false, ttiFrequencyMessage: '', ttiFrequencyError: false,
                     ttiTestPhaseDeg: 0, ttiPhaseTesting: false, ttiPhaseMessage: '', ttiPhaseError: false,
+                    ttiOutputTesting: false, ttiOutputTarget: false, ttiOutputMessage: '', ttiOutputError: false,
                     markerBusy: false,
                     markerError: '',
                     markerMessage: '',
@@ -2723,6 +2749,32 @@
                         this.ttiPhaseMessage = error.response?.data?.detail || error.message || 'Phase command failed';
                     } finally {
                         this.ttiPhaseTesting = false;
+                    }
+                },
+                async setTtiTestOutput(enabled) {
+                    this.ttiOutputTesting = true;
+                    this.ttiOutputTarget = enabled === true;
+                    this.ttiOutputMessage = '';
+                    this.ttiOutputError = false;
+                    try {
+                        const res = await axios.post('/settings/tti/test-output', {
+                            host: String(this.s.tti_host || '').trim(),
+                            port: Number(this.s.tti_port || 9221),
+                            timeout_s: Number(this.s.tti_timeout_s || 3),
+                            model: String(this.s.tti_model || 'TG5012A'),
+                            channel: Number(this.s.tti_channel || 1),
+                            enabled: this.ttiOutputTarget
+                        });
+                        const model = String(res.data?.data?.model || this.s.tti_model || 'TTI');
+                        const channel = Number(res.data?.data?.channel || this.s.tti_channel || 1);
+                        const state = res.data?.data?.output_enabled === true ? 'ON' : 'OFF';
+                        const action = model === 'TGF3162' ? 'accepted' : 'confirmed';
+                        this.ttiOutputMessage = `${model} CH${channel} OUTPUT ${state} ${action}.`;
+                    } catch (error) {
+                        this.ttiOutputError = true;
+                        this.ttiOutputMessage = error.response?.data?.detail || error.message || 'OUTPUT command failed';
+                    } finally {
+                        this.ttiOutputTesting = false;
                     }
                 },
                 async fetchSettings() {

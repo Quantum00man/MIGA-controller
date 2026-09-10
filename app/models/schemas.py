@@ -89,6 +89,8 @@ class ScanConfig(BaseModel):
     transfer_repeats: int = Field(10, ge=2, le=100000)
     transfer_settling_time_s: float = Field(5.0, ge=0.0, le=3600.0)
     transfer_phase_degrees: List[float] = Field(default_factory=lambda: [0.0, 90.0])
+    transfer_phase_scan_mode: str = Field("phase_blocks")
+    transfer_control_output: bool = Field(False)
     parameter_source: str = Field("classic")
     marker_axes: List[str] = Field(default_factory=list)
     interferometer_phase_calibration_override: Optional[Dict[str, Any]] = Field(None)
@@ -118,6 +120,15 @@ class ScanConfig(BaseModel):
         if any(item not in {0.0, 90.0} for item in phases) or len(set(phases)) != len(phases):
             raise ValueError("Transfer Function phases must be unique selections from 0 and 90 degrees")
         return sorted(phases)
+
+    @validator("transfer_phase_scan_mode")
+    def validate_transfer_phase_scan_mode(cls, value):
+        normalized = str(value or "phase_blocks").strip().lower()
+        if normalized not in {"phase_blocks", "frequency_interleaved"}:
+            raise ValueError(
+                "Transfer Function phase scan mode must be phase_blocks or frequency_interleaved"
+            )
+        return normalized
 
     @validator("ac_stark_raman_group")
     def normalize_ac_stark_raman_group(cls, value):
@@ -585,6 +596,10 @@ class TtiPhaseTestRequest(TtiConnectionTestRequest):
         if numeric < -360.0 or numeric > 360.0:
             raise ValueError("TTI test phase must be between -360 and 360 degrees")
         return numeric
+
+
+class TtiOutputTestRequest(TtiConnectionTestRequest):
+    enabled: bool
 
 
 class SyncSlaveRunConfig(BaseModel):

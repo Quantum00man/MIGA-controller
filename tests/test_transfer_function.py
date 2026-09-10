@@ -1,9 +1,11 @@
 import unittest
 import csv
 import json
+import queue
 import tempfile
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, call, patch
 
 from app.analysis.transfer_function import bragg_phase_modulation_rad, build_transfer_function_summary
 from app.core.experiment_manager import ExperimentManager
@@ -11,6 +13,7 @@ from app.core.data_manager import DataManager, RESULTS_CSV_HEADER
 from app.core.data_loader import DataLoader
 from app.drivers.tti_generator import (
     set_tti_test_frequency,
+    set_tti_test_output,
     set_tti_test_phase,
     TtiConnectionSettings,
     TtiGeneratorClient,
@@ -107,6 +110,21 @@ class TtiGeneratorClientTests(unittest.TestCase):
                 client.set_phase(0)
         self.assertEqual(fake.sent, ["*IDN?\n", "CHN 1;PHASE 0\n"])
 
+    def test_settings_output_action_confirms_tg5012a_selected_channel(self):
+        fake = FakeSocket(["TTi,TG5012A,1234,1.00", "1"])
+        settings = TtiConnectionSettings("192.168.1.8", model="TG5012A", channel=2)
+        with patch("app.drivers.tti_generator.socket.create_connection", return_value=fake):
+            identity = set_tti_test_output(settings, True)
+        self.assertIn("TG5012A", identity)
+        self.assertEqual(fake.sent, ["*IDN?\n", "CHN 2;OUTPUT ON;*OPC?\n"])
+
+    def test_tgf3162_output_command_is_fire_and_forget(self):
+        fake = FakeSocket(["THURLBY THANDAR,TGF3162,1234,1.03"])
+        settings = TtiConnectionSettings("192.168.1.9", model="TGF3162", channel=1)
+        with patch("app.drivers.tti_generator.socket.create_connection", return_value=fake):
+            set_tti_test_output(settings, False)
+        self.assertEqual(fake.sent, ["*IDN?\n", "CHN 1;OUTPUT OFF\n"])
+
 
 class TransferFunctionPlanTests(unittest.TestCase):
     def test_frontend_does_not_treat_null_frequency_as_transfer_function_point(self):
@@ -159,6 +177,8 @@ class TransferFunctionPlanTests(unittest.TestCase):
         self.assertEqual(config["transfer_atom_mirror_distance_m"], 2.23)
         self.assertEqual(config["transfer_phase_noise_sigma_mrad"], 100.0)
         self.assertEqual(config["transfer_phase_degrees"], [0.0, 90.0])
+        self.assertEqual(config["transfer_phase_scan_mode"], "phase_blocks")
+        self.assertFalse(config["transfer_control_output"])
         self.assertTrue(all(
             point["metadata"]["transfer_frequency_modulation_mhz"] == 1.0
             for point in plan
@@ -202,6 +222,75 @@ class TransferFunctionPlanTests(unittest.TestCase):
         plan = self.manager._build_transfer_function_execution(config)
         self.assertEqual(len(plan), 4)
         self.assertTrue(all(point["metadata"]["transfer_phase_deg"] == 90.0 for point in plan))
+
+    def test_plan_can_interleave_phases_at_each_frequency(self):
+        config = {
+            "scan_dimensions": 1,
+            "parameter_source": "classic",
+            "randomize": False,
+            "transfer_frequency_start_hz": 100,
+            "transfer_frequency_stop_hz": 200,
+            "transfer_frequency_step_hz": 100,
+            "transfer_repeats": 2,
+            "transfer_phase_degrees": [0, 90],
+            "transfer_phase_scan_mode": "frequency_interleaved",
+            "transfer_control_output": True,
+        }
+        plan = self.manager._build_transfer_function_execution(config)
+        self.assertEqual(
+            [point["metadata"]["transfer_frequency_hz"] for point in plan],
+            [100.0] * 4 + [200.0] * 4,
+        )
+        self.assertEqual(
+            [point["metadata"]["transfer_phase_deg"] for point in plan],
+            [0.0, 0.0, 90.0, 90.0] * 2,
+        )
+        self.assertTrue(all(point["metadata"]["transfer_control_output"] for point in plan))
+
+    def test_invalid_phase_scan_mode_is_rejected(self):
+        config = {
+            "scan_dimensions": 1,
+            "parameter_source": "classic",
+            "randomize": False,
+            "transfer_frequency_start_hz": 100,
+            "transfer_frequency_stop_hz": 100,
+            "transfer_frequency_step_hz": 100,
+            "transfer_repeats": 2,
+            "transfer_phase_scan_mode": "unknown",
+        }
+        with self.assertRaisesRegex(ValueError, "phase scan mode"):
+            self.manager._build_transfer_function_execution(config)
+
+    def test_acquisition_controls_output_once_and_cleans_up_after_error(self):
+        manager = ExperimentManager.__new__(ExperimentManager)
+        manager.settings = {"tti_host": "192.168.1.8", "tti_port": 9221, "tti_timeout_s": 3}
+        manager.stop_flag = False
+        manager.status = SimpleNamespace(message="")
+        manager.data_queue = queue.Queue()
+        manager._scan_finalize_error = None
+        manager._restore_ac_stark_dds = lambda _context: None
+        manager.execute_single_measurement = Mock(side_effect=RuntimeError("measurement failed"))
+        client = Mock()
+        client.connect.return_value = "TTi,TG5012A,1234,1.00"
+        parameters = [{
+            "sequence_parameters": [],
+            "metadata": {"transfer_frequency_hz": 100.0, "transfer_phase_deg": 0.0},
+        }]
+        scan_config = {
+            "mode": "transfer_function",
+            "scan_dimensions": 1,
+            "transfer_generator_model": "TG5012A",
+            "transfer_generator_channel": 1,
+            "transfer_control_output": True,
+            "transfer_settling_time_s": 0,
+        }
+        with patch("app.core.experiment_manager.config.USE_SIMULATION", False), \
+                patch("app.core.experiment_manager.TtiGeneratorClient", return_value=client):
+            manager._acquisition_loop(parameters, scan_config)
+
+        self.assertEqual(client.set_output.call_args_list, [call(True), call(False)])
+        client.close.assert_called_once_with()
+        self.assertIn("measurement failed", manager._scan_finalize_error)
 
 
 class TransferFunctionStatisticsTests(unittest.TestCase):
@@ -270,6 +359,15 @@ class TransferFunctionStatisticsTests(unittest.TestCase):
         self.assertIn('v-model="config.transfer_phase_degrees"', index_html)
         self.assertIn('id="transferPhase0"', index_html)
         self.assertIn('id="transferPhase90"', index_html)
+        self.assertIn('v-model="config.transfer_phase_scan_mode"', index_html)
+        self.assertIn('v-model="config.transfer_control_output"', index_html)
+
+        settings_html = (
+            Path(__file__).resolve().parents[1] / "static" / "settings.html"
+        ).read_text(encoding="utf-8")
+        self.assertIn("setTtiTestOutput(true)", settings_html)
+        self.assertIn("setTtiTestOutput(false)", settings_html)
+        self.assertIn("/settings/tti/test-output", settings_html)
 
     def test_archive_csv_uses_transfer_function_frequency_summary(self):
         archive_html = (

@@ -1,4 +1,4 @@
-"""Minimal Aim-TTi TG5012A/TGF3162 frequency and phase control over raw LAN."""
+"""Minimal Aim-TTi TG5012A/TGF3162 frequency, phase and output control over raw LAN."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ class TtiConnectionSettings:
 
 
 class TtiGeneratorClient:
-    """Serialized socket client for the selected carrier frequency and phase."""
+    """Serialized socket client for the selected channel settings."""
 
     def __init__(self, settings: TtiConnectionSettings):
         self.settings = settings
@@ -168,6 +168,23 @@ class TtiGeneratorClient:
                 )
         return value
 
+    def set_output(self, enabled: bool) -> bool:
+        channel = int(self.settings.channel)
+        if channel not in (1, 2):
+            raise TtiGeneratorError("TTI channel must be 1 or 2")
+        model = str(self.settings.model or "TG5012A").strip().upper()
+        value = bool(enabled)
+        command = f"CHN {channel};OUTPUT {'ON' if value else 'OFF'}"
+        if model == "TGF3162":
+            self.write(command)
+        else:
+            response = self.query(f"{command};*OPC?")
+            if response.strip() != "1":
+                raise TtiGeneratorError(
+                    f"{model} did not confirm the output command (reply: {response!r})"
+                )
+        return value
+
 
 def test_tti_connection(settings: TtiConnectionSettings) -> str:
     with TtiGeneratorClient(settings) as client:
@@ -185,4 +202,11 @@ def set_tti_test_phase(settings: TtiConnectionSettings, phase_degrees: float) ->
     """Connect, verify the model, and set only the selected channel phase."""
     with TtiGeneratorClient(settings) as client:
         client.set_phase(phase_degrees)
+        return client.identity
+
+
+def set_tti_test_output(settings: TtiConnectionSettings, enabled: bool) -> str:
+    """Connect, verify the model, and set only the selected channel output state."""
+    with TtiGeneratorClient(settings) as client:
+        client.set_output(enabled)
         return client.identity

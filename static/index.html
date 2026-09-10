@@ -1037,7 +1037,9 @@
                     </div>
                     <div v-if="config.mode === 'transfer_function'" class="mt-1">
                         <div class="alert alert-light border py-2 px-3 small mb-3">
-                            Live 1D quadrature scan. Completes the full frequency sweep at the first TTI phase, then repeats it at the orthogonal phase.
+                            Live 1D quadrature scan. {{ config.transfer_phase_scan_mode === 'frequency_interleaved'
+                                ? 'Measures every selected phase at each frequency before advancing.'
+                                : 'Completes the full frequency sweep at one phase before starting the next.' }}
                         </div>
                         <div class="row g-2">
                             <div class="col-4">
@@ -1064,7 +1066,7 @@
                                 </div>
                             </div>
                         </div>
-                        <div class="form-text mt-2">Runs one complete frequency scan at each configured quadrature phase. Statistics are updated after every shot.</div>
+                        <div class="form-text mt-2">The phase scan order is selected under Execution Control. Statistics are updated after every shot.</div>
                     </div>
                     <div v-if="['timing', 'rabi'].includes(config.mode)">
                         <label class="form-label small text-muted mb-1">Total Parameter</label>
@@ -1432,7 +1434,25 @@
                                     :disabled="config.transfer_phase_degrees.length === 1 && config.transfer_phase_degrees.includes(90)">
                                 <label class="form-check-label fw-bold" for="transferPhase90">90°</label>
                             </div>
-                            <span class="small text-muted">Each selected phase runs a complete frequency scan; both are required for the quadrature sum.</span>
+                            <span class="small text-muted">Both phases are required for the quadrature sum.</span>
+                        </div>
+                        <div class="row g-2 mt-1">
+                            <div class="col-md-7">
+                                <label class="form-label small text-muted mb-1" for="transferPhaseScanMode">Phase scan order</label>
+                                <select id="transferPhaseScanMode" class="form-select form-select-sm"
+                                    v-model="config.transfer_phase_scan_mode">
+                                    <option value="phase_blocks">Complete one phase scan, then the next</option>
+                                    <option value="frequency_interleaved">Alternate phases at each frequency</option>
+                                </select>
+                            </div>
+                            <div class="col-md-5 d-flex align-items-end">
+                                <div class="form-check border rounded px-3 py-2 w-100 bg-white">
+                                    <input id="transferControlOutput" class="form-check-input ms-0 me-2" type="checkbox"
+                                        v-model="config.transfer_control_output">
+                                    <label class="form-check-label small fw-bold" for="transferControlOutput">Control TTI OUTPUT during scan</label>
+                                </div>
+                            </div>
+                            <div class="col-12 form-text mt-1">When enabled, OUTPUT is turned ON once at scan start and is turned OFF when the scan finishes, stops, or fails.</div>
                         </div>
                     </div>
                     <div class="mb-3 px-1">
@@ -1704,6 +1724,8 @@
                         transfer_repeats: 10,
                         transfer_settling_time_s: 5,
                         transfer_phase_degrees: [0, 90],
+                        transfer_phase_scan_mode: 'phase_blocks',
+                        transfer_control_output: false,
                         phase_noise_mid_fringe_values: [], phase_noise_repeats: 10
                     },
                     isRunning: false, isSimulation: false, statusMessage: "IDLE", currentStep: 0, plotRevision: 0, logs: [], ws: null,
@@ -3602,6 +3624,9 @@ loadScheduledTaskIntoEditor(taskId) {
                             this.config.transfer_phase_degrees = restoredTransferPhases.length
                                 ? [...new Set(restoredTransferPhases)].sort((a, b) => a - b)
                                 : [0, 90];
+                            this.config.transfer_phase_scan_mode = ['phase_blocks', 'frequency_interleaved'].includes(this.config.transfer_phase_scan_mode)
+                                ? this.config.transfer_phase_scan_mode : 'phase_blocks';
+                            this.config.transfer_control_output = this.config.transfer_control_output === true;
     this.config.scan_dimensions = this.resolveScanDimensionsFromConfig(this.config);
     this.config.dim2_enabled = this.config.scan_dimensions >= 2;
     this.config.dim3_enabled = this.config.scan_dimensions >= 3;
@@ -4010,6 +4035,9 @@ finishScheduledRun(finalStatus = 'IDLE') {
                             : [];
                         if (!phases.length) throw new Error('Select at least one TTI phase: 0° or 90°.');
                         payload.transfer_phase_degrees = phases;
+                        payload.transfer_phase_scan_mode = ['phase_blocks', 'frequency_interleaved'].includes(payload.transfer_phase_scan_mode)
+                            ? payload.transfer_phase_scan_mode : 'phase_blocks';
+                        payload.transfer_control_output = payload.transfer_control_output === true;
                         payload.transfer_settling_time_s = 5;
                         payload.scan_dimensions = 1;
                         payload.dim2_enabled = false;

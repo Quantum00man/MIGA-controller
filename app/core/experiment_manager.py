@@ -1241,6 +1241,14 @@ class ExperimentManager:
         ):
             raise ValueError("Select at least one Transfer Function phase from 0 and 90 degrees")
         phase_degrees = sorted(set(phase_degrees))
+        phase_scan_mode = str(
+            scan_config.get("transfer_phase_scan_mode") or "phase_blocks"
+        ).strip().lower()
+        if phase_scan_mode not in {"phase_blocks", "frequency_interleaved"}:
+            raise ValueError(
+                "Transfer Function phase scan mode must be phase_blocks or frequency_interleaved"
+            )
+        control_output = bool(scan_config.get("transfer_control_output", False))
 
         direction = 1.0 if stop >= start else -1.0
         effective_step = abs(step) * direction
@@ -1257,27 +1265,47 @@ class ExperimentManager:
             frequencies = [round(start, 6)]
 
         parameters: List[Dict[str, Any]] = []
-        for phase_index, phase_deg in enumerate(phase_degrees, start=1):
+
+        def append_frequency_phase_block(
+            phase_index: int,
+            phase_deg: float,
+            frequency_index: int,
+            frequency: float,
+        ) -> None:
+            for repeat_index in range(1, repeats + 1):
+                parameters.append({
+                    "sequence_parameters": [],
+                    "metadata": {
+                        "display_parameters": [frequency],
+                        "transfer_frequency_hz": frequency,
+                        "transfer_frequency_index": frequency_index,
+                        "transfer_frequency_count": len(frequencies),
+                        "transfer_repeat": repeat_index,
+                        "transfer_repeats": repeats,
+                        "transfer_frequency_modulation_mhz": frequency_modulation_mhz,
+                        "transfer_atom_mirror_distance_m": atom_mirror_distance_m,
+                        "transfer_phase_noise_sigma_mrad": phase_noise_sigma_mrad,
+                        "transfer_phase_deg": phase_deg,
+                        "transfer_phase_index": phase_index,
+                        "transfer_phase_count": len(phase_degrees),
+                        "transfer_phase_degrees": phase_degrees,
+                        "transfer_phase_scan_mode": phase_scan_mode,
+                        "transfer_control_output": control_output,
+                    },
+                })
+
+        if phase_scan_mode == "frequency_interleaved":
             for frequency_index, frequency in enumerate(frequencies, start=1):
-                for repeat_index in range(1, repeats + 1):
-                    parameters.append({
-                        "sequence_parameters": [],
-                        "metadata": {
-                            "display_parameters": [frequency],
-                            "transfer_frequency_hz": frequency,
-                            "transfer_frequency_index": frequency_index,
-                            "transfer_frequency_count": len(frequencies),
-                            "transfer_repeat": repeat_index,
-                            "transfer_repeats": repeats,
-                            "transfer_frequency_modulation_mhz": frequency_modulation_mhz,
-                            "transfer_atom_mirror_distance_m": atom_mirror_distance_m,
-                            "transfer_phase_noise_sigma_mrad": phase_noise_sigma_mrad,
-                            "transfer_phase_deg": phase_deg,
-                            "transfer_phase_index": phase_index,
-                            "transfer_phase_count": len(phase_degrees),
-                            "transfer_phase_degrees": phase_degrees,
-                        },
-                    })
+                for phase_index, phase_deg in enumerate(phase_degrees, start=1):
+                    append_frequency_phase_block(
+                        phase_index, phase_deg, frequency_index, frequency
+                    )
+        else:
+            for phase_index, phase_deg in enumerate(phase_degrees, start=1):
+                for frequency_index, frequency in enumerate(frequencies, start=1):
+                    append_frequency_phase_block(
+                        phase_index, phase_deg, frequency_index, frequency
+                    )
 
         scan_config["scan_dimensions"] = 1
         scan_config["dim2_enabled"] = False
@@ -1291,6 +1319,8 @@ class ExperimentManager:
         scan_config["transfer_atom_mirror_distance_m"] = atom_mirror_distance_m
         scan_config["transfer_phase_noise_sigma_mrad"] = phase_noise_sigma_mrad
         scan_config["transfer_phase_degrees"] = phase_degrees
+        scan_config["transfer_phase_scan_mode"] = phase_scan_mode
+        scan_config["transfer_control_output"] = control_output
         scan_config["transfer_frequency_values_hz"] = frequencies
         scan_config["transfer_repeats"] = repeats
         return parameters
@@ -2517,6 +2547,7 @@ class ExperimentManager:
         active_transfer_phase: Optional[float] = None
         transfer_model = str(scan_config.get("transfer_generator_model") or "TG5012A").strip().upper()
         transfer_channel = int(scan_config.get("transfer_generator_channel", 1))
+        transfer_control_output = bool(scan_config.get("transfer_control_output", False))
 
         try:
             if transfer_mode and not config.USE_SIMULATION:
@@ -2529,6 +2560,10 @@ class ExperimentManager:
                 ))
                 identity = tti_client.connect()
                 print(f"[Transfer Function] Connected to {identity}; using CH{transfer_channel}")
+                if transfer_control_output:
+                    self.status.message = f"Enabling {transfer_model} CH{transfer_channel} OUTPUT..."
+                    tti_client.set_output(True)
+                    print(f"[Transfer Function] {transfer_model} CH{transfer_channel} OUTPUT ON")
             for idx, param_set in enumerate(parameter_list):
                 if self.stop_flag:
                     break
@@ -2578,6 +2613,17 @@ class ExperimentManager:
             print(f"[Acq Error] {traceback.format_exc()}")
         finally:
             if tti_client is not None:
+                if transfer_control_output:
+                    try:
+                        tti_client.set_output(False)
+                        print(f"[Transfer Function] {transfer_model} CH{transfer_channel} OUTPUT OFF")
+                    except Exception as exc:
+                        cleanup_error = (
+                            f"Failed to disable {transfer_model} CH{transfer_channel} OUTPUT: {exc}"
+                        )
+                        if not self._scan_finalize_error:
+                            self._scan_finalize_error = cleanup_error
+                        print(f"[Transfer Function] {cleanup_error}")
                 tti_client.close()
             restore_error = self._restore_ac_stark_dds(ac_stark_context)
             if restore_error:
