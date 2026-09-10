@@ -440,7 +440,10 @@ the run; the right pane shows analysis and oscilloscope output.}
 The header displays the next run ID, estimated duration and current state. \ui{Live}
 starts the current configuration immediately. \ui{Scheduled} submits one or more saved
 tasks to the server-side scheduler; after acceptance the browser may close. \ui{SYNC}
-uses the configured master/slave topology and a shared shot plan.
+uses the configured master/slave topology and a shared shot plan. The initial shot-time
+estimate is replaced during a scan by the running mean of controller-measured launch
+cycles. After a complete scan, that mean is saved locally and becomes the starting
+estimate for the next scan.
 
 \section{Sequence and parameter source}
 \ui{Classic Placeholders} uses the rules in Chapter~\ref{ch:sequence}.
@@ -471,8 +474,9 @@ and DOWN traces; selecting a point associates the aggregate plot with a particul
 \section{Scheduled runs}
 Tasks can execute sequentially with a configured gap or at scheduled timestamps. The
 backend persists scheduler state. Before submission, the UI validates each task and
-estimates its duration. Stopping a schedule requests termination of both the queue and
-the currently active experiment.
+estimates its duration using the most recently completed scan's mean shot time. The
+estimate is refreshed when a scheduled task completes. Stopping a schedule requests
+termination of both the queue and the currently active experiment.
 
 \chapter{Signal processing and physical quantities}\label{ch:signal}
 

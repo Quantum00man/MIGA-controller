@@ -2231,12 +2231,14 @@ class ExperimentManager:
         params = metadata.get('display_parameters') if isinstance(metadata.get('display_parameters'), list) else (job.get('params') or [])
         payload = {
             'stream_type': stream_type,
+            'run_id': self.data_manager.current_run_id_str if self.data_manager else '',
             'parameter': params[0] if params else None,
             'all_parameters': params,
             'scan_dimensions': int(job.get('scan_dimensions', 1) or 1),
             'error': message,
             'current_step': int(job.get('idx', 0)) + 1,
             'total_steps': int(job.get('total', 1) or 1),
+            'shot_duration_sec': job.get('shot_duration_sec'),
         }
         payload.update(metadata)
         if extra_payload:
@@ -2523,6 +2525,7 @@ class ExperimentManager:
             frontend_data['fit_data_up'] = fit_curve_up[::step_size].tolist()
             frontend_data['fit_data_dw'] = fit_curve_dw[::step_size].tolist()
             frontend_data['time_axis'] = tof_axis[::step_size].tolist()
+            frontend_data['shot_duration_sec'] = job.get('shot_duration_sec')
             frontend_data.update(job.get('metadata') or {})
             if extra_payload:
                 frontend_data.update(extra_payload)
@@ -2597,6 +2600,7 @@ class ExperimentManager:
                                 time.sleep(min(0.1, max(0.0, deadline - time.monotonic())))
                         if self.stop_flag:
                             break
+                shot_started_at = time.monotonic()
                 job = self.execute_single_measurement(
                     sequence_parameters,
                     scan_config,
@@ -2605,6 +2609,11 @@ class ExperimentManager:
                     scan_dimensions=scan_dimensions,
                     metadata=metadata,
                 )
+                # Measure the complete per-shot launch cycle on the controller.
+                # This deliberately excludes scan-level setup/settling above, so
+                # the UI can learn a reusable sequence duration without network
+                # or browser rendering latency skewing the estimate.
+                job['shot_duration_sec'] = time.monotonic() - shot_started_at
                 self.data_queue.put(job)
                 if config.USE_SIMULATION:
                     time.sleep(0.1)

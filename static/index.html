@@ -859,9 +859,12 @@
     <div class="small text-muted fw-bold mb-2">{{ isSyncMode() ? 'SYNC SCHEDULE PLANNER' : 'SCHEDULE PLANNER' }}</div>
     <div class="row g-2">
         <div class="col-6">
-            <label class="form-label small text-muted mb-1">Shot Time (s)</label>
+            <label class="form-label small text-muted mb-1">Shot Time (s, auto-learned)</label>
             <input type="number" class="form-control form-control-sm" v-model.number="scheduleSettings.singlePointDurationSec"
                 min="0.001" step="0.001" :disabled="isScheduleActive()">
+            <div class="form-text" style="font-size:0.68rem;">
+                {{ getShotTimingHint() }}
+            </div>
         </div>
         <div class="col-6">
             <label class="form-label small text-muted mb-1">Task Timing</label>
@@ -1807,6 +1810,7 @@
                     syncStatusPollTimer: null,
                     syncScheduleEnabled: false,
                     scheduleSettings: { singlePointDurationSec: 1.615, timingMode: 'sequential', sequentialGapSec: 60 },
+                    shotTiming: { runId: '', totalDurationSec: 0, sampleCount: 0, lastStep: 0, currentAverageSec: null, active: false },
                     scheduledTasks: [],
                     preparedQueueImportMessage: '',
                     preparedQueueImportError: false,
@@ -3159,8 +3163,53 @@ getHeaderTotalLabel() {
     return 'Total schedule';
 },
 getSinglePointDurationSec() {
+    const learnedThisRun = Number(this.shotTiming?.currentAverageSec);
+    if (this.shotTiming?.active && Number.isFinite(learnedThisRun) && learnedThisRun > 0) {
+        return learnedThisRun;
+    }
     const parsed = Number(this.scheduleSettings?.singlePointDurationSec);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : 1.615;
+},
+getShotTimingHint() {
+    const count = Math.max(0, Number(this.shotTiming?.sampleCount) || 0);
+    const current = Number(this.shotTiming?.currentAverageSec);
+    if (this.shotTiming?.active && count > 0 && Number.isFinite(current)) {
+        return `Current scan: ${current.toFixed(3)} s/shot (${count} shots)`;
+    }
+    return 'Updated automatically from the previous completed scan.';
+},
+recordShotDuration(data = {}) {
+    const durationSec = Number(data.shot_duration_sec);
+    const step = Math.max(0, Math.round(Number(data.current_step) || 0));
+    const total = Math.max(0, Math.round(Number(data.total_steps) || 0));
+    if (!Number.isFinite(durationSec) || durationSec <= 0 || step <= 0) return;
+
+    const runId = String(data.run_id || '').trim() || this.shotTiming.runId || `scan-${total}`;
+    if (this.shotTiming.runId !== runId || step <= Number(this.shotTiming.lastStep || 0)) {
+        if (this.shotTiming.runId === runId) return;
+        this.shotTiming = {
+            runId,
+            totalDurationSec: 0,
+            sampleCount: 0,
+            lastStep: 0,
+            currentAverageSec: null,
+            active: true,
+        };
+    }
+
+    this.shotTiming.totalDurationSec += durationSec;
+    this.shotTiming.sampleCount += 1;
+    this.shotTiming.lastStep = step;
+    this.shotTiming.currentAverageSec = this.shotTiming.totalDurationSec / this.shotTiming.sampleCount;
+    this.shotTiming.active = true;
+
+    if (total > 0 && step >= total) {
+        const learned = this.shotTiming.currentAverageSec;
+        this.shotTiming.active = false;
+        this.scheduleSettings.singlePointDurationSec = Number(learned.toFixed(6));
+        this.refreshScheduledTaskEstimates();
+        this.addLog(`Shot-time estimate updated: ${learned.toFixed(3)} s/shot from ${this.shotTiming.sampleCount} shots.`);
+    }
 },
 getLiveEstimatedShotCount() {
     try {
@@ -5497,8 +5546,11 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     if (data?.stream_type && data.stream_type !== 'scan_point') return;
                     if (this.isSyncMode() && data?.sync_run_id) {
                         const source = this.handleSyncNodeData(data);
+                        if (source === 'master') this.recordShotDuration(data);
                         const waveformSource = this.syncDisplaySource === 'master' ? 'master' : this.syncDisplaySource;
                         if (source !== waveformSource) return;
+                    } else {
+                        this.recordShotDuration(data);
                     }
                     this.currentStep = data.current_step || 0;
                     const total = data.total_steps || 1;
