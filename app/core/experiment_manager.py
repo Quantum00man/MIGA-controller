@@ -1061,6 +1061,21 @@ class ExperimentManager:
         self._apply_runtime_settings()
         self._save_settings_to_disk()
         return parsed
+
+    def update_optimized_alpha_beta(self, alpha: float, beta: float) -> Dict[str, float]:
+        """Validate and persist atom-number crosstalk coefficients together."""
+        parsed_alpha = float(alpha)
+        parsed_beta = float(beta)
+        if not math.isfinite(parsed_alpha) or not 0.0 <= parsed_alpha <= 1.0:
+            raise ValueError("ALPHA must be between 0 and 1")
+        if not math.isfinite(parsed_beta) or not 0.0 <= parsed_beta <= 1.0:
+            raise ValueError("BETA must be between 0 and 1")
+        if abs(1.0 - parsed_alpha * parsed_beta) < 1e-9:
+            raise ValueError("ALPHA and BETA produce a singular detector reconstruction")
+        self.settings.update({"alpha": parsed_alpha, "beta": parsed_beta})
+        self._apply_runtime_settings()
+        self._save_settings_to_disk()
+        return {"alpha": parsed_alpha, "beta": parsed_beta}
     
 
     def get_analysis_config(self) -> Dict[str, Any]:

@@ -1465,14 +1465,19 @@ filtered sequence length. The UI supports absolute or mean-normalized values, li
 logarithmic order axes, and displays valid-window count, mean, RMS and sample standard
 deviation for Fit and raw channels.
 
-The Archive Re-Analysis panel can optimize one parameter in $[0,1]$. A selected sequence
+The Archive Re-Analysis panel can optimize one parameter, or ALPHA and BETA jointly, in
+$[0,1]$. A selected sequence
 mean can seek a requested target, while sample standard deviation and overlapping Allan
 deviation are minimized directly; Allan uses a selected order $n$. The available parameters are the atom-number
 crosstalk coefficients \ui{ALPHA} and \ui{BETA}, and the interferometer coefficient
 \ui{I\_Beta}. ALPHA and BETA can target Atom Number, Transition Probability or
 Interferometer P; I\_Beta targets Interferometer P. Fit/NoFit and valid channels can be
-selected, with Mean, Fit \ui{Interferometer P UP} and target zero as defaults. Standard
-deviation uses the same $N-1$ sample definition as Sequence Statistics and rejects candidates
+selected, with Mean, Fit \ui{Interferometer P UP} and target zero as defaults. The
+\ui{ALPHA + BETA} mode optimizes both atom-number crosstalk coefficients jointly.
+Independent lower and upper bounds are configurable for each coefficient in $[0,1]$ and
+must include its current value. The two-dimensional search is deterministic and excludes
+the singular reconstruction condition $1-\alpha\beta=0$. Standard deviation uses the same
+$N-1$ sample definition as Sequence Statistics and rejects candidates
 that reduce its valid sample count. Allan optimization
 uses the same overlapping-window definition as the displayed Allan curve. It preserves
 invalid shots in their chronological positions, never bridges a gap, and rejects candidate
@@ -1480,7 +1485,8 @@ parameters that reduce the number of valid windows below the initial calibration
 uses only shots inside the currently applied Allan $P_0$ range and excludes the
 interferometer singular point $\beta_I=\alpha_I$. The result is first applied as a
 recalculation preview and does not overwrite the archive. A separate Settings action
-persists only the selected coefficient. If the target is unreachable inside the allowed
+persists the selected coefficient; joint ALPHA/BETA results are validated and written
+together. If the target is unreachable inside the allowed
 interval, the closest feasible result and its residual are reported. For Allan minimization,
 the initial and minimum deviations, order, valid-window counts and relative improvement are
 reported; the initial parameter remains a candidate so optimization cannot return a worse

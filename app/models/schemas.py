@@ -847,6 +847,10 @@ class ArchiveInterferometerBetaOptimizeRequest(BaseModel):
     metric: str = Field("intf")
     statistic: str = Field("mean")
     allan_order: int = Field(1, ge=1, le=100000)
+    alpha_min: float = Field(0.0, ge=0.0, le=1.0)
+    alpha_max: float = Field(1.0, ge=0.0, le=1.0)
+    beta_min: float = Field(0.0, ge=0.0, le=1.0)
+    beta_max: float = Field(1.0, ge=0.0, le=1.0)
     source: str = Field("fit")
     channel: str = Field("up")
     target_mean: float = Field(0.0)
@@ -860,6 +864,11 @@ class InterferometerBetaApplyRequest(BaseModel):
 class AnalysisParameterApplyRequest(BaseModel):
     parameter: str
     value: float = Field(..., ge=0.0, le=1.0)
+
+
+class AnalysisParametersApplyRequest(BaseModel):
+    alpha: float = Field(..., ge=0.0, le=1.0)
+    beta: float = Field(..., ge=0.0, le=1.0)
 
 
 class ArchiveScanFitRequest(BaseModel):

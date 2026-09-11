@@ -158,6 +158,29 @@ class ArchiveInterferometerBetaOptimizationTests(unittest.TestCase):
         self.assertEqual(result["initial_valid_window_count"], 2)
         self.assertGreaterEqual(result["valid_window_count"], 2)
 
+    def test_alpha_beta_joint_optimization_respects_independent_bounds(self):
+        settings = {**self.settings, "alpha": 0.1, "beta": 0.05, "R": 1.1, "K": 10.0}
+        points = []
+        for area_up, area_dw in [(1.0, 1.0), (3.0, 2.0), (2.0, 4.0), (6.0, 3.0)]:
+            n_f2, n_f1 = physics.calculate_atom_numbers(
+                area_up, area_dw, 1.0, 1.0,
+                settings["alpha"], settings["beta"], settings["R"], settings["K"], 0.0,
+            )
+            points.append({"atom_number_up": n_f2, "atom_number_dw": n_f1})
+
+        result = self.loader._optimize_analysis_parameter_from_points(
+            points, settings, parameter="alpha_beta", metric="atoms",
+            statistic="std", channel="total",
+            alpha_min=0.05, alpha_max=0.2, beta_min=0.01, beta_max=0.15,
+        )
+
+        self.assertEqual(result["parameter"], "alpha_beta")
+        self.assertGreaterEqual(result["optimized_values"]["alpha"], 0.05)
+        self.assertLessEqual(result["optimized_values"]["alpha"], 0.2)
+        self.assertGreaterEqual(result["optimized_values"]["beta"], 0.01)
+        self.assertLessEqual(result["optimized_values"]["beta"], 0.15)
+        self.assertLessEqual(result["achieved_statistic"], result["initial_statistic"])
+
     def test_interferometer_beta_rejects_unaffected_metric(self):
         with self.assertRaisesRegex(ValueError, "does not affect"):
             self.loader._optimize_analysis_parameter_from_points(
@@ -195,6 +218,20 @@ class ArchiveInterferometerBetaOptimizationTests(unittest.TestCase):
         self.assertEqual(result, 0.2)
         self.assertEqual(manager.settings, {"alpha": 0.2, "beta": 0.05, "sentinel": "unchanged"})
 
+    def test_joint_settings_update_persists_alpha_and_beta_together(self):
+        calls = []
+        manager = SimpleNamespace(
+            settings={"alpha": 0.1, "beta": 0.05, "sentinel": "unchanged"},
+            _apply_runtime_settings=lambda: calls.append("apply"),
+            _save_settings_to_disk=lambda: calls.append("save"),
+        )
+
+        result = ExperimentManager.update_optimized_alpha_beta(manager, 0.2, 0.15)
+
+        self.assertEqual(result, {"alpha": 0.2, "beta": 0.15})
+        self.assertEqual(manager.settings["sentinel"], "unchanged")
+        self.assertEqual(calls, ["apply", "save"])
+
     def test_archive_ui_exposes_preview_and_settings_actions(self):
         archive_html = (Path(__file__).resolve().parents[1] / "static" / "archive.html").read_text(encoding="utf-8")
 
@@ -207,6 +244,10 @@ class ArchiveInterferometerBetaOptimizationTests(unittest.TestCase):
         self.assertIn('<option value="beta">BETA</option>', archive_html)
         self.assertIn('<option value="std">Standard Deviation</option>', archive_html)
         self.assertIn('<option value="allan">Allan Deviation</option>', archive_html)
+        self.assertIn('<option value="alpha_beta">ALPHA + BETA</option>', archive_html)
+        self.assertIn('alpha_min:', archive_html)
+        self.assertIn('beta_max:', archive_html)
+        self.assertIn('/settings/analysis-parameters/alpha-beta', archive_html)
         self.assertIn('allan_order:', archive_html)
 
 

@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import uuid
 
 import numpy as np
+from scipy.optimize import differential_evolution
 
 from app.analysis import fitting, physics, interferometer_phase, phase_noise
 from app.analysis.transfer_function import build_transfer_function_summary
@@ -1617,6 +1618,10 @@ class DataLoader:
         metric: str = "intf",
         statistic: str = "mean",
         allan_order: int = 1,
+        alpha_min: float = 0.0,
+        alpha_max: float = 1.0,
+        beta_min: float = 0.0,
+        beta_max: float = 1.0,
         source: str = "fit",
         channel: str = "up",
         target_mean: float = 0.0,
@@ -1627,8 +1632,8 @@ class DataLoader:
         minimize_statistic = normalized_statistic in {"std", "allan"}
         normalized_source = str(source or "fit").strip().lower()
         normalized_channel = str(channel or "up").strip().lower()
-        if normalized_parameter not in {"alpha", "beta", "intf_beta"}:
-            raise ValueError("Optimized parameter must be alpha, beta, or intf_beta")
+        if normalized_parameter not in {"alpha", "beta", "alpha_beta", "intf_beta"}:
+            raise ValueError("Optimized parameter must be alpha, beta, alpha_beta, or intf_beta")
         allowed_metrics = {"intf"} if normalized_parameter == "intf_beta" else {"atoms", "prob", "intf"}
         if normalized_metric not in allowed_metrics:
             raise ValueError(f"{normalized_parameter} does not affect the selected metric")
@@ -1648,6 +1653,16 @@ class DataLoader:
 
         atom_alpha = self._safe_scalar(settings.get("alpha"), 0.0151)
         atom_beta = self._safe_scalar(settings.get("beta"), 0.0188)
+        alpha_bounds = (float(alpha_min), float(alpha_max))
+        beta_bounds = (float(beta_min), float(beta_max))
+        if not 0.0 <= alpha_bounds[0] < alpha_bounds[1] <= 1.0:
+            raise ValueError("ALPHA bounds must satisfy 0 <= minimum < maximum <= 1")
+        if not 0.0 <= beta_bounds[0] < beta_bounds[1] <= 1.0:
+            raise ValueError("BETA bounds must satisfy 0 <= minimum < maximum <= 1")
+        if normalized_parameter in {"alpha", "alpha_beta"} and not alpha_bounds[0] <= atom_alpha <= alpha_bounds[1]:
+            raise ValueError("ALPHA bounds must include the current ALPHA value")
+        if normalized_parameter in {"beta", "alpha_beta"} and not beta_bounds[0] <= atom_beta <= beta_bounds[1]:
+            raise ValueError("BETA bounds must include the current BETA value")
         ratio = self._safe_scalar(settings.get("R"), 1.1)
         conversion = self._safe_scalar(settings.get("K"), 7000.0)
         determinant = 1.0 - atom_alpha * atom_beta
@@ -1683,12 +1698,20 @@ class DataLoader:
         intf_beta = self._safe_scalar(settings.get("intf_beta"), 0.07636)
         intf_gamma = self._safe_scalar(settings.get("intf_gamma"), 0.25)
         initial_value = self._safe_scalar(settings.get(normalized_parameter), 0.0)
+        if normalized_parameter == "alpha_beta":
+            initial_value = (atom_alpha, atom_beta)
         singular_margin = 1e-8
 
-        def evaluate(beta: float) -> Tuple[Optional[float], int]:
-            current_atom_alpha = beta if normalized_parameter == "alpha" else atom_alpha
-            current_atom_beta = beta if normalized_parameter == "beta" else atom_beta
-            current_intf_beta = beta if normalized_parameter == "intf_beta" else intf_beta
+        def evaluate(candidate: Any) -> Tuple[Optional[float], int]:
+            if normalized_parameter == "alpha_beta":
+                current_atom_alpha, current_atom_beta = map(float, candidate)
+            else:
+                value = float(candidate)
+                current_atom_alpha = value if normalized_parameter == "alpha" else atom_alpha
+                current_atom_beta = value if normalized_parameter == "beta" else atom_beta
+            current_intf_beta = float(candidate) if normalized_parameter == "intf_beta" else intf_beta
+            if abs(1.0 - current_atom_alpha * current_atom_beta) < 1e-9:
+                return None, 0
             n_f2 = (area_up_values - area_dw_values * current_atom_alpha) * conversion
             n_f1 = (area_dw_values - area_up_values * current_atom_beta) * ratio * conversion
 
@@ -1740,7 +1763,79 @@ class DataLoader:
             if normalized_statistic == "allan":
                 raise ValueError("Not enough contiguous valid shots for the selected Allan order")
             raise ValueError("No valid samples are available for optimization")
-        grid = np.linspace(0.0, 1.0, 401)
+
+        if normalized_parameter == "alpha_beta":
+            def joint_loss(candidate: np.ndarray) -> float:
+                value, count = evaluate(candidate)
+                if value is None or (minimize_statistic and count < initial_count):
+                    return 1e100
+                return float(value if minimize_statistic else abs(value - target))
+
+            optimized = differential_evolution(
+                joint_loss,
+                bounds=[alpha_bounds, beta_bounds],
+                seed=0,
+                maxiter=120,
+                popsize=12,
+                tol=1e-9,
+                polish=True,
+                updating="immediate",
+                workers=1,
+            )
+            optimized_values = {
+                "alpha": float(optimized.x[0]),
+                "beta": float(optimized.x[1]),
+            }
+            achieved_statistic, sample_count = evaluate(
+                (optimized_values["alpha"], optimized_values["beta"])
+            )
+            initial_loss = float(initial_mean if minimize_statistic else abs(initial_mean - target))
+            if achieved_statistic is None or joint_loss(optimized.x) > initial_loss:
+                optimized_values = {"alpha": atom_alpha, "beta": atom_beta}
+                achieved_statistic, sample_count = initial_mean, initial_count
+            residual = None if minimize_statistic else float(achieved_statistic - target)
+            absolute_improvement = float(initial_mean - achieved_statistic)
+            relative_improvement = (
+                absolute_improvement / initial_mean
+                if minimize_statistic and initial_mean > 0.0 else None
+            )
+            boundary_parameters = [
+                name for name, value, bounds in (
+                    ("alpha", optimized_values["alpha"], alpha_bounds),
+                    ("beta", optimized_values["beta"], beta_bounds),
+                )
+                if abs(value - bounds[0]) <= 1e-8 or abs(value - bounds[1]) <= 1e-8
+            ]
+            return {
+                "optimized_values": optimized_values,
+                "initial_values": {"alpha": atom_alpha, "beta": atom_beta},
+                "initial_statistic": float(initial_mean),
+                "achieved_statistic": float(achieved_statistic),
+                "target_statistic": None if minimize_statistic else target,
+                "residual": residual,
+                "exact": not minimize_statistic and residual is not None and abs(residual) <= 1e-9,
+                "objective": "minimize" if minimize_statistic else "target",
+                "allan_order": normalized_allan_order if normalized_statistic == "allan" else None,
+                "initial_valid_window_count": initial_count if normalized_statistic == "allan" else None,
+                "valid_window_count": sample_count if normalized_statistic == "allan" else None,
+                "initial_sample_count": initial_count if normalized_statistic == "std" else None,
+                "absolute_improvement": absolute_improvement if minimize_statistic else None,
+                "relative_improvement": relative_improvement,
+                "at_boundary": bool(boundary_parameters),
+                "boundary_parameters": boundary_parameters,
+                "sample_count": int(sample_count),
+                "parameter": normalized_parameter,
+                "metric": normalized_metric,
+                "statistic": normalized_statistic,
+                "source": normalized_source,
+                "channel": normalized_channel,
+                "parameter_bounds": {"alpha": list(alpha_bounds), "beta": list(beta_bounds)},
+            }
+
+        parameter_bounds = alpha_bounds if normalized_parameter == "alpha" else (
+            beta_bounds if normalized_parameter == "beta" else (0.0, 1.0)
+        )
+        grid = np.linspace(parameter_bounds[0], parameter_bounds[1], 401)
         if normalized_parameter == "intf_beta" and 0.0 <= intf_alpha <= 1.0:
             grid = grid[np.abs(grid - intf_alpha) >= singular_margin]
 
@@ -1825,7 +1920,7 @@ class DataLoader:
             absolute_improvement / initial_mean
             if minimize_statistic and initial_mean > 0.0 else None
         )
-        at_boundary = abs(optimized_value) <= 1e-9 or abs(optimized_value - 1.0) <= 1e-9
+        at_boundary = abs(optimized_value - parameter_bounds[0]) <= 1e-9 or abs(optimized_value - parameter_bounds[1]) <= 1e-9
         return {
             "optimized_value": float(optimized_value),
             "initial_value": float(initial_value),
@@ -1851,8 +1946,8 @@ class DataLoader:
             "statistic": normalized_statistic,
             "source": normalized_source,
             "channel": normalized_channel,
-            "parameter_min": 0.0,
-            "parameter_max": 1.0,
+            "parameter_min": parameter_bounds[0],
+            "parameter_max": parameter_bounds[1],
             "singular_value": intf_alpha if normalized_parameter == "intf_beta" and 0.0 <= intf_alpha <= 1.0 else None,
         }
 
@@ -1869,6 +1964,10 @@ class DataLoader:
         metric: str = "intf",
         statistic: str = "mean",
         allan_order: int = 1,
+        alpha_min: float = 0.0,
+        alpha_max: float = 1.0,
+        beta_min: float = 0.0,
+        beta_max: float = 1.0,
         source: str = "fit",
         channel: str = "up",
         target_mean: float = 0.0,
@@ -1897,6 +1996,10 @@ class DataLoader:
             metric=metric,
             statistic=statistic,
             allan_order=allan_order,
+            alpha_min=alpha_min,
+            alpha_max=alpha_max,
+            beta_min=beta_min,
+            beta_max=beta_max,
             source=source,
             channel=channel,
             target_mean=target_mean,

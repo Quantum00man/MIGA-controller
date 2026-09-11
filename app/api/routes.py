@@ -87,6 +87,7 @@ from app.models.schemas import (
     InterferometerPhaseCalibrationActivateRequest,
     InterferometerBetaApplyRequest,
     AnalysisParameterApplyRequest,
+    AnalysisParametersApplyRequest,
     ArchiveScanFitRequest,
     ArchiveSyncDifferentialFitRequest,
     ArchiveSyncPhaseCalibrationOptimizeRequest,
@@ -1491,6 +1492,19 @@ async def update_optimized_analysis_parameter(req: AnalysisParameterApplyRequest
     except ValueError as exc:
         raise HTTPException(400, str(exc))
 
+
+@router.post("/settings/analysis-parameters/alpha-beta", response_model=ExperimentResponse)
+async def update_optimized_alpha_beta(req: AnalysisParametersApplyRequest):
+    try:
+        values = manager.update_optimized_alpha_beta(req.alpha, req.beta)
+        return ExperimentResponse(
+            status="success",
+            message="ALPHA and BETA updated",
+            data=values,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
 @router.get("/system/update/status", response_model=ExperimentResponse)
 async def get_system_update_status():
     try:
@@ -2078,6 +2092,10 @@ async def optimize_archived_interferometer_beta(req: ArchiveInterferometerBetaOp
             metric=req.metric,
             statistic=req.statistic,
             allan_order=req.allan_order,
+            alpha_min=req.alpha_min,
+            alpha_max=req.alpha_max,
+            beta_min=req.beta_min,
+            beta_max=req.beta_max,
             source=req.source,
             channel=req.channel,
             target_mean=req.target_mean,

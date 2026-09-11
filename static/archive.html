@@ -1078,6 +1078,7 @@
                                             <select class="form-select form-select-sm" v-model="betaOptimization.parameter"
                                                 @change="handleMeanOptimizationParameterChange">
                                                 <option value="intf_beta">I_Beta</option>
+                                                <option value="alpha_beta">ALPHA + BETA</option>
                                                 <option value="alpha">ALPHA</option>
                                                 <option value="beta">BETA</option>
                                             </select>
@@ -1123,6 +1124,14 @@
                                             <input type="number" min="1" step="1" class="form-control form-control-sm"
                                                 v-model.number="betaOptimization.allanOrder">
                                         </div>
+                                        <template v-if="['alpha', 'alpha_beta'].includes(betaOptimization.parameter)">
+                                            <div class="col-3"><label class="form-label-small">ALPHA MIN</label><input type="number" min="0" max="1" step="any" class="form-control form-control-sm" v-model.number="betaOptimization.alphaMin"></div>
+                                            <div class="col-3"><label class="form-label-small">ALPHA MAX</label><input type="number" min="0" max="1" step="any" class="form-control form-control-sm" v-model.number="betaOptimization.alphaMax"></div>
+                                        </template>
+                                        <template v-if="['beta', 'alpha_beta'].includes(betaOptimization.parameter)">
+                                            <div class="col-3"><label class="form-label-small">BETA MIN</label><input type="number" min="0" max="1" step="any" class="form-control form-control-sm" v-model.number="betaOptimization.betaMin"></div>
+                                            <div class="col-3"><label class="form-label-small">BETA MAX</label><input type="number" min="0" max="1" step="any" class="form-control form-control-sm" v-model.number="betaOptimization.betaMax"></div>
+                                        </template>
                                     </div>
                                     <div class="form-text mt-2">Mean seeks a target. Sample STD and Allan deviation are minimized directly; candidates may not reduce the valid sample/window count. Allan calculation does not bridge invalid shots. Uses the applied Allan P0 range.</div>
                                     <div class="d-grid gap-2 mt-2">
@@ -2592,6 +2601,7 @@
                     savedAllanCache: {}, recalculatedAllanCache: {}, currentAllanData: null,
                     betaOptimization: {
                         parameter: 'intf_beta', metric: 'intf', statistic: 'mean', allanOrder: 1, source: 'fit', channel: 'up', targetMean: 0,
+                        alphaMin: 0, alphaMax: 1, betaMin: 0, betaMax: 1,
                         loading: false, applying: false, error: false, message: '', result: null
                     },
                     defaultFitModels: [], defaultScanFitModels: [],
@@ -5428,11 +5438,34 @@
                             metric: this.betaOptimization.metric,
                             statistic: this.betaOptimization.statistic,
                             allan_order: Math.max(1, Math.trunc(Number(this.betaOptimization.allanOrder) || 1)),
+                            alpha_min: Number(this.betaOptimization.alphaMin),
+                            alpha_max: Number(this.betaOptimization.alphaMax),
+                            beta_min: Number(this.betaOptimization.betaMin),
+                            beta_max: Number(this.betaOptimization.betaMax),
                             source: this.betaOptimization.source,
                             channel: this.betaOptimization.channel,
                             target_mean: Number(this.betaOptimization.targetMean ?? 0)
                         }));
                         const result = response.data || {};
+                        if (result.parameter === 'alpha_beta') {
+                            const alpha = Number(result.optimized_values?.alpha);
+                            const beta = Number(result.optimized_values?.beta);
+                            if (!Number.isFinite(alpha) || !Number.isFinite(beta)) throw new Error('Optimizer returned invalid ALPHA/BETA values');
+                            this.betaOptimization.result = result;
+                            this.analysis.alpha = alpha;
+                            this.analysis.beta = beta;
+                            this.currentTab = result.metric;
+                            this.showRawData = this.betaOptimization.source === 'raw';
+                            const initial = Number(result.initial_statistic);
+                            const achieved = Number(result.achieved_statistic);
+                            const improvement = Number(result.relative_improvement);
+                            const improvementText = Number.isFinite(improvement) ? `, improvement=${(100 * improvement).toFixed(2)}%` : '';
+                            const boundaryText = result.at_boundary ? ` Warning: ${result.boundary_parameters.join(', ').toUpperCase()} reached a bound.` : '';
+                            this.betaOptimization.message = `ALPHA=${alpha.toPrecision(10)}, BETA=${beta.toPrecision(10)}; ${result.objective === 'minimize' ? 'minimum' : 'result'} ${result.statistic}=${achieved.toPrecision(6)} (initial ${initial.toPrecision(6)})${improvementText}.${boundaryText}`;
+                            await this.recalculate();
+                            if (this.plotMode !== 'allan') await this.setPlotMode('allan');
+                            return;
+                        }
                         const optimizedValue = Number(result.optimized_value ?? result.optimized_beta);
                         if (!Number.isFinite(optimizedValue)) throw new Error('Optimizer returned an invalid parameter value');
                         this.betaOptimization.result = result;
@@ -5466,6 +5499,24 @@
 
                 async applyOptimizedBetaToSettings() {
                     const parameter = String(this.betaOptimization.result?.parameter || '');
+                    if (parameter === 'alpha_beta') {
+                        const alpha = Number(this.betaOptimization.result?.optimized_values?.alpha);
+                        const beta = Number(this.betaOptimization.result?.optimized_values?.beta);
+                        if (!Number.isFinite(alpha) || !Number.isFinite(beta)) return;
+                        if (!window.confirm(`Apply ALPHA=${alpha.toPrecision(10)} and BETA=${beta.toPrecision(10)} to the global Settings?`)) return;
+                        this.betaOptimization.applying = true;
+                        this.betaOptimization.error = false;
+                        try {
+                            await axios.post('/settings/analysis-parameters/alpha-beta', { alpha, beta });
+                            this.betaOptimization.message = `ALPHA=${alpha.toPrecision(10)} and BETA=${beta.toPrecision(10)} were applied to Settings.`;
+                        } catch (error) {
+                            this.betaOptimization.error = true;
+                            this.betaOptimization.message = error.response?.data?.detail || error.message || 'Applying ALPHA/BETA to Settings failed';
+                        } finally {
+                            this.betaOptimization.applying = false;
+                        }
+                        return;
+                    }
                     const value = Number(this.betaOptimization.result?.optimized_value ?? this.betaOptimization.result?.optimized_beta);
                     if (!parameter || !Number.isFinite(value)) return;
                     const parameterLabel = this.meanOptimizationParameterLabel(parameter);
@@ -5496,7 +5547,7 @@
                 },
 
                 meanOptimizationParameterLabel(parameter) {
-                    return ({ intf_beta: 'I_Beta', alpha: 'ALPHA', beta: 'BETA' })[parameter] || String(parameter || 'Parameter');
+                    return ({ intf_beta: 'I_Beta', alpha_beta: 'ALPHA + BETA', alpha: 'ALPHA', beta: 'BETA' })[parameter] || String(parameter || 'Parameter');
                 },
 
                 handleMeanOptimizationParameterChange() {
