@@ -11,6 +11,7 @@
     const COLUMN_WIDTH_MM = Object.freeze({ single: 89, double: 183 });
     const SCREEN = Object.freeze({ base: 14, axisTitle: 16, plotTitle: 16, annotation: 13 });
     const PRINT = Object.freeze({ basePt: 8, axisTitlePt: 9, plotTitlePt: 10, annotationPt: 8 });
+    const SINGLE_PRINT = Object.freeze({ basePt: 7.5, axisTitlePt: 8.5, plotTitlePt: 9.5, annotationPt: 7.5 });
     const COLORS = Object.freeze({
         up: '#D55E00',
         down: '#0072B2',
@@ -227,9 +228,21 @@
         return layout;
     }
 
-    function themeTrace(trace, publication) {
+    function printTypography(column) {
+        return column === 'single' ? SINGLE_PRINT : PRINT;
+    }
+
+    function clampSingleColumnMarkerSize(size) {
+        if (Array.isArray(size)) {
+            return size.map(value => Number.isFinite(Number(value)) ? Math.min(Number(value), 6) : value);
+        }
+        return Number.isFinite(Number(size)) ? Math.min(Number(size), 6) : size;
+    }
+
+    function themeTrace(trace, publication, column = 'double') {
         if (!trace || typeof trace !== 'object') return trace;
         const themed = { ...trace };
+        const typography = printTypography(column);
         if (trace.line) {
             themed.line = { ...trace.line, color: mapColor(trace.line.color) };
             if (publication && Number.isFinite(Number(trace.line.width))) {
@@ -242,6 +255,9 @@
                 color: Array.isArray(trace.marker.color) ? trace.marker.color : mapColor(trace.marker.color),
                 colorscale: mapColorscale(trace.marker.colorscale)
             };
+            if (publication && column === 'single' && trace.marker.size != null) {
+                themed.marker.size = clampSingleColumnMarkerSize(trace.marker.size);
+            }
             if (trace.marker.line) {
                 themed.marker.line = {
                     ...trace.marker.line,
@@ -249,7 +265,7 @@
                 };
             }
             if (trace.marker.colorbar) {
-                themed.marker.colorbar = publicationColorbar(trace.marker.colorbar, publication);
+                themed.marker.colorbar = publicationColorbar(trace.marker.colorbar, publication, typography);
             }
         }
         if (trace.error_y) {
@@ -270,18 +286,18 @@
             themed.textfont = {
                 ...trace.textfont,
                 family: 'Arial, Helvetica, sans-serif',
-                size: publication ? pointsToPixels(PRINT.annotationPt) : Math.max(Number(trace.textfont.size) || 0, SCREEN.annotation),
+                size: publication ? pointsToPixels(typography.annotationPt) : Math.max(Number(trace.textfont.size) || 0, SCREEN.annotation),
                 color: mapColor(trace.textfont.color || COLORS.ink)
             };
         }
-        if (trace.colorbar) themed.colorbar = publicationColorbar(trace.colorbar, publication);
+        if (trace.colorbar) themed.colorbar = publicationColorbar(trace.colorbar, publication, typography);
         if (trace.colorscale) themed.colorscale = mapColorscale(trace.colorscale);
         return themed;
     }
 
-    function publicationColorbar(colorbar, publication) {
-        const size = publication ? pointsToPixels(PRINT.basePt) : SCREEN.base;
-        const titleSize = publication ? pointsToPixels(PRINT.axisTitlePt) : SCREEN.axisTitle;
+    function publicationColorbar(colorbar, publication, typography = PRINT) {
+        const size = publication ? pointsToPixels(typography.basePt) : SCREEN.base;
+        const titleSize = publication ? pointsToPixels(typography.axisTitlePt) : SCREEN.axisTitle;
         return {
             ...colorbar,
             title: titleObject(colorbar.title, titleSize),
@@ -300,17 +316,18 @@
         return points * CSS_DPI / 72;
     }
 
-    function publicationAxis(axis, orientation) {
+    function publicationAxis(axis, orientation, typography, singleColumn) {
         if (!axis || typeof axis !== 'object') return axis;
         return {
             ...axis,
-            title: titleObject(axis.title, pointsToPixels(PRINT.axisTitlePt)),
+            title: titleObject(axis.title, pointsToPixels(typography.axisTitlePt)),
             tickfont: {
                 ...(axis.tickfont || {}),
                 family: 'Arial, Helvetica, sans-serif',
-                size: pointsToPixels(PRINT.basePt),
+                size: pointsToPixels(typography.basePt),
                 color: COLORS.ink
             },
+            nticks: axis.nticks || (singleColumn ? 5 : undefined),
             automargin: true,
             showline: axis.showline !== false,
             mirror: false,
@@ -328,15 +345,15 @@
         };
     }
 
-    function publicationSceneAxis(axis) {
+    function publicationSceneAxis(axis, typography) {
         if (!axis || typeof axis !== 'object') return axis;
         return {
             ...axis,
-            title: titleObject(axis.title, pointsToPixels(PRINT.axisTitlePt)),
+            title: titleObject(axis.title, pointsToPixels(typography.axisTitlePt)),
             tickfont: {
                 ...(axis.tickfont || {}),
                 family: 'Arial, Helvetica, sans-serif',
-                size: pointsToPixels(PRINT.basePt),
+                size: pointsToPixels(typography.basePt),
                 color: COLORS.ink
             },
             backgroundcolor: COLORS.white,
@@ -347,8 +364,10 @@
         };
     }
 
-    function publicationLayout(input, width, height) {
+    function publicationLayout(input, width, height, column = 'double') {
         const layout = clone(input || {});
+        const singleColumn = column === 'single';
+        const typography = printTypography(column);
         layout.width = width;
         layout.height = height;
         layout.autosize = false;
@@ -357,12 +376,12 @@
         layout.font = {
             ...(layout.font || {}),
             family: 'Arial, Helvetica, sans-serif',
-            size: pointsToPixels(PRINT.basePt),
+            size: pointsToPixels(typography.basePt),
             color: COLORS.ink
         };
         layout.title = normalizeInlineTitleSize(
-            titleObject(layout.title, pointsToPixels(PRINT.plotTitlePt)),
-            pointsToPixels(PRINT.annotationPt)
+            titleObject(layout.title, pointsToPixels(typography.plotTitlePt)),
+            pointsToPixels(typography.annotationPt)
         );
         if (layout.title?.text) {
             layout.title = {
@@ -374,35 +393,54 @@
             };
             layout.margin = {
                 ...(layout.margin || {}),
-                t: Math.max(Number(layout.margin?.t) || 0, 46)
+                t: Math.max(Number(layout.margin?.t) || 0, singleColumn ? 82 : 46)
             };
         }
-        layout.xaxis = publicationAxis(layout.xaxis, 'x');
-        layout.yaxis = publicationAxis(layout.yaxis, 'y');
+        if (singleColumn) {
+            layout.margin = {
+                ...(layout.margin || {}),
+                l: 64,
+                r: 18,
+                b: 48,
+                t: Math.max(Number(layout.margin?.t) || 0, layout.title?.text ? 82 : 56),
+                pad: 2
+            };
+        }
+        layout.xaxis = publicationAxis(layout.xaxis, 'x', typography, singleColumn);
+        layout.yaxis = publicationAxis(layout.yaxis, 'y', typography, singleColumn);
         Object.keys(layout).forEach(key => {
-            if (/^xaxis\d+$/.test(key)) layout[key] = publicationAxis(layout[key], 'x');
-            if (/^yaxis\d+$/.test(key)) layout[key] = publicationAxis(layout[key], 'y');
+            if (/^xaxis\d+$/.test(key)) layout[key] = publicationAxis(layout[key], 'x', typography, singleColumn);
+            if (/^yaxis\d+$/.test(key)) layout[key] = publicationAxis(layout[key], 'y', typography, singleColumn);
         });
-        if (layout.legend) {
+        if ((singleColumn && layout.showlegend !== false) || layout.legend) {
             layout.legend = {
-                ...layout.legend,
+                ...(layout.legend || {}),
                 font: {
-                    ...(layout.legend.font || {}),
+                    ...(layout.legend?.font || {}),
                     family: 'Arial, Helvetica, sans-serif',
-                    size: pointsToPixels(PRINT.basePt),
+                    size: pointsToPixels(typography.basePt),
                     color: COLORS.ink
                 },
-                bgcolor: 'rgba(255,255,255,0.92)',
-                bordercolor: '#B8BCC1',
-                borderwidth: 0.7
+                bgcolor: singleColumn ? 'rgba(255,255,255,0)' : 'rgba(255,255,255,0.92)',
+                bordercolor: singleColumn ? 'rgba(255,255,255,0)' : '#B8BCC1',
+                borderwidth: singleColumn ? 0 : 0.7,
+                ...(singleColumn ? {
+                    orientation: 'h',
+                    x: 0,
+                    xanchor: 'left',
+                    y: 1.02,
+                    yanchor: 'bottom',
+                    traceorder: 'normal',
+                    tracegroupgap: 4
+                } : {})
             };
         }
         if (layout.scene) {
             layout.scene = {
                 ...layout.scene,
-                xaxis: publicationSceneAxis(layout.scene.xaxis),
-                yaxis: publicationSceneAxis(layout.scene.yaxis),
-                zaxis: publicationSceneAxis(layout.scene.zaxis)
+                xaxis: publicationSceneAxis(layout.scene.xaxis, typography),
+                yaxis: publicationSceneAxis(layout.scene.yaxis, typography),
+                zaxis: publicationSceneAxis(layout.scene.zaxis, typography)
             };
         }
         if (Array.isArray(layout.annotations)) {
@@ -411,7 +449,7 @@
                 font: {
                     ...(annotation.font || {}),
                     family: 'Arial, Helvetica, sans-serif',
-                    size: pointsToPixels(PRINT.annotationPt),
+                    size: pointsToPixels(typography.annotationPt),
                     color: mapColor(annotation.font?.color || COLORS.ink)
                 }
             }));
@@ -425,7 +463,10 @@
         const width = Math.round(COLUMN_WIDTH_MM[column] * CSS_DPI / MM_PER_INCH);
         const fullWidth = Number(graphDiv?._fullLayout?.width) || graphDiv?.clientWidth || 700;
         const fullHeight = Number(graphDiv?._fullLayout?.height) || graphDiv?.clientHeight || 450;
-        const ratio = Math.min(1.35, Math.max(0.55, fullHeight / Math.max(fullWidth, 1)));
+        const sourceRatio = fullHeight / Math.max(fullWidth, 1);
+        const ratio = column === 'single'
+            ? Math.min(1.15, Math.max(0.9, sourceRatio))
+            : Math.min(1.35, Math.max(0.55, sourceRatio));
         return { width, height: Math.round(width * ratio) };
     }
 
@@ -464,8 +505,8 @@
         holder.style.cssText = `position:fixed;left:-10000px;top:0;width:${dimensions.width}px;height:${dimensions.height}px;background:#fff;`;
         document.body.appendChild(holder);
         try {
-            const data = clone(Array.from(graphDiv.data || [])).map(trace => themeTrace(trace, true));
-            const layout = publicationLayout(graphDiv.layout || {}, dimensions.width, dimensions.height);
+            const data = clone(Array.from(graphDiv.data || [])).map(trace => themeTrace(trace, true, column));
+            const layout = publicationLayout(graphDiv.layout || {}, dimensions.width, dimensions.height, column);
             await originalNewPlot(holder, data, layout, {
                 staticPlot: true,
                 displayModeBar: false,
@@ -538,6 +579,7 @@
         screenLayout,
         plotConfig,
         exportPublicationPlot,
-        exportDimensions
+        exportDimensions,
+        publicationLayout
     });
 })(window);

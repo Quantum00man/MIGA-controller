@@ -126,7 +126,7 @@ Run the regression tests with:
 
 The complete operation, optimization, formula and troubleshooting reference is available in [the technical manual](docs/manual/manual.tex). A compiled copy is provided at [output/pdf/manual.pdf](output/pdf/manual.pdf).
 
-All Plotly charts in the control and archive pages use a shared Nature-like scientific theme. The Paper selector defaults to a 183 mm double-column export and can switch to 89 mm single-column output. The Plotly camera button downloads both SVG and a 600 ppi PNG for the selected final width.
+All Plotly charts in the control and archive pages use a shared Nature-like scientific theme. The Paper selector defaults to a 183 mm double-column export and can switch to 89 mm single-column output. Single-column exports use a taller, compact layout with a horizontal legend so labels and data remain readable at final print size. The Plotly camera button downloads both SVG and a 600 ppi PNG for the selected final width.
 
 ## Author
 

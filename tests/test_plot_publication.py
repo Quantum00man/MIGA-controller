@@ -33,9 +33,19 @@ class PlotPublicationTests(unittest.TestCase):
         self.assertIn("Arial, Helvetica, sans-serif", source)
         self.assertIn("const SCREEN = Object.freeze({ base: 14, axisTitle: 16, plotTitle: 16", source)
         self.assertIn("const PRINT = Object.freeze({ basePt: 8, axisTitlePt: 9, plotTitlePt: 10", source)
+        self.assertIn("const SINGLE_PRINT = Object.freeze({ basePt: 7.5, axisTitlePt: 8.5, plotTitlePt: 9.5", source)
         self.assertIn("ticks: axis.ticks === '' ? '' : 'outside'", source)
         self.assertIn("mirror: false", source)
         self.assertIn("orientation === 'y'", source)
+
+    def test_single_column_has_an_independent_compact_layout(self):
+        source = PLOT_STYLE.read_text(encoding="utf-8")
+        self.assertIn("Math.max(0.9, sourceRatio)", source)
+        self.assertIn("orientation: 'h'", source)
+        self.assertIn("borderwidth: singleColumn ? 0 : 0.7", source)
+        self.assertIn("nticks: axis.nticks || (singleColumn ? 5 : undefined)", source)
+        self.assertIn("clampSingleColumnMarkerSize", source)
+        self.assertIn("publicationLayout(graphDiv.layout || {}, dimensions.width, dimensions.height, column)", source)
 
     def test_archive_bulk_export_uses_publication_exporter(self):
         html = (ROOT / "static" / "archive.html").read_text(encoding="utf-8")
