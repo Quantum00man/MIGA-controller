@@ -595,7 +595,7 @@ class ExperimentManager:
             "transfer_atom_mirror_distance_m": 2.23,
             "transfer_phase_noise_sigma_mrad": 100.0,
             "rigol_host": "",
-            "rigol_visa_resource": "",
+            "rigol_port": 5555,
             "rigol_timeout_s": 3.0,
             "ramsey_center_frequency_mhz": 110.0,
             "std_p_interferometer": 1.1,
@@ -2659,8 +2659,8 @@ class ExperimentManager:
             if ramsey_mode and not config.USE_SIMULATION:
                 rigol_client = RigolGeneratorClient(RigolConnectionSettings(
                     host=str(self.settings.get("rigol_host") or "").strip(),
+                    port=int(self.settings.get("rigol_port", 5555)),
                     timeout_s=float(self.settings.get("rigol_timeout_s", 3.0)),
-                    visa_resource=str(self.settings.get("rigol_visa_resource") or "").strip(),
                 ))
                 identity = rigol_client.connect()
                 print(f"[Ramsey Interferometer] Connected to {identity}")

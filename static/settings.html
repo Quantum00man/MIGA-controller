@@ -581,10 +581,10 @@
                             <label class="form-label fw-bold" for="rigol-host">DG4162 IP address</label>
                             <input id="rigol-host" class="form-control font-monospace" v-model.trim="s.rigol_host" placeholder="192.168.1.100" autocomplete="off">
                         </div>
-                        <div class="col-md-6">
-                            <label class="form-label fw-bold" for="rigol-resource">VISA resource override</label>
-                            <input id="rigol-resource" class="form-control font-monospace" v-model.trim="s.rigol_visa_resource" placeholder="TCPIP0::192.168.1.100::INSTR">
-                            <div class="form-text">Optional. When empty, the resource is built from the IP address.</div>
+                        <div class="col-md-3">
+                            <label class="form-label fw-bold" for="rigol-port">LXI TCP port</label>
+                            <input id="rigol-port" type="number" min="1" max="65535" step="1" class="form-control" v-model.number="s.rigol_port">
+                            <div class="form-text">DG4162 raw socket default: 5555.</div>
                         </div>
                         <div class="col-md-6">
                             <label class="form-label fw-bold" for="ramsey-center">Center frequency f₀</label>
@@ -2833,7 +2833,7 @@
                 rigolConnectionPayload() {
                     return {
                         host: String(this.s.rigol_host || '').trim(),
-                        visa_resource: String(this.s.rigol_visa_resource || '').trim(),
+                        port: Number(this.s.rigol_port || 5555),
                         timeout_s: Number(this.s.rigol_timeout_s || 3)
                     };
                 },
@@ -3157,7 +3157,8 @@
                     normalized.tti_port = Number.isFinite(ttiPort) && ttiPort >= 1 && ttiPort <= 65535 ? ttiPort : 9221;
                     normalized.tti_timeout_s = Number.isFinite(ttiTimeout) && ttiTimeout >= 0.2 ? ttiTimeout : 3;
                     normalized.rigol_host = String(normalized.rigol_host || '').trim();
-                    normalized.rigol_visa_resource = String(normalized.rigol_visa_resource || '').trim();
+                    const rigolPort = Number.parseInt(normalized.rigol_port ?? 5555, 10);
+                    normalized.rigol_port = Number.isFinite(rigolPort) && rigolPort >= 1 && rigolPort <= 65535 ? rigolPort : 5555;
                     const rigolTimeout = Number(normalized.rigol_timeout_s ?? 3);
                     normalized.rigol_timeout_s = Number.isFinite(rigolTimeout) && rigolTimeout >= 0.2 ? rigolTimeout : 3;
                     const ramseyCenter = Number(normalized.ramsey_center_frequency_mhz ?? 110);

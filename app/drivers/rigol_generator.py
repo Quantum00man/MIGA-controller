@@ -1,8 +1,10 @@
-"""RIGOL DG4162 control through its LAN VISA interface."""
+"""Minimal RIGOL DG4162 frequency and output control over LXI raw LAN."""
 
 from __future__ import annotations
 
 import math
+import socket
+import time
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
@@ -14,26 +16,17 @@ class RigolGeneratorError(RuntimeError):
 @dataclass(frozen=True)
 class RigolConnectionSettings:
     host: str
+    port: int = 5555
     timeout_s: float = 3.0
-    visa_resource: str = ""
-
-    def resource_name(self) -> str:
-        explicit = str(self.visa_resource or "").strip()
-        if explicit:
-            return explicit
-        host = str(self.host or "").strip()
-        if not host:
-            raise RigolGeneratorError("RIGOL DG4162 IP address is not configured")
-        return f"TCPIP0::{host}::INSTR"
 
 
 class RigolGeneratorClient:
-    """Small SCPI/VISA client for the two DG4162 output channels."""
+    """Serialized SCPI socket client for both DG4162 channels."""
 
     def __init__(self, settings: RigolConnectionSettings):
         self.settings = settings
-        self._resource_manager = None
-        self._instrument = None
+        self._socket: Optional[socket.socket] = None
+        self._buffer = bytearray()
         self.identity = ""
 
     def __enter__(self) -> "RigolGeneratorClient":
@@ -45,25 +38,20 @@ class RigolGeneratorClient:
 
     def connect(self) -> str:
         self.close()
+        host = str(self.settings.host or "").strip()
+        if not host:
+            raise RigolGeneratorError("RIGOL DG4162 IP address is not configured")
         try:
-            import pyvisa
-        except ImportError as exc:
-            raise RigolGeneratorError(
-                "PyVISA LAN support is unavailable; install PyVISA and pyvisa-py"
-            ) from exc
-        try:
-            self._resource_manager = pyvisa.ResourceManager("@py")
-            self._instrument = self._resource_manager.open_resource(
-                self.settings.resource_name()
+            self._socket = socket.create_connection(
+                (host, int(self.settings.port)), timeout=float(self.settings.timeout_s)
             )
-            self._instrument.timeout = max(1, int(float(self.settings.timeout_s) * 1000))
-            self._instrument.read_termination = "\n"
-            self._instrument.write_termination = "\n"
-            self.identity = str(self._instrument.query("*IDN?")).strip()
-        except Exception as exc:
-            resource = self.settings.resource_name()
+            self._socket.settimeout(float(self.settings.timeout_s))
+            self.identity = self.query("*IDN?")
+        except (OSError, ValueError) as exc:
             self.close()
-            raise RigolGeneratorError(f"Cannot connect to DG4162 at {resource}: {exc}") from exc
+            raise RigolGeneratorError(
+                f"Cannot connect to DG4162 at {host}:{self.settings.port}: {exc}"
+            ) from exc
         identity_upper = self.identity.upper()
         if "RIGOL" not in identity_upper or "DG4162" not in identity_upper:
             identity = self.identity
@@ -72,21 +60,52 @@ class RigolGeneratorClient:
         return self.identity
 
     def close(self) -> None:
-        if self._instrument is not None:
+        if self._socket is not None:
             try:
-                self._instrument.close()
+                self._socket.close()
             finally:
-                self._instrument = None
-        if self._resource_manager is not None:
-            try:
-                self._resource_manager.close()
-            finally:
-                self._resource_manager = None
+                self._socket = None
+        self._buffer.clear()
 
-    def _require_instrument(self):
-        if self._instrument is None:
+    def _require_socket(self) -> socket.socket:
+        if self._socket is None:
             raise RigolGeneratorError("RIGOL DG4162 is not connected")
-        return self._instrument
+        return self._socket
+
+    def write(self, command: str) -> None:
+        sock = self._require_socket()
+        try:
+            sock.sendall((str(command).rstrip("\r\n") + "\n").encode("ascii"))
+        except (OSError, UnicodeError) as exc:
+            self.close()
+            raise RigolGeneratorError(f"DG4162 command failed: {exc}") from exc
+
+    def _readline(self) -> str:
+        sock = self._require_socket()
+        deadline = time.monotonic() + float(self.settings.timeout_s)
+        try:
+            while b"\n" not in self._buffer:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("reply deadline exceeded")
+                sock.settimeout(remaining)
+                block = sock.recv(4096)
+                if not block:
+                    raise OSError("peer disconnected")
+                self._buffer.extend(block)
+                if len(self._buffer) > 16384:
+                    raise OSError("reply exceeded text limit")
+            line, _, remainder = self._buffer.partition(b"\n")
+            self._buffer = bytearray(remainder)
+            sock.settimeout(float(self.settings.timeout_s))
+            return line.decode("ascii").strip()
+        except (OSError, UnicodeError, TimeoutError) as exc:
+            self.close()
+            raise RigolGeneratorError(f"DG4162 reply failed: {exc}") from exc
+
+    def query(self, command: str) -> str:
+        self.write(command)
+        return self._readline()
 
     @staticmethod
     def _frequency(value: float) -> float:
@@ -105,12 +124,13 @@ class RigolGeneratorClient:
         if channel not in (1, 2):
             raise RigolGeneratorError("RIGOL channel must be 1 or 2")
         value = self._frequency(frequency_hz)
-        instrument = self._require_instrument()
+        self.write(f":SOURce{channel}:FREQuency:FIXed {value:.12g}")
         try:
-            instrument.write(f":SOURce{channel}:FREQuency:FIXed {value:.12g}")
-            actual = float(instrument.query(f":SOURce{channel}:FREQuency:FIXed?"))
-        except Exception as exc:
-            raise RigolGeneratorError(f"DG4162 CH{channel} frequency command failed: {exc}") from exc
+            actual = float(self.query(f":SOURce{channel}:FREQuency:FIXed?"))
+        except (ValueError, RigolGeneratorError) as exc:
+            raise RigolGeneratorError(
+                f"DG4162 CH{channel} frequency command failed: {exc}"
+            ) from exc
         tolerance = max(1e-6, abs(value) * 1e-9)
         if not math.isfinite(actual) or abs(actual - value) > tolerance:
             raise RigolGeneratorError(
@@ -125,13 +145,9 @@ class RigolGeneratorClient:
         channel = int(channel)
         if channel not in (1, 2):
             raise RigolGeneratorError("RIGOL channel must be 1 or 2")
-        instrument = self._require_instrument()
         state = "ON" if bool(enabled) else "OFF"
-        try:
-            instrument.write(f":OUTPut{channel}:STATe {state}")
-            actual = str(instrument.query(f":OUTPut{channel}:STATe?")).strip().upper()
-        except Exception as exc:
-            raise RigolGeneratorError(f"DG4162 CH{channel} OUTPUT command failed: {exc}") from exc
+        self.write(f":OUTPut{channel}:STATe {state}")
+        actual = self.query(f":OUTPut{channel}:STATe?").strip().upper()
         actual_enabled = actual in {"1", "ON"}
         if actual_enabled != bool(enabled):
             raise RigolGeneratorError(
@@ -145,25 +161,19 @@ def test_rigol_connection(settings: RigolConnectionSettings) -> str:
         return client.identity
 
 
-def set_rigol_test_frequency(
-    settings: RigolConnectionSettings, channel: int, frequency_hz: float
-) -> str:
+def set_rigol_test_frequency(settings: RigolConnectionSettings, channel: int, frequency_hz: float) -> str:
     with RigolGeneratorClient(settings) as client:
         client.set_frequency(channel, frequency_hz)
         return client.identity
 
 
-def set_rigol_test_frequency_pair(
-    settings: RigolConnectionSettings, ch1_hz: float, ch2_hz: float
-) -> str:
+def set_rigol_test_frequency_pair(settings: RigolConnectionSettings, ch1_hz: float, ch2_hz: float) -> str:
     with RigolGeneratorClient(settings) as client:
         client.set_frequency_pair(ch1_hz, ch2_hz)
         return client.identity
 
 
-def set_rigol_test_output(
-    settings: RigolConnectionSettings, channel: int, enabled: bool
-) -> str:
+def set_rigol_test_output(settings: RigolConnectionSettings, channel: int, enabled: bool) -> str:
     with RigolGeneratorClient(settings) as client:
         client.set_output(channel, enabled)
         return client.identity

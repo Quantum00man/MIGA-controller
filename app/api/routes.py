@@ -1375,8 +1375,8 @@ async def test_tti_generator_output(settings: TtiOutputTestRequest):
 def _rigol_connection_settings(settings: RigolConnectionTestRequest) -> RigolConnectionSettings:
     return RigolConnectionSettings(
         host=settings.host,
+        port=settings.port,
         timeout_s=settings.timeout_s,
-        visa_resource=settings.visa_resource,
     )
 
 

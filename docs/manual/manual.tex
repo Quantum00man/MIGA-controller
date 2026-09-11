@@ -1043,7 +1043,8 @@ interpreting the curve quantitatively.}
 Ramsey Interferometer is a live, one-dimensional scan of the non-negative frequency
 offset $\Delta f$, expressed in MHz. The centre frequency $f_0$ is saved under
 \ui{Settings $>$ Ramsey Interferometer} and defaults to \SI{110}{\mega\hertz}. At each
-scan point the controller programs a LAN-connected RIGOL DG4162 as
+scan point the controller programs a LAN-connected RIGOL DG4162 through its LXI raw
+TCP socket (port 5555 by default) as
 \begin{equation}
   f_{\mathrm{CH1}}=f_0-\Delta f,\qquad
   f_{\mathrm{CH2}}=f_0+\Delta f .
@@ -1503,7 +1504,7 @@ Transfer Function & Actual \SI{780}{\nano\meter} frequency-modulation amplitude,
 atom--mirror distance, fixed Allan phase-noise deviation at the current average,
 TG5012A/TGF3162 and CH1/CH2 selection, direct instrument IP, TCP port, timeout,
 connection test, and immediate frequency/phase tests.\\
-Ramsey Interferometer & RIGOL DG4162 LAN/VISA resource, timeout, centre frequency,
+Ramsey Interferometer & RIGOL DG4162 LXI IP address, raw TCP port, timeout, centre frequency,
 connection test, individual and paired frequency tests, and manual CH1/CH2 output tests.\\
 Network & Acquisition platform, Red Pitaya addresses, DAQ rate and timeout.\\
 Logic \& Channels & Launch/trigger channel IDs and linked-mode timing constant.\\

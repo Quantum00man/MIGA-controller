@@ -1,5 +1,4 @@
 import queue
-import sys
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -11,49 +10,24 @@ from app.drivers.rigol_generator import (
     RigolGeneratorClient,
     RigolGeneratorError,
 )
-from app.models.schemas import ScanConfig
+from app.models.schemas import ScanConfig, SystemSettings
 
 
-class FakeVisaInstrument:
-    def __init__(self, identity="RIGOL TECHNOLOGIES,DG4162,DG4E000000000,00.01"):
-        self.identity = identity
-        self.timeout = None
-        self.read_termination = None
-        self.write_termination = None
-        self.writes = []
-        self.frequencies = {1: 110_000_000.0, 2: 110_000_000.0}
-        self.outputs = {1: False, 2: False}
+class FakeSocket:
+    def __init__(self, replies):
+        self.replies = bytearray("".join(f"{reply}\n" for reply in replies).encode("ascii"))
+        self.sent = []
 
-    def write(self, command):
-        self.writes.append(command)
-        if command.startswith(":SOURce"):
-            channel = int(command[len(":SOURce")])
-            self.frequencies[channel] = float(command.split()[-1])
-        elif command.startswith(":OUTPut"):
-            channel = int(command[len(":OUTPut")])
-            self.outputs[channel] = command.endswith("ON")
-
-    def query(self, command):
-        if command == "*IDN?":
-            return self.identity
-        if command.startswith(":SOURce"):
-            return str(self.frequencies[int(command[len(":SOURce")])])
-        if command.startswith(":OUTPut"):
-            return "ON" if self.outputs[int(command[len(":OUTPut")])] else "OFF"
-        raise AssertionError(command)
-
-    def close(self):
+    def settimeout(self, _timeout):
         pass
 
+    def sendall(self, payload):
+        self.sent.append(payload.decode("ascii"))
 
-class FakeVisaResourceManager:
-    def __init__(self, instrument):
-        self.instrument = instrument
-        self.opened_resource = None
-
-    def open_resource(self, resource):
-        self.opened_resource = resource
-        return self.instrument
+    def recv(self, size):
+        block = bytes(self.replies[:size])
+        del self.replies[:size]
+        return block
 
     def close(self):
         pass
@@ -61,32 +35,42 @@ class FakeVisaResourceManager:
 
 class RigolGeneratorTests(unittest.TestCase):
     def test_connect_and_set_both_frequencies_with_readback(self):
-        instrument = FakeVisaInstrument()
-        manager = FakeVisaResourceManager(instrument)
-        fake_pyvisa = SimpleNamespace(ResourceManager=lambda backend: manager)
-        with patch.dict(sys.modules, {"pyvisa": fake_pyvisa}):
+        fake = FakeSocket([
+            "RIGOL TECHNOLOGIES,DG4162,DG4E000000000,00.01",
+            "109000000",
+            "111000000",
+        ])
+        with patch("app.drivers.rigol_generator.socket.create_connection", return_value=fake) as connect:
             with RigolGeneratorClient(RigolConnectionSettings("192.168.1.40")) as client:
                 client.set_frequency_pair(109_000_000, 111_000_000)
-        self.assertEqual(manager.opened_resource, "TCPIP0::192.168.1.40::INSTR")
-        self.assertEqual(instrument.writes, [
-            ":SOURce1:FREQuency:FIXed 109000000",
-            ":SOURce2:FREQuency:FIXed 111000000",
+        connect.assert_called_once_with(("192.168.1.40", 5555), timeout=3.0)
+        self.assertEqual(fake.sent, [
+            "*IDN?\n",
+            ":SOURce1:FREQuency:FIXed 109000000\n",
+            ":SOURce1:FREQuency:FIXed?\n",
+            ":SOURce2:FREQuency:FIXed 111000000\n",
+            ":SOURce2:FREQuency:FIXed?\n",
         ])
 
     def test_wrong_instrument_is_rejected(self):
-        instrument = FakeVisaInstrument("RIGOL TECHNOLOGIES,DG1022,123,1.0")
-        manager = FakeVisaResourceManager(instrument)
-        with patch.dict(sys.modules, {"pyvisa": SimpleNamespace(ResourceManager=lambda backend: manager)}):
+        fake = FakeSocket(["RIGOL TECHNOLOGIES,DG1022,123,1.0"])
+        with patch("app.drivers.rigol_generator.socket.create_connection", return_value=fake):
             with self.assertRaisesRegex(RigolGeneratorError, "Expected RIGOL DG4162"):
                 RigolGeneratorClient(RigolConnectionSettings("192.168.1.40")).connect()
 
     def test_manual_output_control_is_channel_specific(self):
-        instrument = FakeVisaInstrument()
-        manager = FakeVisaResourceManager(instrument)
-        with patch.dict(sys.modules, {"pyvisa": SimpleNamespace(ResourceManager=lambda backend: manager)}):
+        fake = FakeSocket([
+            "RIGOL TECHNOLOGIES,DG4162,DG4E000000000,00.01",
+            "ON",
+        ])
+        with patch("app.drivers.rigol_generator.socket.create_connection", return_value=fake):
             with RigolGeneratorClient(RigolConnectionSettings("192.168.1.40")) as client:
                 client.set_output(2, True)
-        self.assertEqual(instrument.writes, [":OUTPut2:STATe ON"])
+        self.assertEqual(fake.sent, [
+            "*IDN?\n",
+            ":OUTPut2:STATe ON\n",
+            ":OUTPut2:STATe?\n",
+        ])
 
 
 class RamseyPlanTests(unittest.TestCase):
@@ -142,7 +126,7 @@ class RamseyPlanTests(unittest.TestCase):
 
     def test_acquisition_sets_pair_once_for_all_repeats(self):
         manager = ExperimentManager.__new__(ExperimentManager)
-        manager.settings = {"rigol_host": "192.168.1.40", "rigol_timeout_s": 3, "rigol_visa_resource": ""}
+        manager.settings = {"rigol_host": "192.168.1.40", "rigol_port": 5555, "rigol_timeout_s": 3}
         manager.stop_flag = False
         manager.status = SimpleNamespace(message="")
         manager.data_queue = queue.Queue()
@@ -186,3 +170,4 @@ class RamseyFrontendContractTests(unittest.TestCase):
         config = ScanConfig()
         self.assertEqual(config.ramsey_settling_time_s, 5.0)
         self.assertEqual(config.ramsey_delta_start_mhz, 0.0)
+        self.assertEqual(SystemSettings.model_fields["rigol_port"].default, 5555)

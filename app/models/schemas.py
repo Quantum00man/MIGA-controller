@@ -531,7 +531,7 @@ class SystemSettings(BaseModel):
     transfer_atom_mirror_distance_m: float = Field(2.23, gt=0)
     transfer_phase_noise_sigma_mrad: float = Field(100.0, ge=0)
     rigol_host: str = Field("")
-    rigol_visa_resource: str = Field("")
+    rigol_port: int = Field(5555, ge=1, le=65535)
     rigol_timeout_s: float = Field(3.0, ge=0.2, le=120.0)
     ramsey_center_frequency_mhz: float = Field(110.0, gt=0.0, le=160.0)
     std_p_interferometer: float = Field(1.1, ge=0)
@@ -541,8 +541,8 @@ class SystemSettings(BaseModel):
     def normalize_tti_host(cls, value):
         return str(value or "").strip()
 
-    @validator("rigol_host", "rigol_visa_resource")
-    def normalize_rigol_connection_text(cls, value):
+    @validator("rigol_host")
+    def normalize_rigol_host(cls, value):
         return str(value or "").strip()
 
     @validator("tti_model")
@@ -616,19 +616,16 @@ class TtiOutputTestRequest(TtiConnectionTestRequest):
 
 
 class RigolConnectionTestRequest(BaseModel):
-    host: str = Field("")
-    visa_resource: str = Field("")
+    host: str
+    port: int = Field(5555, ge=1, le=65535)
     timeout_s: float = Field(3.0, ge=0.2, le=120.0)
 
-    @validator("host", "visa_resource")
-    def normalize_connection_text(cls, value):
-        return str(value or "").strip()
-
-    @validator("visa_resource", always=True)
-    def require_host_or_resource(cls, value, values):
-        if not value and not str(values.get("host") or "").strip():
-            raise ValueError("RIGOL IP address or VISA resource is required")
-        return value
+    @validator("host")
+    def validate_host(cls, value):
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("RIGOL DG4162 IP address is required")
+        return normalized
 
 
 class RigolFrequencyTestRequest(RigolConnectionTestRequest):
