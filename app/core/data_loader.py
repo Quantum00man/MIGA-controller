@@ -1622,6 +1622,8 @@ class DataLoader:
         alpha_max: float = 1.0,
         beta_min: float = 0.0,
         beta_max: float = 1.0,
+        probability_mean_tolerance: float = 1.0,
+        parameter_prior_weight: float = 0.05,
         source: str = "fit",
         channel: str = "up",
         target_mean: float = 0.0,
@@ -1629,7 +1631,7 @@ class DataLoader:
         normalized_parameter = str(parameter or "intf_beta").strip().lower()
         normalized_metric = str(metric or "intf").strip().lower()
         normalized_statistic = str(statistic or "mean").strip().lower()
-        minimize_statistic = normalized_statistic in {"std", "allan"}
+        minimize_statistic = normalized_statistic in {"std", "allan", "leakage"}
         normalized_source = str(source or "fit").strip().lower()
         normalized_channel = str(channel or "up").strip().lower()
         if normalized_parameter not in {"alpha", "beta", "alpha_beta", "intf_beta"}:
@@ -1637,8 +1639,12 @@ class DataLoader:
         allowed_metrics = {"intf"} if normalized_parameter == "intf_beta" else {"atoms", "prob", "intf"}
         if normalized_metric not in allowed_metrics:
             raise ValueError(f"{normalized_parameter} does not affect the selected metric")
-        if normalized_statistic not in {"mean", "std", "allan"}:
-            raise ValueError("Optimization statistic must be mean, std, or allan")
+        if normalized_statistic not in {"mean", "std", "allan", "leakage"}:
+            raise ValueError("Optimization statistic must be mean, std, allan, or leakage")
+        if normalized_statistic == "leakage" and (
+            normalized_parameter != "alpha_beta" or normalized_metric != "prob"
+        ):
+            raise ValueError("Common-mode leakage requires ALPHA + BETA and Transition Probability")
         normalized_allan_order = int(allan_order)
         if normalized_allan_order < 1:
             raise ValueError("Allan order must be at least 1")
@@ -1650,6 +1656,12 @@ class DataLoader:
         target = float(target_mean)
         if not minimize_statistic and not math.isfinite(target):
             raise ValueError("Target statistic must be finite")
+        mean_tolerance = float(probability_mean_tolerance)
+        prior_weight = float(parameter_prior_weight)
+        if not math.isfinite(mean_tolerance) or mean_tolerance <= 0.0:
+            raise ValueError("Probability mean tolerance must be positive")
+        if not math.isfinite(prior_weight) or prior_weight < 0.0:
+            raise ValueError("Parameter prior weight cannot be negative")
 
         atom_alpha = self._safe_scalar(settings.get("alpha"), 0.0151)
         atom_beta = self._safe_scalar(settings.get("beta"), 0.0188)
@@ -1752,6 +1764,26 @@ class DataLoader:
                     values, normalized_allan_order
                 )
                 return value, valid_windows
+            if normalized_statistic == "leakage":
+                valid = np.isfinite(values) & np.isfinite(total)
+                if np.count_nonzero(valid) < 3:
+                    return None, 0
+                probability_values = values[valid]
+                total_values = total[valid]
+                order = np.flatnonzero(valid).astype(float)
+                design = np.column_stack((np.ones_like(order), order))
+                probability_detrended = probability_values - design @ np.linalg.lstsq(
+                    design, probability_values, rcond=None
+                )[0]
+                total_detrended = total_values - design @ np.linalg.lstsq(
+                    design, total_values, rcond=None
+                )[0]
+                total_scale = float(np.std(total_detrended, ddof=1))
+                if total_scale < 1e-12:
+                    return None, 0
+                normalized_total = total_detrended / total_scale
+                slope = float(np.dot(normalized_total, probability_detrended) / np.dot(normalized_total, normalized_total))
+                return abs(slope), int(probability_values.size)
             if normalized_statistic == "std":
                 value = float(np.std(finite, ddof=1)) if finite.size > 1 else 0.0
             else:
@@ -1765,10 +1797,83 @@ class DataLoader:
             raise ValueError("No valid samples are available for optimization")
 
         if normalized_parameter == "alpha_beta":
+            initial_probability_mean = None
+            if normalized_statistic == "leakage":
+                original_statistic = normalized_statistic
+                normalized_statistic = "mean"
+                initial_probability_mean, _ = evaluate(initial_value)
+                normalized_statistic = original_statistic
+
+            def leakage_diagnostics(candidate: np.ndarray, source_name: str) -> Dict[str, Any]:
+                nonlocal area_up_values, area_dw_values, normalized_source
+                saved_arrays = area_up_values, area_dw_values, normalized_source
+                try:
+                    suffix_name = "_nofit" if source_name == "raw" else ""
+                    source_up, source_dw = [], []
+                    for point in points:
+                        n_f2 = self._parse_float(point.get(f"atom_number_up{suffix_name}"))
+                        n_f1 = self._parse_float(point.get(f"atom_number_dw{suffix_name}"))
+                        if n_f2 is None or n_f1 is None:
+                            source_up.append(math.nan)
+                            source_dw.append(math.nan)
+                            continue
+                        scaled_up = n_f2 / conversion
+                        scaled_dw = n_f1 / (ratio * conversion)
+                        source_up.append((scaled_up + atom_alpha * scaled_dw) / determinant)
+                        source_dw.append((scaled_dw + atom_beta * scaled_up) / determinant)
+                    area_up_values = np.asarray(source_up, dtype=float)
+                    area_dw_values = np.asarray(source_dw, dtype=float)
+                    normalized_source = source_name
+                    current_alpha, current_beta = map(float, candidate)
+                    n_f2 = (area_up_values - area_dw_values * current_alpha) * conversion
+                    n_f1 = (area_dw_values - area_up_values * current_beta) * ratio * conversion
+                    total_values = n_f2 + n_f1
+                    probability = np.full_like(total_values, np.nan)
+                    valid = np.isfinite(total_values) & (np.abs(total_values) >= 1e-9)
+                    numerator = n_f2 if normalized_channel == "up" else n_f1
+                    probability[valid] = 100.0 * numerator[valid] / total_values[valid]
+                    valid &= np.isfinite(probability)
+                    probability_values = probability[valid]
+                    total_valid = total_values[valid]
+                    if probability_values.size < 3:
+                        return {"sample_count": int(probability_values.size)}
+                    order = np.flatnonzero(valid).astype(float)
+                    design = np.column_stack((np.ones_like(order), order))
+                    pd = probability_values - design @ np.linalg.lstsq(design, probability_values, rcond=None)[0]
+                    td = total_valid - design @ np.linalg.lstsq(design, total_valid, rcond=None)[0]
+                    total_std = float(np.std(td, ddof=1))
+                    slope = float(np.dot(td / total_std, pd) / np.dot(td / total_std, td / total_std)) if total_std > 1e-12 else None
+                    correlation = float(np.corrcoef(pd, td)[0, 1]) if np.std(pd) > 0 and total_std > 0 else None
+                    allan_n1, allan_windows = phase_noise.overlapping_allan_deviation(probability, 1)
+                    return {
+                        "leakage_slope": slope,
+                        "leakage_magnitude": abs(slope) if slope is not None else None,
+                        "correlation": correlation,
+                        "probability_mean": float(np.mean(probability_values)),
+                        "probability_std": float(np.std(probability_values, ddof=1)),
+                        "allan_n1": allan_n1,
+                        "allan_n1_valid_windows": allan_windows,
+                        "sample_count": int(probability_values.size),
+                    }
+                finally:
+                    area_up_values, area_dw_values, normalized_source = saved_arrays
+
             def joint_loss(candidate: np.ndarray) -> float:
                 value, count = evaluate(candidate)
                 if value is None or (minimize_statistic and count < initial_count):
                     return 1e100
+                if normalized_statistic == "leakage":
+                    diagnostics = leakage_diagnostics(candidate, normalized_source)
+                    candidate_mean = diagnostics.get("probability_mean")
+                    if candidate_mean is None or abs(candidate_mean - initial_probability_mean) > mean_tolerance:
+                        return 1e100
+                    alpha_scale = alpha_bounds[1] - alpha_bounds[0]
+                    beta_scale = beta_bounds[1] - beta_bounds[0]
+                    prior = 0.5 * (
+                        ((float(candidate[0]) - atom_alpha) / alpha_scale) ** 2
+                        + ((float(candidate[1]) - atom_beta) / beta_scale) ** 2
+                    )
+                    return float(value + prior_weight * prior)
                 return float(value if minimize_statistic else abs(value - target))
 
             optimized = differential_evolution(
@@ -1793,6 +1898,22 @@ class DataLoader:
             if achieved_statistic is None or joint_loss(optimized.x) > initial_loss:
                 optimized_values = {"alpha": atom_alpha, "beta": atom_beta}
                 achieved_statistic, sample_count = initial_mean, initial_count
+            leakage_diagnostics_by_source = None
+            validation_warnings: List[str] = []
+            if normalized_statistic == "leakage":
+                other_source = "raw" if normalized_source == "fit" else "fit"
+                leakage_diagnostics_by_source = {}
+                for source_name in (normalized_source, other_source):
+                    before = leakage_diagnostics(np.asarray((atom_alpha, atom_beta)), source_name)
+                    after = leakage_diagnostics(np.asarray((optimized_values["alpha"], optimized_values["beta"])), source_name)
+                    leakage_diagnostics_by_source[source_name] = {"before": before, "after": after}
+                selected_after = leakage_diagnostics_by_source[normalized_source]["after"]
+                achieved_statistic = selected_after.get("leakage_magnitude")
+                sample_count = selected_after.get("sample_count", sample_count)
+                other_before = leakage_diagnostics_by_source[other_source]["before"].get("leakage_magnitude")
+                other_after = leakage_diagnostics_by_source[other_source]["after"].get("leakage_magnitude")
+                if other_before is not None and other_after is not None and other_after > other_before:
+                    validation_warnings.append(f"Leakage improved for {normalized_source} but worsened for {other_source}")
             residual = None if minimize_statistic else float(achieved_statistic - target)
             absolute_improvement = float(initial_mean - achieved_statistic)
             relative_improvement = (
@@ -1830,6 +1951,10 @@ class DataLoader:
                 "source": normalized_source,
                 "channel": normalized_channel,
                 "parameter_bounds": {"alpha": list(alpha_bounds), "beta": list(beta_bounds)},
+                "probability_mean_tolerance": mean_tolerance if normalized_statistic == "leakage" else None,
+                "parameter_prior_weight": prior_weight if normalized_statistic == "leakage" else None,
+                "leakage_diagnostics": leakage_diagnostics_by_source,
+                "validation_warnings": validation_warnings,
             }
 
         parameter_bounds = alpha_bounds if normalized_parameter == "alpha" else (
@@ -1968,6 +2093,8 @@ class DataLoader:
         alpha_max: float = 1.0,
         beta_min: float = 0.0,
         beta_max: float = 1.0,
+        probability_mean_tolerance: float = 1.0,
+        parameter_prior_weight: float = 0.05,
         source: str = "fit",
         channel: str = "up",
         target_mean: float = 0.0,
@@ -2000,6 +2127,8 @@ class DataLoader:
             alpha_max=alpha_max,
             beta_min=beta_min,
             beta_max=beta_max,
+            probability_mean_tolerance=probability_mean_tolerance,
+            parameter_prior_weight=parameter_prior_weight,
             source=source,
             channel=channel,
             target_mean=target_mean,

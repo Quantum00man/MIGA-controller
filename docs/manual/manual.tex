@@ -1492,6 +1492,22 @@ the initial and minimum deviations, order, valid-window counts and relative impr
 reported; the initial parameter remains a candidate so optimization cannot return a worse
 Allan deviation.
 
+For a long common-mode atom-number drift, \ui{Common-mode Leakage} is available with
+\ui{ALPHA + BETA} and \ui{Transition Probability}. For each candidate calibration, the
+probability $P$ and total atom number $N$ are independently detrended against chronological
+shot order. With $\widetilde N$ scaled to unit sample standard deviation, the leakage slope
+$k_N$ is obtained from
+\begin{equation}
+  \widetilde P_i=k_N\frac{\widetilde N_i}{\operatorname{std}(\widetilde N)}+\epsilon_i.
+\end{equation}
+The optimizer minimizes $|k_N|$ plus a normalized ALPHA/BETA parameter prior. A hard
+\ui{Mean P Tolerance} prevents the candidate mean probability from moving too far from its
+initial value, and candidates may not reduce the valid sample count. The result reports
+before/after slope, correlation, probability mean, standard deviation, first-order Allan
+deviation and sample count for both Fit and NoFit. A warning is emitted when the selected
+source improves but the other source worsens. This objective diagnoses total-number
+leakage; it does not establish calibration validity without an independent archive.
+
 \chapter{Settings, calibration and maintenance}\label{ch:settings}
 
 \begin{figure}[htbp]

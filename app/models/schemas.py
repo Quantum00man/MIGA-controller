@@ -851,6 +851,8 @@ class ArchiveInterferometerBetaOptimizeRequest(BaseModel):
     alpha_max: float = Field(1.0, ge=0.0, le=1.0)
     beta_min: float = Field(0.0, ge=0.0, le=1.0)
     beta_max: float = Field(1.0, ge=0.0, le=1.0)
+    probability_mean_tolerance: float = Field(1.0, gt=0.0, le=100.0)
+    parameter_prior_weight: float = Field(0.05, ge=0.0, le=1000.0)
     source: str = Field("fit")
     channel: str = Field("up")
     target_mean: float = Field(0.0)

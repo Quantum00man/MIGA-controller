@@ -1097,6 +1097,7 @@
                                                 <option value="mean">Mean</option>
                                                 <option value="std">Standard Deviation</option>
                                                 <option value="allan">Allan Deviation</option>
+                                                <option value="leakage">Common-mode Leakage</option>
                                             </select>
                                         </div>
                                         <div class="col-4">
@@ -1124,6 +1125,10 @@
                                             <input type="number" min="1" step="1" class="form-control form-control-sm"
                                                 v-model.number="betaOptimization.allanOrder">
                                         </div>
+                                        <template v-if="betaOptimization.statistic === 'leakage'">
+                                            <div class="col-4"><label class="form-label-small">MEAN P TOLERANCE (pp)</label><input type="number" min="0.000001" max="100" step="any" class="form-control form-control-sm" v-model.number="betaOptimization.meanTolerance"></div>
+                                            <div class="col-4"><label class="form-label-small">PARAMETER PRIOR WEIGHT</label><input type="number" min="0" step="any" class="form-control form-control-sm" v-model.number="betaOptimization.priorWeight"></div>
+                                        </template>
                                         <template v-if="['alpha', 'alpha_beta'].includes(betaOptimization.parameter)">
                                             <div class="col-3"><label class="form-label-small">ALPHA MIN</label><input type="number" min="0" max="1" step="any" class="form-control form-control-sm" v-model.number="betaOptimization.alphaMin"></div>
                                             <div class="col-3"><label class="form-label-small">ALPHA MAX</label><input type="number" min="0" max="1" step="any" class="form-control form-control-sm" v-model.number="betaOptimization.alphaMax"></div>
@@ -1149,6 +1154,24 @@
                                     <div v-if="betaOptimization.message" class="small mt-2"
                                         :class="betaOptimization.error ? 'text-danger' : (betaOptimization.result?.exact ? 'text-success' : 'text-warning')">
                                         {{ betaOptimization.message }}
+                                    </div>
+                                    <div v-if="betaOptimization.result?.leakage_diagnostics" class="table-responsive mt-2">
+                                        <table class="table table-sm table-bordered align-middle mb-1 small">
+                                            <thead><tr><th>Source</th><th>State</th><th>Leak slope (pp/σN)</th><th>Correlation</th><th>Mean P (%)</th><th>STD</th><th>Allan n=1</th><th>Samples</th></tr></thead>
+                                            <tbody>
+                                                <template v-for="sourceName in ['fit', 'raw']" :key="sourceName">
+                                                    <tr v-for="stateName in ['before', 'after']" :key="sourceName + stateName">
+                                                        <td>{{ sourceName === 'fit' ? 'Fit' : 'NoFit' }}</td><td>{{ stateName }}</td>
+                                                        <td>{{ formatMetricValue(betaOptimization.result.leakage_diagnostics[sourceName]?.[stateName]?.leakage_slope) }}</td>
+                                                        <td>{{ formatMetricValue(betaOptimization.result.leakage_diagnostics[sourceName]?.[stateName]?.correlation) }}</td>
+                                                        <td>{{ formatMetricValue(betaOptimization.result.leakage_diagnostics[sourceName]?.[stateName]?.probability_mean) }}</td>
+                                                        <td>{{ formatMetricValue(betaOptimization.result.leakage_diagnostics[sourceName]?.[stateName]?.probability_std) }}</td>
+                                                        <td>{{ formatMetricValue(betaOptimization.result.leakage_diagnostics[sourceName]?.[stateName]?.allan_n1) }}</td>
+                                                        <td>{{ betaOptimization.result.leakage_diagnostics[sourceName]?.[stateName]?.sample_count ?? '—' }}</td>
+                                                    </tr>
+                                                </template>
+                                            </tbody>
+                                        </table>
                                     </div>
                                 </div>
                             </div>
@@ -2602,6 +2625,7 @@
                     betaOptimization: {
                         parameter: 'intf_beta', metric: 'intf', statistic: 'mean', allanOrder: 1, source: 'fit', channel: 'up', targetMean: 0,
                         alphaMin: 0, alphaMax: 1, betaMin: 0, betaMax: 1,
+                        meanTolerance: 1, priorWeight: 0.05,
                         loading: false, applying: false, error: false, message: '', result: null
                     },
                     defaultFitModels: [], defaultScanFitModels: [],
@@ -5442,6 +5466,8 @@
                             alpha_max: Number(this.betaOptimization.alphaMax),
                             beta_min: Number(this.betaOptimization.betaMin),
                             beta_max: Number(this.betaOptimization.betaMax),
+                            probability_mean_tolerance: Number(this.betaOptimization.meanTolerance),
+                            parameter_prior_weight: Number(this.betaOptimization.priorWeight),
                             source: this.betaOptimization.source,
                             channel: this.betaOptimization.channel,
                             target_mean: Number(this.betaOptimization.targetMean ?? 0)
@@ -5461,7 +5487,9 @@
                             const improvement = Number(result.relative_improvement);
                             const improvementText = Number.isFinite(improvement) ? `, improvement=${(100 * improvement).toFixed(2)}%` : '';
                             const boundaryText = result.at_boundary ? ` Warning: ${result.boundary_parameters.join(', ').toUpperCase()} reached a bound.` : '';
-                            this.betaOptimization.message = `ALPHA=${alpha.toPrecision(10)}, BETA=${beta.toPrecision(10)}; ${result.objective === 'minimize' ? 'minimum' : 'result'} ${result.statistic}=${achieved.toPrecision(6)} (initial ${initial.toPrecision(6)})${improvementText}.${boundaryText}`;
+                            const validationText = Array.isArray(result.validation_warnings) && result.validation_warnings.length ? ` ${result.validation_warnings.join(' ')}` : '';
+                            const statisticName = result.statistic === 'leakage' ? 'leakage magnitude (pp/σN)' : result.statistic;
+                            this.betaOptimization.message = `ALPHA=${alpha.toPrecision(10)}, BETA=${beta.toPrecision(10)}; ${result.objective === 'minimize' ? 'minimum' : 'result'} ${statisticName}=${achieved.toPrecision(6)} (initial ${initial.toPrecision(6)})${improvementText}.${boundaryText}${validationText}`;
                             await this.recalculate();
                             if (this.plotMode !== 'allan') await this.setPlotMode('allan');
                             return;
@@ -5553,6 +5581,9 @@
                 handleMeanOptimizationParameterChange() {
                     const available = this.meanOptimizationMetricOptions().map(option => option.value);
                     if (!available.includes(this.betaOptimization.metric)) this.betaOptimization.metric = available[0];
+                    if (this.betaOptimization.statistic === 'leakage' && this.betaOptimization.parameter !== 'alpha_beta') {
+                        this.betaOptimization.statistic = 'std';
+                    }
                     this.handleMeanOptimizationMetricChange();
                 },
 
@@ -5560,12 +5591,20 @@
                     if (this.betaOptimization.metric !== 'atoms' && this.betaOptimization.channel === 'total') {
                         this.betaOptimization.channel = 'up';
                     }
+                    if (this.betaOptimization.statistic === 'leakage' && this.betaOptimization.metric !== 'prob') {
+                        this.betaOptimization.statistic = 'std';
+                    }
                     this.betaOptimization.error = false;
                     this.betaOptimization.message = '';
                     this.betaOptimization.result = null;
                 },
 
                 handleMeanOptimizationStatisticChange() {
+                    if (this.betaOptimization.statistic === 'leakage') {
+                        this.betaOptimization.parameter = 'alpha_beta';
+                        this.betaOptimization.metric = 'prob';
+                        if (this.betaOptimization.channel === 'total') this.betaOptimization.channel = 'up';
+                    }
                     this.betaOptimization.error = false;
                     this.betaOptimization.message = '';
                     this.betaOptimization.result = null;

@@ -1,4 +1,5 @@
 import asyncio
+import math
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -181,6 +182,37 @@ class ArchiveInterferometerBetaOptimizationTests(unittest.TestCase):
         self.assertLessEqual(result["optimized_values"]["beta"], 0.15)
         self.assertLessEqual(result["achieved_statistic"], result["initial_statistic"])
 
+    def test_alpha_beta_common_mode_leakage_uses_mean_constraint_and_cross_diagnostics(self):
+        settings = {**self.settings, "alpha": 0.1, "beta": 0.05, "R": 1.1, "K": 10.0}
+        points = []
+        for index in range(160):
+            common = math.sin(2.0 * math.pi * index / 50.0)
+            area_up = 2.0 * (1.0 + 0.05 * common) + 0.03 * math.sin(index * 0.37)
+            area_dw = 8.0 * (1.0 + 0.14 * common) + 0.04 * math.cos(index * 0.23)
+            n_f2, n_f1 = physics.calculate_atom_numbers(
+                area_up, area_dw, 1.0, 1.0,
+                settings["alpha"], settings["beta"], settings["R"], settings["K"], 0.0,
+            )
+            points.append({
+                "atom_number_up": n_f2,
+                "atom_number_dw": n_f1,
+                "atom_number_up_nofit": n_f2 * 1.001,
+                "atom_number_dw_nofit": n_f1 * 0.999,
+            })
+
+        result = self.loader._optimize_analysis_parameter_from_points(
+            points, settings, parameter="alpha_beta", metric="prob",
+            statistic="leakage", channel="up",
+            alpha_min=0.0, alpha_max=0.3, beta_min=0.0, beta_max=0.2,
+            probability_mean_tolerance=1.0, parameter_prior_weight=0.05,
+        )
+
+        fit = result["leakage_diagnostics"]["fit"]
+        self.assertLessEqual(fit["after"]["leakage_magnitude"], fit["before"]["leakage_magnitude"])
+        self.assertLessEqual(abs(fit["after"]["probability_mean"] - fit["before"]["probability_mean"]), 1.000001)
+        self.assertEqual(fit["before"]["sample_count"], fit["after"]["sample_count"])
+        self.assertIn("raw", result["leakage_diagnostics"])
+
     def test_interferometer_beta_rejects_unaffected_metric(self):
         with self.assertRaisesRegex(ValueError, "does not affect"):
             self.loader._optimize_analysis_parameter_from_points(
@@ -244,10 +276,12 @@ class ArchiveInterferometerBetaOptimizationTests(unittest.TestCase):
         self.assertIn('<option value="beta">BETA</option>', archive_html)
         self.assertIn('<option value="std">Standard Deviation</option>', archive_html)
         self.assertIn('<option value="allan">Allan Deviation</option>', archive_html)
+        self.assertIn('<option value="leakage">Common-mode Leakage</option>', archive_html)
         self.assertIn('<option value="alpha_beta">ALPHA + BETA</option>', archive_html)
         self.assertIn('alpha_min:', archive_html)
         self.assertIn('beta_max:', archive_html)
         self.assertIn('/settings/analysis-parameters/alpha-beta', archive_html)
+        self.assertIn('probability_mean_tolerance:', archive_html)
         self.assertIn('allan_order:', archive_html)
 
 
