@@ -30,6 +30,8 @@ RESULTS_CSV_HEADER = [
     "Workflow_Step", "Workflow_Marker", "Workflow_Point", "Workflow_Repeat",
     "Workflow_Shot", "Workflow_Randomized",
     "TTI_Frequency_Hz", "Transfer_Repeat", "TTI_Phase_Deg",
+    "Ramsey_Delta_F_MHz", "Ramsey_Repeat", "Ramsey_Center_Frequency_MHz",
+    "Ramsey_CH1_Frequency_MHz", "Ramsey_CH2_Frequency_MHz",
 ]
 
 
@@ -252,6 +254,11 @@ class DataManager:
             transfer_frequency_hz=result.transfer_frequency_hz if result.transfer_frequency_hz is not None else np.nan,
             transfer_repeat=result.transfer_repeat if result.transfer_repeat is not None else -1,
             transfer_phase_deg=result.transfer_phase_deg if result.transfer_phase_deg is not None else np.nan,
+            ramsey_delta_f_mhz=result.ramsey_delta_f_mhz if result.ramsey_delta_f_mhz is not None else np.nan,
+            ramsey_repeat=result.ramsey_repeat if result.ramsey_repeat is not None else -1,
+            ramsey_center_frequency_mhz=result.ramsey_center_frequency_mhz if result.ramsey_center_frequency_mhz is not None else np.nan,
+            ramsey_ch1_frequency_mhz=result.ramsey_ch1_frequency_mhz if result.ramsey_ch1_frequency_mhz is not None else np.nan,
+            ramsey_ch2_frequency_mhz=result.ramsey_ch2_frequency_mhz if result.ramsey_ch2_frequency_mhz is not None else np.nan,
         )
 
     def _write_csv_row(self, result: ScanResult, step_index: int):
@@ -296,6 +303,11 @@ class DataManager:
             f(result.transfer_frequency_hz, 6),
             result.transfer_repeat if result.transfer_repeat is not None else "",
             f(result.transfer_phase_deg, 6),
+            f(result.ramsey_delta_f_mhz, 9),
+            result.ramsey_repeat if result.ramsey_repeat is not None else "",
+            f(result.ramsey_center_frequency_mhz, 9),
+            f(result.ramsey_ch1_frequency_mhz, 9),
+            f(result.ramsey_ch2_frequency_mhz, 9),
         ]
         self.csv_writer.writerow(row)
         self.csv_handle.flush()
@@ -373,6 +385,9 @@ class DataManager:
                     pt.get('workflow_shot', ''), pt.get('workflow_randomized', ''),
                     f('transfer_frequency_hz', 6), pt.get('transfer_repeat', ''),
                     f('transfer_phase_deg', 6),
+                    f('ramsey_delta_f_mhz', 9), pt.get('ramsey_repeat', ''),
+                    f('ramsey_center_frequency_mhz', 9),
+                    f('ramsey_ch1_frequency_mhz', 9), f('ramsey_ch2_frequency_mhz', 9),
                 ]
                 writer.writerow(row)
 

@@ -116,6 +116,8 @@ The application is divided into five main layers:
 
 At runtime, the browser submits an experiment request to the API. The core engine renders and compiles the sequence, triggers the selected acquisition device, processes the returned waveforms, streams results to the browser and stores the run for later re-analysis.
 
+The Ramsey Interferometer live mode scans a non-negative frequency offset $\Delta f$ in MHz. A LAN-connected RIGOL DG4162 is programmed once per scan point with CH1 = $f_0-\Delta f$ and CH2 = $f_0+\Delta f$; the existing MOT sequence controls the external RF switch. Results use the same physical-metric, Fit/NoFit and archive workflow as a Standard one-dimensional scan.
+
 ## Tests and documentation
 
 Run the regression tests with:

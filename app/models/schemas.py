@@ -91,6 +91,11 @@ class ScanConfig(BaseModel):
     transfer_phase_degrees: List[float] = Field(default_factory=lambda: [0.0, 90.0])
     transfer_phase_scan_mode: str = Field("phase_blocks")
     transfer_control_output: bool = Field(False)
+    ramsey_delta_start_mhz: float = Field(0.0, ge=0.0)
+    ramsey_delta_stop_mhz: float = Field(1.0, ge=0.0)
+    ramsey_delta_step_mhz: float = Field(0.1, gt=0.0)
+    ramsey_repeats: int = Field(1, ge=1, le=100000)
+    ramsey_settling_time_s: float = Field(5.0, ge=0.0, le=3600.0)
     parameter_source: str = Field("classic")
     marker_axes: List[str] = Field(default_factory=list)
     interferometer_phase_calibration_override: Optional[Dict[str, Any]] = Field(None)
@@ -525,11 +530,19 @@ class SystemSettings(BaseModel):
     transfer_frequency_modulation_mhz: float = Field(1.0, gt=0)
     transfer_atom_mirror_distance_m: float = Field(2.23, gt=0)
     transfer_phase_noise_sigma_mrad: float = Field(100.0, ge=0)
+    rigol_host: str = Field("")
+    rigol_visa_resource: str = Field("")
+    rigol_timeout_s: float = Field(3.0, ge=0.2, le=120.0)
+    ramsey_center_frequency_mhz: float = Field(110.0, gt=0.0, le=160.0)
     std_p_interferometer: float = Field(1.1, ge=0)
     laser_frequency_phase_noise_mrad: float = Field(100.0, ge=0)
 
     @validator("tti_host")
     def normalize_tti_host(cls, value):
+        return str(value or "").strip()
+
+    @validator("rigol_host", "rigol_visa_resource")
+    def normalize_rigol_connection_text(cls, value):
         return str(value or "").strip()
 
     @validator("tti_model")
@@ -599,6 +612,45 @@ class TtiPhaseTestRequest(TtiConnectionTestRequest):
 
 
 class TtiOutputTestRequest(TtiConnectionTestRequest):
+    enabled: bool
+
+
+class RigolConnectionTestRequest(BaseModel):
+    host: str = Field("")
+    visa_resource: str = Field("")
+    timeout_s: float = Field(3.0, ge=0.2, le=120.0)
+
+    @validator("host", "visa_resource")
+    def normalize_connection_text(cls, value):
+        return str(value or "").strip()
+
+    @validator("visa_resource", always=True)
+    def require_host_or_resource(cls, value, values):
+        if not value and not str(values.get("host") or "").strip():
+            raise ValueError("RIGOL IP address or VISA resource is required")
+        return value
+
+
+class RigolFrequencyTestRequest(RigolConnectionTestRequest):
+    channel: int = Field(..., ge=1, le=2)
+    frequency_mhz: float = Field(..., gt=0.0, le=160.0)
+
+
+class RigolFrequencyPairTestRequest(RigolConnectionTestRequest):
+    center_frequency_mhz: float = Field(110.0, gt=0.0, le=160.0)
+    delta_f_mhz: float = Field(..., ge=0.0)
+
+    @validator("delta_f_mhz")
+    def validate_frequency_pair(cls, value, values):
+        delta = float(value)
+        center = float(values.get("center_frequency_mhz", 110.0))
+        if center - delta <= 0 or center + delta > 160.0:
+            raise ValueError("RIGOL frequency pair must stay within 0 to 160 MHz")
+        return delta
+
+
+class RigolOutputTestRequest(RigolConnectionTestRequest):
+    channel: int = Field(..., ge=1, le=2)
     enabled: bool
 
 

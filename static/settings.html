@@ -575,6 +575,56 @@
                     </div>
                 </div>
 
+                <div v-if="tab==='ramsey'">
+                    <div class="row g-3 align-items-end">
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold" for="rigol-host">DG4162 IP address</label>
+                            <input id="rigol-host" class="form-control font-monospace" v-model.trim="s.rigol_host" placeholder="192.168.1.100" autocomplete="off">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold" for="rigol-resource">VISA resource override</label>
+                            <input id="rigol-resource" class="form-control font-monospace" v-model.trim="s.rigol_visa_resource" placeholder="TCPIP0::192.168.1.100::INSTR">
+                            <div class="form-text">Optional. When empty, the resource is built from the IP address.</div>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold" for="ramsey-center">Center frequency f₀</label>
+                            <div class="input-group"><input id="ramsey-center" type="number" min="0.000001" max="160" step="any" class="form-control" v-model.number="s.ramsey_center_frequency_mhz"><span class="input-group-text">MHz</span></div>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label fw-bold" for="rigol-timeout">Timeout</label>
+                            <div class="input-group"><input id="rigol-timeout" type="number" min="0.2" max="120" step="0.1" class="form-control" v-model.number="s.rigol_timeout_s"><span class="input-group-text">s</span></div>
+                        </div>
+                        <div class="col-md-3 d-grid">
+                            <button class="btn btn-outline-primary" @click="testRigolConnection" :disabled="rigolBusy"><span v-if="rigolBusy" class="spinner-border spinner-border-sm me-1"></span>Test Connection</button>
+                        </div>
+                        <div class="col-12" v-if="rigolMessage"><div class="alert py-2 mb-0" :class="rigolError ? 'alert-danger' : 'alert-success'">{{ rigolMessage }}</div></div>
+
+                        <div class="col-12 mt-4 pt-3 border-top"><h6 class="fw-bold mb-1">Frequency tests</h6><div class="small text-muted">Commands are applied immediately and are not restored.</div></div>
+                        <div class="col-md-4">
+                            <label class="form-label small fw-bold">CH1 frequency</label>
+                            <div class="input-group"><input type="number" min="0.000001" max="160" step="any" class="form-control" v-model.number="rigolCh1TestMhz"><span class="input-group-text">MHz</span></div>
+                            <button class="btn btn-outline-warning w-100 mt-2" @click="setRigolTestFrequency(1)" :disabled="rigolBusy">Set CH1</button>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small fw-bold">CH2 frequency</label>
+                            <div class="input-group"><input type="number" min="0.000001" max="160" step="any" class="form-control" v-model.number="rigolCh2TestMhz"><span class="input-group-text">MHz</span></div>
+                            <button class="btn btn-outline-warning w-100 mt-2" @click="setRigolTestFrequency(2)" :disabled="rigolBusy">Set CH2</button>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small fw-bold">Ramsey test Δf</label>
+                            <div class="input-group"><input type="number" min="0" step="any" class="form-control" v-model.number="rigolDeltaTestMhz"><span class="input-group-text">MHz</span></div>
+                            <button class="btn btn-outline-warning w-100 mt-2" @click="setRigolTestPair" :disabled="rigolBusy">Set f₀−Δf / f₀+Δf</button>
+                        </div>
+
+                        <div class="col-12 mt-4 pt-3 border-top"><h6 class="fw-bold mb-1">Manual OUTPUT tests</h6><div class="small text-muted">Ramsey scans never change OUTPUT state.</div></div>
+                        <div class="col-md-6" v-for="channel in [1, 2]" :key="`rigol-output-${channel}`">
+                            <label class="form-label small fw-bold">CH{{ channel }} OUTPUT</label>
+                            <div class="btn-group w-100"><button class="btn btn-outline-success" @click="setRigolTestOutput(channel, true)" :disabled="rigolBusy">ON</button><button class="btn btn-outline-danger" @click="setRigolTestOutput(channel, false)" :disabled="rigolBusy">OFF</button></div>
+                        </div>
+                    </div>
+                    <div class="alert alert-light border mt-4 mb-0 small">At each Δf point the scan writes CH1 = f₀ − Δf and CH2 = f₀ + Δf, verifies both values, waits for the Index settling time, and then runs the existing MOT sequence. Phase and OUTPUT are left unchanged.</div>
+                </div>
+
                 <div v-if="tab==='tti'">
                     <div class="row g-3 align-items-end">
                         <div class="col-md-6">
@@ -1675,6 +1725,7 @@
                         { id: 'phase-noise', label: 'Phase Noise Analyze', icon: 'bi-graph-up', description: 'Configure the detection and laser-frequency baselines used to compare phase noise across mid fringes.' },
                         { id: 'sync', label: 'SYNC', icon: 'bi-bounding-box-circles', description: 'Configure Standalone, Master or Slave operation for synchronized differential measurements.' },
                         { id: 'tti', label: 'Transfer Function', icon: 'bi-soundwave', description: 'Configure the generator connection and the actual 780 nm frequency-modulation amplitude used to normalize Transfer Function scans.' },
+                        { id: 'ramsey', label: 'Ramsey Interferometer', icon: 'bi-bezier', description: 'Configure the RIGOL DG4162 LAN connection, center frequency and manual channel tests for Ramsey scans.' },
                         { id: 'net', label: 'Network', icon: 'bi-hdd-network', description: 'Select the acquisition platform and configure device connection limits.' },
                         { id: 'logic', label: 'Logic & Channels', icon: 'bi-diagram-3', description: 'Set launch, trigger and linked-mode channel timing.' },
                         { id: 'paths', label: 'System Paths', icon: 'bi-folder2-open', description: 'Configure executable and default template locations used by the controller.' },
@@ -1685,6 +1736,8 @@
                     ttiTestFrequencyHz: 1000, ttiFrequencyTesting: false, ttiFrequencyMessage: '', ttiFrequencyError: false,
                     ttiTestPhaseDeg: 0, ttiPhaseTesting: false, ttiPhaseMessage: '', ttiPhaseError: false,
                     ttiOutputTesting: false, ttiOutputTarget: false, ttiOutputMessage: '', ttiOutputError: false,
+                    rigolBusy: false, rigolMessage: '', rigolError: false,
+                    rigolCh1TestMhz: 110, rigolCh2TestMhz: 110, rigolDeltaTestMhz: 0.1,
                     markerBusy: false,
                     markerError: '',
                     markerMessage: '',
@@ -2777,6 +2830,51 @@
                         this.ttiOutputTesting = false;
                     }
                 },
+                rigolConnectionPayload() {
+                    return {
+                        host: String(this.s.rigol_host || '').trim(),
+                        visa_resource: String(this.s.rigol_visa_resource || '').trim(),
+                        timeout_s: Number(this.s.rigol_timeout_s || 3)
+                    };
+                },
+                async runRigolAction(action) {
+                    this.rigolBusy = true; this.rigolMessage = ''; this.rigolError = false;
+                    try {
+                        this.rigolMessage = await action();
+                    } catch (error) {
+                        this.rigolError = true;
+                        this.rigolMessage = error.response?.data?.detail || error.message || 'DG4162 command failed';
+                    } finally { this.rigolBusy = false; }
+                },
+                async testRigolConnection() {
+                    await this.runRigolAction(async () => {
+                        const res = await axios.post('/settings/rigol/test', this.rigolConnectionPayload());
+                        return `Connected: ${res.data?.data?.identity || 'RIGOL DG4162'}`;
+                    });
+                },
+                async setRigolTestFrequency(channel) {
+                    await this.runRigolAction(async () => {
+                        const frequency = Number(channel === 2 ? this.rigolCh2TestMhz : this.rigolCh1TestMhz);
+                        if (!Number.isFinite(frequency) || frequency <= 0 || frequency > 160) throw new Error('Frequency must be within 0 to 160 MHz.');
+                        await axios.post('/settings/rigol/test-frequency', { ...this.rigolConnectionPayload(), channel, frequency_mhz: frequency });
+                        return `DG4162 CH${channel} verified at ${frequency} MHz.`;
+                    });
+                },
+                async setRigolTestPair() {
+                    await this.runRigolAction(async () => {
+                        const center = Number(this.s.ramsey_center_frequency_mhz);
+                        const delta = Number(this.rigolDeltaTestMhz);
+                        if (!Number.isFinite(delta) || delta < 0) throw new Error('Δf must be non-negative.');
+                        const res = await axios.post('/settings/rigol/test-pair', { ...this.rigolConnectionPayload(), center_frequency_mhz: center, delta_f_mhz: delta });
+                        return `Frequency pair verified: CH1 ${res.data.data.ch1_mhz} MHz · CH2 ${res.data.data.ch2_mhz} MHz.`;
+                    });
+                },
+                async setRigolTestOutput(channel, enabled) {
+                    await this.runRigolAction(async () => {
+                        await axios.post('/settings/rigol/test-output', { ...this.rigolConnectionPayload(), channel, enabled });
+                        return `DG4162 CH${channel} OUTPUT ${enabled ? 'ON' : 'OFF'} verified.`;
+                    });
+                },
                 async fetchSettings() {
                     try {
                         const res = await axios.get('/settings/all');
@@ -3058,6 +3156,12 @@
                     const ttiTimeout = Number(normalized.tti_timeout_s ?? 3);
                     normalized.tti_port = Number.isFinite(ttiPort) && ttiPort >= 1 && ttiPort <= 65535 ? ttiPort : 9221;
                     normalized.tti_timeout_s = Number.isFinite(ttiTimeout) && ttiTimeout >= 0.2 ? ttiTimeout : 3;
+                    normalized.rigol_host = String(normalized.rigol_host || '').trim();
+                    normalized.rigol_visa_resource = String(normalized.rigol_visa_resource || '').trim();
+                    const rigolTimeout = Number(normalized.rigol_timeout_s ?? 3);
+                    normalized.rigol_timeout_s = Number.isFinite(rigolTimeout) && rigolTimeout >= 0.2 ? rigolTimeout : 3;
+                    const ramseyCenter = Number(normalized.ramsey_center_frequency_mhz ?? 110);
+                    normalized.ramsey_center_frequency_mhz = Number.isFinite(ramseyCenter) && ramseyCenter > 0 && ramseyCenter <= 160 ? ramseyCenter : 110;
                     normalized.sequence_marker_definitions = Array.isArray(normalized.sequence_marker_definitions)
                         ? normalized.sequence_marker_definitions.map(item => ({ ...item }))
                         : [];

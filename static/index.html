@@ -688,10 +688,10 @@
                             v-model="runMode" :disabled="isRunning || isScheduleActive()">
                         <label class="btn btn-outline-secondary" for="runModeLive">Live</label>
                         <input type="radio" class="btn-check" name="runMode" id="runModeScheduled" value="scheduled"
-                            v-model="runMode" :disabled="isRunning || isScheduleActive() || ['ac_stark', 'transfer_function'].includes(config.mode)">
+                            v-model="runMode" :disabled="isRunning || isScheduleActive() || ['ac_stark', 'transfer_function', 'ramsey_interferometer'].includes(config.mode)">
                         <label class="btn btn-outline-secondary" for="runModeScheduled">Scheduled</label>
                         <input type="radio" class="btn-check" name="runMode" id="runModeSync" value="sync"
-                            v-model="runMode" :disabled="isRunning || isScheduleActive() || ['lock_in', 'ac_stark', 'transfer_function'].includes(config.mode)">
+                            v-model="runMode" :disabled="isRunning || isScheduleActive() || ['lock_in', 'ac_stark', 'transfer_function', 'ramsey_interferometer'].includes(config.mode)">
                         <label class="btn btn-outline-primary" for="runModeSync">SYNC</label>
                     </div>
                     <div class="form-text mt-2" style="font-size: 0.72rem;">
@@ -772,8 +772,8 @@
                 </div>
             </template>
 
-            <span class="section-label" v-if="config.mode !== 'transfer_function'">Parameter Source</span>
-            <div class="card p-3 mb-3" v-if="config.mode !== 'transfer_function'">
+            <span class="section-label" v-if="!['transfer_function', 'ramsey_interferometer'].includes(config.mode)">Parameter Source</span>
+            <div class="card p-3 mb-3" v-if="!['transfer_function', 'ramsey_interferometer'].includes(config.mode)">
                 <div class="btn-group btn-group-sm w-100" role="group" aria-label="Parameter source">
                     <input type="radio" class="btn-check" id="sourceClassic" value="classic" v-model="config.parameter_source"
                         :disabled="isRunning || isScheduleActive()">
@@ -907,10 +907,10 @@
                             v-model.number="config.scan_dimensions">
                         <label class="btn btn-outline-secondary" for="scan1d">1D</label>
                         <input type="radio" class="btn-check" name="scanDimension" id="scan2d" :value="2"
-                            v-model.number="config.scan_dimensions" :disabled="['ac_stark', 'lock_in', 'transfer_function', 'phase_noise'].includes(config.mode)">
+                            v-model.number="config.scan_dimensions" :disabled="['ac_stark', 'lock_in', 'transfer_function', 'ramsey_interferometer', 'phase_noise'].includes(config.mode)">
                         <label class="btn btn-outline-secondary" for="scan2d">2D</label>
                         <input type="radio" class="btn-check" name="scanDimension" id="scan3d" :value="3"
-                            v-model.number="config.scan_dimensions" :disabled="['ac_stark', 'lock_in', 'transfer_function', 'phase_noise'].includes(config.mode)">
+                            v-model.number="config.scan_dimensions" :disabled="['ac_stark', 'lock_in', 'transfer_function', 'ramsey_interferometer', 'phase_noise'].includes(config.mode)">
                         <label class="btn btn-outline-secondary" for="scan3d">3D</label>
                     </div>
                     <div class="form-text mt-2" v-if="config.scan_dimensions > 1">
@@ -919,8 +919,8 @@
                     </div>
                 </div>
 
-                <span class="section-label" v-if="!['ac_stark', 'lock_in', 'transfer_function', 'phase_noise'].includes(config.mode)">Parameter P0</span>
-                <div class="card p-3" v-if="!['ac_stark', 'lock_in', 'transfer_function', 'phase_noise'].includes(config.mode)">
+                <span class="section-label" v-if="!['ac_stark', 'lock_in', 'transfer_function', 'ramsey_interferometer', 'phase_noise'].includes(config.mode)">Parameter P0</span>
+                <div class="card p-3" v-if="!['ac_stark', 'lock_in', 'transfer_function', 'ramsey_interferometer', 'phase_noise'].includes(config.mode)">
                     <div v-if="config.parameter_source === 'markers'" class="mb-3">
                         <label class="form-label small fw-bold text-primary mb-1">P0 Marker</label>
                         <select class="form-select form-select-sm" v-model="config.marker_axes[0]" @change="applyMarkerDefaults(0)">
@@ -1035,6 +1035,7 @@
                             <option value="lock_in" :disabled="isSyncMode()">Lock-in Measurement</option>
                             <option value="ac_stark" :disabled="isSyncMode()">AC Stark Centering</option>
                             <option value="transfer_function" :disabled="isSyncMode() || isScheduledMode()">Transfer Function</option>
+                            <option value="ramsey_interferometer" :disabled="isSyncMode() || isScheduledMode()">Ramsey Interferometer</option>
                         </select>
                         <div v-if="isSyncMode()" class="form-text">SYNC supports Standard, Timing, Rabi, Half, Link and Bragg Rabi.</div>
                     </div>
@@ -1070,6 +1071,17 @@
                             </div>
                         </div>
                         <div class="form-text mt-2">The phase scan order is selected under Execution Control. Statistics are updated after every shot.</div>
+                    </div>
+                    <div v-if="config.mode === 'ramsey_interferometer'" class="mt-1">
+                        <div class="alert alert-light border py-2 px-3 small mb-3">DG4162 CH1 = f₀ − Δf and CH2 = f₀ + Δf. The existing MOT sequence controls the external RF switch.</div>
+                        <div class="row g-2">
+                            <div class="col-4"><label class="form-label small text-muted mb-1">Δf Start (MHz)</label><input type="number" min="0" step="any" class="form-control form-control-sm" v-model.number="config.ramsey_delta_start_mhz"></div>
+                            <div class="col-4"><label class="form-label small text-muted mb-1">Δf Stop (MHz)</label><input type="number" min="0" step="any" class="form-control form-control-sm" v-model.number="config.ramsey_delta_stop_mhz"></div>
+                            <div class="col-4"><label class="form-label small text-muted mb-1">Δf Step (MHz)</label><input type="number" min="0.000000001" step="any" class="form-control form-control-sm" v-model.number="config.ramsey_delta_step_mhz"></div>
+                            <div class="col-6 mt-2"><label class="form-label small text-muted mb-1">Repeats per Δf</label><input type="number" min="1" step="1" class="form-control form-control-sm" v-model.number="config.ramsey_repeats"></div>
+                            <div class="col-6 mt-2"><label class="form-label small text-muted mb-1">Settling time</label><div class="input-group input-group-sm"><input type="number" min="0" max="3600" step="any" class="form-control" v-model.number="config.ramsey_settling_time_s"><span class="input-group-text">s</span></div></div>
+                        </div>
+                        <div class="form-text mt-2">Center frequency f₀ is configured in Settings → Ramsey Interferometer. Phase and OUTPUT are not changed during a scan.</div>
                     </div>
                     <div v-if="['timing', 'rabi'].includes(config.mode)">
                         <label class="form-label small text-muted mb-1">Total Parameter</label>
@@ -1407,14 +1419,14 @@
                 <span class="section-label">Execution Control</span>
                 <div class="card p-3 mb-5 border-0 bg-transparent shadow-none ps-0 pe-0">
                     <div class="row g-2 align-items-center mb-3 px-1">
-                        <div v-if="config.mode !== 'phase_noise'" class="col-6"><label class="form-label small text-muted mb-1">{{ config.mode === 'transfer_function' ? 'Repeats per frequency' : (config.mode === 'ac_stark' ? 'Averages per half-point' : (config.mode === 'lock_in' ? 'ABBA blocks' : 'Averages')) }}</label><input
-                                v-if="config.mode !== 'transfer_function'" type="number" class="form-control form-control-sm" v-model.number="config.averages"
-                                min="1"><input v-else type="number" class="form-control form-control-sm" v-model.number="config.transfer_repeats" min="2"></div>
+                        <div v-if="config.mode !== 'phase_noise'" class="col-6"><label class="form-label small text-muted mb-1">{{ config.mode === 'transfer_function' ? 'Repeats per frequency' : (config.mode === 'ramsey_interferometer' ? 'Repeats per Δf' : (config.mode === 'ac_stark' ? 'Averages per half-point' : (config.mode === 'lock_in' ? 'ABBA blocks' : 'Averages'))) }}</label><input
+                                v-if="!['transfer_function', 'ramsey_interferometer'].includes(config.mode)" type="number" class="form-control form-control-sm" v-model.number="config.averages"
+                                min="1"><input v-else-if="config.mode === 'transfer_function'" type="number" class="form-control form-control-sm" v-model.number="config.transfer_repeats" min="2"><input v-else type="number" class="form-control form-control-sm" v-model.number="config.ramsey_repeats" min="1"></div>
                         <div v-else class="col-6"><label class="form-label small text-muted mb-1">Phase Noise plan</label><div class="form-control form-control-sm bg-light">{{ config.phase_noise_mid_fringe_values.length }} T values × {{ config.phase_noise_repeats }} repeats</div></div>
                         <div class="col-6">
                             <div class="d-flex align-items-center gap-3 mt-4 flex-wrap">
                                 <div class="form-check mb-0"><input class="form-check-input" type="checkbox"
-                                        v-model="config.randomize" id="randCheck" :disabled="['ac_stark', 'lock_in', 'transfer_function', 'phase_noise'].includes(config.mode)"><label
+                                        v-model="config.randomize" id="randCheck" :disabled="['ac_stark', 'lock_in', 'transfer_function', 'ramsey_interferometer', 'phase_noise'].includes(config.mode)"><label
                                         class="form-check-label small" for="randCheck">Randomize</label></div>
                                 <div class="form-check mb-0"><input class="form-check-input" type="checkbox"
                                         v-model="config.ext_trigger" id="extTriggerCheck"><label
@@ -1738,6 +1750,11 @@
                         transfer_phase_degrees: [0, 90],
                         transfer_phase_scan_mode: 'phase_blocks',
                         transfer_control_output: false,
+                        ramsey_delta_start_mhz: 0,
+                        ramsey_delta_stop_mhz: 1,
+                        ramsey_delta_step_mhz: 0.1,
+                        ramsey_repeats: 1,
+                        ramsey_settling_time_s: 5,
                         phase_noise_mid_fringe_values: [], phase_noise_repeats: 10
                     },
                     isRunning: false, isSimulation: false, statusMessage: "IDLE", currentStep: 0, plotRevision: 0, logs: [], ws: null,
@@ -1906,19 +1923,19 @@
                     }
                 },
                 'config.mode'(mode) {
-                    if (this.runMode === 'sync' && ['lock_in', 'ac_stark', 'transfer_function'].includes(mode)) {
+                    if (this.runMode === 'sync' && ['lock_in', 'ac_stark', 'transfer_function', 'ramsey_interferometer'].includes(mode)) {
                         this.config.mode = 'standard';
                         return;
                     }
                     if (this.config.parameter_source === 'markers' && mode !== 'standard') {
-                        if (mode === 'transfer_function') {
+                        if (['transfer_function', 'ramsey_interferometer'].includes(mode)) {
                             this.config.parameter_source = 'classic';
                         } else {
                             this.config.mode = 'standard';
                             return;
                         }
                     }
-                    if (['ac_stark', 'lock_in', 'transfer_function'].includes(mode)) {
+                    if (['ac_stark', 'lock_in', 'transfer_function', 'ramsey_interferometer'].includes(mode)) {
                         this.config.scan_dimensions = 1;
                         this.config.dim2_enabled = false;
                         this.config.dim3_enabled = false;
@@ -1935,6 +1952,11 @@
                             this.showRawData = false;
                             if (!['atoms', 'intf', 'phase'].includes(this.currentTab)) this.currentTab = 'atoms';
                         }
+                        if (mode === 'ramsey_interferometer') {
+                            this.runMode = 'live';
+                            this.config.parameter_source = 'classic';
+                            this.config.averages = 1;
+                        }
                     }
                     if (!this.isRunning) {
                         this.resetHistory(1);
@@ -1943,7 +1965,7 @@
                 runMode(value) {
                     if (value !== 'live' && this.config.parameter_source === 'markers') this.config.parameter_source = 'classic';
                     if (value === 'sync') {
-                        if (['lock_in', 'ac_stark', 'transfer_function'].includes(this.config.mode)) this.config.mode = 'standard';
+                        if (['lock_in', 'ac_stark', 'transfer_function', 'ramsey_interferometer'].includes(this.config.mode)) this.config.mode = 'standard';
                         this.fetchSyncConfig();
                         this.$nextTick(() => this.syncViewMode === 'node' ? this.initPlots() : this.renderSyncPlot());
                     }
@@ -3235,6 +3257,16 @@ getLiveEstimatedShotCount() {
                 ? this.config.transfer_phase_degrees.length : 2;
             return frequencyCount * Math.max(2, Math.round(Number(this.config.transfer_repeats) || 2)) * phaseCount;
         }
+        if (this.config.mode === 'ramsey_interferometer') {
+            const deltaCount = this.estimateAxisPointCount({
+                scan_type: 'range', method: 'step_size',
+                start: this.config.ramsey_delta_start_mhz,
+                stop: this.config.ramsey_delta_stop_mhz,
+                step: this.config.ramsey_delta_step_mhz,
+                list: ''
+            });
+            return deltaCount * Math.max(1, Math.round(Number(this.config.ramsey_repeats) || 1));
+        }
         return this.estimateScanStepCount(this.config);
     } catch (error) {
         return 0;
@@ -3247,6 +3279,10 @@ getLiveEstimatedDurationSeconds() {
     if (this.config.mode === 'transfer_function') {
         const repeats = Math.max(2, Math.round(Number(this.config.transfer_repeats) || 2));
         seconds += Math.ceil(shots / repeats) * 5;
+    }
+    if (this.config.mode === 'ramsey_interferometer') {
+        const repeats = Math.max(1, Math.round(Number(this.config.ramsey_repeats) || 1));
+        seconds += Math.ceil(shots / repeats) * Math.max(0, Number(this.config.ramsey_settling_time_s) || 0);
     }
     return seconds;
 },
@@ -3273,6 +3309,11 @@ getLiveEstimateSummary() {
     if (this.config.mode === 'transfer_function') {
         const repeats = Math.max(2, Math.round(Number(this.config.transfer_repeats) || 2));
         return `${shots} shots at ${Math.ceil(shots / repeats)} frequencies | ${this.formatDuration(this.getLiveEstimatedDurationSeconds())} incl. 5 s settling/point`;
+    }
+    if (this.config.mode === 'ramsey_interferometer') {
+        const repeats = Math.max(1, Math.round(Number(this.config.ramsey_repeats) || 1));
+        const points = Math.ceil(shots / repeats);
+        return `${shots} shots at ${points} Δf points | ${this.formatDuration(this.getLiveEstimatedDurationSeconds())} incl. ${Math.max(0, Number(this.config.ramsey_settling_time_s) || 0)} s settling/point`;
     }
     return `${shots} shots | ${this.formatDuration(this.getLiveEstimatedDurationSeconds())} @ ${this.getSinglePointDurationSec().toFixed(3)} s/shot`;
 },
@@ -4109,6 +4150,25 @@ finishScheduledRun(finalStatus = 'IDLE') {
                         payload.parameter_source = 'classic';
                         payload.marker_axes = [];
                     }
+                    if (payload.mode === 'ramsey_interferometer') {
+                        ['ramsey_delta_start_mhz', 'ramsey_delta_stop_mhz', 'ramsey_delta_step_mhz', 'ramsey_settling_time_s'].forEach((field) => {
+                            const value = Number(payload[field]);
+                            if (!Number.isFinite(value)) throw new Error(`${field} must be numeric.`);
+                            payload[field] = value;
+                        });
+                        if (payload.ramsey_delta_start_mhz < 0 || payload.ramsey_delta_stop_mhz < 0) throw new Error('Ramsey Δf must be non-negative.');
+                        if (payload.ramsey_delta_step_mhz <= 0) throw new Error('Ramsey Δf step must be greater than zero.');
+                        if (payload.ramsey_settling_time_s < 0 || payload.ramsey_settling_time_s > 3600) throw new Error('Ramsey settling time must be between 0 and 3600 seconds.');
+                        payload.ramsey_repeats = Math.round(Number(payload.ramsey_repeats));
+                        if (!Number.isInteger(payload.ramsey_repeats) || payload.ramsey_repeats < 1 || payload.ramsey_repeats > 100000) throw new Error('Ramsey repeats must be between 1 and 100000.');
+                        payload.scan_dimensions = 1;
+                        payload.dim2_enabled = false;
+                        payload.dim3_enabled = false;
+                        payload.randomize = false;
+                        payload.averages = 1;
+                        payload.parameter_source = 'classic';
+                        payload.marker_axes = [];
+                    }
                     if (payload.mode === 'phase_noise') {
                         if (!this.activePhaseNoiseCalibration) throw new Error('Phase Noise Analyze requires an active Bragg phase calibration.');
                         const selected = Array.isArray(payload.phase_noise_mid_fringe_values)
@@ -4509,6 +4569,9 @@ finishScheduledRun(finalStatus = 'IDLE') {
                         uirevision: 'analysis-results'
                     };
                 },
+                getLiveXAxisLabel() {
+                    return this.config.mode === 'ramsey_interferometer' ? 'Δf (MHz)' : 'Parameter P0';
+                },
                 build1DLayout(channel, metric) {
                     const base = this.buildCommonAnalysisLayout();
                     const isUp = channel === 'up';
@@ -4518,7 +4581,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                         yaxis: { ...base.yaxis, title: metric.label + (isUp ? metric.suffixUp : metric.suffixDw) },
                         xaxis: {
                             ...base.xaxis,
-                            title: isUp ? '' : 'Parameter P0',
+                            title: isUp ? '' : this.getLiveXAxisLabel(),
                             showticklabels: !isUp
                         },
                         title: {
@@ -5580,15 +5643,18 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     // Number(null) is 0, so coercion alone would misclassify an
                     // ordinary scan point as a 0 Hz Transfer Function point.
                     const isTransferFunctionPoint = this.hasFiniteNumericValue(data.transfer_frequency_hz);
+                    const isRamseyPoint = this.hasFiniteNumericValue(data.ramsey_delta_f_mhz);
                     const isFinalImmediateStep = !this.isScheduleActive() && !this.isSyncMode() && total > 0 && this.currentStep >= total;
                     this.currentScanDimensions = scanDimensions;
                     this.statusMessage = isTransferFunctionPoint
                         ? `Transfer Function: ${String(data.transfer_generator_model || 'TTI')} CH${Number(data.transfer_generator_channel || 1)} | ${Number(data.transfer_phase_deg).toPrecision(6)}° | ${Number(data.transfer_frequency_hz).toPrecision(8)} Hz | ${Number(data.transfer_repeat)}/${Number(this.config.transfer_repeats)}`
+                        : (isRamseyPoint
+                        ? `Ramsey: Δf=${Number(data.ramsey_delta_f_mhz).toPrecision(8)} MHz | CH1=${Number(data.ramsey_ch1_frequency_mhz).toPrecision(9)} MHz | CH2=${Number(data.ramsey_ch2_frequency_mhz).toPrecision(9)} MHz | ${Number(data.ramsey_repeat)}/${Number(this.config.ramsey_repeats)}`
                         : (isAcStarkPoint
                         ? `AC Stark: ratio=${Number(data.ac_stark_ratio).toFixed(6)} | ${String(data.ac_stark_side).toUpperCase()}`
                         : (isLockInPoint
                             ? `Lock-in: block ${Number(data.lock_in_block_index)} | ${String(data.lock_in_state).toUpperCase()}${Number(data.lock_in_position)}`
-                            : `Scanning: ${this.formatScanParameters(scannedParams)}`));
+                            : `Scanning: ${this.formatScanParameters(scannedParams)}`)));
 
                     if (!data.time_axis || !data.raw_data_up || !data.raw_data_dw || !data.fit_data_up || !data.fit_data_dw) {
                         if (data.error) {
@@ -5670,6 +5736,9 @@ finishScheduledRun(finalStatus = 'IDLE') {
                                 ? data.all_parameters.map(value => Number(value))
                                 : scannedParams;
                             let paramLog = this.formatScanParameters(allParamsForLog);
+                            if (isRamseyPoint) {
+                                paramLog = `Ramsey Δf=${Number(data.ramsey_delta_f_mhz).toPrecision(8)} MHz | CH1=${Number(data.ramsey_ch1_frequency_mhz).toPrecision(9)} MHz | CH2=${Number(data.ramsey_ch2_frequency_mhz).toPrecision(9)} MHz | repeat ${Number(data.ramsey_repeat)}/${Number(this.config.ramsey_repeats)}`;
+                            }
                             if (data.detected_delay !== undefined && data.detected_delay !== null) {
                                 paramLog += ` | Δt=${(data.detected_delay * 1000).toFixed(2)}ms`;
                             }

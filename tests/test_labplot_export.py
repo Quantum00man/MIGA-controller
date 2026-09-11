@@ -88,6 +88,13 @@ class PhaseNoiseLoader:
         }
 
 
+class RamseyLoader(FakeLoader):
+    def load_run(self, year, month, day, run_id, node_id=None, current_phase_calibration=None):
+        payload = super().load_run(year, month, day, run_id, node_id, current_phase_calibration)
+        payload["config"] = {"mode": "ramsey_interferometer"}
+        return payload
+
+
 def transfer_summary():
     rows = []
     for index, frequency in enumerate((10.0, 20.0, 30.0), start=1):
@@ -153,6 +160,20 @@ class LabPlotExportTests(unittest.TestCase):
         intf_curves = [item.attrib["name"] for item in worksheets["Interferometer P (%)"].iter("xyCurve")]
         self.assertIn("Archive fringe fit", intf_curves)
         self.assertIn("Current Bragg fringe fit", intf_curves)
+
+    def test_ramsey_archive_uses_standard_metrics_with_delta_f_axis(self):
+        payload = build_archive_project(
+            RamseyLoader(), "2026", "09", "11", "run_ramsey", ["atoms", "intf", "phase"]
+        )
+        root = self.parse(payload)
+        worksheets = {item.attrib["name"]: item for item in root.iter("worksheet")}
+        self.assertEqual(set(worksheets), {"Atom Number", "Interferometer P (%)", "Interferometer Phase (rad)"})
+        axis_labels = [
+            (axis.findtext("textLabel/text") or "")
+            for axis in root.iter("axis")
+            if axis.attrib.get("name") == "x"
+        ]
+        self.assertTrue(any("Delta f (MHz)" in label for label in axis_labels))
 
     def test_archive_uses_accessible_scientific_publication_theme(self):
         payload = build_archive_project(

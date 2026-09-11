@@ -3314,6 +3314,9 @@
                 isTransferFunctionArchive() {
                     return String(this.loadedConfig?.mode || "").trim().toLowerCase() === "transfer_function";
                 },
+                isRamseyInterferometerArchive() {
+                    return String(this.loadedConfig?.mode || "").trim().toLowerCase() === "ramsey_interferometer";
+                },
                 isPhaseNoiseArchive() {
                     return String(this.loadedConfig?.mode || "").trim().toLowerCase() === "phase_noise";
                 },
@@ -3380,6 +3383,7 @@
                         const channel = Number(this.loadedConfig?.transfer_generator_channel || 1);
                         return `${model} CH${channel} frequency (Hz)`;
                     }
+                    if (this.isRamseyInterferometerArchive()) return 'Δf (MHz)';
                     const step = this.activeOptimizationStep();
                     return step?.marker_name || step?.marker_id || "Parameter P0";
                 },

@@ -61,6 +61,14 @@ from app.drivers.tti_generator import (
     TtiGeneratorError,
     test_tti_connection,
 )
+from app.drivers.rigol_generator import (
+    RigolConnectionSettings,
+    RigolGeneratorError,
+    set_rigol_test_frequency,
+    set_rigol_test_frequency_pair,
+    set_rigol_test_output,
+    test_rigol_connection,
+)
 from app.models.schemas import (
     AnalysisSettings,
     ArchiveAllanRequest,
@@ -110,6 +118,10 @@ from app.models.schemas import (
     TtiFrequencyTestRequest,
     TtiOutputTestRequest,
     TtiPhaseTestRequest,
+    RigolConnectionTestRequest,
+    RigolFrequencyTestRequest,
+    RigolFrequencyPairTestRequest,
+    RigolOutputTestRequest,
     SyncNodeCommandRequest,
     SyncNodePrepareRequest,
     SyncNodeTestRequest,
@@ -1357,6 +1369,84 @@ async def test_tti_generator_output(settings: TtiOutputTestRequest):
             },
         )
     except TtiGeneratorError as exc:
+        raise HTTPException(502, str(exc))
+
+
+def _rigol_connection_settings(settings: RigolConnectionTestRequest) -> RigolConnectionSettings:
+    return RigolConnectionSettings(
+        host=settings.host,
+        timeout_s=settings.timeout_s,
+        visa_resource=settings.visa_resource,
+    )
+
+
+@router.post("/settings/rigol/test", response_model=ExperimentResponse)
+async def test_rigol_generator(settings: RigolConnectionTestRequest):
+    try:
+        identity = await run_in_threadpool(
+            test_rigol_connection, _rigol_connection_settings(settings)
+        )
+        return ExperimentResponse(
+            status="success", message="DG4162 connection verified", data={"identity": identity}
+        )
+    except RigolGeneratorError as exc:
+        raise HTTPException(502, str(exc))
+
+
+@router.post("/settings/rigol/test-frequency", response_model=ExperimentResponse)
+async def test_rigol_generator_frequency(settings: RigolFrequencyTestRequest):
+    try:
+        identity = await run_in_threadpool(
+            set_rigol_test_frequency,
+            _rigol_connection_settings(settings),
+            settings.channel,
+            settings.frequency_mhz * 1_000_000.0,
+        )
+        return ExperimentResponse(
+            status="success",
+            message=f"DG4162 CH{settings.channel} frequency verified",
+            data={"identity": identity, "channel": settings.channel, "frequency_mhz": settings.frequency_mhz},
+        )
+    except RigolGeneratorError as exc:
+        raise HTTPException(502, str(exc))
+
+
+@router.post("/settings/rigol/test-pair", response_model=ExperimentResponse)
+async def test_rigol_generator_frequency_pair(settings: RigolFrequencyPairTestRequest):
+    ch1_mhz = settings.center_frequency_mhz - settings.delta_f_mhz
+    ch2_mhz = settings.center_frequency_mhz + settings.delta_f_mhz
+    try:
+        identity = await run_in_threadpool(
+            set_rigol_test_frequency_pair,
+            _rigol_connection_settings(settings),
+            ch1_mhz * 1_000_000.0,
+            ch2_mhz * 1_000_000.0,
+        )
+        return ExperimentResponse(
+            status="success",
+            message="DG4162 Ramsey frequency pair verified",
+            data={"identity": identity, "ch1_mhz": ch1_mhz, "ch2_mhz": ch2_mhz},
+        )
+    except RigolGeneratorError as exc:
+        raise HTTPException(502, str(exc))
+
+
+@router.post("/settings/rigol/test-output", response_model=ExperimentResponse)
+async def test_rigol_generator_output(settings: RigolOutputTestRequest):
+    try:
+        identity = await run_in_threadpool(
+            set_rigol_test_output,
+            _rigol_connection_settings(settings),
+            settings.channel,
+            settings.enabled,
+        )
+        state = "ON" if settings.enabled else "OFF"
+        return ExperimentResponse(
+            status="success",
+            message=f"DG4162 CH{settings.channel} OUTPUT {state} verified",
+            data={"identity": identity, "channel": settings.channel, "output_enabled": settings.enabled},
+        )
+    except RigolGeneratorError as exc:
         raise HTTPException(502, str(exc))
 
 

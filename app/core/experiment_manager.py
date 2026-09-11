@@ -36,6 +36,7 @@ from app.core.sequence_markers import (
     validate_auto_marker_scan,
 )
 from app.drivers.tti_generator import TtiConnectionSettings, TtiGeneratorClient
+from app.drivers.rigol_generator import RigolConnectionSettings, RigolGeneratorClient
 
 class ExperimentManager:
     _instance = None
@@ -593,6 +594,10 @@ class ExperimentManager:
             "transfer_frequency_modulation_mhz": 1.0,
             "transfer_atom_mirror_distance_m": 2.23,
             "transfer_phase_noise_sigma_mrad": 100.0,
+            "rigol_host": "",
+            "rigol_visa_resource": "",
+            "rigol_timeout_s": 3.0,
+            "ramsey_center_frequency_mhz": 110.0,
             "std_p_interferometer": 1.1,
             "laser_frequency_phase_noise_mrad": 100.0,
             
@@ -1325,6 +1330,80 @@ class ExperimentManager:
         scan_config["transfer_repeats"] = repeats
         return parameters
 
+    def _build_ramsey_interferometer_execution(self, scan_config: Dict[str, Any]) -> List[Dict[str, Any]]:
+        if self._resolve_scan_dimensions(scan_config) != 1:
+            raise ValueError("Ramsey Interferometer only supports a 1D live scan")
+        if scan_config.get("randomize"):
+            raise ValueError("Ramsey Interferometer does not support Randomize")
+        if str(scan_config.get("parameter_source") or "classic").lower() != "classic":
+            raise ValueError("Ramsey Interferometer requires classic fixed-sequence execution")
+
+        start = float(scan_config.get("ramsey_delta_start_mhz", 0.0))
+        stop = float(scan_config.get("ramsey_delta_stop_mhz", 1.0))
+        step = float(scan_config.get("ramsey_delta_step_mhz", 0.1))
+        center = float(self.settings.get("ramsey_center_frequency_mhz", 110.0))
+        settling = float(scan_config.get("ramsey_settling_time_s", 5.0))
+        repeats = int(scan_config.get("ramsey_repeats", 1))
+        if not all(math.isfinite(value) for value in (start, stop, step, center, settling)):
+            raise ValueError("Ramsey Interferometer frequencies and settling time must be finite")
+        if start < 0 or stop < 0:
+            raise ValueError("Ramsey Interferometer delta f must be non-negative")
+        if step <= 0:
+            raise ValueError("Ramsey Interferometer delta f step must be greater than zero")
+        if repeats < 1:
+            raise ValueError("Ramsey Interferometer requires at least one repeat per delta f")
+        if settling < 0 or settling > 3600:
+            raise ValueError("Ramsey Interferometer settling time must be between 0 and 3600 seconds")
+        maximum_delta = max(start, stop)
+        if center - maximum_delta <= 0 or center + maximum_delta > 160.0:
+            raise ValueError("Ramsey Interferometer CH1/CH2 frequencies must stay within 0 to 160 MHz")
+
+        direction = 1.0 if stop >= start else -1.0
+        effective_step = abs(step) * direction
+        tolerance = abs(effective_step) * 1e-9 + 1e-12
+        compare = (lambda value: value <= stop + tolerance) if direction > 0 else (lambda value: value >= stop - tolerance)
+        deltas: List[float] = []
+        current = start
+        while compare(current):
+            deltas.append(round(current, 9))
+            if len(deltas) > 10000:
+                raise ValueError("Ramsey Interferometer scan exceeds 10000 delta-f points")
+            current += effective_step
+        if not deltas:
+            deltas = [round(start, 9)]
+
+        parameters: List[Dict[str, Any]] = []
+        for delta_index, delta_mhz in enumerate(deltas, start=1):
+            ch1_mhz = center - delta_mhz
+            ch2_mhz = center + delta_mhz
+            for repeat_index in range(1, repeats + 1):
+                parameters.append({
+                    "sequence_parameters": [],
+                    "metadata": {
+                        "display_parameters": [delta_mhz],
+                        "ramsey_delta_f_mhz": delta_mhz,
+                        "ramsey_delta_index": delta_index,
+                        "ramsey_delta_count": len(deltas),
+                        "ramsey_repeat": repeat_index,
+                        "ramsey_repeats": repeats,
+                        "ramsey_center_frequency_mhz": center,
+                        "ramsey_ch1_frequency_mhz": ch1_mhz,
+                        "ramsey_ch2_frequency_mhz": ch2_mhz,
+                    },
+                })
+
+        scan_config["scan_dimensions"] = 1
+        scan_config["dim2_enabled"] = False
+        scan_config["dim3_enabled"] = False
+        scan_config["randomize"] = False
+        scan_config["averages"] = 1
+        scan_config["ramsey_delta_values_mhz"] = deltas
+        scan_config["ramsey_center_frequency_mhz"] = center
+        scan_config["ramsey_repeats"] = repeats
+        scan_config["ramsey_settling_time_s"] = settling
+        scan_config["ramsey_generator_model"] = "DG4162"
+        return parameters
+
     def _build_ac_stark_execution(self, scan_config: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         if self._resolve_scan_dimensions(scan_config) != 1:
             raise ValueError("AC Stark Centering only supports a 1D live scan")
@@ -1524,6 +1603,8 @@ class ExperimentManager:
                 parameters = self._build_lock_in_execution(scan_config)
             elif scan_config.get('mode') == 'transfer_function':
                 parameters = self._build_transfer_function_execution(scan_config)
+            elif scan_config.get('mode') == 'ramsey_interferometer':
+                parameters = self._build_ramsey_interferometer_execution(scan_config)
             elif scan_config.get('mode') == 'phase_noise':
                 parameters = self._build_phase_noise_execution(scan_config)
             else:
@@ -2452,6 +2533,11 @@ class ExperimentManager:
                 transfer_frequency_hz=metadata.get('transfer_frequency_hz'),
                 transfer_repeat=metadata.get('transfer_repeat'),
                 transfer_phase_deg=metadata.get('transfer_phase_deg'),
+                ramsey_delta_f_mhz=metadata.get('ramsey_delta_f_mhz'),
+                ramsey_repeat=metadata.get('ramsey_repeat'),
+                ramsey_center_frequency_mhz=metadata.get('ramsey_center_frequency_mhz'),
+                ramsey_ch1_frequency_mhz=metadata.get('ramsey_ch1_frequency_mhz'),
+                ramsey_ch2_frequency_mhz=metadata.get('ramsey_ch2_frequency_mhz'),
                 ac_stark_ratio=metadata.get('ac_stark_ratio'),
                 ac_stark_side=metadata.get('ac_stark_side'),
                 ac_stark_dds_element=metadata.get('ac_stark_dds_element'),
@@ -2545,9 +2631,12 @@ class ExperimentManager:
         total_steps = len(parameter_list)
         scan_dimensions = self._resolve_scan_dimensions(scan_config)
         transfer_mode = str(scan_config.get("mode") or "").strip().lower() == "transfer_function"
+        ramsey_mode = str(scan_config.get("mode") or "").strip().lower() == "ramsey_interferometer"
         tti_client: Optional[TtiGeneratorClient] = None
+        rigol_client: Optional[RigolGeneratorClient] = None
         active_transfer_frequency: Optional[float] = None
         active_transfer_phase: Optional[float] = None
+        active_ramsey_delta: Optional[float] = None
         transfer_model = str(scan_config.get("transfer_generator_model") or "TG5012A").strip().upper()
         transfer_channel = int(scan_config.get("transfer_generator_channel", 1))
         transfer_control_output = bool(scan_config.get("transfer_control_output", False))
@@ -2567,6 +2656,14 @@ class ExperimentManager:
                     self.status.message = f"Enabling {transfer_model} CH{transfer_channel} OUTPUT..."
                     tti_client.set_output(True)
                     print(f"[Transfer Function] {transfer_model} CH{transfer_channel} OUTPUT ON")
+            if ramsey_mode and not config.USE_SIMULATION:
+                rigol_client = RigolGeneratorClient(RigolConnectionSettings(
+                    host=str(self.settings.get("rigol_host") or "").strip(),
+                    timeout_s=float(self.settings.get("rigol_timeout_s", 3.0)),
+                    visa_resource=str(self.settings.get("rigol_visa_resource") or "").strip(),
+                ))
+                identity = rigol_client.connect()
+                print(f"[Ramsey Interferometer] Connected to {identity}")
             for idx, param_set in enumerate(parameter_list):
                 if self.stop_flag:
                     break
@@ -2595,6 +2692,30 @@ class ExperimentManager:
                         if not config.USE_SIMULATION and settling_time > 0:
                             action = "confirmed" if transfer_model == "TG5012A" else "accepted"
                             self.status.message = f"{transfer_model} CH{transfer_channel} {action} {frequency:g} Hz at {phase_deg:g}°; settling {settling_time:g} s..."
+                            deadline = time.monotonic() + settling_time
+                            while not self.stop_flag and time.monotonic() < deadline:
+                                time.sleep(min(0.1, max(0.0, deadline - time.monotonic())))
+                        if self.stop_flag:
+                            break
+                if ramsey_mode:
+                    delta_mhz = float(metadata.get("ramsey_delta_f_mhz"))
+                    if active_ramsey_delta is None or delta_mhz != active_ramsey_delta:
+                        ch1_mhz = float(metadata.get("ramsey_ch1_frequency_mhz"))
+                        ch2_mhz = float(metadata.get("ramsey_ch2_frequency_mhz"))
+                        self.status.message = (
+                            f"Setting DG4162 CH1={ch1_mhz:g} MHz, CH2={ch2_mhz:g} MHz..."
+                        )
+                        if rigol_client is not None:
+                            rigol_client.set_frequency_pair(
+                                ch1_mhz * 1_000_000.0, ch2_mhz * 1_000_000.0
+                            )
+                        active_ramsey_delta = delta_mhz
+                        settling_time = float(scan_config.get("ramsey_settling_time_s", 5.0))
+                        if not config.USE_SIMULATION and settling_time > 0:
+                            self.status.message = (
+                                f"DG4162 frequencies verified for Δf={delta_mhz:g} MHz; "
+                                f"settling {settling_time:g} s..."
+                            )
                             deadline = time.monotonic() + settling_time
                             while not self.stop_flag and time.monotonic() < deadline:
                                 time.sleep(min(0.1, max(0.0, deadline - time.monotonic())))
@@ -2634,6 +2755,8 @@ class ExperimentManager:
                             self._scan_finalize_error = cleanup_error
                         print(f"[Transfer Function] {cleanup_error}")
                 tti_client.close()
+            if rigol_client is not None:
+                rigol_client.close()
             restore_error = self._restore_ac_stark_dds(ac_stark_context)
             if restore_error:
                 self._scan_finalize_error = restore_error

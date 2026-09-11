@@ -787,6 +787,11 @@ class DataLoader:
             "transfer_frequency_hz": self._parse_float(row.get("TTI_Frequency_Hz")),
             "transfer_repeat": self._parse_int(row.get("Transfer_Repeat"), -1),
             "transfer_phase_deg": self._parse_float(row.get("TTI_Phase_Deg")),
+            "ramsey_delta_f_mhz": self._parse_float(row.get("Ramsey_Delta_F_MHz")),
+            "ramsey_repeat": self._parse_int(row.get("Ramsey_Repeat"), -1),
+            "ramsey_center_frequency_mhz": self._parse_float(row.get("Ramsey_Center_Frequency_MHz")),
+            "ramsey_ch1_frequency_mhz": self._parse_float(row.get("Ramsey_CH1_Frequency_MHz")),
+            "ramsey_ch2_frequency_mhz": self._parse_float(row.get("Ramsey_CH2_Frequency_MHz")),
         }
 
     def _read_results_csv(self, run_dir: Path, max_points: Optional[int] = MAX_DISPLAY_POINTS) -> List[Dict[str, Any]]:

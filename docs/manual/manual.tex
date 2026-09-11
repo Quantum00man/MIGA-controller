@@ -1038,6 +1038,38 @@ frequencies with the single configured actual-FM amplitude. If the calibrated op
 varies appreciably with frequency, apply a frequency-dependent external correction before
 interpreting the curve quantitatively.}
 
+\section{Ramsey interferometer scan}
+
+Ramsey Interferometer is a live, one-dimensional scan of the non-negative frequency
+offset $\Delta f$, expressed in MHz. The centre frequency $f_0$ is saved under
+\ui{Settings $>$ Ramsey Interferometer} and defaults to \SI{110}{\mega\hertz}. At each
+scan point the controller programs a LAN-connected RIGOL DG4162 as
+\begin{equation}
+  f_{\mathrm{CH1}}=f_0-\Delta f,\qquad
+  f_{\mathrm{CH2}}=f_0+\Delta f .
+\end{equation}
+Both values are queried back from the generator before acquisition. The controller then
+waits for the settling interval selected in the Control Console (default
+\SI{5}{\second}) and executes all repeats at that $\Delta f$. The frequencies are not
+rewritten between repeats.
+
+The loaded MOT sequence is responsible for selecting CH1 before the first Ramsey pulse
+and CH2 before the second pulse through the external RF switch. The controller does not
+modify switch TTLs, generator phase, waveform, amplitude or output state. Settings
+provides explicit CH1 and CH2 frequency tests, a paired $f_0\mp\Delta f$ test, and manual
+OUTPUT ON/OFF tests. These actions change the live instrument immediately; Ramsey scans
+themselves never toggle either output.
+
+Live and Archive views treat $\Delta f$ as the ordinary one-dimensional parameter and
+therefore retain the complete Standard physical-parameter tabs, Fit/NoFit selection,
+repeat averaging, scan fitting, CSV export and LabPlot export. Their horizontal axis is
+labelled $\Delta f$ (MHz). Each result also records the centre frequency, both programmed
+channel frequencies and the repeat number.
+
+\warningtext{The initial implementation does not align the two DG4162 channel phases.
+Any phase-coherence or hardware-trigger requirement must be established externally before
+interpreting a Ramsey fringe.}
+
 \chapter{Synchronized multi-controller operation}\label{ch:sync}
 
 \section{Roles and authorization}
@@ -1471,6 +1503,8 @@ Transfer Function & Actual \SI{780}{\nano\meter} frequency-modulation amplitude,
 atom--mirror distance, fixed Allan phase-noise deviation at the current average,
 TG5012A/TGF3162 and CH1/CH2 selection, direct instrument IP, TCP port, timeout,
 connection test, and immediate frequency/phase tests.\\
+Ramsey Interferometer & RIGOL DG4162 LAN/VISA resource, timeout, centre frequency,
+connection test, individual and paired frequency tests, and manual CH1/CH2 output tests.\\
 Network & Acquisition platform, Red Pitaya addresses, DAQ rate and timeout.\\
 Logic \& Channels & Launch/trigger channel IDs and linked-mode timing constant.\\
 System Paths & \code{tmot4}, arguments, \code{cmot4}, default template and DDS writer.\\

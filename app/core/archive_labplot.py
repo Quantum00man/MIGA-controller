@@ -110,10 +110,10 @@ def _metric_worksheet(
     node_payloads: Sequence[Dict[str, Any]],
     include_fits: bool,
     current_fit: Optional[Dict[str, Any]],
+    x_label: str = "Parameter P0",
 ) -> Optional[Worksheet]:
     metric = METRICS[metric_key]
     prefix = metric["raw" if source == "nofit" else "fit"]
-    x_label = "Parameter P0"
     if metric_key == "phase":
         curves: List[Curve] = []
         for index, node in enumerate(node_payloads):
@@ -593,9 +593,10 @@ def build_archive_project(
         })
 
     selected = [item for item in metrics if item in METRICS]
+    x_label = "Delta f (MHz)" if str(config_data.get("mode") or "").strip().lower() == "ramsey_interferometer" else "Parameter P0"
     worksheets = []
     for metric in selected:
-        worksheet = _metric_worksheet(metric, source, node_payloads, include_fits, current_fit)
+        worksheet = _metric_worksheet(metric, source, node_payloads, include_fits, current_fit, x_label)
         if worksheet:
             worksheets.append(worksheet)
     if include_differential and manifest:

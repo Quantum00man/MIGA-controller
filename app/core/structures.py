@@ -38,6 +38,13 @@ class ScanResult:
     transfer_repeat: Optional[int] = None
     transfer_phase_deg: Optional[float] = None
 
+    # Ramsey Interferometer provenance. The displayed parameter is delta f in MHz.
+    ramsey_delta_f_mhz: Optional[float] = None
+    ramsey_repeat: Optional[int] = None
+    ramsey_center_frequency_mhz: Optional[float] = None
+    ramsey_ch1_frequency_mhz: Optional[float] = None
+    ramsey_ch2_frequency_mhz: Optional[float] = None
+
     # AC Stark scan provenance. These stay empty for every other scan mode.
     ac_stark_ratio: Optional[float] = None
     ac_stark_side: Optional[str] = None
