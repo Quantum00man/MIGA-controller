@@ -117,6 +117,22 @@
         };
     }
 
+    function axisTitleText(title) {
+        if (typeof title === 'string') return title.trim();
+        if (title && typeof title.text === 'string') return title.text.trim();
+        return '';
+    }
+
+    function publicationXAxisTitle(graphDiv) {
+        const ownTitle = axisTitleText(graphDiv?.layout?.xaxis?.title);
+        if (ownTitle) return ownTitle;
+
+        const graphId = String(graphDiv?.id || '');
+        const pairedId = /Up$/.test(graphId) ? graphId.replace(/Up$/, 'Dw') : '';
+        const pairedGraph = pairedId ? document.getElementById(pairedId) : null;
+        return axisTitleText(pairedGraph?.layout?.xaxis?.title);
+    }
+
     function screenAxis(axis, orientation) {
         if (!axis || typeof axis !== 'object') return axis;
         const explicitGrid = axis.showgrid;
@@ -316,11 +332,12 @@
         return points * CSS_DPI / 72;
     }
 
-    function publicationAxis(axis, orientation, typography, singleColumn) {
+    function publicationAxis(axis, orientation, typography, singleColumn, fallbackTitle = '') {
         if (!axis || typeof axis !== 'object') return axis;
+        const title = axisTitleText(axis.title) ? axis.title : fallbackTitle;
         return {
             ...axis,
-            title: titleObject(axis.title, pointsToPixels(typography.axisTitlePt)),
+            title: titleObject(title, pointsToPixels(typography.axisTitlePt)),
             tickfont: {
                 ...(axis.tickfont || {}),
                 family: 'Arial, Helvetica, sans-serif',
@@ -329,6 +346,8 @@
             },
             nticks: axis.nticks || (singleColumn ? 5 : undefined),
             automargin: true,
+            visible: orientation === 'x' ? true : axis.visible,
+            showticklabels: orientation === 'x' ? true : axis.showticklabels,
             showline: axis.showline !== false,
             mirror: false,
             ticks: axis.ticks === '' ? '' : 'outside',
@@ -364,7 +383,7 @@
         };
     }
 
-    function publicationLayout(input, width, height, column = 'double') {
+    function publicationLayout(input, width, height, column = 'double', xAxisTitle = '') {
         const layout = clone(input || {});
         const singleColumn = column === 'single';
         const typography = printTypography(column);
@@ -406,7 +425,7 @@
                 pad: 2
             };
         }
-        layout.xaxis = publicationAxis(layout.xaxis, 'x', typography, singleColumn);
+        layout.xaxis = publicationAxis(layout.xaxis, 'x', typography, singleColumn, xAxisTitle);
         layout.yaxis = publicationAxis(layout.yaxis, 'y', typography, singleColumn);
         Object.keys(layout).forEach(key => {
             if (/^xaxis\d+$/.test(key)) layout[key] = publicationAxis(layout[key], 'x', typography, singleColumn);
@@ -506,7 +525,10 @@
         document.body.appendChild(holder);
         try {
             const data = clone(Array.from(graphDiv.data || [])).map(trace => themeTrace(trace, true, column));
-            const layout = publicationLayout(graphDiv.layout || {}, dimensions.width, dimensions.height, column);
+            const xAxisTitle = publicationXAxisTitle(graphDiv);
+            const layout = publicationLayout(
+                graphDiv.layout || {}, dimensions.width, dimensions.height, column, xAxisTitle
+            );
             await originalNewPlot(holder, data, layout, {
                 staticPlot: true,
                 displayModeBar: false,

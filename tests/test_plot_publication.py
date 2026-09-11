@@ -45,7 +45,15 @@ class PlotPublicationTests(unittest.TestCase):
         self.assertIn("borderwidth: singleColumn ? 0 : 0.7", source)
         self.assertIn("nticks: axis.nticks || (singleColumn ? 5 : undefined)", source)
         self.assertIn("clampSingleColumnMarkerSize", source)
-        self.assertIn("publicationLayout(graphDiv.layout || {}, dimensions.width, dimensions.height, column)", source)
+        self.assertIn("graphDiv.layout || {}, dimensions.width, dimensions.height, column, xAxisTitle", source)
+
+    def test_publication_export_restores_hidden_stacked_x_axis(self):
+        source = PLOT_STYLE.read_text(encoding="utf-8")
+        self.assertIn("function publicationXAxisTitle(graphDiv)", source)
+        self.assertIn("graphId.replace(/Up$/, 'Dw')", source)
+        self.assertIn("visible: orientation === 'x' ? true : axis.visible", source)
+        self.assertIn("showticklabels: orientation === 'x' ? true : axis.showticklabels", source)
+        self.assertIn("const xAxisTitle = publicationXAxisTitle(graphDiv)", source)
 
     def test_archive_bulk_export_uses_publication_exporter(self):
         html = (ROOT / "static" / "archive.html").read_text(encoding="utf-8")
