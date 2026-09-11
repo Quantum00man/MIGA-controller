@@ -5169,7 +5169,7 @@
                     const runs = this.archiveTree?.[this.selectedYear]?.[this.selectedMonth]?.[this.selectedDay] || [];
                     return (Array.isArray(runs) ? runs : [])
                         .map(entry => this.normalizeRunEntry(entry))
-                        .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+                        .sort((a, b) => String(a.id).localeCompare(String(b.id), undefined, { numeric: true }));
                 },
                 getSelectedRunEntry() {
                     return this.getRuns().find(run => run.id === this.selectedRun) || null;
