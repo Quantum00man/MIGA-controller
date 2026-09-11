@@ -846,6 +846,7 @@ class ArchiveInterferometerBetaOptimizeRequest(BaseModel):
     parameter: str = Field("intf_beta")
     metric: str = Field("intf")
     statistic: str = Field("mean")
+    allan_order: int = Field(1, ge=1, le=100000)
     source: str = Field("fit")
     channel: str = Field("up")
     target_mean: float = Field(0.0)

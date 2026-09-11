@@ -2077,6 +2077,7 @@ async def optimize_archived_interferometer_beta(req: ArchiveInterferometerBetaOp
             parameter=req.parameter,
             metric=req.metric,
             statistic=req.statistic,
+            allan_order=req.allan_order,
             source=req.source,
             channel=req.channel,
             target_mean=req.target_mean,

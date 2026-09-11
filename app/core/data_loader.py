@@ -1616,6 +1616,7 @@ class DataLoader:
         parameter: str = "intf_beta",
         metric: str = "intf",
         statistic: str = "mean",
+        allan_order: int = 1,
         source: str = "fit",
         channel: str = "up",
         target_mean: float = 0.0,
@@ -1623,6 +1624,7 @@ class DataLoader:
         normalized_parameter = str(parameter or "intf_beta").strip().lower()
         normalized_metric = str(metric or "intf").strip().lower()
         normalized_statistic = str(statistic or "mean").strip().lower()
+        minimize_statistic = normalized_statistic in {"std", "allan"}
         normalized_source = str(source or "fit").strip().lower()
         normalized_channel = str(channel or "up").strip().lower()
         if normalized_parameter not in {"alpha", "beta", "intf_beta"}:
@@ -1630,18 +1632,19 @@ class DataLoader:
         allowed_metrics = {"intf"} if normalized_parameter == "intf_beta" else {"atoms", "prob", "intf"}
         if normalized_metric not in allowed_metrics:
             raise ValueError(f"{normalized_parameter} does not affect the selected metric")
-        if normalized_statistic not in {"mean", "std"}:
-            raise ValueError("Optimization statistic must be mean or std")
+        if normalized_statistic not in {"mean", "std", "allan"}:
+            raise ValueError("Optimization statistic must be mean, std, or allan")
+        normalized_allan_order = int(allan_order)
+        if normalized_allan_order < 1:
+            raise ValueError("Allan order must be at least 1")
         if normalized_source not in {"fit", "raw"}:
             raise ValueError("Mean optimization source must be fit or raw")
         allowed_channels = {"up", "dw", "total"} if normalized_metric == "atoms" else {"up", "dw"}
         if normalized_channel not in allowed_channels:
             raise ValueError("The selected channel is unavailable for this metric")
         target = float(target_mean)
-        if not math.isfinite(target):
+        if not minimize_statistic and not math.isfinite(target):
             raise ValueError("Target statistic must be finite")
-        if normalized_statistic == "std" and target < 0.0:
-            raise ValueError("Target standard deviation cannot be negative")
 
         atom_alpha = self._safe_scalar(settings.get("alpha"), 0.0151)
         atom_beta = self._safe_scalar(settings.get("beta"), 0.0188)
@@ -1658,6 +1661,8 @@ class DataLoader:
             n_f2 = self._parse_float(point.get(f"atom_number_up{suffix}"))
             n_f1 = self._parse_float(point.get(f"atom_number_dw{suffix}"))
             if n_f2 is None or n_f1 is None:
+                areas_up.append(math.nan)
+                areas_dw.append(math.nan)
                 continue
             scaled_up = n_f2 / conversion
             scaled_dw = n_f1 / (ratio * conversion)
@@ -1666,8 +1671,11 @@ class DataLoader:
             if math.isfinite(area_up) and math.isfinite(area_dw):
                 areas_up.append(float(area_up))
                 areas_dw.append(float(area_dw))
-        if not areas_up:
-            raise ValueError("No valid samples are available for mean optimization")
+            else:
+                areas_up.append(math.nan)
+                areas_dw.append(math.nan)
+        if not any(math.isfinite(value) for value in areas_up):
+            raise ValueError("No valid samples are available for optimization")
 
         area_up_values = np.asarray(areas_up, dtype=float)
         area_dw_values = np.asarray(areas_dw, dtype=float)
@@ -1693,7 +1701,7 @@ class DataLoader:
                     values = n_f2 + n_f1
             elif normalized_metric == "prob":
                 total = n_f2 + n_f1
-                values = np.zeros_like(total)
+                values = np.full_like(total, np.nan)
                 valid_total = np.abs(total) >= 1e-9
                 numerator = n_f2 if normalized_channel == "up" else n_f1
                 values[valid_total] = 100.0 * numerator[valid_total] / total[valid_total]
@@ -1708,7 +1716,7 @@ class DataLoader:
                     (1.0 - intf_alpha + intf_gamma) * n_f2 - intf_alpha * n_f1
                 ) / denominator
                 corrected_total = corrected_n1 + corrected_n2
-                values = np.zeros_like(corrected_total)
+                values = np.full_like(corrected_total, np.nan)
                 valid_total = np.abs(corrected_total) >= 1e-9
                 numerator = corrected_n1 if normalized_channel == "up" else corrected_n2
                 values[valid_total] = 100.0 * numerator[valid_total] / corrected_total[valid_total]
@@ -1716,23 +1724,33 @@ class DataLoader:
             finite = values[np.isfinite(values)]
             if finite.size == 0:
                 return None, 0
+            if normalized_statistic == "allan":
+                value, valid_windows = phase_noise.overlapping_allan_deviation(
+                    values, normalized_allan_order
+                )
+                return value, valid_windows
             if normalized_statistic == "std":
                 value = float(np.std(finite, ddof=1)) if finite.size > 1 else 0.0
             else:
                 value = float(np.mean(finite))
             return value, int(finite.size)
 
-        initial_mean, _initial_count = evaluate(initial_value)
+        initial_mean, initial_count = evaluate(initial_value)
+        if initial_mean is None:
+            if normalized_statistic == "allan":
+                raise ValueError("Not enough contiguous valid shots for the selected Allan order")
+            raise ValueError("No valid samples are available for optimization")
         grid = np.linspace(0.0, 1.0, 401)
         if normalized_parameter == "intf_beta" and 0.0 <= intf_alpha <= 1.0:
             grid = grid[np.abs(grid - intf_alpha) >= singular_margin]
 
         candidates: List[Tuple[float, float, int]] = []
         evaluated: List[Tuple[float, float, int]] = []
+        candidates.append((float(initial_value), float(initial_mean), int(initial_count)))
         for raw_value in grid:
             value = float(raw_value)
             mean, count = evaluate(value)
-            if mean is not None:
+            if mean is not None and (not minimize_statistic or count >= initial_count):
                 item = (value, mean, count)
                 evaluated.append(item)
                 candidates.append(item)
@@ -1740,7 +1758,9 @@ class DataLoader:
         # Refine the best sampled minima. This is important for STD objectives,
         # which often touch their minimum without crossing the requested target.
         ranked_indices = sorted(
-            range(len(evaluated)), key=lambda index: abs(evaluated[index][1] - target)
+            range(len(evaluated)),
+            key=lambda index: evaluated[index][1] if minimize_statistic
+            else abs(evaluated[index][1] - target)
         )[:8]
         golden_ratio = (math.sqrt(5.0) - 1.0) / 2.0
         for index in ranked_indices:
@@ -1755,8 +1775,8 @@ class DataLoader:
             left_result = evaluate(left)
             right_result = evaluate(right)
             for _ in range(64):
-                left_error = abs(left_result[0] - target) if left_result[0] is not None else math.inf
-                right_error = abs(right_result[0] - target) if right_result[0] is not None else math.inf
+                left_error = (left_result[0] if minimize_statistic else abs(left_result[0] - target)) if left_result[0] is not None and (not minimize_statistic or left_result[1] >= initial_count) else math.inf
+                right_error = (right_result[0] if minimize_statistic else abs(right_result[0] - target)) if right_result[0] is not None and (not minimize_statistic or right_result[1] >= initial_count) else math.inf
                 if left_error <= right_error:
                     upper, right, right_result = right, left, left_result
                     left = upper - golden_ratio * (upper - lower)
@@ -1766,10 +1786,10 @@ class DataLoader:
                     right = lower + golden_ratio * (upper - lower)
                     right_result = evaluate(right)
             for value, result in ((left, left_result), (right, right_result)):
-                if result[0] is not None:
+                if result[0] is not None and (not minimize_statistic or result[1] >= initial_count):
                     candidates.append((float(value), float(result[0]), int(result[1])))
 
-        for left, right in zip(evaluated, evaluated[1:]):
+        for left, right in ([] if minimize_statistic else zip(evaluated, evaluated[1:])):
             lo, lo_mean, _lo_count = left
             hi, hi_mean, _hi_count = right
             if normalized_parameter == "intf_beta" and lo < intf_alpha < hi:
@@ -1794,23 +1814,36 @@ class DataLoader:
 
         if not candidates:
             raise ValueError("No valid samples are available for mean optimization")
-        optimized_value, achieved_statistic, sample_count = min(
-            candidates, key=lambda item: (abs(item[1] - target), abs(item[0] - initial_value))
+        optimized_value, achieved_statistic, sample_count = min(candidates, key=lambda item: (
+            item[1] if minimize_statistic else abs(item[1] - target),
+            abs(item[0] - initial_value),
+        ))
+        residual = None if minimize_statistic else float(achieved_statistic - target)
+        exact = not minimize_statistic and residual is not None and abs(residual) <= 1e-9
+        absolute_improvement = float(initial_mean - achieved_statistic)
+        relative_improvement = (
+            absolute_improvement / initial_mean
+            if minimize_statistic and initial_mean > 0.0 else None
         )
-        residual = float(achieved_statistic - target)
-        exact = abs(residual) <= 1e-9
         at_boundary = abs(optimized_value) <= 1e-9 or abs(optimized_value - 1.0) <= 1e-9
         return {
             "optimized_value": float(optimized_value),
             "initial_value": float(initial_value),
             "initial_statistic": initial_mean,
             "achieved_statistic": float(achieved_statistic),
-            "target_statistic": target,
+            "target_statistic": None if minimize_statistic else target,
             "initial_mean": initial_mean if normalized_statistic == "mean" else None,
             "achieved_mean": float(achieved_statistic) if normalized_statistic == "mean" else None,
             "target_mean": target if normalized_statistic == "mean" else None,
             "residual": residual,
             "exact": exact,
+            "objective": "minimize" if minimize_statistic else "target",
+            "allan_order": normalized_allan_order if normalized_statistic == "allan" else None,
+            "initial_valid_window_count": initial_count if normalized_statistic == "allan" else None,
+            "valid_window_count": sample_count if normalized_statistic == "allan" else None,
+            "initial_sample_count": initial_count if normalized_statistic == "std" else None,
+            "absolute_improvement": absolute_improvement if minimize_statistic else None,
+            "relative_improvement": relative_improvement,
             "at_boundary": at_boundary,
             "sample_count": sample_count,
             "parameter": normalized_parameter,
@@ -1835,6 +1868,7 @@ class DataLoader:
         parameter: str = "intf_beta",
         metric: str = "intf",
         statistic: str = "mean",
+        allan_order: int = 1,
         source: str = "fit",
         channel: str = "up",
         target_mean: float = 0.0,
@@ -1862,6 +1896,7 @@ class DataLoader:
             parameter=parameter,
             metric=metric,
             statistic=statistic,
+            allan_order=allan_order,
             source=source,
             channel=channel,
             target_mean=target_mean,

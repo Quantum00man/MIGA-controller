@@ -111,7 +111,52 @@ class ArchiveInterferometerBetaOptimizationTests(unittest.TestCase):
         self.assertAlmostEqual(result["optimized_value"], 0.2137, places=7)
         self.assertAlmostEqual(result["achieved_statistic"], 0.0, places=7)
         self.assertEqual(result["statistic"], "std")
-        self.assertTrue(result["exact"])
+        self.assertEqual(result["objective"], "minimize")
+        self.assertIsNone(result["target_statistic"])
+        self.assertFalse(result["exact"])
+        self.assertGreaterEqual(result["sample_count"], result["initial_sample_count"])
+
+    def test_alpha_can_minimize_allan_deviation_without_a_target(self):
+        settings = {**self.settings, "alpha": 0.1, "beta": 0.05, "R": 1.1, "K": 10.0}
+        points = []
+        for area_up, area_dw in [(1.0, 1.0), (3.0, 2.0), (2.0, 1.0), (6.0, 3.0)]:
+            n_f2, n_f1 = physics.calculate_atom_numbers(
+                area_up, area_dw, 1.0, 1.0,
+                settings["alpha"], settings["beta"], settings["R"], settings["K"], 0.0,
+            )
+            points.append({"atom_number_up": n_f2, "atom_number_dw": n_f1})
+
+        result = self.loader._optimize_analysis_parameter_from_points(
+            points, settings, parameter="alpha", metric="atoms",
+            statistic="allan", allan_order=1, channel="up",
+        )
+
+        self.assertEqual(result["objective"], "minimize")
+        self.assertEqual(result["allan_order"], 1)
+        self.assertFalse(result["exact"])
+        self.assertLessEqual(result["achieved_statistic"], result["initial_statistic"])
+        self.assertGreaterEqual(result["valid_window_count"], result["initial_valid_window_count"])
+
+    def test_allan_optimization_does_not_bridge_missing_shots(self):
+        settings = {**self.settings, "alpha": 0.1, "beta": 0.05, "R": 1.1, "K": 10.0}
+        points = []
+        for areas in [(1.0, 1.0), (2.0, 1.0), None, (4.0, 2.0), (5.0, 2.0)]:
+            if areas is None:
+                points.append({"atom_number_up": None, "atom_number_dw": None})
+                continue
+            n_f2, n_f1 = physics.calculate_atom_numbers(
+                *areas, 1.0, 1.0,
+                settings["alpha"], settings["beta"], settings["R"], settings["K"], 0.0,
+            )
+            points.append({"atom_number_up": n_f2, "atom_number_dw": n_f1})
+
+        result = self.loader._optimize_analysis_parameter_from_points(
+            points, settings, parameter="alpha", metric="atoms",
+            statistic="allan", allan_order=1, channel="up",
+        )
+
+        self.assertEqual(result["initial_valid_window_count"], 2)
+        self.assertGreaterEqual(result["valid_window_count"], 2)
 
     def test_interferometer_beta_rejects_unaffected_metric(self):
         with self.assertRaisesRegex(ValueError, "does not affect"):
@@ -161,6 +206,8 @@ class ArchiveInterferometerBetaOptimizationTests(unittest.TestCase):
         self.assertIn('<option value="alpha">ALPHA</option>', archive_html)
         self.assertIn('<option value="beta">BETA</option>', archive_html)
         self.assertIn('<option value="std">Standard Deviation</option>', archive_html)
+        self.assertIn('<option value="allan">Allan Deviation</option>', archive_html)
+        self.assertIn('allan_order:', archive_html)
 
 
 if __name__ == "__main__":
