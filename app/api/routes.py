@@ -64,8 +64,9 @@ from app.drivers.tti_generator import (
 from app.drivers.rigol_generator import (
     RigolConnectionSettings,
     RigolGeneratorError,
-    set_rigol_test_frequency,
-    set_rigol_test_frequency_pair,
+    interpolate_power_dbm,
+    set_rigol_test_frequency_power,
+    set_rigol_test_frequency_power_pair,
     set_rigol_test_output,
     test_rigol_connection,
 )
@@ -1396,16 +1397,18 @@ async def test_rigol_generator(settings: RigolConnectionTestRequest):
 @router.post("/settings/rigol/test-frequency", response_model=ExperimentResponse)
 async def test_rigol_generator_frequency(settings: RigolFrequencyTestRequest):
     try:
+        power_dbm = interpolate_power_dbm(settings.frequency_mhz, settings.power_table)
         identity = await run_in_threadpool(
-            set_rigol_test_frequency,
+            set_rigol_test_frequency_power,
             _rigol_connection_settings(settings),
             settings.channel,
             settings.frequency_mhz * 1_000_000.0,
+            power_dbm,
         )
         return ExperimentResponse(
             status="success",
             message=f"DG4162 CH{settings.channel} frequency verified",
-            data={"identity": identity, "channel": settings.channel, "frequency_mhz": settings.frequency_mhz},
+            data={"identity": identity, "channel": settings.channel, "frequency_mhz": settings.frequency_mhz, "power_dbm": power_dbm},
         )
     except RigolGeneratorError as exc:
         raise HTTPException(502, str(exc))
@@ -1416,16 +1419,20 @@ async def test_rigol_generator_frequency_pair(settings: RigolFrequencyPairTestRe
     ch1_mhz = settings.center_frequency_mhz - settings.delta_f_mhz
     ch2_mhz = settings.center_frequency_mhz + settings.delta_f_mhz
     try:
+        ch1_dbm = interpolate_power_dbm(ch1_mhz, settings.power_table)
+        ch2_dbm = interpolate_power_dbm(ch2_mhz, settings.power_table)
         identity = await run_in_threadpool(
-            set_rigol_test_frequency_pair,
+            set_rigol_test_frequency_power_pair,
             _rigol_connection_settings(settings),
             ch1_mhz * 1_000_000.0,
+            ch1_dbm,
             ch2_mhz * 1_000_000.0,
+            ch2_dbm,
         )
         return ExperimentResponse(
             status="success",
             message="DG4162 Ramsey frequency pair verified",
-            data={"identity": identity, "ch1_mhz": ch1_mhz, "ch2_mhz": ch2_mhz},
+            data={"identity": identity, "ch1_mhz": ch1_mhz, "ch1_dbm": ch1_dbm, "ch2_mhz": ch2_mhz, "ch2_dbm": ch2_dbm},
         )
     except RigolGeneratorError as exc:
         raise HTTPException(502, str(exc))

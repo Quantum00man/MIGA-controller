@@ -24,7 +24,7 @@ from app.drivers.vcd_parser import VCDParser
 from app.analysis import fitting, physics, interferometer_phase, phase_noise
 from app.analysis.lock_in import build_lock_in_analysis
 from app.analysis.transfer_function import build_transfer_function_summary
-from app.models.schemas import ScanConfig
+from app.models.schemas import ScanConfig, default_ramsey_frequency_power_table
 from app.core.data_manager import DataManager
 from app.core.structures import ExperimentStatus, ScanResult
 from app.core.pulse_generator import generate_bragg_pulse
@@ -36,7 +36,11 @@ from app.core.sequence_markers import (
     validate_auto_marker_scan,
 )
 from app.drivers.tti_generator import TtiConnectionSettings, TtiGeneratorClient
-from app.drivers.rigol_generator import RigolConnectionSettings, RigolGeneratorClient
+from app.drivers.rigol_generator import (
+    RigolConnectionSettings,
+    RigolGeneratorClient,
+    interpolate_power_dbm,
+)
 
 class ExperimentManager:
     _instance = None
@@ -598,6 +602,16 @@ class ExperimentManager:
             "rigol_port": 5555,
             "rigol_timeout_s": 3.0,
             "ramsey_center_frequency_mhz": 110.0,
+            "ramsey_frequency_power_table": [
+                {"frequency_mhz": frequency, "power_dbm": power}
+                for frequency, power in [
+                    (119, -3.3), (118, -3.3), (117, -3.3), (116, -3.3),
+                    (115, -4.07), (114, -4.37), (113, -4.67), (112, -4.87),
+                    (111, -4.97), (110, -5.11), (109, -5.17), (108, -5.23),
+                    (107, -5.08), (106, -5.0), (105, -4.69), (104, -4.31),
+                    (103, -3.81), (102, -3.81), (101, -3.81), (100, -3.81),
+                ]
+            ],
             "std_p_interferometer": 1.1,
             "laser_frequency_phase_noise_mrad": 100.0,
             
@@ -1342,6 +1356,9 @@ class ExperimentManager:
         stop = float(scan_config.get("ramsey_delta_stop_mhz", 1.0))
         step = float(scan_config.get("ramsey_delta_step_mhz", 0.1))
         center = float(self.settings.get("ramsey_center_frequency_mhz", 110.0))
+        power_table = deepcopy(self.settings.get("ramsey_frequency_power_table") or [
+            point.model_dump() for point in default_ramsey_frequency_power_table()
+        ])
         settling = float(scan_config.get("ramsey_settling_time_s", 5.0))
         repeats = int(scan_config.get("ramsey_repeats", 1))
         if not all(math.isfinite(value) for value in (start, stop, step, center, settling)):
@@ -1376,6 +1393,8 @@ class ExperimentManager:
         for delta_index, delta_mhz in enumerate(deltas, start=1):
             ch1_mhz = center - delta_mhz
             ch2_mhz = center + delta_mhz
+            ch1_dbm = interpolate_power_dbm(ch1_mhz, power_table)
+            ch2_dbm = interpolate_power_dbm(ch2_mhz, power_table)
             for repeat_index in range(1, repeats + 1):
                 parameters.append({
                     "sequence_parameters": [],
@@ -1389,6 +1408,8 @@ class ExperimentManager:
                         "ramsey_center_frequency_mhz": center,
                         "ramsey_ch1_frequency_mhz": ch1_mhz,
                         "ramsey_ch2_frequency_mhz": ch2_mhz,
+                        "ramsey_ch1_power_dbm": ch1_dbm,
+                        "ramsey_ch2_power_dbm": ch2_dbm,
                     },
                 })
 
@@ -1399,6 +1420,7 @@ class ExperimentManager:
         scan_config["averages"] = 1
         scan_config["ramsey_delta_values_mhz"] = deltas
         scan_config["ramsey_center_frequency_mhz"] = center
+        scan_config["ramsey_frequency_power_table"] = power_table
         scan_config["ramsey_repeats"] = repeats
         scan_config["ramsey_settling_time_s"] = settling
         scan_config["ramsey_generator_model"] = "DG4162"
@@ -2538,6 +2560,8 @@ class ExperimentManager:
                 ramsey_center_frequency_mhz=metadata.get('ramsey_center_frequency_mhz'),
                 ramsey_ch1_frequency_mhz=metadata.get('ramsey_ch1_frequency_mhz'),
                 ramsey_ch2_frequency_mhz=metadata.get('ramsey_ch2_frequency_mhz'),
+                ramsey_ch1_power_dbm=metadata.get('ramsey_ch1_power_dbm'),
+                ramsey_ch2_power_dbm=metadata.get('ramsey_ch2_power_dbm'),
                 ac_stark_ratio=metadata.get('ac_stark_ratio'),
                 ac_stark_side=metadata.get('ac_stark_side'),
                 ac_stark_dds_element=metadata.get('ac_stark_dds_element'),
@@ -2702,18 +2726,25 @@ class ExperimentManager:
                     if active_ramsey_delta is None or delta_mhz != active_ramsey_delta:
                         ch1_mhz = float(metadata.get("ramsey_ch1_frequency_mhz"))
                         ch2_mhz = float(metadata.get("ramsey_ch2_frequency_mhz"))
+                        power_table = scan_config.get("ramsey_frequency_power_table") or self.settings.get("ramsey_frequency_power_table") or [
+                            point.model_dump() for point in default_ramsey_frequency_power_table()
+                        ]
+                        ch1_dbm = float(metadata.get("ramsey_ch1_power_dbm", interpolate_power_dbm(ch1_mhz, power_table)))
+                        ch2_dbm = float(metadata.get("ramsey_ch2_power_dbm", interpolate_power_dbm(ch2_mhz, power_table)))
                         self.status.message = (
-                            f"Setting DG4162 CH1={ch1_mhz:g} MHz, CH2={ch2_mhz:g} MHz..."
+                            f"Setting DG4162 CH1={ch1_mhz:g} MHz/{ch1_dbm:g} dBm, "
+                            f"CH2={ch2_mhz:g} MHz/{ch2_dbm:g} dBm..."
                         )
                         if rigol_client is not None:
-                            rigol_client.set_frequency_pair(
-                                ch1_mhz * 1_000_000.0, ch2_mhz * 1_000_000.0
+                            rigol_client.set_frequency_power_pair(
+                                ch1_mhz * 1_000_000.0, ch1_dbm,
+                                ch2_mhz * 1_000_000.0, ch2_dbm,
                             )
                         active_ramsey_delta = delta_mhz
                         settling_time = float(scan_config.get("ramsey_settling_time_s", 5.0))
                         if not config.USE_SIMULATION and settling_time > 0:
                             self.status.message = (
-                                f"DG4162 frequencies verified for Δf={delta_mhz:g} MHz; "
+                                f"DG4162 frequencies and powers verified for Δf={delta_mhz:g} MHz; "
                                 f"settling {settling_time:g} s..."
                             )
                             deadline = time.monotonic() + settling_time

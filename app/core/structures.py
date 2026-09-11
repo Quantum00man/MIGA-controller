@@ -44,6 +44,8 @@ class ScanResult:
     ramsey_center_frequency_mhz: Optional[float] = None
     ramsey_ch1_frequency_mhz: Optional[float] = None
     ramsey_ch2_frequency_mhz: Optional[float] = None
+    ramsey_ch1_power_dbm: Optional[float] = None
+    ramsey_ch2_power_dbm: Optional[float] = None
 
     # AC Stark scan provenance. These stay empty for every other scan mode.
     ac_stark_ratio: Optional[float] = None

@@ -274,6 +274,29 @@ class RamanPowerCalibration(BaseModel):
         return value
 
 
+class RamseyFrequencyPowerPoint(BaseModel):
+    frequency_mhz: float = Field(..., gt=0.0, le=160.0)
+    power_dbm: float
+
+    @validator("power_dbm")
+    def validate_power(cls, value):
+        numeric = float(value)
+        if not math.isfinite(numeric):
+            raise ValueError("Ramsey power must be finite")
+        return numeric
+
+
+def default_ramsey_frequency_power_table() -> List[RamseyFrequencyPowerPoint]:
+    values = [
+        (119, -3.3), (118, -3.3), (117, -3.3), (116, -3.3),
+        (115, -4.07), (114, -4.37), (113, -4.67), (112, -4.87),
+        (111, -4.97), (110, -5.11), (109, -5.17), (108, -5.23),
+        (107, -5.08), (106, -5.0), (105, -4.69), (104, -4.31),
+        (103, -3.81), (102, -3.81), (101, -3.81), (100, -3.81),
+    ]
+    return [RamseyFrequencyPowerPoint(frequency_mhz=f, power_dbm=p) for f, p in values]
+
+
 class BraggPowerCalibration(BaseModel):
     """Generalized-logistic voltage to normalized optical-power calibration."""
 
@@ -534,6 +557,9 @@ class SystemSettings(BaseModel):
     rigol_port: int = Field(5555, ge=1, le=65535)
     rigol_timeout_s: float = Field(3.0, ge=0.2, le=120.0)
     ramsey_center_frequency_mhz: float = Field(110.0, gt=0.0, le=160.0)
+    ramsey_frequency_power_table: List[RamseyFrequencyPowerPoint] = Field(
+        default_factory=default_ramsey_frequency_power_table
+    )
     std_p_interferometer: float = Field(1.1, ge=0)
     laser_frequency_phase_noise_mrad: float = Field(100.0, ge=0)
 
@@ -544,6 +570,15 @@ class SystemSettings(BaseModel):
     @validator("rigol_host")
     def normalize_rigol_host(cls, value):
         return str(value or "").strip()
+
+    @validator("ramsey_frequency_power_table")
+    def validate_ramsey_frequency_power_table(cls, value):
+        if not value:
+            raise ValueError("Ramsey frequency-power table must contain at least one row")
+        frequencies = [float(point.frequency_mhz) for point in value]
+        if len(set(frequencies)) != len(frequencies):
+            raise ValueError("Ramsey frequency-power table contains duplicate frequencies")
+        return sorted(value, key=lambda point: point.frequency_mhz, reverse=True)
 
     @validator("tti_model")
     def validate_tti_model(cls, value):
@@ -631,11 +666,17 @@ class RigolConnectionTestRequest(BaseModel):
 class RigolFrequencyTestRequest(RigolConnectionTestRequest):
     channel: int = Field(..., ge=1, le=2)
     frequency_mhz: float = Field(..., gt=0.0, le=160.0)
+    power_table: List[RamseyFrequencyPowerPoint] = Field(
+        default_factory=default_ramsey_frequency_power_table
+    )
 
 
 class RigolFrequencyPairTestRequest(RigolConnectionTestRequest):
     center_frequency_mhz: float = Field(110.0, gt=0.0, le=160.0)
     delta_f_mhz: float = Field(..., ge=0.0)
+    power_table: List[RamseyFrequencyPowerPoint] = Field(
+        default_factory=default_ramsey_frequency_power_table
+    )
 
     @validator("delta_f_mhz")
     def validate_frequency_pair(cls, value, values):

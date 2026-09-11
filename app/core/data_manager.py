@@ -32,6 +32,7 @@ RESULTS_CSV_HEADER = [
     "TTI_Frequency_Hz", "Transfer_Repeat", "TTI_Phase_Deg",
     "Ramsey_Delta_F_MHz", "Ramsey_Repeat", "Ramsey_Center_Frequency_MHz",
     "Ramsey_CH1_Frequency_MHz", "Ramsey_CH2_Frequency_MHz",
+    "Ramsey_CH1_Power_dBm", "Ramsey_CH2_Power_dBm",
 ]
 
 
@@ -259,6 +260,8 @@ class DataManager:
             ramsey_center_frequency_mhz=result.ramsey_center_frequency_mhz if result.ramsey_center_frequency_mhz is not None else np.nan,
             ramsey_ch1_frequency_mhz=result.ramsey_ch1_frequency_mhz if result.ramsey_ch1_frequency_mhz is not None else np.nan,
             ramsey_ch2_frequency_mhz=result.ramsey_ch2_frequency_mhz if result.ramsey_ch2_frequency_mhz is not None else np.nan,
+            ramsey_ch1_power_dbm=result.ramsey_ch1_power_dbm if result.ramsey_ch1_power_dbm is not None else np.nan,
+            ramsey_ch2_power_dbm=result.ramsey_ch2_power_dbm if result.ramsey_ch2_power_dbm is not None else np.nan,
         )
 
     def _write_csv_row(self, result: ScanResult, step_index: int):
@@ -308,6 +311,8 @@ class DataManager:
             f(result.ramsey_center_frequency_mhz, 9),
             f(result.ramsey_ch1_frequency_mhz, 9),
             f(result.ramsey_ch2_frequency_mhz, 9),
+            f(result.ramsey_ch1_power_dbm, 6),
+            f(result.ramsey_ch2_power_dbm, 6),
         ]
         self.csv_writer.writerow(row)
         self.csv_handle.flush()
@@ -388,6 +393,7 @@ class DataManager:
                     f('ramsey_delta_f_mhz', 9), pt.get('ramsey_repeat', ''),
                     f('ramsey_center_frequency_mhz', 9),
                     f('ramsey_ch1_frequency_mhz', 9), f('ramsey_ch2_frequency_mhz', 9),
+                    f('ramsey_ch1_power_dbm', 6), f('ramsey_ch2_power_dbm', 6),
                 ]
                 writer.writerow(row)
 

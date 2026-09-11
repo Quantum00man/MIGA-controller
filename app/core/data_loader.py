@@ -792,6 +792,8 @@ class DataLoader:
             "ramsey_center_frequency_mhz": self._parse_float(row.get("Ramsey_Center_Frequency_MHz")),
             "ramsey_ch1_frequency_mhz": self._parse_float(row.get("Ramsey_CH1_Frequency_MHz")),
             "ramsey_ch2_frequency_mhz": self._parse_float(row.get("Ramsey_CH2_Frequency_MHz")),
+            "ramsey_ch1_power_dbm": self._parse_float(row.get("Ramsey_CH1_Power_dBm")),
+            "ramsey_ch2_power_dbm": self._parse_float(row.get("Ramsey_CH2_Power_dBm")),
         }
 
     def _read_results_csv(self, run_dir: Path, max_points: Optional[int] = MAX_DISPLAY_POINTS) -> List[Dict[str, Any]]:

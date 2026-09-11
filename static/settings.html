@@ -599,7 +599,7 @@
                         </div>
                         <div class="col-12" v-if="rigolMessage"><div class="alert py-2 mb-0" :class="rigolError ? 'alert-danger' : 'alert-success'">{{ rigolMessage }}</div></div>
 
-                        <div class="col-12 mt-4 pt-3 border-top"><h6 class="fw-bold mb-1">Frequency tests</h6><div class="small text-muted">Commands are applied immediately and are not restored.</div></div>
+                        <div class="col-12 mt-4 pt-3 border-top"><h6 class="fw-bold mb-1">Frequency + power tests</h6><div class="small text-muted">Each test applies the frequency and its lookup-table/interpolated dBm power immediately.</div></div>
                         <div class="col-md-4">
                             <label class="form-label small fw-bold">CH1 frequency</label>
                             <div class="input-group"><input type="number" min="0.000001" max="160" step="any" class="form-control" v-model.number="rigolCh1TestMhz"><span class="input-group-text">MHz</span></div>
@@ -616,13 +616,32 @@
                             <button class="btn btn-outline-warning w-100 mt-2" @click="setRigolTestPair" :disabled="rigolBusy">Set f₀−Δf / f₀+Δf</button>
                         </div>
 
+                        <div class="col-12 mt-4 pt-3 border-top">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <div><h6 class="fw-bold mb-1">AOM frequency—power lookup table</h6><div class="small text-muted">Linear interpolation is used between rows; frequencies outside the table use the nearest endpoint power.</div></div>
+                                <button class="btn btn-outline-primary btn-sm" @click="addRigolPowerRow"><i class="bi bi-plus-lg me-1"></i>Add row</button>
+                            </div>
+                            <div class="table-responsive border rounded" style="max-height: 360px; overflow-y: auto;">
+                                <table class="table table-sm table-hover align-middle mb-0">
+                                    <thead class="table-light sticky-top"><tr><th>Frequency (MHz)</th><th>Power (dBm)</th><th class="text-end">Action</th></tr></thead>
+                                    <tbody>
+                                        <tr v-for="(point, index) in (s.ramsey_frequency_power_table || [])" :key="`ramsey-power-${index}`">
+                                            <td><input type="number" min="0.000001" max="160" step="any" class="form-control form-control-sm" v-model.number="point.frequency_mhz"></td>
+                                            <td><input type="number" step="any" class="form-control form-control-sm" v-model.number="point.power_dbm"></td>
+                                            <td class="text-end"><button class="btn btn-outline-danger btn-sm" @click="removeRigolPowerRow(index)" :disabled="s.ramsey_frequency_power_table.length <= 1"><i class="bi bi-trash"></i></button></td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
                         <div class="col-12 mt-4 pt-3 border-top"><h6 class="fw-bold mb-1">Manual OUTPUT tests</h6><div class="small text-muted">Ramsey scans never change OUTPUT state.</div></div>
                         <div class="col-md-6" v-for="channel in [1, 2]" :key="`rigol-output-${channel}`">
                             <label class="form-label small fw-bold">CH{{ channel }} OUTPUT</label>
                             <div class="btn-group w-100"><button class="btn btn-outline-success" @click="setRigolTestOutput(channel, true)" :disabled="rigolBusy">ON</button><button class="btn btn-outline-danger" @click="setRigolTestOutput(channel, false)" :disabled="rigolBusy">OFF</button></div>
                         </div>
                     </div>
-                    <div class="alert alert-light border mt-4 mb-0 small">At each Δf point the scan writes CH1 = f₀ − Δf and CH2 = f₀ + Δf, verifies both values, waits for the Index settling time, and then runs the existing MOT sequence. Phase and OUTPUT are left unchanged.</div>
+                    <div class="alert alert-light border mt-4 mb-0 small">At each Δf point the scan writes CH1 = f₀ − Δf and CH2 = f₀ + Δf together with their lookup-table dBm amplitudes, verifies all values, waits for the Index settling time, and then runs the existing MOT sequence. Phase and OUTPUT are left unchanged.</div>
                 </div>
 
                 <div v-if="tab==='tti'">
@@ -2837,6 +2856,22 @@
                         timeout_s: Number(this.s.rigol_timeout_s || 3)
                     };
                 },
+                defaultRamseyPowerTable() {
+                    return [[119,-3.3],[118,-3.3],[117,-3.3],[116,-3.3],[115,-4.07],[114,-4.37],[113,-4.67],[112,-4.87],[111,-4.97],[110,-5.11],[109,-5.17],[108,-5.23],[107,-5.08],[106,-5],[105,-4.69],[104,-4.31],[103,-3.81],[102,-3.81],[101,-3.81],[100,-3.81]].map(([frequency_mhz, power_dbm]) => ({ frequency_mhz, power_dbm }));
+                },
+                rigolPowerTablePayload() {
+                    return (this.s.ramsey_frequency_power_table || []).map(point => ({
+                        frequency_mhz: Number(point.frequency_mhz), power_dbm: Number(point.power_dbm)
+                    }));
+                },
+                addRigolPowerRow() {
+                    if (!Array.isArray(this.s.ramsey_frequency_power_table)) this.s.ramsey_frequency_power_table = [];
+                    const last = this.s.ramsey_frequency_power_table[this.s.ramsey_frequency_power_table.length - 1];
+                    this.s.ramsey_frequency_power_table.push({ frequency_mhz: Number(last?.frequency_mhz ?? 110) - 1, power_dbm: Number(last?.power_dbm ?? -5) });
+                },
+                removeRigolPowerRow(index) {
+                    if ((this.s.ramsey_frequency_power_table || []).length > 1) this.s.ramsey_frequency_power_table.splice(index, 1);
+                },
                 async runRigolAction(action) {
                     this.rigolBusy = true; this.rigolMessage = ''; this.rigolError = false;
                     try {
@@ -2856,8 +2891,8 @@
                     await this.runRigolAction(async () => {
                         const frequency = Number(channel === 2 ? this.rigolCh2TestMhz : this.rigolCh1TestMhz);
                         if (!Number.isFinite(frequency) || frequency <= 0 || frequency > 160) throw new Error('Frequency must be within 0 to 160 MHz.');
-                        await axios.post('/settings/rigol/test-frequency', { ...this.rigolConnectionPayload(), channel, frequency_mhz: frequency });
-                        return `DG4162 CH${channel} verified at ${frequency} MHz.`;
+                        const res = await axios.post('/settings/rigol/test-frequency', { ...this.rigolConnectionPayload(), channel, frequency_mhz: frequency, power_table: this.rigolPowerTablePayload() });
+                        return `DG4162 CH${channel} verified at ${frequency} MHz / ${res.data.data.power_dbm} dBm.`;
                     });
                 },
                 async setRigolTestPair() {
@@ -2865,8 +2900,8 @@
                         const center = Number(this.s.ramsey_center_frequency_mhz);
                         const delta = Number(this.rigolDeltaTestMhz);
                         if (!Number.isFinite(delta) || delta < 0) throw new Error('Δf must be non-negative.');
-                        const res = await axios.post('/settings/rigol/test-pair', { ...this.rigolConnectionPayload(), center_frequency_mhz: center, delta_f_mhz: delta });
-                        return `Frequency pair verified: CH1 ${res.data.data.ch1_mhz} MHz · CH2 ${res.data.data.ch2_mhz} MHz.`;
+                        const res = await axios.post('/settings/rigol/test-pair', { ...this.rigolConnectionPayload(), center_frequency_mhz: center, delta_f_mhz: delta, power_table: this.rigolPowerTablePayload() });
+                        return `Pair verified: CH1 ${res.data.data.ch1_mhz} MHz / ${res.data.data.ch1_dbm} dBm · CH2 ${res.data.data.ch2_mhz} MHz / ${res.data.data.ch2_dbm} dBm.`;
                     });
                 },
                 async setRigolTestOutput(channel, enabled) {
@@ -3163,6 +3198,11 @@
                     normalized.rigol_timeout_s = Number.isFinite(rigolTimeout) && rigolTimeout >= 0.2 ? rigolTimeout : 3;
                     const ramseyCenter = Number(normalized.ramsey_center_frequency_mhz ?? 110);
                     normalized.ramsey_center_frequency_mhz = Number.isFinite(ramseyCenter) && ramseyCenter > 0 && ramseyCenter <= 160 ? ramseyCenter : 110;
+                    const powerTable = Array.isArray(normalized.ramsey_frequency_power_table) && normalized.ramsey_frequency_power_table.length
+                        ? normalized.ramsey_frequency_power_table : this.defaultRamseyPowerTable();
+                    normalized.ramsey_frequency_power_table = powerTable.map(point => ({
+                        frequency_mhz: Number(point.frequency_mhz), power_dbm: Number(point.power_dbm)
+                    })).sort((a, b) => b.frequency_mhz - a.frequency_mhz);
                     normalized.sequence_marker_definitions = Array.isArray(normalized.sequence_marker_definitions)
                         ? normalized.sequence_marker_definitions.map(item => ({ ...item }))
                         : [];

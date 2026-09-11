@@ -1054,6 +1054,13 @@ waits for the settling interval selected in the Control Console (default
 \SI{5}{\second}) and executes all repeats at that $\Delta f$. The frequencies are not
 rewritten between repeats.
 
+For each channel, the controller also selects a sine waveform, selects dBm as the
+amplitude unit, and applies the power from the editable frequency--power lookup table in
+Settings. Exact table frequencies use their stored powers; intermediate frequencies use
+linear interpolation. Frequencies below or above the table range use the nearest endpoint
+power. Frequency, waveform, unit and amplitude are queried back before settling. The
+default table covers 100--119 MHz with the supplied AOM calibration values.
+
 The loaded MOT sequence is responsible for selecting CH1 before the first Ramsey pulse
 and CH2 before the second pulse through the external RF switch. The controller does not
 modify switch TTLs, generator phase, waveform, amplitude or output state. Settings
@@ -1505,7 +1512,8 @@ atom--mirror distance, fixed Allan phase-noise deviation at the current average,
 TG5012A/TGF3162 and CH1/CH2 selection, direct instrument IP, TCP port, timeout,
 connection test, and immediate frequency/phase tests.\\
 Ramsey Interferometer & RIGOL DG4162 LXI IP address, raw TCP port, timeout, centre frequency,
-connection test, individual and paired frequency tests, and manual CH1/CH2 output tests.\\
+connection test, editable frequency--power lookup table, individual and paired
+frequency/power tests, and manual CH1/CH2 output tests.\\
 Network & Acquisition platform, Red Pitaya addresses, DAQ rate and timeout.\\
 Logic \& Channels & Launch/trigger channel IDs and linked-mode timing constant.\\
 System Paths & \code{tmot4}, arguments, \code{cmot4}, default template and DDS writer.\\
