@@ -1555,6 +1555,14 @@
                     </div>
 
                     <div class="analysis-header-actions">
+                        <div class="input-group input-group-sm" style="width:auto" title="Publication export width used by the Plotly camera button">
+                            <span class="input-group-text">Paper</span>
+                            <select class="form-select" style="width:auto" v-model="publicationColumn"
+                                @change="setPublicationColumn(publicationColumn)" aria-label="Publication export width">
+                                <option value="double">Double column (183 mm)</option>
+                                <option value="single">Single column (89 mm)</option>
+                            </select>
+                        </div>
                         <div v-if="config.mode === 'transfer_function'" class="btn-group btn-group-sm" role="group" aria-label="Transfer Function statistic">
                             <button class="btn" :aria-pressed="transferFunctionStatistic === 'std'"
                                 :class="transferFunctionStatistic === 'std' ? 'btn-dark' : 'btn-outline-dark'"
@@ -1691,6 +1699,7 @@
     <script src="https://cdn.jsdelivr.net/npm/vue@3.2.31/dist/vue.global.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
     <script src="https://cdn.plot.ly/plotly-2.12.1.min.js"></script>
+    <script src="/plot-publication.js"></script>
 
     <script>
         const { createApp } = Vue;
@@ -1846,6 +1855,7 @@
                     lockInHistoryMap: {},
                     transferFunctionHistoryMap: {},
                     layoutResBase: {}, layoutResUp: {}, layoutResDw: {}, layoutOscUp: {}, layoutOscDw: {},
+                    publicationColumn: window.MigaPlotStyle?.getColumn() || 'double',
                     isPlotting: false,
                     heatmapColorscale: [[0, '#c62828'], [0.5, '#fff3bf'], [1, '#1565c0']],
                     dim3DisplayMode: 'slice', sliceAxis: 2, sliceIndex: 0
@@ -4047,6 +4057,9 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     if (document.getElementById('waveformPlotUp')) Plotly.newPlot('waveformPlotUp', [], this.layoutOscUp);
                     if (document.getElementById('waveformPlotDw')) Plotly.newPlot('waveformPlotDw', [], this.layoutOscDw);
                     if (this.isSyncMode()) this.renderSyncPlot(); else this.renderMainPlot();
+                },
+                setPublicationColumn(column) {
+                    this.publicationColumn = window.MigaPlotStyle?.setColumn(column) || (column === 'single' ? 'single' : 'double');
                 },
                 parseNumericInput(value) {
                     if (value === null || value === undefined || value === '') return null;

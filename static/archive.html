@@ -2007,6 +2007,14 @@
                                     class="bi bi-graph-up-arrow fs-5 me-2"></i><span>Analysis Results</span>
                             </div>
                             <div class="analysis-header-actions">
+                                <div class="input-group input-group-sm" style="width:auto" title="Publication export width used by Plotly camera buttons and bulk plot export">
+                                    <span class="input-group-text">Paper</span>
+                                    <select class="form-select" style="width:auto" v-model="publicationColumn"
+                                        @change="setPublicationColumn(publicationColumn)" aria-label="Publication export width">
+                                        <option value="double">Double column (183 mm)</option>
+                                        <option value="single">Single column (89 mm)</option>
+                                    </select>
+                                </div>
                                 <button class="btn-icon" @click="toggleMaximize('analysis')"
                                     :title="maximizedView === 'analysis' ? 'Restore analysis view' : 'Maximize analysis view'"
                                     :aria-label="maximizedView === 'analysis' ? 'Restore analysis view' : 'Maximize analysis view'">
@@ -2496,6 +2504,7 @@
     <script src="https://cdn.jsdelivr.net/npm/vue@3.2.31/dist/vue.global.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
     <script src="https://cdn.plot.ly/plotly-2.12.1.min.js"></script>
+    <script src="/plot-publication.js"></script>
 
     <script>
         const { createApp } = Vue;
@@ -2623,6 +2632,7 @@
                     showRawData: true, phaseUnit: 'rad', maximizedView: null, currentTab: 'atoms', plotMode: 'series', transferFunctionStatistic: 'std', transferFunctionYAxisScale: 'linear', allanOrder: 1, allanScaleMode: 'absolute', allanXAxisMode: 'linear', allanP0AvailableMin: null, allanP0AvailableMax: null, allanP0Min: null, allanP0Max: null, allanP0MinInput: '', allanP0MaxInput: '', plotRevision: 0,
                     tabs: [{ id: 'atoms', label: 'Atom Number' }, { id: 'amp', label: 'Max Voltage' }, { id: 'tail', label: 'Tail Mean' }, { id: 'sigma', label: 'Width (ms)' }, { id: 'temp', label: 'Temperature' }, { id: 'arrival', label: 'Arrival Time' }, { id: 'prob', label: 'Transition Prob.' }, { id: 'intf', label: 'Interferometer' }, { id: 'phase', label: 'Interferometer Phase' }],
                     historyMap: {}, layoutResBase: {}, layoutResUp: {}, layoutResDw: {}, layoutResTot: {}, layoutOscUp: {}, layoutOscDw: {},
+                    publicationColumn: window.MigaPlotStyle?.getColumn() || 'double',
                     heatmapColorscale: [[0, '#c62828'], [0.5, '#fff3bf'], [1, '#1565c0']],
                     dim3DisplayMode: 'slice', sliceAxis: 2, sliceIndex: 0, sliceValuesCache: []
                 }
@@ -5606,6 +5616,9 @@
                     const clickHandler = (data) => this.onPlotClick(data);
                     upDiv.on('plotly_click', clickHandler); dwDiv.on('plotly_click', clickHandler); totDiv.on('plotly_click', clickHandler);
                 },
+                setPublicationColumn(column) {
+                    this.publicationColumn = window.MigaPlotStyle?.setColumn(column) || (column === 'single' ? 'single' : 'double');
+                },
 
                 async onPlotClick(data) {
                     if (!data || !data.points) return;
@@ -8140,8 +8153,6 @@
                 async exportAllPlots() {
                     if (!this.loadedRunId || Object.keys(this.historyMap).length === 0) return;
                     const originalTab = this.currentTab;
-                    const width = this.isThreeDimensionalView() ? 1200 : 1000;
-                    const height = this.isThreeDimensionalView() ? 900 : 800;
 
                     for (const tab of this.tabs) {
                         this.currentTab = tab.id;
@@ -8150,18 +8161,23 @@
                         this.renderMainPlot();
                         await new Promise(r => setTimeout(r, 250));
 
-                        await Plotly.downloadImage(document.getElementById('resultsPlotUp'), {
-                            format: 'png', width, height, filename: `plot_${this.selectedDay}_${this.selectedRun}_${tab.id}_up`
+                        await window.MigaPlotStyle.exportPublicationPlot(document.getElementById('resultsPlotUp'), {
+                            column: this.publicationColumn,
+                            filename: `plot_${this.selectedDay}_${this.selectedRun}_${tab.id}_up_${this.publicationColumn === 'single' ? '89mm' : '183mm'}`
                         });
                         await new Promise(r => setTimeout(r, 150));
-                        await Plotly.downloadImage(document.getElementById('resultsPlotDw'), {
-                            format: 'png', width, height, filename: `plot_${this.selectedDay}_${this.selectedRun}_${tab.id}_dw`
-                        });
+                        if (this.currentTab !== 'phase') {
+                            await window.MigaPlotStyle.exportPublicationPlot(document.getElementById('resultsPlotDw'), {
+                                column: this.publicationColumn,
+                                filename: `plot_${this.selectedDay}_${this.selectedRun}_${tab.id}_dw_${this.publicationColumn === 'single' ? '89mm' : '183mm'}`
+                            });
+                        }
                         await new Promise(r => setTimeout(r, 150));
 
                         if (this.showTotalPlot()) {
-                            await Plotly.downloadImage(document.getElementById('resultsPlotTotal'), {
-                                format: 'png', width, height, filename: `plot_${this.selectedDay}_${this.selectedRun}_${tab.id}_total`
+                            await window.MigaPlotStyle.exportPublicationPlot(document.getElementById('resultsPlotTotal'), {
+                                column: this.publicationColumn,
+                                filename: `plot_${this.selectedDay}_${this.selectedRun}_${tab.id}_total_${this.publicationColumn === 'single' ? '89mm' : '183mm'}`
                             });
                             await new Promise(r => setTimeout(r, 150));
                         }
