@@ -2176,6 +2176,10 @@
                                         :max="phaseNoiseMaxAllanOrder()" v-model.number="phaseNoiseAllanOrderDraft" @keyup.enter="addPhaseNoiseAllanOrder">
                                     <button type="button" class="btn btn-sm btn-outline-secondary" @click="addPhaseNoiseAllanOrder" :disabled="isLoadingAllan">Add</button>
                                     <span class="small text-muted">max {{ phaseNoiseMaxAllanOrder() }}</span>
+                                    <button type="button" class="btn btn-sm btn-outline-success ms-2"
+                                        @click="exportPhaseNoiseAllanCSV" :disabled="isLoadingAllan || !phaseNoiseSummary.length">
+                                        <i class="bi bi-download me-1"></i>Allan CSV
+                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -8729,6 +8733,55 @@
                         this.phaseNoiseAllanOrders.filter(value => Number(value) !== Number(order))
                     );
                     await this.refreshPhaseNoiseAllan();
+                },
+                async exportPhaseNoiseAllanCSV() {
+                    if (!this.isPhaseNoiseArchive() || this.phaseNoiseStatistic !== 'allan') return;
+                    try {
+                        this.errorMsg = '';
+                        const selectedOrders = this.normalizePhaseNoiseAllanOrders();
+                        const hasAllSelectedOrders = (Array.isArray(this.phaseNoiseSummary) ? this.phaseNoiseSummary : [])
+                            .every(row => selectedOrders.every(order => (
+                                (row.allan_deviations || []).some(item => Number(item.order) === Number(order))
+                            )));
+                        if (!hasAllSelectedOrders) await this.refreshPhaseNoiseAllan();
+
+                        const header = [
+                            'T2_us2', 'T_ms', 'n_order', 'measured_allan_rad',
+                            'expected_allan_rad', 'detection_allan_rad', 'laser_allan_rad',
+                            'valid_window_count', 'shot_count'
+                        ];
+                        const rows = [];
+                        (Array.isArray(this.phaseNoiseSummary) ? this.phaseNoiseSummary : []).forEach(summary => {
+                            selectedOrders.forEach(order => {
+                                const allan = (summary.allan_deviations || [])
+                                    .find(item => Number(item.order) === Number(order));
+                                if (!allan) return;
+                                rows.push([
+                                    summary.t2_us2, summary.t_ms, order,
+                                    allan.measured_phase_noise_rad,
+                                    allan.expected_total_phase_noise_rad,
+                                    allan.detection_phase_noise_rad,
+                                    allan.laser_phase_noise_rad,
+                                    allan.valid_window_count,
+                                    summary.shot_count
+                                ]);
+                            });
+                        });
+                        if (!rows.length) {
+                            this.errorMsg = 'Phase Noise Allan export failed: no Allan data available.';
+                            return;
+                        }
+
+                        const csvContent = '\uFEFF' + [header, ...rows]
+                            .map(row => row.map(value => this.csvCell(value ?? '')).join(','))
+                            .join('\n');
+                        const runPart = this.sanitizeFilenamePart(
+                            this.selectedRun || this.loadedRunId || 'run', 'run'
+                        );
+                        await this.downloadCsvContent(csvContent, `phase_noise_allan_${runPart}.csv`);
+                    } catch (error) {
+                        this.errorMsg = 'Phase Noise Allan export failed: ' + (error.message || 'Unknown error');
+                    }
                 },
                 setPhaseNoiseAxisScale(axis, scale) {
                     const normalized = scale === 'log' ? 'log' : 'linear';
