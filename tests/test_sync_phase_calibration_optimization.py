@@ -46,6 +46,10 @@ class SyncPhaseCalibrationOptimizationTests(unittest.TestCase):
         self.assertIn("applySavedSyncPhaseCalibrationOptimization", archive_html)
         self.assertIn("deleteSavedSyncPhaseCalibrationOptimization", archive_html)
         self.assertIn("Saved separately from original archive data", archive_html)
+        self.assertIn("SHOT INDEX RANGE", archive_html)
+        self.assertIn("shot_index_min: this.syncPhaseShotMin", archive_html)
+        self.assertIn("selected_shot_index_min", archive_html)
+        self.assertIn("settings.shot_index_min", archive_html)
 
     def test_joint_ac_optimization_reduces_sync_allan_and_std(self):
         random = np.random.default_rng(44)
@@ -116,6 +120,50 @@ class SyncPhaseCalibrationOptimizationTests(unittest.TestCase):
         self.assertEqual(response["source_fields"], {"reference": "intf_p1", "target": "intf_p1"})
         self.assertEqual(response["settings"]["objective"], "allan")
         self.assertEqual(response["settings"]["parameter_bound_fraction"], 0.1)
+
+    def test_archive_endpoint_filters_inclusive_actual_shot_indices(self):
+        master_cal = calibration(1.0, 0.1, "master-cal")
+        slave_cal = calibration(1.2, 0.2, "slave-cal")
+        actual_shots = [10, 11, 12, 20, 21, 22, 23, 24, 25, 26, 30, 31]
+        rows_master = []
+        rows_slave = []
+        for shot in actual_shots:
+            phase = 1.4 + 0.01 * math.sin(shot)
+            rows_master.append({"sync_shot_index": shot, "sync_p0": 50.0, "intf_p1": 0.1 + math.cos(phase)})
+            rows_slave.append({"sync_shot_index": shot, "sync_p0": 50.0, "intf_p1": 0.2 + 1.2 * math.cos(phase + 0.05)})
+        loaded = {
+            "sync_manifest": {"node_results": {"master": rows_master, "slaves": {"slave-a": rows_slave}}},
+            "archive_phase_reference_contexts": {
+                "master": {"effective_calibration": master_cal},
+                "slave-a": {"effective_calibration": slave_cal},
+            },
+        }
+        request = ArchiveSyncPhaseCalibrationOptimizeRequest(
+            year="2026", month="09", day="01", run_id="sync01",
+            reference_node_id="master", target_node_id="slave-a",
+            shot_index_min=20, shot_index_max=31,
+        )
+        with patch("app.api.routes.data_loader.load_run", return_value=loaded):
+            response = asyncio.run(optimize_archive_sync_phase_calibrations(request))
+
+        self.assertEqual([row["shot"] for row in response["series"]], [20, 21, 22, 23, 24, 25, 26, 30, 31])
+        self.assertEqual(response["settings"]["shot_index_min"], 20)
+        self.assertEqual(response["settings"]["shot_index_max"], 31)
+
+    def test_allan_n1_does_not_bridge_missing_actual_shots(self):
+        from app.analysis.phase_calibration_optimization import _allan_one
+
+        values = np.asarray([0.0, 0.0, 100.0, 100.0])
+        shots = np.asarray([0, 1, 10, 11])
+        self.assertEqual(_allan_one(values, shots), 0.0)
+
+    def test_allan_optimization_rejects_a_range_without_consecutive_shots(self):
+        pairs = [
+            {"shot": index * 2, "p0": 50.0, "reference_signal": 0.2, "target_signal": 0.3}
+            for index in range(8)
+        ]
+        with self.assertRaisesRegex(ValueError, "consecutive actual shot indices"):
+            optimize_sync_phase_calibrations(pairs, calibration(1, 0), calibration(1, 0))
 
     def test_saved_optimization_is_a_separate_sidecar_and_is_deletable(self):
         with tempfile.TemporaryDirectory() as temporary_directory:

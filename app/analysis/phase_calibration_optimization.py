@@ -52,28 +52,43 @@ def _phase_values(
     return phases, valid, overflow
 
 
-def _allan_one(values: np.ndarray) -> float:
+def _allan_one(values: np.ndarray, shot_indices: Optional[np.ndarray] = None) -> float:
     if len(values) < 2:
         return math.inf
-    return float(np.sqrt(np.mean(np.diff(values) ** 2) / 2.0))
+    differences = np.diff(values)
+    if shot_indices is not None:
+        consecutive = np.diff(shot_indices) == 1
+        differences = differences[consecutive]
+    if not len(differences):
+        return math.inf
+    return float(np.sqrt(np.mean(differences ** 2) / 2.0))
 
 
-def _metrics(values: np.ndarray) -> Dict[str, Optional[float]]:
+def _metrics(values: np.ndarray, shot_indices: Optional[np.ndarray] = None) -> Dict[str, Optional[float]]:
     if not len(values):
         return {"mean_rad": None, "std_rad": None, "allan_n1_rad": None}
     return {
         "mean_rad": float(np.mean(values)),
         "std_rad": float(np.std(values, ddof=1)) if len(values) > 1 else 0.0,
-        "allan_n1_rad": _allan_one(values) if len(values) > 1 else None,
+        "allan_n1_rad": _allan_one(values, shot_indices) if len(values) > 1 else None,
     }
 
 
-def _objective_metric(values: np.ndarray, objective: str, allan_weight: float) -> float:
+def _objective_metric(
+    values: np.ndarray,
+    objective: str,
+    allan_weight: float,
+    shot_indices: Optional[np.ndarray] = None,
+) -> float:
     std = float(np.std(values, ddof=1)) if len(values) > 1 else math.inf
-    allan = _allan_one(values)
+    allan = _allan_one(values, shot_indices)
     if objective == "std":
         return std
     if objective == "combined":
+        if allan_weight <= 0:
+            return std
+        if allan_weight >= 1:
+            return allan
         return float(np.sqrt(allan_weight * allan ** 2 + (1.0 - allan_weight) * std ** 2))
     return allan
 
@@ -131,6 +146,7 @@ def optimize_sync_phase_calibrations(
     selected_pairs = [item for item, keep in zip(pairs, finite) if keep]
     if len(selected_pairs) < 8:
         raise ValueError("At least 8 paired, finite SYNC shots are required")
+    shot_indices = np.asarray([int(item["shot"]) for item in selected_pairs], dtype=np.int64)
 
     ref_a0, ref_c0, _, _, _ = _calibration_parameters(reference_calibration)
     target_a0, target_c0, _, _, _ = _calibration_parameters(target_calibration)
@@ -166,9 +182,12 @@ def optimize_sync_phase_calibrations(
     baseline_difference, baseline_valid, _, _ = evaluate(initial)
     if np.count_nonzero(baseline_valid) < 8:
         raise ValueError("The current calibrations produce fewer than 8 valid paired phases")
-    baseline_scale = max(
-        _objective_metric(baseline_difference, objective, combined_allan_weight), 1e-9
+    baseline_metric = _objective_metric(
+        baseline_difference, objective, combined_allan_weight, shot_indices[baseline_valid]
     )
+    if not math.isfinite(baseline_metric):
+        raise ValueError("Allan optimization requires at least one pair of consecutive actual shot indices")
+    baseline_scale = max(baseline_metric, 1e-9)
 
     def loss(parameters: np.ndarray) -> float:
         difference, valid, ref_overflow, target_overflow = evaluate(parameters)
@@ -176,7 +195,9 @@ def optimize_sync_phase_calibrations(
         invalid_count = len(valid) - valid_count
         if valid_count < 8:
             return 1e9 + (8 - valid_count) * 1e8
-        sync_loss = (_objective_metric(difference, objective, combined_allan_weight) / baseline_scale) ** 2
+        sync_loss = (_objective_metric(
+            difference, objective, combined_allan_weight, shot_indices[valid]
+        ) / baseline_scale) ** 2
         ref_curve_rmse, _ = _curve_constraint(reference_calibration, parameters[0], parameters[1])
         target_curve_rmse, _ = _curve_constraint(target_calibration, parameters[2], parameters[3])
         curve_loss = (ref_curve_rmse / ref_a0) ** 2 + (target_curve_rmse / target_a0) ** 2
@@ -219,8 +240,8 @@ def optimize_sync_phase_calibrations(
             "target": {"A": float(values[2]), "C": float(values[3])},
         }
 
-    before_metrics = _metrics(baseline_difference)
-    after_metrics = _metrics(final_difference)
+    before_metrics = _metrics(baseline_difference, shot_indices[baseline_valid])
+    after_metrics = _metrics(final_difference, shot_indices[final_valid])
     before_metrics.update({
         "valid_pair_count": int(np.count_nonzero(baseline_valid)),
         "invalid_pair_count": int(len(baseline_valid) - np.count_nonzero(baseline_valid)),

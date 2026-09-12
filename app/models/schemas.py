@@ -909,6 +909,8 @@ class ArchiveSyncPhaseCalibrationOptimizeRequest(BaseModel):
     prior_weight: float = Field(0.05, ge=0, le=1000)
     p0_min: Optional[float] = Field(None)
     p0_max: Optional[float] = Field(None)
+    shot_index_min: Optional[int] = Field(None)
+    shot_index_max: Optional[int] = Field(None)
 
 
 class ArchiveSyncPhaseCalibrationSaveRequest(BaseModel):

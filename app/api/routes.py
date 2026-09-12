@@ -2362,6 +2362,10 @@ async def optimize_archive_sync_phase_calibrations(req: ArchiveSyncPhaseCalibrat
                 continue
             if req.p0_max is not None and target_p0 > req.p0_max:
                 continue
+            if req.shot_index_min is not None and shot < req.shot_index_min:
+                continue
+            if req.shot_index_max is not None and shot > req.shot_index_max:
+                continue
             try:
                 reference_signal = float(reference_row.get(reference_field))
                 target_signal = float(target_row.get(target_field))
@@ -2400,6 +2404,8 @@ async def optimize_archive_sync_phase_calibrations(req: ArchiveSyncPhaseCalibrat
             "prior_weight": req.prior_weight,
             "p0_min": req.p0_min,
             "p0_max": req.p0_max,
+            "shot_index_min": req.shot_index_min,
+            "shot_index_max": req.shot_index_max,
         }
         return result
     except FileNotFoundError as exc:

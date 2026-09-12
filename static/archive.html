@@ -1832,11 +1832,13 @@
                                 <div class="btn-group btn-group-sm"><button class="btn" :class="syncPhaseAllanXAxis === 'linear' ? 'btn-secondary' : 'btn-outline-secondary'" @click="syncPhaseAllanXAxis='linear'; renderSyncArchiveNodePlots()">Linear X</button><button class="btn" :class="syncPhaseAllanXAxis === 'log' ? 'btn-secondary' : 'btn-outline-secondary'" @click="syncPhaseAllanXAxis='log'; renderSyncArchiveNodePlots()">Log X</button></div>
                                 <label class="form-label-small mb-0">P0 RANGE</label><input type="number" step="any" class="form-control form-control-sm" style="width:112px" v-model="syncPhaseP0MinInput" @keyup.enter="applySyncPhaseP0Range"><span class="small text-muted">to</span><input type="number" step="any" class="form-control form-control-sm" style="width:112px" v-model="syncPhaseP0MaxInput" @keyup.enter="applySyncPhaseP0Range">
                                 <button class="btn btn-outline-secondary btn-sm" @click="applySyncPhaseP0Range">Apply</button><button class="btn btn-outline-secondary btn-sm" @click="resetSyncPhaseP0Range">Full Range</button><span class="small text-muted">Chronological paired shots; averaging is not used for Allan.</span>
+                                <label class="form-label-small mb-0">SHOT INDEX RANGE</label><input type="number" step="1" class="form-control form-control-sm" style="width:112px" v-model="syncPhaseShotMinInput" @keyup.enter="applySyncPhaseShotRange"><span class="small text-muted">to</span><input type="number" step="1" class="form-control form-control-sm" style="width:112px" v-model="syncPhaseShotMaxInput" @keyup.enter="applySyncPhaseShotRange">
+                                <button class="btn btn-outline-secondary btn-sm" @click="applySyncPhaseShotRange">Apply</button><button class="btn btn-outline-secondary btn-sm" @click="resetSyncPhaseShotRange">Full Shots</button><span class="small text-muted">Inclusive actual sync_shot_index.</span>
                                 <button class="btn btn-outline-success btn-sm" @click="downloadSyncPhaseAllanCSV"><i class="bi bi-download me-1"></i>Allan CSV</button>
                             </div>
                             <div v-if="syncPhasePlotMode === 'allan'" class="col-12">
                                 <section class="allan-statistics" aria-labelledby="sync-phase-allan-statistics-title">
-                                    <div class="allan-statistics-header"><span id="sync-phase-allan-statistics-title" class="allan-statistics-title">Sequence Statistics</span><span class="allan-statistics-note">Valid chronological shots in the selected P0 range</span></div>
+                                    <div class="allan-statistics-header"><span id="sync-phase-allan-statistics-title" class="allan-statistics-title">Sequence Statistics</span><span class="allan-statistics-note">Valid chronological shots in the selected P0 and shot-index ranges</span></div>
                                     <div class="allan-statistics-scroll" v-if="syncPhaseAllanStatisticsRows().length" tabindex="0">
                                         <table class="allan-statistics-table"><tbody><tr v-for="row in syncPhaseAllanStatisticsRows()" :key="row.id">
                                             <th scope="row">{{ row.label }}<span class="allan-statistic-count">{{ row.sampleCount }} valid shots</span></th>
@@ -1864,7 +1866,7 @@
                                         <div class="col-sm-6 col-lg-2"><label class="form-label-small">PRIOR WEIGHT</label><input type="number" class="form-control form-control-sm" min="0" max="1000" step="0.01" v-model.number="syncPhaseCalibrationOptimization.priorWeight"></div>
                                         <div class="col-sm-6 col-lg-2"><button class="btn btn-primary btn-sm w-100 fw-bold" @click="runSyncPhaseCalibrationOptimization" :disabled="syncPhaseCalibrationOptimization.loading"><span v-if="syncPhaseCalibrationOptimization.loading" class="spinner-border spinner-border-sm me-1"></span>{{ syncPhaseCalibrationOptimization.loading ? 'Optimizing…' : 'Optimize A/C' }}</button></div>
                                     </div>
-                                    <div class="form-text">Uses the current P0 range. Larger fringe/prior weights keep A and C closer to the original calibration.</div>
+                                    <div class="form-text">Uses the current P0 and actual shot-index ranges. Larger fringe/prior weights keep A and C closer to the original calibration.</div>
                                     <div v-if="syncPhaseCalibrationOptimization.error" class="alert alert-danger small py-2 mt-2 mb-0">{{ syncPhaseCalibrationOptimization.error }}</div>
                                     <div v-if="syncPhaseCalibrationOptimization.message" class="alert alert-success small py-2 mt-2 mb-0">{{ syncPhaseCalibrationOptimization.message }}</div>
                                     <div v-if="syncPhaseCalibrationOptimization.saved.length" class="row g-2 align-items-end mt-1">
@@ -2588,6 +2590,7 @@
                     syncPhaseReferenceNode: 'master', syncPhaseTargetNode: '',
                     syncPhaseAllanOrder: 1, syncPhaseAllanScale: 'absolute', syncPhaseAllanXAxis: 'linear',
                     syncPhaseP0Min: null, syncPhaseP0Max: null, syncPhaseP0MinInput: '', syncPhaseP0MaxInput: '',
+                    syncPhaseShotMin: null, syncPhaseShotMax: null, syncPhaseShotMinInput: '', syncPhaseShotMaxInput: '',
                     syncPhaseCalibrationOptimization: {
                         objective: 'allan', combinedAllanWeight: 0.5, boundPercent: 10,
                         fringeWeight: 1, priorWeight: 0.05,
@@ -6374,11 +6377,13 @@
                 handleSyncPhaseControlChange() {
                     this.ensureSyncPhaseNodes();
                     this.resetSyncPhaseP0Range(false);
+                    this.resetSyncPhaseShotRange(false);
                     this.renderSyncArchiveNodePlots();
                 },
                 setSyncPhasePlotMode(mode) {
                     this.syncPhasePlotMode = mode === 'allan' ? 'allan' : 'series';
                     this.resetSyncPhaseP0Range(false);
+                    this.resetSyncPhaseShotRange(false);
                     if (this.syncPhasePlotMode === 'allan') {
                         this.syncPhaseAllanOrder = this.syncPhaseMaxAllanOrder();
                         this.normalizeAndRenderSyncPhaseAllan();
@@ -6423,10 +6428,33 @@
                     this.syncPhaseP0MinInput = String(this.syncPhaseP0Min); this.syncPhaseP0MaxInput = String(this.syncPhaseP0Max);
                     this.normalizeAndRenderSyncPhaseAllan();
                 },
+                syncPhaseAvailableShotBounds() {
+                    const values = this.syncPhaseActiveSeriesRows().flat().map(item => Number(item.shot)).filter(Number.isFinite).sort((a, b) => a - b);
+                    return values.length ? { min: values[0], max: values[values.length - 1] } : { min: null, max: null };
+                },
+                resetSyncPhaseShotRange(render = true) {
+                    const bounds = this.syncPhaseAvailableShotBounds();
+                    this.syncPhaseShotMin = bounds.min; this.syncPhaseShotMax = bounds.max;
+                    this.syncPhaseShotMinInput = Number.isFinite(bounds.min) ? String(bounds.min) : '';
+                    this.syncPhaseShotMaxInput = Number.isFinite(bounds.max) ? String(bounds.max) : '';
+                    if (render) this.normalizeAndRenderSyncPhaseAllan();
+                },
+                applySyncPhaseShotRange() {
+                    const bounds = this.syncPhaseAvailableShotBounds();
+                    if (!Number.isFinite(bounds.min) || !Number.isFinite(bounds.max)) return;
+                    let min = Number(this.syncPhaseShotMinInput); let max = Number(this.syncPhaseShotMaxInput);
+                    if (!Number.isFinite(min)) min = bounds.min; if (!Number.isFinite(max)) max = bounds.max;
+                    min = Math.trunc(min); max = Math.trunc(max); if (min > max) [min, max] = [max, min];
+                    this.syncPhaseShotMin = Math.max(bounds.min, min); this.syncPhaseShotMax = Math.min(bounds.max, max);
+                    this.syncPhaseShotMinInput = String(this.syncPhaseShotMin); this.syncPhaseShotMaxInput = String(this.syncPhaseShotMax);
+                    this.normalizeAndRenderSyncPhaseAllan();
+                },
                 syncPhaseAllanRows(rows) {
                     const min = this.syncPhaseP0Min === null || this.syncPhaseP0Min === '' ? null : Number(this.syncPhaseP0Min);
                     const max = this.syncPhaseP0Max === null || this.syncPhaseP0Max === '' ? null : Number(this.syncPhaseP0Max);
-                    return rows.filter(item => (!Number.isFinite(min) || item.p0 >= min - 1e-12) && (!Number.isFinite(max) || item.p0 <= max + 1e-12)).sort((a, b) => a.shot - b.shot);
+                    const shotMin = this.syncPhaseShotMin === null || this.syncPhaseShotMin === '' ? null : Number(this.syncPhaseShotMin);
+                    const shotMax = this.syncPhaseShotMax === null || this.syncPhaseShotMax === '' ? null : Number(this.syncPhaseShotMax);
+                    return rows.filter(item => (!Number.isFinite(min) || item.p0 >= min - 1e-12) && (!Number.isFinite(max) || item.p0 <= max + 1e-12) && (!Number.isFinite(shotMin) || item.shot >= shotMin) && (!Number.isFinite(shotMax) || item.shot <= shotMax)).sort((a, b) => a.shot - b.shot);
                 },
                 syncPhaseMaxAllanOrder() {
                     const counts = this.syncPhaseActiveSeriesRows().map(rows => this.syncPhaseAllanRows(rows).length).filter(count => count > 0);
@@ -6447,6 +6475,7 @@
                         let sumSquares = 0; let count = 0;
                         for (let start = 0; start <= values.length - 2 * order; start += 1) {
                             const split = start + order; const end = split + order;
+                            if (Number(source[end - 1].shot) - Number(source[start].shot) !== 2 * order - 1) continue;
                             const difference = ((prefix[end] - prefix[split]) - (prefix[split] - prefix[start])) / order;
                             sumSquares += difference * difference / 2; count += 1;
                         }
@@ -6494,6 +6523,8 @@
                             prior_weight: Math.max(0, Number(state.priorWeight) || 0),
                             p0_min: this.syncPhaseP0Min !== null && this.syncPhaseP0Min !== '' && Number.isFinite(Number(this.syncPhaseP0Min)) ? Number(this.syncPhaseP0Min) : null,
                             p0_max: this.syncPhaseP0Max !== null && this.syncPhaseP0Max !== '' && Number.isFinite(Number(this.syncPhaseP0Max)) ? Number(this.syncPhaseP0Max) : null,
+                            shot_index_min: this.syncPhaseShotMin !== null && this.syncPhaseShotMin !== '' && Number.isFinite(Number(this.syncPhaseShotMin)) ? Math.trunc(Number(this.syncPhaseShotMin)) : null,
+                            shot_index_max: this.syncPhaseShotMax !== null && this.syncPhaseShotMax !== '' && Number.isFinite(Number(this.syncPhaseShotMax)) ? Math.trunc(Number(this.syncPhaseShotMax)) : null,
                         });
                         state.result = response.data;
                         await this.$nextTick();
@@ -6562,6 +6593,12 @@
                     }
                     if (settings.p0_max != null && Number.isFinite(Number(settings.p0_max))) {
                         this.syncPhaseP0Max = Number(settings.p0_max); this.syncPhaseP0MaxInput = String(settings.p0_max);
+                    }
+                    if (settings.shot_index_min != null && Number.isFinite(Number(settings.shot_index_min))) {
+                        this.syncPhaseShotMin = Math.trunc(Number(settings.shot_index_min)); this.syncPhaseShotMinInput = String(this.syncPhaseShotMin);
+                    }
+                    if (settings.shot_index_max != null && Number.isFinite(Number(settings.shot_index_max))) {
+                        this.syncPhaseShotMax = Math.trunc(Number(settings.shot_index_max)); this.syncPhaseShotMaxInput = String(this.syncPhaseShotMax);
                     }
                     state.message = 'Saved optimization applied as a preview. Original archive data remain unchanged.';
                     await this.$nextTick();
@@ -6821,6 +6858,7 @@
                     const metadataRows = [
                         ['reference_node', this.syncPhaseReferenceNode], ['target_node', this.syncPhaseTargetNode],
                         ['selected_p0_min', this.syncPhaseP0Min ?? ''], ['selected_p0_max', this.syncPhaseP0Max ?? ''],
+                        ['selected_shot_index_min', this.syncPhaseShotMin ?? ''], ['selected_shot_index_max', this.syncPhaseShotMax ?? ''],
                         ['max_order', this.syncPhaseAllanOrder],
                     ];
                     curves.forEach(item => {

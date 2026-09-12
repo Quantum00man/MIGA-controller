@@ -1432,15 +1432,16 @@ calibration quality needs review rather than automatic acceptance.
   \ui{Interferometer Phase}.
   \item Select exactly two hosts. The first is Reference and the second Target; use
   \ui{Reverse Difference} when required.
-  \item Set the inclusive $P_0$ range to the chronological shots that should constrain
-  the constant differential phase.
+  \item Set the inclusive $P_0$ range and actual \code{sync\_shot\_index} range to the
+  chronological shots that should constrain the constant differential phase. Both filters
+  apply together; missing shot indices remain gaps and are not bridged by Allan windows.
   \item In \ui{Joint A/C calibration optimization}, choose \ui{Allan n=1},
   \ui{Standard deviation} or \ui{Combined}; then set bounds and constraint weights.
   \item Click \ui{Optimize A/C}. Inspect parameter changes, valid-pair count, boundary
   warnings, saved-curve RMSE and the mean-removed before/after differential plot.
   \item The optimized per-node phases immediately feed the existing Phase Series, Allan
-  plot and Sequence Statistics. Changing Allan order or $P_0$ filtering recalculates
-  those views from the preview values.
+  plot and Sequence Statistics. Changing Allan order, $P_0$ filtering or the actual shot
+  index range recalculates those views from the preview values.
   \item Click \ui{Reset preview} to restore the archived phases.
 \end{procedure}
 
