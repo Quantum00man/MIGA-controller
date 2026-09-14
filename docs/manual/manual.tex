@@ -227,8 +227,8 @@ Optimization & \pathcode{/optimize.html} & Ax-based online search across discret
 \code{PARAMETER} variables.\\
 Data Archive & \pathcode{/archive.html} & Run browsing, collections, waveform inspection,
 recalculation, scan fitting, Allan and Bragg phase analysis.\\
-Settings & \pathcode{/settings.html} & Hardware, physics, calibration, marker, fit, sync,
-path and update configuration.\\
+Settings & \pathcode{/settings.html} & Grouped analysis, calibration, instrument,
+controller and maintenance configuration.\\
 \bottomrule
 \end{tabularx}
 \end{table}
@@ -1513,48 +1513,106 @@ leakage; it does not establish calibration validity without an independent archi
 
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=\textwidth]{ui-settings.jpg}
-\caption{Settings interface. Tabs separate physical calibration from execution, network
-and maintenance concerns.}
+\begin{tikzpicture}[font=\scriptsize]
+  \draw[rounded corners=2pt,fill=white,draw=MigaGray!45] (0,0) rectangle (15.8,7.2);
+  \fill[MigaLight] (0.02,0.02) rectangle (3.65,7.18);
+  \draw[MigaGray!30] (3.65,0) -- (3.65,7.2);
+  \node[anchor=west,font=\small\bfseries,text=MigaNavy] at (0.45,6.75) {Controller Settings};
+  \node[anchor=west,font=\bfseries,text=MigaGray] at (0.45,6.18) {ANALYSIS};
+  \node[anchor=west,rounded corners=2pt,fill=MigaBlue!12,text=MigaBlue,
+    minimum width=2.8cm,minimum height=0.48cm] at (0.4,5.72) {Physics \& Gains};
+  \node[anchor=west] at (0.55,5.23) {Fitting Models};
+  \node[anchor=west] at (0.55,4.83) {Phase Noise};
+  \node[anchor=west,font=\bfseries,text=MigaGray] at (0.45,4.3) {CALIBRATION};
+  \node[anchor=west] at (0.55,3.88) {Raman AC Stark};
+  \node[anchor=west] at (0.55,3.48) {Bragg Pulse};
+  \node[anchor=west] at (0.55,3.08) {Interferometer Phase};
+  \node[anchor=west,font=\bfseries,text=MigaGray] at (0.45,2.55) {INSTRUMENTS};
+  \node[anchor=west] at (0.55,2.13) {Transfer Function};
+  \node[anchor=west] at (0.55,1.73) {Ramsey Interferometer};
+  \node[anchor=west,font=\bfseries,text=MigaGray] at (0.45,1.42) {CONTROLLER};
+  \node[anchor=west,font=\bfseries,text=MigaGray] at (0.45,1.02) {TOOLS \& MAINTENANCE};
+  \node[anchor=west,font=\large\bfseries,text=MigaNavy] at (4.2,6.5) {Physics \& Gains};
+  \node[anchor=west,text=MigaGray] at (4.2,6.05) {Detector gains, signal filters and physical calibration constants.};
+  \draw[MigaGray!25] (4.2,5.7) -- (15.25,5.7);
+  \node[anchor=west,font=\bfseries,text=MigaNavy] at (4.2,5.25) {Detector gain correction};
+  \draw[rounded corners=1pt,fill=white,draw=MigaGray!35] (4.2,4.45) rectangle (9.35,4.9);
+  \draw[rounded corners=1pt,fill=white,draw=MigaGray!35] (9.65,4.45) rectangle (14.8,4.9);
+  \node[anchor=west,font=\bfseries,text=MigaNavy] at (4.2,3.95) {Signal validation};
+  \draw[rounded corners=1pt,fill=white,draw=MigaGray!35] (4.2,3.15) rectangle (9.35,3.6);
+  \draw[rounded corners=1pt,fill=white,draw=MigaGray!35] (9.65,3.15) rectangle (14.8,3.6);
+  \node[anchor=west,font=\bfseries,text=MigaNavy] at (4.2,2.65) {Calibration \& constants};
+  \draw[MigaGray!25] (4.2,2.3) -- (15.25,2.3);
+  \fill[MigaLight] (3.67,0.02) rectangle (15.78,0.8);
+  \node[anchor=east,rounded corners=2pt,draw=MigaGray!50,minimum height=0.42cm]
+    at (13.35,0.4) {Discard changes};
+  \node[anchor=east,rounded corners=2pt,fill=MigaBlue,text=white,minimum height=0.42cm]
+    at (15.3,0.4) {Save changes};
+\end{tikzpicture}
+\caption{Controller Settings layout. A grouped navigation rail separates analysis,
+calibration, instruments, controller configuration and maintenance tools.}
 \label{fig:settings-ui}
 \end{figure}
 
-\begin{longtable}{>{\bfseries}p{0.20\textwidth} p{0.72\textwidth}}
-\caption{Settings tabs and responsibilities.}\label{tab:settings}\\
+The desktop interface uses a persistent navigation rail. On narrow screens the same five
+groups become a compact two-column selector above the active page. The active page title
+and description remain visible at the top of the content area. \ui{Sequence Markers}
+retains its wider editing workspace.
+
+\begin{longtable}{>{\raggedright\arraybackslash\bfseries}p{0.16\textwidth}
+  >{\raggedright\arraybackslash\bfseries}p{0.20\textwidth}
+  >{\raggedright\arraybackslash}p{0.55\textwidth}}
+\caption{Settings navigation groups and responsibilities.}\label{tab:settings}\\
 \toprule
-Tab & Responsibility\\
+Group & Page & Responsibility\\
 \midrule
 \endfirsthead
-\toprule Tab & Responsibility\\ \midrule
+\toprule Group & Page & Responsibility\\ \midrule
 \endhead
-Physics \& Gains & Detector gains, validation limits, $K$ inputs, crosstalk, geometry,
+Analysis & Physics \& Gains & Detector gains, validation limits, $K$ inputs, crosstalk, geometry,
 launch velocity, decimation and interferometer coefficients.\\
-Raman AC Stark & DDS writer path and four independent R1/R2 amplitude-to-power
-calibrations for UP and DOWN groups.\\
-Bragg Pulse & Channel-32 voltage-to-power logistic calibration, linear interval and off
-threshold, with raw and normalized preview plots.\\
-Sequence Markers & Visual marker editor, saved documents, definitions, hard bounds,
-compensation and embedded metadata.\\
-Fitting Models & Atom-area method, baseline points, waveform model formulas, guesses,
+& Fitting Models & Atom-area method, baseline points, waveform model formulas, guesses,
 roles and fixed/free parameters.\\
-SYNC & Standalone/Master/Slave role, node name, token, allowed IP and slave endpoints.\\
-Transfer Function & Actual \SI{780}{\nano\meter} frequency-modulation amplitude,
+& Phase Noise & Detection and laser-frequency baselines used for mid-fringe phase-noise
+comparisons.\\
+\midrule
+Calibration & Raman AC Stark & DDS writer path and four independent R1/R2 amplitude-to-power
+calibrations for UP and DOWN groups.\\
+& Bragg Pulse & Channel-32 voltage-to-power logistic calibration, linear interval and off
+threshold, with raw and normalized preview plots.\\
+& Interferometer Phase & Saved Bragg fringe calibrations, data source and fixed $T$ or
+$T^2$ phase reference.\\
+\midrule
+Instruments & Transfer Function & Actual \SI{780}{\nano\meter} frequency-modulation amplitude,
 atom--mirror distance, fixed Allan phase-noise deviation at the current average,
 TG5012A/TGF3162 and CH1/CH2 selection, direct instrument IP, TCP port, timeout,
 connection test, and immediate frequency/phase tests.\\
-Ramsey Interferometer & RIGOL DG4162 LXI IP address, raw TCP port, timeout, centre frequency,
+& Ramsey Interferometer & RIGOL DG4162 LXI IP address, raw TCP port, timeout, centre frequency,
 connection test, editable frequency--power lookup table, individual and paired
 frequency/power tests, and manual CH1/CH2 output tests.\\
-Network & Acquisition platform, Red Pitaya addresses, DAQ rate and timeout.\\
-Logic \& Channels & Launch/trigger channel IDs and linked-mode timing constant.\\
-System Paths & \code{tmot4}, arguments, \code{cmot4}, default template and DDS writer.\\
-System Update & Repository URL, branch, fetch status and controlled update action.\\
+\midrule
+Controller & Network & Acquisition platform, Red Pitaya addresses, DAQ rate and timeout.\\
+& SYNC & Standalone/Master/Slave role, node name, token, allowed IP and slave endpoints.\\
+& Logic \& Channels & Launch/trigger channel IDs and linked-mode timing constant.\\
+& System Paths & \code{tmot4}, arguments, \code{cmot4}, default template and DDS writer.\\
+\midrule
+Tools \& Maintenance & Sequence Markers & Visual marker editor, saved documents,
+definitions, hard bounds, compensation and embedded metadata.\\
+& System Update & Repository URL, branch, fetch status and controlled update action.\\
 \bottomrule
 \end{longtable}
 
 Settings are saved to \pathcode{user_settings.json}. The manager refreshes runtime settings
 from disk before starting optimization. Keep a versioned laboratory copy of calibration
 values, but do not commit host-specific credentials or tokens.
+
+Edits are held as a page-wide draft. After the first change, the active page shows
+\ui{Unsaved changes} and enables \ui{Discard changes} and \ui{Save changes}. Saving uses
+the existing \pathcode{/settings/all} endpoint and preserves the
+\pathcode{user_settings.json} schema. Discarding restores the last loaded or saved values.
+Closing or refreshing the browser with an unsaved draft triggers a confirmation. Instrument
+tests, calibration activation and system-update controls remain immediate actions and are
+not deferred by \ui{Save changes}.
 
 \begin{procedure}{calibration change control}
   \item Export or copy the existing settings and record the current run reference.

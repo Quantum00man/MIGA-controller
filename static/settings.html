@@ -58,60 +58,79 @@
             box-shadow: var(--settings-shadow);
         }
 
-        .settings-tabs-wrap {
-            padding: 9px 10px 0;
-            overflow: hidden;
-            border-bottom: 1px solid var(--settings-border-soft);
-            border-radius: var(--settings-radius) var(--settings-radius) 0 0;
-            background: var(--settings-surface);
+        .settings-layout {
+            display: grid;
+            grid-template-columns: 230px minmax(0, 1fr);
+            align-items: stretch;
         }
 
-        .settings-tabs {
-            display: flex;
-            flex-wrap: nowrap;
-            gap: 4px;
+        .settings-sidebar {
+            padding: 18px 14px;
+            border-right: 1px solid var(--settings-border-soft);
+            border-radius: var(--settings-radius) 0 0 var(--settings-radius);
+            background: var(--settings-surface-subtle);
+        }
+
+        .settings-nav-group + .settings-nav-group {
+            margin-top: 20px;
+        }
+
+        .settings-nav-heading {
+            margin: 0 8px 6px;
+            color: #788497;
+            font-size: 0.68rem;
+            font-weight: 750;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .settings-nav-list {
+            display: grid;
+            gap: 3px;
             margin: 0;
-            padding: 0 0 7px;
-            overflow-x: auto;
-            overscroll-behavior-inline: contain;
-            scrollbar-color: #aeb9c7 transparent;
-            scrollbar-width: thin;
+            padding: 0;
+            list-style: none;
         }
 
-        .settings-tabs::-webkit-scrollbar {
-            height: 5px;
-        }
-
-        .settings-tabs::-webkit-scrollbar-thumb {
-            border-radius: 999px;
-            background: #aeb9c7;
-        }
-
-        .settings-tabs .nav-item {
-            flex: 0 0 auto;
-        }
-
-        .settings-tabs .nav-link {
-            min-height: 40px;
-            padding: 8px 13px;
+        .settings-nav-link {
+            display: flex;
+            width: 100%;
+            min-height: 38px;
+            align-items: center;
+            gap: 9px;
+            padding: 8px 10px;
             border: 1px solid transparent;
             border-radius: 6px;
+            background: transparent;
             color: var(--settings-text-muted);
-            font-size: 0.86rem;
-            font-weight: 650;
-            white-space: nowrap;
+            font-size: 0.84rem;
+            font-weight: 600;
+            text-align: left;
         }
 
-        .settings-tabs .nav-link:hover {
+        .settings-nav-link:hover {
             border-color: var(--settings-border);
-            background: var(--settings-surface-subtle);
+            background: var(--settings-surface);
             color: var(--settings-text);
         }
 
-        .settings-tabs .nav-link.active {
-            border-color: var(--settings-accent);
-            background: var(--settings-accent);
-            color: #ffffff;
+        .settings-nav-link.active {
+            border-color: #c8daf7;
+            background: #e8f1ff;
+            color: #0758c7;
+            font-weight: 700;
+        }
+
+        .settings-nav-link i {
+            width: 18px;
+            flex: 0 0 18px;
+            text-align: center;
+        }
+
+        .settings-main {
+            min-width: 0;
+            border-radius: 0 var(--settings-radius) var(--settings-radius) 0;
+            background: var(--settings-surface);
         }
 
         .settings-content {
@@ -126,6 +145,25 @@
             margin-bottom: 24px;
             padding-bottom: 16px;
             border-bottom: 1px solid var(--settings-border-soft);
+        }
+
+        .settings-status {
+            display: inline-flex;
+            flex: 0 0 auto;
+            align-items: center;
+            gap: 7px;
+            margin-top: 2px;
+            color: #8a5a00;
+            font-size: 0.78rem;
+            font-weight: 650;
+            white-space: nowrap;
+        }
+
+        .settings-status-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: #d68b00;
         }
 
         .settings-tab-intro h2 {
@@ -364,22 +402,30 @@
                 border-radius: 7px;
             }
 
-            .settings-tabs-wrap {
-                padding: 8px 8px 0;
+            .settings-layout {
+                display: block;
             }
 
-            .settings-tabs {
-                scroll-snap-type: inline proximity;
-                -webkit-overflow-scrolling: touch;
+            .settings-sidebar {
+                padding: 12px;
+                border-right: 0;
+                border-bottom: 1px solid var(--settings-border-soft);
+                border-radius: 7px 7px 0 0;
             }
 
-            .settings-tabs .nav-item {
-                scroll-snap-align: start;
+            .settings-nav-groups {
+                display: grid;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                gap: 14px 10px;
             }
 
-            .settings-tabs .nav-link {
-                min-height: 44px;
-                padding: 10px 13px;
+            .settings-nav-group + .settings-nav-group {
+                margin-top: 0;
+            }
+
+            .settings-nav-link {
+                min-height: 42px;
+                padding: 9px 8px;
             }
 
             .settings-content {
@@ -388,8 +434,13 @@
             }
 
             .settings-tab-intro {
+                display: block;
                 margin-bottom: 18px;
                 padding-bottom: 14px;
+            }
+
+            .settings-status {
+                margin-top: 10px;
             }
 
             .settings-actions {
@@ -424,26 +475,36 @@
 
     <div id="app" class="settings-shell container" :class="{'settings-shell-wide': tab === 'markers'}">
         <div class="settings-page-header d-flex justify-content-between align-items-center mb-4">
-            <h1><i class="bi bi-sliders me-2" aria-hidden="true"></i>Analysis Configuration</h1>
+            <h1><i class="bi bi-sliders me-2" aria-hidden="true"></i>Controller Settings</h1>
             <a href="/" class="settings-back btn btn-outline-secondary"><i class="bi bi-arrow-left" aria-hidden="true"></i><span>Back to Lab</span></a>
         </div>
 
         <div class="settings-card card">
-            <div class="settings-tabs-wrap">
-                <ul class="settings-tabs nav" role="tablist" aria-label="Configuration section">
-                    <li class="nav-item" v-for="item in tabDefinitions" :key="item.id">
-                        <button type="button" class="nav-link" :class="{active: tab === item.id}"
-                            role="tab" :aria-selected="tab === item.id" @click="tab = item.id">
-                            <i class="bi me-1" :class="item.icon" aria-hidden="true"></i>{{ item.label }}
-                        </button>
-                    </li>
-                </ul>
-            </div>
-            <div class="settings-content card-body p-4">
+            <div class="settings-layout">
+                <aside class="settings-sidebar" aria-label="Settings navigation">
+                    <div class="settings-nav-groups">
+                        <section class="settings-nav-group" v-for="group in tabGroups" :key="group.id">
+                            <h2 class="settings-nav-heading">{{ group.label }}</h2>
+                            <ul class="settings-nav-list">
+                                <li v-for="item in tabsForGroup(group.id)" :key="item.id">
+                                    <button type="button" class="settings-nav-link" :class="{active: tab === item.id}"
+                                        :aria-current="tab === item.id ? 'page' : null" @click="tab = item.id">
+                                        <i class="bi" :class="item.icon" aria-hidden="true"></i><span>{{ item.label }}</span>
+                                    </button>
+                                </li>
+                            </ul>
+                        </section>
+                    </div>
+                </aside>
+                <main class="settings-main">
+                <div class="settings-content card-body p-4">
                 <div class="settings-tab-intro">
                     <div>
                         <h2>{{ getActiveTabDefinition().label }}</h2>
                         <p>{{ getActiveTabDefinition().description }}</p>
+                    </div>
+                    <div v-if="hasUnsavedChanges" class="settings-status" role="status">
+                        <span class="settings-status-dot" aria-hidden="true"></span>Unsaved changes
                     </div>
                 </div>
 
@@ -1649,13 +1710,15 @@
                     }}</div>
 
                 <div class="settings-actions d-flex justify-content-end gap-2">
-                    <button class="btn btn-secondary" @click="fetchSettings">Discard</button>
-                    <button class="btn btn-success px-4 fw-bold" @click="saveSettings" :disabled="saving">
+                    <button class="btn btn-outline-secondary" @click="discardChanges" :disabled="saving || !hasUnsavedChanges">Discard changes</button>
+                    <button class="btn btn-primary px-4 fw-bold" @click="saveSettings" :disabled="saving || !hasUnsavedChanges">
                         <span v-if="saving" class="spinner-border spinner-border-sm me-2"></span>
-                        {{ saving ? 'Saving...' : 'Apply & Save' }}
+                        {{ saving ? 'Saving...' : 'Save changes' }}
                     </button>
                 </div>
 
+            </div>
+            </main>
             </div>
         </div>
 
@@ -1731,24 +1794,32 @@
             data() {
                 return {
                     tab: 'phys', s: {}, msg: '', isError: false, saving: false,
+                    savedSettingsSnapshot: '', savedMarkerSnapshot: '', beforeUnloadHandler: null,
                     braggPlotError: '',
                     phaseCalibrations: [], activePhaseCalibrationId: '', selectedPhaseCalibrationId: '', phaseDraft: {},
                     phaseBusy: false, phaseMessage: '', phaseError: false,
+                    tabGroups: [
+                        { id: 'analysis', label: 'Analysis' },
+                        { id: 'calibration', label: 'Calibration' },
+                        { id: 'instruments', label: 'Instruments' },
+                        { id: 'controller', label: 'Controller' },
+                        { id: 'tools', label: 'Tools & Maintenance' }
+                    ],
                     tabDefinitions: [
-                        { id: 'phys', label: 'Physics & Gains', icon: 'bi-activity', description: 'Configure detector gains, signal filters and physical calibration constants.' },
-                        { id: 'raman', label: 'Raman AC Stark', icon: 'bi-lightning-charge', description: 'Configure DDS writer access and four independent Raman amplitude-to-power calibration curves.' },
-                        { id: 'bragg', label: 'Bragg Pulse', icon: 'bi-broadcast', description: 'Configure the channel-32 voltage-to-normalized-power curve and its linear operating interval.' },
-                        { id: 'markers', label: 'Sequence Markers', icon: 'bi-tags', description: 'Mark DDS, DAC, duration and ON/OFF values visually, then define their execution rules.' },
-                        { id: 'fitting', label: 'Fitting Models', icon: 'bi-bezier2', description: 'Manage atom-area calculation and the models used for time-of-flight fitting.' },
-                        { id: 'phase', label: 'Interferometer Phase', icon: 'bi-activity', description: 'Manage Bragg fringe calibrations, data sources and the fixed T or T² phase reference.' },
-                        { id: 'phase-noise', label: 'Phase Noise Analyze', icon: 'bi-graph-up', description: 'Configure the detection and laser-frequency baselines used to compare phase noise across mid fringes.' },
-                        { id: 'sync', label: 'SYNC', icon: 'bi-bounding-box-circles', description: 'Configure Standalone, Master or Slave operation for synchronized differential measurements.' },
-                        { id: 'tti', label: 'Transfer Function', icon: 'bi-soundwave', description: 'Configure the generator connection and the actual 780 nm frequency-modulation amplitude used to normalize Transfer Function scans.' },
-                        { id: 'ramsey', label: 'Ramsey Interferometer', icon: 'bi-bezier', description: 'Configure the RIGOL DG4162 LAN connection, center frequency and manual channel tests for Ramsey scans.' },
-                        { id: 'net', label: 'Network', icon: 'bi-hdd-network', description: 'Select the acquisition platform and configure device connection limits.' },
-                        { id: 'logic', label: 'Logic & Channels', icon: 'bi-diagram-3', description: 'Set launch, trigger and linked-mode channel timing.' },
-                        { id: 'paths', label: 'System Paths', icon: 'bi-folder2-open', description: 'Configure executable and default template locations used by the controller.' },
-                        { id: 'update', label: 'System Update', icon: 'bi-arrow-repeat', description: 'Review the current checkout and update the controller from its configured GitHub source.' }
+                        { id: 'phys', group: 'analysis', label: 'Physics & Gains', icon: 'bi-activity', description: 'Configure detector gains, signal filters and physical calibration constants.' },
+                        { id: 'fitting', group: 'analysis', label: 'Fitting Models', icon: 'bi-bezier2', description: 'Manage atom-area calculation and the models used for time-of-flight fitting.' },
+                        { id: 'phase-noise', group: 'analysis', label: 'Phase Noise', icon: 'bi-graph-up', description: 'Configure the detection and laser-frequency baselines used to compare phase noise across mid fringes.' },
+                        { id: 'raman', group: 'calibration', label: 'Raman AC Stark', icon: 'bi-lightning-charge', description: 'Configure DDS writer access and four independent Raman amplitude-to-power calibration curves.' },
+                        { id: 'bragg', group: 'calibration', label: 'Bragg Pulse', icon: 'bi-broadcast', description: 'Configure the channel-32 voltage-to-normalized-power curve and its linear operating interval.' },
+                        { id: 'phase', group: 'calibration', label: 'Interferometer Phase', icon: 'bi-crosshair', description: 'Manage Bragg fringe calibrations, data sources and the fixed T or T² phase reference.' },
+                        { id: 'tti', group: 'instruments', label: 'Transfer Function', icon: 'bi-soundwave', description: 'Configure the generator connection and the actual 780 nm frequency-modulation amplitude used to normalize Transfer Function scans.' },
+                        { id: 'ramsey', group: 'instruments', label: 'Ramsey Interferometer', icon: 'bi-bezier', description: 'Configure the RIGOL DG4162 LAN connection, center frequency and manual channel tests for Ramsey scans.' },
+                        { id: 'net', group: 'controller', label: 'Network', icon: 'bi-hdd-network', description: 'Select the acquisition platform and configure device connection limits.' },
+                        { id: 'sync', group: 'controller', label: 'SYNC', icon: 'bi-bounding-box-circles', description: 'Configure Standalone, Master or Slave operation for synchronized differential measurements.' },
+                        { id: 'logic', group: 'controller', label: 'Logic & Channels', icon: 'bi-diagram-3', description: 'Set launch, trigger and linked-mode channel timing.' },
+                        { id: 'paths', group: 'controller', label: 'System Paths', icon: 'bi-folder2-open', description: 'Configure executable and default template locations used by the controller.' },
+                        { id: 'markers', group: 'tools', label: 'Sequence Markers', icon: 'bi-tags', description: 'Mark DDS, DAC, duration and ON/OFF values visually, then define their execution rules.' },
+                        { id: 'update', group: 'tools', label: 'System Update', icon: 'bi-arrow-repeat', description: 'Review the current checkout and update the controller from its configured GitHub source.' }
                     ],
                     updateInfo: {}, updateMsg: '', updateIsError: false, updateBusy: false,
                     ttiTesting: false, ttiTestMessage: '', ttiTestError: false,
@@ -1860,6 +1931,11 @@
                     if (this.markerForm.kind === 'dac_value') return 10 ** -Math.max(0, Number(this.markerForm.decimals) || 0);
                     return 1;
                 },
+                hasUnsavedChanges() {
+                    if (!this.savedSettingsSnapshot) return false;
+                    return JSON.stringify(this.s) !== this.savedSettingsSnapshot
+                        || JSON.stringify(this.markerDocument) !== this.savedMarkerSnapshot;
+                }
             },
             watch: {
                 tab(value) {
@@ -1870,8 +1946,22 @@
                     if (this.tab === 'bragg') this.$nextTick(() => this.renderBraggPlots());
                 }
             },
-            mounted() { this.fetchSettings(); },
+            mounted() {
+                this.beforeUnloadHandler = (event) => {
+                    if (!this.hasUnsavedChanges) return;
+                    event.preventDefault();
+                    event.returnValue = '';
+                };
+                window.addEventListener('beforeunload', this.beforeUnloadHandler);
+                this.fetchSettings();
+            },
+            beforeUnmount() {
+                window.removeEventListener('beforeunload', this.beforeUnloadHandler);
+            },
             methods: {
+                tabsForGroup(groupId) {
+                    return this.tabDefinitions.filter(item => item.group === groupId);
+                },
                 formatMarkerSavedTime(timestamp) {
                     const numeric = Number(timestamp);
                     return Number.isFinite(numeric) && numeric > 0 ? new Date(numeric).toLocaleString() : 'unknown time';
@@ -1927,7 +2017,7 @@
                     this.setMarkerDefinitions(definitions);
                     await this.refreshMarkerInspection();
                     if (showMessage) {
-                        this.markerMessage = `Imported ${suggestions.length} matching definitions. Apply & Save will embed them in ${this.markerDocument.marked_filename}.`;
+                        this.markerMessage = `Imported ${suggestions.length} matching definitions. Save changes will embed them in ${this.markerDocument.marked_filename}.`;
                     }
                     return suggestions.length;
                 },
@@ -2917,7 +3007,19 @@
                         await this.fetchPhaseCalibrations();
                         await this.fetchUpdateStatus(true);
                         await this.fetchSavedMarkerDocuments(!this.markerDocument);
+                        this.savedSettingsSnapshot = JSON.stringify(this.s);
+                        this.savedMarkerSnapshot = JSON.stringify(this.markerDocument);
                     } catch (e) { console.error(e); }
+                },
+
+                async discardChanges() {
+                    this.s = JSON.parse(this.savedSettingsSnapshot || '{}');
+                    this.markerDocument = JSON.parse(this.savedMarkerSnapshot || 'null');
+                    this.clearMarkerSelection();
+                    if (this.tab === 'bragg') this.$nextTick(() => this.renderBraggPlots());
+                    this.isError = false;
+                    this.msg = 'Unsaved changes discarded.';
+                    setTimeout(() => this.msg = '', 2500);
                 },
 
                 async saveSettings() {
@@ -2930,6 +3032,8 @@
                         if(this.s.hardware_platform === 'daq') this.syncDecimation();
                         await axios.post('/settings/all', this.s);
                         const savedMarkerRecord = this.markerDocument ? await this.persistMarkerDocument() : null;
+                        this.savedSettingsSnapshot = JSON.stringify(this.s);
+                        this.savedMarkerSnapshot = JSON.stringify(this.markerDocument);
                         this.isError = false;
                         this.msg = savedMarkerRecord
                             ? `Configuration and ${savedMarkerRecord.marked_filename} saved successfully.`
