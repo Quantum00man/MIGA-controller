@@ -9,6 +9,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import uuid
 
 import numpy as np
+
+from app.analysis.allan_uncertainty import ONE_SIGMA_CONFIDENCE, chi_square_errors, white_noise_edf
 from scipy.optimize import differential_evolution
 
 from app.analysis import fitting, physics, interferometer_phase, phase_noise
@@ -1413,6 +1415,11 @@ class DataLoader:
             return {
                 "y": [],
                 "valid_window_counts": [],
+                "edf_white": [],
+                "ci_lower": [],
+                "ci_upper": [],
+                "error_minus": [],
+                "error_plus": [],
                 "mean_value": mean_value,
                 "sequence_statistics": sequence_statistics,
             }
@@ -1424,11 +1431,21 @@ class DataLoader:
 
         sigma_values: List[Optional[float]] = []
         valid_window_counts: List[int] = []
+        edf_values: List[Optional[float]] = []
+        ci_lower_values: List[Optional[float]] = []
+        ci_upper_values: List[Optional[float]] = []
+        error_minus_values: List[Optional[float]] = []
+        error_plus_values: List[Optional[float]] = []
         for order in orders:
             window_count = values.size - (2 * order) + 1
             if window_count <= 0:
                 sigma_values.append(None)
                 valid_window_counts.append(0)
+                edf_values.append(None)
+                ci_lower_values.append(None)
+                ci_upper_values.append(None)
+                error_minus_values.append(None)
+                error_plus_values.append(None)
                 continue
 
             valid_a = valid_prefix[order:order + window_count] - valid_prefix[:window_count]
@@ -1438,16 +1455,35 @@ class DataLoader:
             valid_window_counts.append(current_valid_count)
             if current_valid_count == 0:
                 sigma_values.append(None)
+                edf_values.append(None)
+                ci_lower_values.append(None)
+                ci_upper_values.append(None)
+                error_minus_values.append(None)
+                error_plus_values.append(None)
                 continue
 
             mean_a = (value_prefix[order:order + window_count] - value_prefix[:window_count]) / order
             mean_b = (value_prefix[2 * order:2 * order + window_count] - value_prefix[order:order + window_count]) / order
             diffs = (mean_b - mean_a) / math.sqrt(2.0)
-            sigma_values.append(float(np.sqrt(np.mean(np.square(diffs[valid_windows])))))
+            sigma = float(np.sqrt(np.mean(np.square(diffs[valid_windows]))))
+            sigma_values.append(sigma)
+            uncertainty = chi_square_errors(
+                sigma, white_noise_edf(np.flatnonzero(valid_windows), order),
+            )
+            edf_values.append(uncertainty["edf"])
+            ci_lower_values.append(uncertainty["ci_lower"])
+            ci_upper_values.append(uncertainty["ci_upper"])
+            error_minus_values.append(uncertainty["error_minus"])
+            error_plus_values.append(uncertainty["error_plus"])
 
         return {
             "y": sigma_values,
             "valid_window_counts": valid_window_counts,
+            "edf_white": edf_values,
+            "ci_lower": ci_lower_values,
+            "ci_upper": ci_upper_values,
+            "error_minus": error_minus_values,
+            "error_plus": error_plus_values,
             "mean_value": mean_value,
             "sequence_statistics": sequence_statistics,
         }
@@ -1464,6 +1500,8 @@ class DataLoader:
                     metrics[metric_name][source_name][channel_name] = self._build_allan_channel(points, field_names, orders)
         payload["metrics"] = metrics
         payload["overlapping"] = True
+        payload["allan_error_model"] = "white_noise_edf_chi_square"
+        payload["allan_confidence_level"] = ONE_SIGMA_CONFIDENCE
         return payload
 
     def _load_allan_points(

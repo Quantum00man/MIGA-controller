@@ -334,6 +334,8 @@ class LabPlotExportTests(unittest.TestCase):
                     {
                         "order": order,
                         "measured_phase_noise_rad": 0.1 * index / math.sqrt(order),
+                        "measured_error_minus_rad": 0.01,
+                        "measured_error_plus_rad": 0.02,
                         "expected_total_phase_noise_rad": 0.08 * index / math.sqrt(order),
                         "detection_phase_noise_rad": 0.03 * index / math.sqrt(order),
                         "laser_phase_noise_rad": 0.05 * index / math.sqrt(order),
@@ -362,6 +364,18 @@ class LabPlotExportTests(unittest.TestCase):
         first_column = next(spreadsheet.iter("column"))
         x_values = struct.unpack("=2d", base64.b64decode(first_column.find("output_filter").tail))
         self.assertEqual(x_values, (1.0, 2.0))
+        measured_curve = next(
+            item for item in worksheets["Phase Noise - Allan Deviation"].iter("xyCurve")
+            if item.attrib["name"] == "Measured total"
+        )
+        error_bars = measured_curve.find("errorBars")
+        self.assertEqual(error_bars.attrib["yErrorType"], "2")
+        self.assertTrue(error_bars.attrib["yErrorPlusColumn"].endswith("_ErrorPlus"))
+        expected_curve = next(
+            item for item in worksheets["Phase Noise - Allan Deviation"].iter("xyCurve")
+            if item.attrib["name"] == "Expected total"
+        )
+        self.assertEqual(expected_curve.find("errorBars").attrib["yErrorType"], "0")
 
 
 if __name__ == "__main__":

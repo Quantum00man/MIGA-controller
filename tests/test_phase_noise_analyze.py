@@ -125,6 +125,9 @@ class PhaseNoiseAnalyzeTests(unittest.TestCase):
             (1.1 / 20.0) / math.sqrt(2),
         )
         self.assertEqual(row["allan_deviations"][1]["valid_window_count"], 1)
+        self.assertEqual(row["allan_deviations"][1]["measured_edf_white"], 1.0)
+        self.assertGreater(row["allan_deviations"][1]["measured_error_plus_rad"], 0)
+        self.assertGreater(row["allan_deviations"][1]["measured_error_minus_rad"], 0)
 
     def test_pages_expose_new_settings_mode_and_archive_plot(self):
         root = Path(__file__).resolve().parents[1]

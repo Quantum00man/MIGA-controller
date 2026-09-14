@@ -6,6 +6,8 @@ from typing import Any, Dict, Iterable, List, Optional
 
 import numpy as np
 
+from app.analysis.allan_uncertainty import ONE_SIGMA_CONFIDENCE, chi_square_errors, white_noise_edf
+
 from app.analysis import interferometer_phase
 
 
@@ -98,6 +100,25 @@ def overlapping_allan_deviation(
     return float(np.sqrt(np.mean(np.square(differences[valid_windows])))), valid_window_count
 
 
+def overlapping_allan_result(
+    values: Iterable[Optional[float]], order: int,
+) -> dict[str, Optional[float]]:
+    """Calculate overlapping Allan deviation and white-noise confidence data."""
+    sequence = list(values)
+    deviation, valid_window_count = overlapping_allan_deviation(sequence, order)
+    n = int(order)
+    valid_starts = [
+        start for start in range(max(0, len(sequence) - 2 * n + 1))
+        if all(_finite(value) is not None for value in sequence[start:start + 2 * n])
+    ]
+    uncertainty = chi_square_errors(deviation, white_noise_edf(valid_starts, n))
+    return {
+        "deviation": deviation,
+        "valid_window_count": valid_window_count,
+        **uncertainty,
+    }
+
+
 def build_phase_noise_summary(
     points: Iterable[Any],
     calibration: Optional[Dict[str, Any]],
@@ -145,7 +166,9 @@ def build_phase_noise_summary(
         measured = float(np.std(phases, ddof=1)) if len(phases) >= 2 else None
         allan_rows = []
         for order in requested_orders:
-            allan_measured, valid_windows = overlapping_allan_deviation(sequence, order)
+            allan_result = overlapping_allan_result(sequence, order)
+            allan_measured = allan_result["deviation"]
+            valid_windows = int(allan_result["valid_window_count"] or 0)
             order_scale = math.sqrt(order)
             allan_detection = detection_rad / order_scale if detection_rad is not None else None
             allan_laser = laser_rad / order_scale if laser_rad is not None else None
@@ -154,6 +177,13 @@ def build_phase_noise_summary(
                 "order": order,
                 "measured_phase_noise_rad": allan_measured,
                 "valid_window_count": valid_windows,
+                "measured_edf_white": allan_result["edf"],
+                "confidence_level": ONE_SIGMA_CONFIDENCE,
+                "edf_noise_model": "white",
+                "measured_ci_lower_rad": allan_result["ci_lower"],
+                "measured_ci_upper_rad": allan_result["ci_upper"],
+                "measured_error_minus_rad": allan_result["error_minus"],
+                "measured_error_plus_rad": allan_result["error_plus"],
                 "detection_phase_noise_rad": allan_detection,
                 "laser_phase_noise_rad": allan_laser,
                 "expected_total_phase_noise_rad": allan_expected,

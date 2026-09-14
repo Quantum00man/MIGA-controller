@@ -6470,20 +6470,76 @@
                     const values = source.map(item => Number(item.phase));
                     const mean = values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
                     const orders = []; const deviations = []; const validWindowCounts = [];
+                    const edfWhite = []; const ciLower = []; const ciUpper = []; const errorMinus = []; const errorPlus = [];
                     for (let order = 1; order <= maxOrder; order += 1) {
                         const prefix = [0]; values.forEach((value, index) => prefix.push(prefix[index] + value));
-                        let sumSquares = 0; let count = 0;
+                        let sumSquares = 0; let count = 0; const validStarts = [];
                         for (let start = 0; start <= values.length - 2 * order; start += 1) {
                             const split = start + order; const end = split + order;
                             if (Number(source[end - 1].shot) - Number(source[start].shot) !== 2 * order - 1) continue;
                             const difference = ((prefix[end] - prefix[split]) - (prefix[split] - prefix[start])) / order;
-                            sumSquares += difference * difference / 2; count += 1;
+                            sumSquares += difference * difference / 2; count += 1; validStarts.push(start);
                         }
-                        orders.push(order); deviations.push(count ? Math.sqrt(sumSquares / count) : null); validWindowCounts.push(count);
+                        const deviation = count ? Math.sqrt(sumSquares / count) : null;
+                        const uncertainty = this.allanChiSquareUncertainty(deviation, this.allanWhiteNoiseEdf(validStarts, order));
+                        orders.push(order); deviations.push(deviation); validWindowCounts.push(count);
+                        edfWhite.push(uncertainty.edf); ciLower.push(uncertainty.ciLower); ciUpper.push(uncertainty.ciUpper);
+                        errorMinus.push(uncertainty.errorMinus); errorPlus.push(uncertainty.errorPlus);
                     }
                     const rms = values.length ? Math.sqrt(values.reduce((sum, value) => sum + value * value, 0) / values.length) : null;
                     const standardDeviation = values.length > 1 ? Math.sqrt(values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (values.length - 1)) : (values.length ? 0 : null);
-                    return { orders, deviations, validWindowCounts, mean, rms, standardDeviation, count: source.length };
+                    return { orders, deviations, validWindowCounts, edfWhite, ciLower, ciUpper, errorMinus, errorPlus, mean, rms, standardDeviation, count: source.length };
+                },
+                allanLogGamma(value) {
+                    const coefficients = [676.5203681218851, -1259.1392167224028, 771.3234287776531, -176.6150291621406, 12.507343278686905, -0.13857109526572012, 9.984369578019572e-6, 1.5056327351493116e-7];
+                    if (value < 0.5) return Math.log(Math.PI) - Math.log(Math.sin(Math.PI * value)) - this.allanLogGamma(1 - value);
+                    let z = value - 1; let x = 0.9999999999998099;
+                    coefficients.forEach((coefficient, index) => { x += coefficient / (z + index + 1); });
+                    const t = z + coefficients.length - 0.5;
+                    return 0.5 * Math.log(2 * Math.PI) + (z + 0.5) * Math.log(t) - t + Math.log(x);
+                },
+                allanRegularizedGammaP(shape, x) {
+                    if (!(shape > 0) || !(x >= 0)) return NaN;
+                    if (x === 0) return 0;
+                    const logGamma = this.allanLogGamma(shape); const epsilon = 1e-13; const tiny = 1e-300;
+                    if (x < shape + 1) {
+                        let term = 1 / shape; let sum = term;
+                        for (let index = 1; index <= 500; index += 1) { term *= x / (shape + index); sum += term; if (Math.abs(term) < Math.abs(sum) * epsilon) break; }
+                        return sum * Math.exp(-x + shape * Math.log(x) - logGamma);
+                    }
+                    let b = x + 1 - shape; let c = 1 / tiny; let d = 1 / b; let fraction = d;
+                    for (let index = 1; index <= 500; index += 1) {
+                        const an = -index * (index - shape); b += 2; d = an * d + b; if (Math.abs(d) < tiny) d = tiny;
+                        c = b + an / c; if (Math.abs(c) < tiny) c = tiny; d = 1 / d; const delta = d * c; fraction *= delta;
+                        if (Math.abs(delta - 1) < epsilon) break;
+                    }
+                    return 1 - Math.exp(-x + shape * Math.log(x) - logGamma) * fraction;
+                },
+                allanChiSquareQuantile(probability, edf) {
+                    if (!(probability > 0 && probability < 1 && edf > 0)) return null;
+                    let low = 0; let high = Math.max(1, edf);
+                    while (this.allanRegularizedGammaP(edf / 2, high / 2) < probability && high < 1e12) high *= 2;
+                    for (let index = 0; index < 100; index += 1) { const middle = (low + high) / 2; if (this.allanRegularizedGammaP(edf / 2, middle / 2) < probability) low = middle; else high = middle; }
+                    return (low + high) / 2;
+                },
+                allanWhiteNoiseEdf(validStarts, order) {
+                    const n = Math.max(1, Math.round(Number(order) || 1)); const starts = [...new Set(validStarts.map(Number))].sort((a, b) => a - b);
+                    if (!starts.length) return null;
+                    const overlap = offset => Math.max(0, n - Math.abs(offset)); const diagonal = 1 / n;
+                    let gramSquares = starts.length * diagonal * diagonal;
+                    for (let left = 0; left < starts.length - 1; left += 1) for (let right = left + 1; right < starts.length; right += 1) {
+                        const offset = starts[right] - starts[left]; if (offset >= 2 * n) break;
+                        const dot = (2 * overlap(offset) - overlap(offset + n) - overlap(offset - n)) / (2 * n * n);
+                        gramSquares += 2 * dot * dot;
+                    }
+                    const trace = starts.length * diagonal; return gramSquares > 0 ? trace * trace / gramSquares : null;
+                },
+                allanChiSquareUncertainty(deviation, edf) {
+                    const sigma = Number(deviation); const nu = Number(edf); if (!(sigma >= 0) || !(nu > 0)) return { edf: null, ciLower: null, ciUpper: null, errorMinus: null, errorPlus: null };
+                    const tail = (1 - 0.6826894921370859) / 2; const qLow = this.allanChiSquareQuantile(tail, nu); const qHigh = this.allanChiSquareQuantile(1 - tail, nu);
+                    if (!(qLow > 0) || !(qHigh > 0)) return { edf: nu, ciLower: null, ciUpper: null, errorMinus: null, errorPlus: null };
+                    const lower = sigma * Math.sqrt(nu / qHigh); const upper = sigma * Math.sqrt(nu / qLow);
+                    return { edf: nu, ciLower: lower, ciUpper: upper, errorMinus: sigma - lower, errorPlus: upper - sigma };
                 },
                 syncPhaseAllanStatisticsRows() {
                     return this.syncPhaseAllanDefinitions().map(definition => {
@@ -6790,7 +6846,11 @@
                                 if (relative) return denominator > 1e-12 ? value / denominator : null;
                                 return value * scale;
                             });
-                            return { x: curve.orders, y, customdata: curve.validWindowCounts, type: 'scatter', mode: 'lines+markers', name: definition.kind === 'difference' ? `Difference: ${definition.label}` : definition.label, line: { color: definition.color, width: definition.kind === 'difference' ? 3 : 2, dash: definition.kind === 'difference' ? 'dash' : 'solid' }, marker: { size: 7, symbol: definition.kind === 'difference' ? 'diamond' : 'circle' }, hovertemplate: 'n=%{x}<br>Allan=%{y:.6g}<br>valid windows=%{customdata}<extra>%{fullData.name}</extra>' };
+                            const errorScale = relative ? (denominator > 1e-12 ? 1 / denominator : null) : scale;
+                            const plus = curve.errorPlus.map(value => value == null || errorScale == null ? null : value * errorScale);
+                            const minus = curve.errorMinus.map(value => value == null || errorScale == null ? null : value * errorScale);
+                            const customdata = curve.validWindowCounts.map((count, index) => [count, curve.edfWhite[index]]);
+                            return { x: curve.orders, y, customdata, error_y: { type: 'data', symmetric: false, array: plus, arrayminus: minus, visible: true, color: definition.color, thickness: 1.3, width: 4 }, type: 'scatter', mode: 'lines+markers', name: definition.kind === 'difference' ? `Difference: ${definition.label}` : definition.label, line: { color: definition.color, width: definition.kind === 'difference' ? 3 : 2, dash: definition.kind === 'difference' ? 'dash' : 'solid' }, marker: { size: 7, symbol: definition.kind === 'difference' ? 'diamond' : 'circle' }, hovertemplate: 'n=%{x}<br>Allan=%{y:.6g}<br>valid windows=%{customdata[0]}<br>white-noise EDF=%{customdata[1]:.4g}<extra>%{fullData.name}</extra>' };
                         });
                         xTitle = 'Allan Order n';
                         title = `All Hosts + Phase Difference · ${this.syncPhaseAllanScale === 'relative' ? 'Relative' : 'Absolute'} overlapping Allan`;
@@ -6850,12 +6910,14 @@
                     const definitions = this.syncPhaseAllanDefinitions();
                     const curves = definitions.map(definition => ({ ...definition, curve: this.syncPhaseAllanCurve(definition.rows) }));
                     const orders = curves[0]?.curve?.orders || [];
-                    const header = ['allan_order_n', ...curves.flatMap(item => [`${this.sanitizeFilenamePart(item.label)}_allan_rad`, `${this.sanitizeFilenamePart(item.label)}_relative_allan`, `${this.sanitizeFilenamePart(item.label)}_valid_windows`])];
+                    const header = ['allan_order_n', ...curves.flatMap(item => { const prefix = this.sanitizeFilenamePart(item.label); return [`${prefix}_allan_rad`, `${prefix}_error_minus_rad`, `${prefix}_error_plus_rad`, `${prefix}_ci_lower_rad`, `${prefix}_ci_upper_rad`, `${prefix}_edf_white`, `${prefix}_relative_allan`, `${prefix}_relative_error_minus`, `${prefix}_relative_error_plus`, `${prefix}_valid_windows`]; })];
                     const rows = orders.map((order, index) => [order, ...curves.flatMap(item => {
                         const value = item.curve.deviations[index]; const denominator = Math.abs(Number(item.curve.mean));
-                        return [value ?? '', value != null && denominator > 1e-12 ? value / denominator : '', item.curve.validWindowCounts[index] ?? 0];
+                        const minus = item.curve.errorMinus[index]; const plus = item.curve.errorPlus[index];
+                        return [value ?? '', minus ?? '', plus ?? '', item.curve.ciLower[index] ?? '', item.curve.ciUpper[index] ?? '', item.curve.edfWhite[index] ?? '', value != null && denominator > 1e-12 ? value / denominator : '', minus != null && denominator > 1e-12 ? minus / denominator : '', plus != null && denominator > 1e-12 ? plus / denominator : '', item.curve.validWindowCounts[index] ?? 0];
                     })]);
                     const metadataRows = [
+                        ['allan_error_model', 'white_noise_edf_chi_square'], ['allan_confidence_level', 0.6826894921370859],
                         ['reference_node', this.syncPhaseReferenceNode], ['target_node', this.syncPhaseTargetNode],
                         ['selected_p0_min', this.syncPhaseP0Min ?? ''], ['selected_p0_max', this.syncPhaseP0Max ?? ''],
                         ['selected_shot_index_min', this.syncPhaseShotMin ?? ''], ['selected_shot_index_max', this.syncPhaseShotMax ?? ''],
@@ -7428,6 +7490,15 @@
                     }
                     return baseValues.map(value => value == null ? null : value / meanValue);
                 },
+                getAllanDisplayErrors(series, key) {
+                    const values = Array.isArray(series?.[key]) ? series[key].map(value => value == null || !Number.isFinite(Number(value)) ? null : Number(value)) : [];
+                    if (this.normalizeAllanScaleMode(this.allanScaleMode) !== 'relative') {
+                        const scale = this.currentTab === 'phase' && this.phaseUnit === 'mrad' ? 1000 : 1;
+                        return values.map(value => value == null ? null : value * scale);
+                    }
+                    const meanValue = Math.abs(Number(series?.mean_value));
+                    return values.map(value => value == null || !(meanValue > 1e-12) ? null : value / meanValue);
+                },
                 build2DLayout(channel, metric, sourceLabel, xAxisIndex = 0, yAxisIndex = 1, subtitle = '') {
                     const base = this.buildCommonAnalysisLayout();
                     const title = channel === 'up' ? metric.nameUp : metric.nameDw;
@@ -7734,7 +7805,9 @@
                         name: `${channelName} ${this.allanScaleMode === 'relative' ? 'Relative Allan' : 'Allan'}`,
                         line: { color, width: 2 },
                         marker: { size: 7 },
-                        hovertemplate: this.buildAllanHoverTemplate(metric, channelName)
+                        error_y: { type: 'data', symmetric: false, array: this.getAllanDisplayErrors(series, 'error_plus'), arrayminus: this.getAllanDisplayErrors(series, 'error_minus'), visible: true, color, thickness: 1.3, width: 4 },
+                        customdata: orders.map((order, index) => [series.valid_window_counts?.[index] ?? 0, series.edf_white?.[index] ?? null]),
+                        hovertemplate: `n=%{x}<br>${this.normalizeAllanScaleMode(this.allanScaleMode) === 'relative' ? 'Relative Allan' : 'Allan'}=%{y:.6g}<br>valid windows=%{customdata[0]}<br>white-noise EDF=%{customdata[1]:.4g}<extra>${channelName} · ${metric.label}</extra>`
                     }];
                     const buildSummary = (series) => {
                         const validCounts = Array.isArray(series?.valid_window_counts) ? series.valid_window_counts : [];
@@ -8217,6 +8290,11 @@
                                 label: channel.label,
                                 values: this.getAllanDisplayValues(series),
                                 validCounts: Array.isArray(series.valid_window_counts) ? series.valid_window_counts : [],
+                                edfWhite: Array.isArray(series.edf_white) ? series.edf_white : [],
+                                ciLower: Array.isArray(series.ci_lower) ? series.ci_lower : [],
+                                ciUpper: Array.isArray(series.ci_upper) ? series.ci_upper : [],
+                                errorMinus: this.getAllanDisplayErrors(series, 'error_minus'),
+                                errorPlus: this.getAllanDisplayErrors(series, 'error_plus'),
                                 meanValue: series.sequence_statistics?.mean ?? series.mean_value ?? '',
                                 rmsValue: series.sequence_statistics?.rms ?? '',
                                 standardDeviation: series.sequence_statistics?.standard_deviation ?? '',
@@ -8225,6 +8303,8 @@
                         });
 
                         const metadataRows = [
+                            ['allan_error_model', 'white_noise_edf_chi_square'],
+                            ['allan_confidence_level', 0.6826894921370859],
                             ['run_id', this.loadedRunId || this.selectedRun || ''],
                             ['run_label', this.loadedRunEntry?.run_label || ''],
                             ['tab', this.currentTab],
@@ -8251,7 +8331,7 @@
 
                         const header = ['order'];
                         channelDefs.forEach(channel => {
-                            header.push(`${channel.key}_allan_${scaleMode}`, `${channel.key}_valid_windows`);
+                            header.push(`${channel.key}_allan_${scaleMode}`, `${channel.key}_error_minus_${scaleMode}`, `${channel.key}_error_plus_${scaleMode}`, `${channel.key}_ci_lower_absolute`, `${channel.key}_ci_upper_absolute`, `${channel.key}_edf_white`, `${channel.key}_valid_windows`);
                         });
 
                         const csvRows = metadataRows.map(([key, value]) => `# ${key},${this.csvCell(value)}`);
@@ -8260,7 +8340,7 @@
                             const row = [this.csvCell(order)];
                             channelDefs.forEach(channel => {
                                 const current = seriesByChannel[channel.key];
-                                row.push(this.csvCell(current.values[index]), this.csvCell(current.validCounts[index]));
+                                row.push(this.csvCell(current.values[index]), this.csvCell(current.errorMinus[index]), this.csvCell(current.errorPlus[index]), this.csvCell(current.ciLower[index]), this.csvCell(current.ciUpper[index]), this.csvCell(current.edfWhite[index]), this.csvCell(current.validCounts[index]));
                             });
                             csvRows.push(row.join(','));
                         });
@@ -8784,7 +8864,7 @@
                         if (!hasAllSelectedOrders) await this.refreshPhaseNoiseAllan();
 
                         const header = [
-                            'T2_us2', 'T_ms', 'n_order', 'measured_allan_rad',
+                            'T2_us2', 'T_ms', 'n_order', 'measured_allan_rad', 'measured_error_minus_rad', 'measured_error_plus_rad', 'measured_ci_lower_rad', 'measured_ci_upper_rad', 'measured_edf_white', 'confidence_level', 'edf_noise_model',
                             'expected_allan_rad', 'detection_allan_rad', 'laser_allan_rad',
                             'valid_window_count', 'shot_count'
                         ];
@@ -8797,6 +8877,13 @@
                                 rows.push([
                                     summary.t2_us2, summary.t_ms, order,
                                     allan.measured_phase_noise_rad,
+                                    allan.measured_error_minus_rad,
+                                    allan.measured_error_plus_rad,
+                                    allan.measured_ci_lower_rad,
+                                    allan.measured_ci_upper_rad,
+                                    allan.measured_edf_white,
+                                    allan.confidence_level,
+                                    allan.edf_noise_model,
                                     allan.expected_total_phase_noise_rad,
                                     allan.detection_phase_noise_rad,
                                     allan.laser_phase_noise_rad,
@@ -8862,6 +8949,7 @@
                                 type: 'scatter', mode: 'lines+markers', name: `${label} n=${order}`,
                                 legendgroup: `allan-${order}`,
                                 line: { color, width, dash }, marker: { color, size: label === 'Measured' ? 8 : 6, symbol },
+                                error_y: label === 'Measured' ? { type: 'data', symmetric: false, array: allanRows.map(item => plotY(item.measured_error_plus_rad)), arrayminus: allanRows.map(item => plotY(item.measured_error_minus_rad)), visible: true, color, thickness: 1.3, width: 4 } : undefined,
                                 opacity: label === 'Measured' || label === 'Expected total' ? 1 : 0.72,
                                 connectgaps: false,
                                 hovertemplate: `${xTitle}=%{x:.9g}<br>σA(n=${order})=%{y:.6g} mrad<br>T²=%{customdata[0]:.9g} (μs)²<br>T=%{customdata[1]:.6g} ms<br>valid windows=%{customdata[2]}<br>shots=%{customdata[3]}<extra>${label} n=${order}</extra>`

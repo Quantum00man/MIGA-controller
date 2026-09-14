@@ -39,6 +39,8 @@ class Curve:
     line: bool = True
     symbols: bool = True
     line_style: int = 1
+    y_error_plus: Optional[Sequence[float]] = None
+    y_error_minus: Optional[Sequence[float]] = None
 
 
 @dataclass
@@ -199,7 +201,8 @@ def _axis(parent: ET.Element, name: str, orientation: int, position: int, title:
     parent.append(axis)
 
 
-def _xy_curve(parent: ET.Element, curve: Curve, x_path: str, y_path: str) -> None:
+def _xy_curve(parent: ET.Element, curve: Curve, x_path: str, y_path: str,
+              error_plus_path: str = "", error_minus_path: str = "") -> None:
     element = _aspect("xyCurve", curve.name)
     _comment(element)
     ET.SubElement(element, "general", {
@@ -234,8 +237,8 @@ def _xy_curve(parent: ET.Element, curve: Curve, x_path: str, y_path: str) -> Non
         "fileName": "", "opacity": "0",
     })
     ET.SubElement(element, "errorBars", {
-        "xErrorType": "0", "xErrorPlusColumn": "", "xErrorMinusColumn": "", "yErrorType": "0",
-        "yErrorPlusColumn": "", "yErrorMinusColumn": "", "type": "0", "capSize": "8", "style": "1",
+        "xErrorType": "0", "xErrorPlusColumn": "", "xErrorMinusColumn": "", "yErrorType": "2" if error_plus_path and error_minus_path else "0",
+        "yErrorPlusColumn": error_plus_path, "yErrorMinusColumn": error_minus_path, "type": "1", "capSize": "8", "style": "1",
         "color_r": str(r), "color_g": str(g), "color_b": str(b), "width": "3.5", "opacity": "1",
     })
     ET.SubElement(element, "margins", {
@@ -271,17 +274,24 @@ def _legend(parent: ET.Element) -> None:
 
 
 def build_project(project_name: str, worksheets: Iterable[Worksheet], comment: str = "") -> bytes:
-    prepared: List[Tuple[Worksheet, str, List[List[Tuple[Curve, str, str]]]]] = []
+    prepared: List[Tuple[Worksheet, str, List[List[Tuple[Curve, str, str, str, str]]]]] = []
     for worksheet in worksheets:
         plots: List[List[Tuple[Curve, str, str]]] = []
         for plot in worksheet.plots:
             curves = []
             for curve in plot.curves:
-                x, y = _finite_pairs(curve.x, curve.y)
+                kept_indices = []
+                x = []; y = []
+                for index, (raw_x, raw_y) in enumerate(zip(curve.x, curve.y)):
+                    pair_x, pair_y = _finite_pairs([raw_x], [raw_y])
+                    if pair_x:
+                        x.append(pair_x[0]); y.append(pair_y[0]); kept_indices.append(index)
                 if x:
+                    plus = [float(curve.y_error_plus[index]) for index in kept_indices] if curve.y_error_plus is not None else None
+                    minus = [float(curve.y_error_minus[index]) for index in kept_indices] if curve.y_error_minus is not None else None
                     curves.append((Curve(
-                        curve.name, x, y, curve.color, curve.line, curve.symbols, curve.line_style
-                    ), "", ""))
+                        curve.name, x, y, curve.color, curve.line, curve.symbols, curve.line_style, plus, minus
+                    ), "", "", "", ""))
             plots.append(curves)
         if any(plots):
             prepared.append((worksheet, f"Data - {worksheet.name}", plots))
@@ -305,14 +315,21 @@ def build_project(project_name: str, worksheets: Iterable[Worksheet], comment: s
         counter = 0
         for plot_index, curves in enumerate(plot_curves):
             for curve_index, item in enumerate(curves):
-                curve, _, _ = item
+                curve, _, _, _, _ = item
                 counter += 1
                 x_name = f"P{plot_index + 1}_X{curve_index + 1}"
                 y_name = f"P{plot_index + 1}_{curve.name}"
                 _column(spreadsheet, x_name, curve.x, 1)
                 _column(spreadsheet, y_name, curve.y, 2)
                 path_root = f"{project_name}/{sheet_name}"
-                curves[curve_index] = (curve, f"{path_root}/{x_name}", f"{path_root}/{y_name}")
+                plus_path = ""; minus_path = ""
+                if curve.y_error_plus is not None and curve.y_error_minus is not None:
+                    plus_name = f"P{plot_index + 1}_{curve.name}_ErrorPlus"
+                    minus_name = f"P{plot_index + 1}_{curve.name}_ErrorMinus"
+                    _column(spreadsheet, plus_name, curve.y_error_plus, 0)
+                    _column(spreadsheet, minus_name, curve.y_error_minus, 0)
+                    plus_path = f"{path_root}/{plus_name}"; minus_path = f"{path_root}/{minus_name}"
+                curves[curve_index] = (curve, f"{path_root}/{x_name}", f"{path_root}/{y_name}", plus_path, minus_path)
         wrapper.append(spreadsheet)
 
         wrapper = ET.SubElement(root, "child_aspect")
@@ -346,8 +363,8 @@ def build_project(project_name: str, worksheets: Iterable[Worksheet], comment: s
                 "x": "25", "y": str(25 + index * (plot_height + 24)), "width": str(width - 50),
                 "height": str(plot_height), "visible": "1",
             })
-            x_values = [value for curve, _, _ in curves for value in curve.x]
-            y_values = [value for curve, _, _ in curves for value in curve.y]
+            x_values = [value for curve, _, _, _, _ in curves for value in curve.x]
+            y_values = [value for curve, _, _, _, _ in curves for value in curve.y]
             x_min, x_max = min(x_values), max(x_values)
             y_min, y_max = min(y_values), max(y_values)
             if x_min == x_max:
@@ -376,8 +393,8 @@ def build_project(project_name: str, worksheets: Iterable[Worksheet], comment: s
             _label(element, f"{plot.title} - Title", "", PLOT_TITLE_POINT_SIZE, visible=False)
             _axis(element, "x", 0, 1, plot.x_label)
             _axis(element, "y", 1, 2, plot.y_label)
-            for curve, x_path, y_path in curves:
-                _xy_curve(element, curve, x_path, y_path)
+            for curve, x_path, y_path, plus_path, minus_path in curves:
+                _xy_curve(element, curve, x_path, y_path, plus_path, minus_path)
             if len(curves) > 1:
                 _legend(element)
             sheet.append(element)

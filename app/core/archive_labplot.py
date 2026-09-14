@@ -358,6 +358,8 @@ def _phase_noise_curve(
 ) -> Optional[Curve]:
     x_values: List[float] = []
     y_values: List[float] = []
+    error_plus: List[float] = []
+    error_minus: List[float] = []
     for row in rows:
         x = _finite(row.get(x_field))
         source = row
@@ -370,7 +372,13 @@ def _phase_noise_curve(
         if x is not None and y is not None:
             x_values.append(x)
             y_values.append(y * 1000.0)
-    return Curve(label, x_values, y_values, color, line_style=line_style) if x_values else None
+            if order is not None and field == "measured_phase_noise_rad":
+                plus = _finite(source.get("measured_error_plus_rad"))
+                minus = _finite(source.get("measured_error_minus_rad"))
+                error_plus.append((plus or 0.0) * 1000.0)
+                error_minus.append((minus or 0.0) * 1000.0)
+    return Curve(label, x_values, y_values, color, line_style=line_style,
+                 y_error_plus=error_plus or None, y_error_minus=error_minus or None) if x_values else None
 
 
 def _phase_noise_worksheets(

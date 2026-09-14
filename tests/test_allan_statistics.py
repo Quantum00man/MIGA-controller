@@ -24,6 +24,10 @@ class AllanStatisticsTests(unittest.TestCase):
         self.assertAlmostEqual(statistics["mean"], 2.5)
         self.assertAlmostEqual(statistics["rms"], math.sqrt(7.5))
         self.assertAlmostEqual(statistics["standard_deviation"], math.sqrt(5.0 / 3.0))
+        self.assertEqual(len(channel["edf_white"]), 2)
+        self.assertGreater(channel["error_plus"][0], channel["error_minus"][0])
+        self.assertLess(channel["ci_lower"][0], channel["y"][0])
+        self.assertGreater(channel["ci_upper"][0], channel["y"][0])
 
     def test_total_channel_statistics_use_the_combined_value(self):
         points = [
