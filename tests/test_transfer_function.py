@@ -151,6 +151,14 @@ class TransferFunctionPlanTests(unittest.TestCase):
         self.assertIn("if (String(configObj.mode || '') === 'transfer_function')", index_html)
         self.assertIn("transfer_function: 'Transfer Function'", index_html)
 
+    def test_archive_exposes_sync_differential_transfer_function(self):
+        archive_html = (Path(__file__).resolve().parents[1] / "static" / "archive.html").read_text(encoding="utf-8")
+        self.assertIn("Differential Transfer Function", archive_html)
+        self.assertIn("syncArchiveTransferDifferentialRows()", archive_html)
+        self.assertIn("renderSyncArchiveTransferFunctionPlot(element)", archive_html)
+        self.assertIn("downloadSyncTransferFunctionDifferentialCSV", archive_html)
+        self.assertIn("row.differential_s2", archive_html)
+
     def setUp(self):
         self.manager = ExperimentManager.__new__(ExperimentManager)
         self.manager.settings = {"tti_model": "TG5012A", "tti_channel": 1}

@@ -1250,7 +1250,7 @@
                     </div>
                 </div>
 
-                <div class="card border-info shadow-sm" v-if="(loadedPoints.length > 0 || (syncManifest && syncArchivePairs().length > 0)) && !isAcStarkArchive() && !isLockInArchive()">
+                <div class="card border-info shadow-sm" v-if="(loadedPoints.length > 0 || (syncManifest && syncArchivePairs().length > 0)) && !isAcStarkArchive() && !isLockInArchive() && !(syncManifest && isTransferFunctionArchive())">
                     <button type="button"
                         class="card-header collapsible-card-header bg-info text-white border-0 d-flex justify-content-between align-items-center"
                         @click="togglePanel('scanFitting')" aria-controls="scan-fitting-panel"
@@ -1787,7 +1787,7 @@
                                 </button>
                                 <select class="form-select form-select-sm" style="width:auto" v-model="syncArchiveViewMode" @change="handleSyncArchiveViewChange">
                                     <option value="node">Node Data</option>
-                                    <option value="differential">Differential Replay</option>
+                                    <option value="differential">{{ isTransferFunctionArchive() ? 'Differential Transfer Function' : 'Differential Replay' }}</option>
                                 </select>
                                 <select v-if="syncArchiveViewMode === 'node' && syncArchiveTab !== 'phase'" class="form-select form-select-sm" style="width:auto" v-model="syncArchiveNodeSource" @change="handleSyncArchiveNodeSourceChange">
                                     <option value="master">Master</option>
@@ -1907,12 +1907,26 @@
                             </div>
                         </div>
                         <div v-else class="row g-2 mt-2">
-                            <div class="col-lg-6 d-flex gap-2">
+                            <div v-if="isTransferFunctionArchive()" class="col-12 d-flex flex-wrap align-items-center gap-2">
+                                <span class="badge bg-primary">Master − Slave</span>
+                                <select class="form-select form-select-sm" style="width:auto" v-model="syncArchiveSlaveId" @change="renderSyncArchivePlot">
+                                    <option v-for="slaveId in syncArchiveSlaveOptions()" :key="slaveId" :value="slaveId">{{ syncArchiveNodeLabel(slaveId) }}</option>
+                                </select>
+                                <div class="btn-group btn-group-sm" role="group" aria-label="Differential Transfer Function y-axis scale">
+                                    <button class="btn" :class="transferFunctionYAxisScale === 'linear' ? 'btn-secondary' : 'btn-outline-secondary'" @click="transferFunctionYAxisScale='linear'; renderSyncArchivePlot()">Linear Y</button>
+                                    <button class="btn" :class="transferFunctionYAxisScale === 'log' ? 'btn-secondary' : 'btn-outline-secondary'" @click="transferFunctionYAxisScale='log'; renderSyncArchivePlot()" title="Log Y shows |ΔS|² only">Log Y</button>
+                                </div>
+                                <button class="btn btn-outline-success btn-sm" @click="downloadSyncTransferFunctionDifferentialCSV" :disabled="!syncArchiveTransferDifferentialRows().length">
+                                    <i class="bi bi-download me-1"></i>Differential TF CSV
+                                </button>
+                                <span class="small text-muted">Signed quadratures are subtracted before calculating |ΔS|².</span>
+                            </div>
+                            <div v-if="!isTransferFunctionArchive()" class="col-lg-6 d-flex gap-2">
                                 <span class="badge bg-primary align-self-center">X Master</span>
                                 <select class="form-select form-select-sm" v-model="syncArchiveAxisX.metric" @change="resetSyncArchiveAxisRange"><option v-for="item in syncArchiveMetricOptions" :key="item.key" :value="item.key">{{ item.label }}</option></select>
                                 <select v-if="syncArchiveAxisX.metric !== 'phase'" class="form-select form-select-sm" v-model="syncArchiveAxisX.channel" @change="resetSyncArchiveAxisRange"><option value="up">UP</option><option value="dw">DOWN</option></select>
                             </div>
-                            <div class="col-lg-6 d-flex gap-2">
+                            <div v-if="!isTransferFunctionArchive()" class="col-lg-6 d-flex gap-2">
                                 <span class="badge bg-secondary align-self-center">Y Slave</span>
                                 <select class="form-select form-select-sm" v-model="syncArchiveSlaveId" @change="resetSyncArchiveReplay">
                                     <option v-for="slaveId in syncArchiveSlaveOptions()" :key="slaveId" :value="slaveId">{{ syncArchiveNodeLabel(slaveId) }}</option>
@@ -1920,7 +1934,7 @@
                                 <select class="form-select form-select-sm" v-model="syncArchiveAxisY.metric" @change="resetSyncArchiveAxisRange"><option v-for="item in syncArchiveMetricOptions" :key="item.key" :value="item.key">{{ item.label }}</option></select>
                                 <select v-if="syncArchiveAxisY.metric !== 'phase'" class="form-select form-select-sm" v-model="syncArchiveAxisY.channel" @change="resetSyncArchiveAxisRange"><option value="up">UP</option><option value="dw">DOWN</option></select>
                             </div>
-                            <div class="col-12 d-flex flex-wrap align-items-center gap-2">
+                            <div v-if="!isTransferFunctionArchive()" class="col-12 d-flex flex-wrap align-items-center gap-2">
                                 <select class="form-select form-select-sm" style="width:auto" v-model="syncArchiveDifferentialAggregation" @change="resetSyncArchiveReplay" aria-label="Archived differential aggregation">
                                     <option value="shots">Every shot</option>
                                     <option value="average">Averaged</option>
@@ -1934,7 +1948,7 @@
                                 <input type="range" class="form-range flex-grow-1" style="min-width:180px" min="0" :max="syncArchiveDifferentialPoints().length" v-model.number="syncArchiveReplayCount" @input="renderSyncArchivePlot">
                                 <span class="small text-muted">{{ syncArchiveReplayCount }}/{{ syncArchiveDifferentialPoints().length }} {{ syncArchiveDifferentialAggregation === 'average' ? 'averaged scan points' : 'paired shots' }}</span>
                             </div>
-                            <div class="col-12">
+                            <div v-if="!isTransferFunctionArchive()" class="col-12">
                                 <div class="sync-axis-range-panel">
                                     <div class="d-flex flex-wrap align-items-end gap-2">
                                         <div>
@@ -7262,9 +7276,122 @@
                     };
                     return calculated;
                 },
+                syncArchiveTransferDifferentialRows() {
+                    const selectedSlave = String(this.syncArchiveSlaveId || '');
+                    const saved = Array.isArray(this.syncManifest?.transfer_function_differential_summary)
+                        ? this.syncManifest.transfer_function_differential_summary : [];
+                    if (saved.length) {
+                        return saved.filter(row => !selectedSlave || String(row.slave_node_id || '') === selectedSlave)
+                            .slice().sort((a, b) => Number(a.frequency_hz) - Number(b.frequency_hz));
+                    }
+
+                    // Backward-compatible reconstruction for archives captured
+                    // before the differential summary was stored in the manifest.
+                    const c = 299792458;
+                    const groups = new Map();
+                    this.syncArchivePairs().forEach(pair => {
+                        const master = pair.master || {};
+                        const slave = pair.slave || {};
+                        if (master.interferometer_phase_valid !== true || slave.interferometer_phase_valid !== true) return;
+                        const frequency = Number(master.transfer_frequency_hz ?? slave.transfer_frequency_hz);
+                        const phase = Number(master.transfer_phase_deg ?? slave.transfer_phase_deg);
+                        if (!Number.isFinite(frequency) || ![0, 90].includes(phase)) return;
+                        const normalized = record => {
+                            const measured = Number(record.interferometer_phase);
+                            const modulation = Number(record.transfer_frequency_modulation_mhz);
+                            const distance = Number(record.transfer_atom_mirror_distance_m);
+                            const amplitude = 4 * Math.PI * distance * modulation * 1e6 / c;
+                            return Number.isFinite(measured) && Number.isFinite(amplitude) && amplitude > 0
+                                ? measured / amplitude : null;
+                        };
+                        const masterS = normalized(master);
+                        const slaveS = normalized(slave);
+                        if (masterS === null || slaveS === null) return;
+                        const key = frequency.toPrecision(15);
+                        const group = groups.get(key) || { frequency_hz: frequency, values: { 0: [], 90: [] } };
+                        group.values[phase].push(masterS - slaveS);
+                        groups.set(key, group);
+                    });
+                    const statistics = values => {
+                        if (!values.length) return { count: 0, mean: null, std: null, sem: null };
+                        const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+                        const std = values.length > 1
+                            ? Math.sqrt(values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (values.length - 1))
+                            : null;
+                        return { count: values.length, mean, std, sem: std === null ? null : std / Math.sqrt(values.length) };
+                    };
+                    return [...groups.values()].sort((a, b) => a.frequency_hz - b.frequency_hz).map(group => {
+                        const zero = statistics(group.values[0]);
+                        const ninety = statistics(group.values[90]);
+                        const available = [zero.mean, ninety.mean].filter(value => value !== null);
+                        const differentialS2 = available.length ? available.reduce((sum, value) => sum + value ** 2, 0) : null;
+                        return {
+                            slave_node_id: selectedSlave,
+                            frequency_hz: group.frequency_hz,
+                            delta_s_0deg_count: zero.count, delta_s_0deg_mean: zero.mean, delta_s_0deg_std: zero.std, delta_s_0deg_sem: zero.sem,
+                            delta_s_90deg_count: ninety.count, delta_s_90deg_mean: ninety.mean, delta_s_90deg_std: ninety.std, delta_s_90deg_sem: ninety.sem,
+                            differential_s2: differentialS2,
+                            differential_magnitude: differentialS2 === null ? null : Math.sqrt(differentialS2),
+                            quadrature_complete: zero.mean !== null && ninety.mean !== null,
+                        };
+                    });
+                },
+                async downloadSyncTransferFunctionDifferentialCSV() {
+                    const rows = this.syncArchiveTransferDifferentialRows();
+                    if (!rows.length) return;
+                    const fields = [
+                        'slave_node_id', 'frequency_hz',
+                        'delta_s_0deg_count', 'delta_s_0deg_mean', 'delta_s_0deg_std', 'delta_s_0deg_sem',
+                        'delta_s_90deg_count', 'delta_s_90deg_mean', 'delta_s_90deg_std', 'delta_s_90deg_sem',
+                        'differential_s2', 'differential_magnitude', 'quadrature_complete'
+                    ];
+                    const csv = '\uFEFF' + [fields, ...rows.map(row => fields.map(field => row[field] ?? ''))]
+                        .map(row => row.map(value => this.csvCell(value)).join(',')).join('\n');
+                    const runPart = this.sanitizeFilenamePart(this.selectedRun || this.loadedRunId || 'run');
+                    const slavePart = this.sanitizeFilenamePart(this.syncArchiveNodeLabel(this.syncArchiveSlaveId), 'slave');
+                    await this.downloadCsvContent(csv, `sync_transfer_function_${runPart}_${slavePart}.csv`);
+                },
+                renderSyncArchiveTransferFunctionPlot(element) {
+                    const rows = this.syncArchiveTransferDifferentialRows();
+                    const linear = this.transferFunctionYAxisScale !== 'log';
+                    const traces = [{
+                        x: rows.map(row => Number(row.frequency_hz)),
+                        y: rows.map(row => row.differential_s2),
+                        customdata: rows.map(row => `${Number(row.delta_s_0deg_count || 0)}/${Number(row.delta_s_90deg_count || 0)}`),
+                        type: 'scatter', mode: 'lines+markers', name: '|ΔS|²',
+                        line: { color: '#198754', width: 3 }, marker: { color: '#198754', size: 8, symbol: 'diamond' },
+                        connectgaps: false,
+                        hovertemplate: 'Frequency=%{x:.9g} Hz<br>|ΔS|²=%{y:.6g}<br>n(0°/90°)=%{customdata}<extra></extra>'
+                    }];
+                    if (linear) {
+                        [[0, '#c62828'], [90, '#1565c0']].forEach(([phase, color]) => traces.push({
+                            x: rows.map(row => Number(row.frequency_hz)),
+                            y: rows.map(row => row[`delta_s_${phase}deg_mean`]),
+                            error_y: { type: 'data', array: rows.map(row => row[`delta_s_${phase}deg_sem`] ?? 0), visible: true },
+                            type: 'scatter', mode: 'lines+markers', name: `ΔS${phase}`,
+                            line: { color, width: 1.8, dash: phase === 0 ? 'dash' : 'dot' }, marker: { color, size: 7 },
+                            connectgaps: false,
+                            hovertemplate: `Frequency=%{x:.9g} Hz<br>ΔS${phase}=%{y:.6g}<extra></extra>`
+                        }));
+                    }
+                    const label = this.syncArchiveNodeLabel(this.syncArchiveSlaveId);
+                    Plotly.react(element, traces, {
+                        margin: { l: 78, r: 35, t: 52, b: 68 },
+                        title: `Differential Transfer Function · Master − ${label}`,
+                        xaxis: { title: 'TTI carrier frequency (Hz)', showline: true, mirror: true, ticks: 'inside', gridcolor: '#dde5ee' },
+                        yaxis: { title: linear ? 'ΔS components / |ΔS|²' : '|ΔS|²', type: this.transferFunctionYAxisScale, showline: true, mirror: true, ticks: 'inside', gridcolor: '#dde5ee' },
+                        legend: { orientation: 'h', x: 0.5, xanchor: 'center', y: 1.12 },
+                        annotations: rows.length ? [] : [{ text: 'No valid differential Transfer Function data', showarrow: false, xref: 'paper', yref: 'paper', x: 0.5, y: 0.5 }],
+                        paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', hovermode: 'closest'
+                    }, { responsive: true, displaylogo: false });
+                },
                 renderSyncArchivePlot() {
                     const element = document.getElementById('syncArchivePlot');
                     if (!element || typeof Plotly === 'undefined') return;
+                    if (this.isTransferFunctionArchive()) {
+                        this.renderSyncArchiveTransferFunctionPlot(element);
+                        return;
+                    }
                     const points = this.syncArchiveDifferentialPoints(this.syncArchiveReplayCount);
                     const fixedRanges = this.ensureSyncArchiveAxisRange();
                     const traces = [{
