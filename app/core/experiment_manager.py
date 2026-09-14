@@ -1571,11 +1571,15 @@ class ExperimentManager:
     def build_scan_parameter_plan(self, scan_config: Dict[str, Any]) -> List[Any]:
         payload = dict(scan_config or {})
         mode = str(payload.get('mode') or 'standard').strip().lower()
-        supported_modes = {'standard', 'timing', 'rabi', 'half', 'link', 'bragg_rabi'}
+        supported_modes = {'standard', 'timing', 'rabi', 'half', 'link', 'bragg_rabi', 'transfer_function'}
         if mode not in supported_modes:
             raise ValueError(
-                "Sync mode supports Standard, Timing, Rabi, Half, Link and Bragg Rabi scan logic"
+                "Sync mode supports Standard, Timing, Rabi, Half, Link, Bragg Rabi and Transfer Function scan logic"
             )
+        if mode == 'transfer_function':
+            # Transfer Function resolves node settings into the run config so
+            # acquisition and archive summaries use the Master's snapshot.
+            return self._build_transfer_function_execution(scan_config)
         return self._generate_parameters(payload)
 
     def _build_phase_noise_execution(self, scan_config: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -2679,9 +2683,10 @@ class ExperimentManager:
         transfer_model = str(scan_config.get("transfer_generator_model") or "TG5012A").strip().upper()
         transfer_channel = int(scan_config.get("transfer_generator_channel", 1))
         transfer_control_output = bool(scan_config.get("transfer_control_output", False))
+        transfer_control_generator = bool(scan_config.get("_transfer_control_generator", True))
 
         try:
-            if transfer_mode and not config.USE_SIMULATION:
+            if transfer_mode and transfer_control_generator and not config.USE_SIMULATION:
                 tti_client = TtiGeneratorClient(TtiConnectionSettings(
                     host=str(self.settings.get("tti_host") or "").strip(),
                     port=int(self.settings.get("tti_port", 9221)),
@@ -2728,7 +2733,7 @@ class ExperimentManager:
                                 tti_client.set_phase(phase_deg)
                         active_transfer_frequency = frequency
                         settling_time = float(scan_config.get("transfer_settling_time_s", 5.0))
-                        if not config.USE_SIMULATION and settling_time > 0:
+                        if transfer_control_generator and not config.USE_SIMULATION and settling_time > 0:
                             action = "confirmed" if transfer_model == "TG5012A" else "accepted"
                             self.status.message = f"{transfer_model} CH{transfer_channel} {action} {frequency:g} Hz at {phase_deg:g}°; settling {settling_time:g} s..."
                             deadline = time.monotonic() + settling_time

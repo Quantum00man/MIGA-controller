@@ -688,10 +688,10 @@
                             v-model="runMode" :disabled="isRunning || isScheduleActive()">
                         <label class="btn btn-outline-secondary" for="runModeLive">Live</label>
                         <input type="radio" class="btn-check" name="runMode" id="runModeScheduled" value="scheduled"
-                            v-model="runMode" :disabled="isRunning || isScheduleActive() || ['ac_stark', 'transfer_function', 'ramsey_interferometer'].includes(config.mode)">
+                            v-model="runMode" :disabled="isRunning || isScheduleActive() || ['ac_stark', 'ramsey_interferometer'].includes(config.mode)">
                         <label class="btn btn-outline-secondary" for="runModeScheduled">Scheduled</label>
                         <input type="radio" class="btn-check" name="runMode" id="runModeSync" value="sync"
-                            v-model="runMode" :disabled="isRunning || isScheduleActive() || ['lock_in', 'ac_stark', 'transfer_function', 'ramsey_interferometer'].includes(config.mode)">
+                            v-model="runMode" :disabled="isRunning || isScheduleActive() || ['lock_in', 'ac_stark', 'ramsey_interferometer'].includes(config.mode)">
                         <label class="btn btn-outline-primary" for="runModeSync">SYNC</label>
                     </div>
                     <div class="form-text mt-2" style="font-size: 0.72rem;">
@@ -1034,10 +1034,10 @@
                             <option value="bragg_rabi">Bragg Rabi</option>
                             <option value="lock_in" :disabled="isSyncMode()">Lock-in Measurement</option>
                             <option value="ac_stark" :disabled="isSyncMode()">AC Stark Centering</option>
-                            <option value="transfer_function" :disabled="isSyncMode() || isScheduledMode()">Transfer Function</option>
+                            <option value="transfer_function">Transfer Function</option>
                             <option value="ramsey_interferometer" :disabled="isSyncMode() || isScheduledMode()">Ramsey Interferometer</option>
                         </select>
-                        <div v-if="isSyncMode()" class="form-text">SYNC supports Standard, Timing, Rabi, Half, Link and Bragg Rabi.</div>
+                        <div v-if="isSyncMode()" class="form-text">SYNC supports Standard, Timing, Rabi, Half, Link, Bragg Rabi and Transfer Function. Only the Master controls TTI.</div>
                     </div>
                     <div v-if="config.mode === 'transfer_function'" class="mt-1">
                         <div class="alert alert-light border py-2 px-3 small mb-3">
@@ -1923,7 +1923,7 @@
                     }
                 },
                 'config.mode'(mode) {
-                    if (this.runMode === 'sync' && ['lock_in', 'ac_stark', 'transfer_function', 'ramsey_interferometer'].includes(mode)) {
+                    if (this.runMode === 'sync' && ['lock_in', 'ac_stark', 'ramsey_interferometer'].includes(mode)) {
                         this.config.mode = 'standard';
                         return;
                     }
@@ -1945,7 +1945,6 @@
                             if (!['atoms', 'prob'].includes(this.currentTab)) this.currentTab = 'atoms';
                         }
                         if (mode === 'transfer_function') {
-                            this.runMode = 'live';
                             this.config.parameter_source = 'classic';
                             this.config.averages = 1;
                             this.config.transfer_settling_time_s = 5;
@@ -1965,7 +1964,7 @@
                 runMode(value) {
                     if (value !== 'live' && this.config.parameter_source === 'markers') this.config.parameter_source = 'classic';
                     if (value === 'sync') {
-                        if (['lock_in', 'ac_stark', 'transfer_function', 'ramsey_interferometer'].includes(this.config.mode)) this.config.mode = 'standard';
+                        if (['lock_in', 'ac_stark', 'ramsey_interferometer'].includes(this.config.mode)) this.config.mode = 'standard';
                         this.fetchSyncConfig();
                         this.$nextTick(() => this.syncViewMode === 'node' ? this.initPlots() : this.renderSyncPlot());
                     }
@@ -3395,6 +3394,20 @@ estimateAxisPointCount(spec = {}) {
     return Math.max(count, 1);
 },
 estimateScanStepCount(configObj = this.config) {
+    if (String(configObj.mode || '') === 'transfer_function') {
+        const frequencyCount = this.estimateAxisPointCount({
+            scan_type: 'range', method: 'step_size',
+            start: configObj.transfer_frequency_start_hz,
+            stop: configObj.transfer_frequency_stop_hz,
+            step: configObj.transfer_frequency_step_hz,
+            list: ''
+        });
+        const phases = Array.isArray(configObj.transfer_phase_degrees)
+            ? configObj.transfer_phase_degrees.map(Number).filter(value => value === 0 || value === 90)
+            : [];
+        const phaseCount = new Set(phases).size || 2;
+        return frequencyCount * Math.max(2, Math.round(Number(configObj.transfer_repeats) || 2)) * phaseCount;
+    }
     if (String(configObj.mode || '') === 'lock_in') {
         return Math.max(1, Math.round(Number(configObj.averages) || 1)) * 4;
     }
@@ -3465,6 +3478,10 @@ refreshScheduledTaskEstimates() {
             const points = this.estimateScanStepCount(task.config);
             task.estimated_points = points;
             task.estimated_duration_sec = points * this.getSinglePointDurationSec();
+            if (String(task.config?.mode || '') === 'transfer_function') {
+                const repeats = Math.max(2, Math.round(Number(task.config.transfer_repeats) || 2));
+                task.estimated_duration_sec += Math.ceil(points / repeats) * 5;
+            }
             task.validation_error = '';
         } catch (error) {
             task.estimated_points = 0;
@@ -3486,11 +3503,24 @@ getScheduledTaskModeLabel(task) {
         link: '1D linked scan',
         phase_noise: 'Phase Noise Analyze',
         bragg_rabi: '1D Bragg Rabi scan',
-        lock_in: 'Lock-in Measurement'
+        lock_in: 'Lock-in Measurement',
+        transfer_function: 'Transfer Function'
     };
     return prefix + (modeMap[String(configObj.mode || 'standard')] || '1D scan');
 },
 getScheduledTaskAxisLabel(configObj = {}) {
+    if (String(configObj.mode || '') === 'transfer_function') {
+        const frequencies = this.estimateAxisPointCount({
+            scan_type: 'range', method: 'step_size',
+            start: configObj.transfer_frequency_start_hz,
+            stop: configObj.transfer_frequency_stop_hz,
+            step: configObj.transfer_frequency_step_hz,
+            list: ''
+        });
+        const phases = Array.isArray(configObj.transfer_phase_degrees) && configObj.transfer_phase_degrees.length
+            ? configObj.transfer_phase_degrees.join('°/') + '°' : '0°/90°';
+        return `${frequencies} frequencies | phases:${phases} | repeats:${Math.max(2, Math.round(Number(configObj.transfer_repeats) || 2))}`;
+    }
     if (String(configObj.mode || '') === 'lock_in') {
         const blocks = Math.max(1, Math.round(Number(configObj.averages) || 1));
         return `P0: ${configObj.lock_in_a_value}, ${configObj.lock_in_b_value}, ${configObj.lock_in_b_value}, ${configObj.lock_in_a_value} | blocks:${blocks}`;
@@ -5539,6 +5569,17 @@ finishScheduledRun(finalStatus = 'IDLE') {
                 },
                 renderSyncNodePlots() {
                     if (!document.getElementById('resultsPlotUp') || !document.getElementById('resultsPlotDw')) return;
+                    if (this.config.mode === 'transfer_function') {
+                        this.transferFunctionHistoryMap = {};
+                        this.transferPhaseDegrees = [];
+                        (this.syncNodeResults[this.syncDisplaySource] || []).forEach(record => {
+                            if (!record.error && this.hasFiniteNumericValue(record.transfer_frequency_hz)) {
+                                this.recordTransferFunctionPoint(record);
+                            }
+                        });
+                        this.renderTransferFunctionPlot();
+                        return;
+                    }
                     const points = this.aggregateHistoryMap(this.syncHistoryMaps[this.syncDisplaySource] || {});
                     const metric = this.getMetricConfig();
                     const dimensions = Math.max(1, Math.min(3, points.reduce(
@@ -5553,6 +5594,79 @@ finishScheduledRun(finalStatus = 'IDLE') {
                         this.render3DPlot(points, metric);
                     }
                 },
+                syncTransferFunctionDifferentialRows() {
+                    const speedOfLight = 299792458;
+                    const groups = new Map();
+                    (this.syncPairs || []).forEach(pair => {
+                        const master = pair.master || {};
+                        const slave = pair.slave || {};
+                        if (master.interferometer_phase_valid !== true || slave.interferometer_phase_valid !== true) return;
+                        const frequency = Number(master.transfer_frequency_hz ?? slave.transfer_frequency_hz);
+                        const phase = Number(master.transfer_phase_deg ?? slave.transfer_phase_deg);
+                        if (!Number.isFinite(frequency) || ![0, 90].includes(phase)) return;
+                        const normalize = record => {
+                            const modulation = Number(record.transfer_frequency_modulation_mhz);
+                            const distance = Number(record.transfer_atom_mirror_distance_m);
+                            const measuredPhase = Number(record.interferometer_phase);
+                            const amplitude = 4 * Math.PI * distance * modulation * 1e6 / speedOfLight;
+                            return Number.isFinite(measuredPhase) && Number.isFinite(amplitude) && amplitude > 0
+                                ? measuredPhase / amplitude : null;
+                        };
+                        const masterS = normalize(master);
+                        const slaveS = normalize(slave);
+                        if (masterS === null || slaveS === null) return;
+                        const slaveId = String(pair.slave_node_id || slave.sync_node_id || 'slave');
+                        const key = `${slaveId}|${frequency.toPrecision(15)}`;
+                        const group = groups.get(key) || { slaveId, frequency, components: { 0: [], 90: [] } };
+                        group.components[phase].push(masterS - slaveS);
+                        groups.set(key, group);
+                    });
+                    return [...groups.values()].sort((a, b) => a.slaveId.localeCompare(b.slaveId) || a.frequency - b.frequency)
+                        .map(group => {
+                            const deltaS0 = this.sampleMean(group.components[0]);
+                            const deltaS90 = this.sampleMean(group.components[90]);
+                            const available = [deltaS0, deltaS90].filter(value => value !== null);
+                            return {
+                                ...group, deltaS0, deltaS90,
+                                differentialS2: available.length ? available.reduce((sum, value) => sum + value ** 2, 0) : null,
+                                differentialMagnitude: available.length ? Math.sqrt(available.reduce((sum, value) => sum + value ** 2, 0)) : null,
+                            };
+                        });
+                },
+                renderSyncTransferFunctionDifferential(element) {
+                    const rows = this.syncTransferFunctionDifferentialRows();
+                    const slaveIds = [...new Set(rows.map(row => row.slaveId))];
+                    const colors = ['#198754', '#6f42c1', '#fd7e14', '#0dcaf0'];
+                    const traces = [];
+                    slaveIds.forEach((slaveId, index) => {
+                        const selected = rows.filter(row => row.slaveId === slaveId);
+                        const color = colors[index % colors.length];
+                        traces.push({
+                            x: selected.map(row => row.frequency),
+                            y: selected.map(row => row.differentialS2),
+                            customdata: selected.map(row => `${row.components[0].length}/${row.components[90].length}`),
+                            type: 'scatter', mode: 'lines+markers', name: `${slaveId} |ΔS|²`,
+                            line: { color, width: 3 }, marker: { color, size: 8, symbol: 'diamond' },
+                            connectgaps: false,
+                            hovertemplate: 'Frequency=%{x:.9g} Hz<br>|ΔS|²=%{y:.6g}<br>n(0°/90°)=%{customdata}<extra></extra>'
+                        });
+                        if (this.transferFunctionYAxisScale !== 'log') [0, 90].forEach((phase, phaseIndex) => traces.push({
+                            x: selected.map(row => row.frequency),
+                            y: selected.map(row => phase === 0 ? row.deltaS0 : row.deltaS90),
+                            type: 'scatter', mode: 'lines+markers', name: `${slaveId} ΔS${phase}`,
+                            line: { color, width: 1.5, dash: phaseIndex ? 'dot' : 'dash' },
+                            marker: { color, size: 6 }, connectgaps: false,
+                            hovertemplate: `Frequency=%{x:.9g} Hz<br>ΔS${phase}=%{y:.6g}<extra></extra>`
+                        }));
+                    });
+                    Plotly.react(element, traces, {
+                        margin: { l: 75, r: 35, t: 45, b: 70 },
+                        title: 'Differential Transfer Function · Master − Slave',
+                        xaxis: { title: 'TTI carrier frequency (Hz)' },
+                        yaxis: { title: this.transferFunctionYAxisScale === 'log' ? '|ΔS|²' : 'ΔS components / |ΔS|²', type: this.transferFunctionYAxisScale },
+                        hovermode: 'closest', legend: { orientation: 'h' }
+                    }, { responsive: true, displaylogo: false });
+                },
                 renderSyncPlot() {
                     if (this.syncViewMode === 'node') {
                         this.renderSyncNodePlots();
@@ -5560,6 +5674,10 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     }
                     const element = document.getElementById('syncPlot');
                     if (!element || typeof Plotly === 'undefined') return;
+                    if (this.config.mode === 'transfer_function') {
+                        this.renderSyncTransferFunctionDifferential(element);
+                        return;
+                    }
                     const valid = this.syncDifferentialPoints().slice(0, Math.max(0, Number(this.syncReplayCount) || 0));
                     Plotly.react(element, [{
                         x: valid.map(p => p.x), y: valid.map(p => p.y),

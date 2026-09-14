@@ -7,7 +7,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, call, patch
 
-from app.analysis.transfer_function import bragg_phase_modulation_rad, build_transfer_function_summary
+from app.analysis.transfer_function import (
+    bragg_phase_modulation_rad,
+    build_differential_transfer_function_summary,
+    build_transfer_function_summary,
+)
 from app.core.experiment_manager import ExperimentManager
 from app.core.data_manager import DataManager, RESULTS_CSV_HEADER
 from app.core.data_loader import DataLoader
@@ -140,6 +144,12 @@ class TransferFunctionPlanTests(unittest.TestCase):
             "value !== null && value !== undefined && value !== ''",
             index_html,
         )
+
+    def test_frontend_allows_scheduled_transfer_function_and_estimates_its_shots(self):
+        index_html = (Path(__file__).resolve().parents[1] / "static" / "index.html").read_text(encoding="utf-8")
+        self.assertIn('<option value="transfer_function">Transfer Function</option>', index_html)
+        self.assertIn("if (String(configObj.mode || '') === 'transfer_function')", index_html)
+        self.assertIn("transfer_function: 'Transfer Function'", index_html)
 
     def setUp(self):
         self.manager = ExperimentManager.__new__(ExperimentManager)
@@ -294,6 +304,40 @@ class TransferFunctionPlanTests(unittest.TestCase):
 
 
 class TransferFunctionStatisticsTests(unittest.TestCase):
+    def test_differential_summary_subtracts_signed_quadratures_before_squaring(self):
+        def record(phase, modulation, distance):
+            return {
+                "interferometer_phase": phase,
+                "interferometer_phase_valid": True,
+                "transfer_frequency_modulation_mhz": modulation,
+                "transfer_atom_mirror_distance_m": distance,
+            }
+
+        master_amplitude = bragg_phase_modulation_rad(1.0, 2.0)
+        slave_amplitude = bragg_phase_modulation_rad(2.0, 3.0)
+        pairs = []
+        for phase_deg, master_s, slave_s in ((0.0, 3.0, 1.0), (90.0, 5.0, 2.0)):
+            pairs.append({
+                "slave_node_id": "slave_b",
+                "master": {
+                    **record(master_s * master_amplitude, 1.0, 2.0),
+                    "transfer_frequency_hz": 100.0,
+                    "transfer_phase_deg": phase_deg,
+                },
+                "slave": {
+                    **record(slave_s * slave_amplitude, 2.0, 3.0),
+                    "transfer_frequency_hz": 100.0,
+                    "transfer_phase_deg": phase_deg,
+                },
+            })
+
+        row = build_differential_transfer_function_summary(pairs)[0]
+        self.assertAlmostEqual(row["delta_s_0deg_mean"], 2.0)
+        self.assertAlmostEqual(row["delta_s_90deg_mean"], 3.0)
+        self.assertAlmostEqual(row["differential_s2"], 13.0)
+        self.assertAlmostEqual(row["differential_magnitude"], 13.0 ** 0.5)
+        self.assertTrue(row["quadrature_complete"])
+
     def test_summary_uses_sample_standard_deviation_and_total_per_shot(self):
         rows = [
             {

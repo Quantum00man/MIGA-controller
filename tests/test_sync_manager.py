@@ -84,6 +84,27 @@ class SyncManagerTests(unittest.TestCase):
 
         self.assertEqual(plan, [[1, 2], [2, 4]])
 
+    def test_sync_parameter_plan_builds_transfer_function_metadata(self):
+        manager = ExperimentManager.__new__(ExperimentManager)
+        manager.settings = {
+            "tti_model": "TG5012A", "tti_channel": 1,
+            "transfer_frequency_modulation_mhz": 1.0,
+            "transfer_atom_mirror_distance_m": 2.23,
+            "transfer_phase_noise_sigma_mrad": 100.0,
+        }
+        plan = manager.build_scan_parameter_plan({
+            "mode": "transfer_function", "scan_dimensions": 1,
+            "parameter_source": "classic", "randomize": False,
+            "transfer_frequency_start_hz": 100.0,
+            "transfer_frequency_stop_hz": 100.0,
+            "transfer_frequency_step_hz": 1.0,
+            "transfer_repeats": 2, "transfer_phase_degrees": [0, 90],
+        })
+
+        self.assertEqual(len(plan), 4)
+        self.assertEqual([item["metadata"]["transfer_phase_deg"] for item in plan], [0.0, 0.0, 90.0, 90.0])
+        self.assertTrue(all(item["metadata"]["transfer_frequency_hz"] == 100.0 for item in plan))
+
     def test_master_sends_one_exact_shot_plan_and_starts_slave_first(self):
         with tempfile.TemporaryDirectory() as tmp:
             manager = FakeManager(tmp)
@@ -178,6 +199,44 @@ class SyncManagerTests(unittest.TestCase):
             parameters = manager.started[0][1]
             self.assertEqual([item["sequence_parameters"] for item in parameters], [[], []])
             self.assertEqual([item["metadata"]["sync_p0"] for item in parameters], [10, 20])
+
+    def test_transfer_function_slave_uses_master_plan_but_local_normalization_without_tti_control(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = FakeManager(tmp, role="slave")
+            manager.settings.update({
+                "tti_model": "TGF3162", "tti_channel": 2,
+                "transfer_frequency_modulation_mhz": 2.5,
+                "transfer_atom_mirror_distance_m": 3.2,
+                "transfer_phase_noise_sigma_mrad": 70.0,
+            })
+            sync = SyncManager(manager)
+            plan = [{
+                "sequence_parameters": [],
+                "metadata": {
+                    "display_parameters": [1200.0],
+                    "transfer_frequency_hz": 1200.0,
+                    "transfer_phase_deg": 90.0,
+                    "transfer_repeat": 1,
+                },
+            }]
+            with patch("app.core.sync_manager.config.BASE_DIR", Path(tmp)):
+                sync.prepare_node({
+                    "sync_run_id": "sync_tf", "master_node_id": "master",
+                    "scan_config": {"mode": "transfer_function", "transfer_phase_degrees": [0, 90]},
+                    "shot_plan": plan, "sequence_content": "+10us WAIT = OFF (1)\n",
+                })
+            sync.start_node("sync_tf")
+
+            config, parameters = manager.started[0]
+            self.assertEqual(config["mode"], "transfer_function")
+            self.assertFalse(config["_transfer_control_generator"])
+            self.assertEqual(config["transfer_settling_time_s"], 0.0)
+            self.assertEqual(config["transfer_frequency_modulation_mhz"], 2.5)
+            self.assertEqual(config["transfer_atom_mirror_distance_m"], 3.2)
+            self.assertEqual(parameters[0]["sequence_parameters"], [])
+            self.assertEqual(parameters[0]["metadata"]["transfer_frequency_hz"], 1200.0)
+            self.assertEqual(parameters[0]["metadata"]["transfer_phase_deg"], 90.0)
+            self.assertEqual(parameters[0]["metadata"]["sync_p0"], 1200.0)
 
     def test_slave_sequence_upload_preserves_non_utf8_bytes(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -247,3 +247,59 @@ def build_transfer_function_summary(
             row["interferometer_phase_s2"] = None
         rows.append(row)
     return rows
+
+
+def build_differential_transfer_function_summary(
+    pairs: Iterable[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Build signed Master-minus-Slave quadratures and their squared magnitude."""
+    grouped: Dict[tuple[str, float], Dict[float, List[float]]] = {}
+    for pair in pairs:
+        master = pair.get("master") or {}
+        slave = pair.get("slave") or {}
+        if not (_value(master, ("interferometer_phase",)) is not None
+                and _value(slave, ("interferometer_phase",)) is not None):
+            continue
+        try:
+            frequency = float(master.get("transfer_frequency_hz", slave.get("transfer_frequency_hz")))
+            phase_deg = float(master.get("transfer_phase_deg", slave.get("transfer_phase_deg")))
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(frequency) or phase_deg not in {0.0, 90.0}:
+            continue
+
+        normalized = []
+        for record in (master, slave):
+            amplitude = bragg_phase_modulation_rad(
+                record.get("transfer_frequency_modulation_mhz"),
+                record.get("transfer_atom_mirror_distance_m"),
+            )
+            measured = _value(record, ("interferometer_phase",))
+            normalized.append(measured / amplitude if measured is not None and amplitude else None)
+        if any(value is None for value in normalized):
+            continue
+        slave_id = str(pair.get("slave_node_id") or slave.get("sync_node_id") or "slave")
+        grouped.setdefault((slave_id, frequency), {0.0: [], 90.0: []})[phase_deg].append(
+            float(normalized[0] - normalized[1])
+        )
+
+    rows: List[Dict[str, Any]] = []
+    for (slave_id, frequency), components in sorted(grouped.items(), key=lambda item: (item[0][0], item[0][1])):
+        row: Dict[str, Any] = {"slave_node_id": slave_id, "frequency_hz": frequency}
+        means: List[Optional[float]] = []
+        for phase_deg in (0.0, 90.0):
+            values = components[phase_deg]
+            mean = float(np.mean(values)) if values else None
+            std = float(np.std(values, ddof=1)) if len(values) >= 2 else None
+            label = f"{int(phase_deg)}deg"
+            row[f"delta_s_{label}_count"] = len(values)
+            row[f"delta_s_{label}_mean"] = mean
+            row[f"delta_s_{label}_std"] = std
+            row[f"delta_s_{label}_sem"] = std / math.sqrt(len(values)) if std is not None else None
+            means.append(mean)
+        available = [value for value in means if value is not None]
+        row["differential_s2"] = float(sum(value * value for value in available)) if available else None
+        row["differential_magnitude"] = math.sqrt(row["differential_s2"]) if row["differential_s2"] is not None else None
+        row["quadrature_complete"] = all(value is not None for value in means)
+        rows.append(row)
+    return rows

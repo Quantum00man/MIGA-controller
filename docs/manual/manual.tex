@@ -1124,6 +1124,27 @@ Master and slave results are keyed by \code{sync_shot_index}. A pair is emitted 
 both sides exist and neither contains an error. The UI can display per-node curves or
 differential paired results and replay completed points.
 
+Transfer Function is available in both the regular scheduled queue and scheduled SYNC
+queue. In SYNC mode, the Master defines the common frequency
+grid, selected \ang{0}/\ang{90} generator phases, scan order and repeat count, and is the
+only node that connects to or changes the TTI generator. Slaves start through the normal
+SYNC prepare/start sequence, execute their fixed local sequence without a generator
+settling delay, and use their own configured $\Delta\nu_{780}$, atom--mirror distance and
+phase-noise value when normalizing and archiving their response. For each Slave, the
+signed normalized quadratures are subtracted before squaring,
+\begin{equation}
+ \Delta S_0=S_{0,\mathrm{Master}}-S_{0,\mathrm{Slave}},\qquad
+ \Delta S_{90}=S_{90,\mathrm{Master}}-S_{90,\mathrm{Slave}},
+\end{equation}
+and the differential magnitude is
+\begin{equation}
+ |\Delta S|^2=(\Delta S_0)^2+(\Delta S_{90})^2.
+\end{equation}
+This is not the difference of the already squared single-node responses. If only one
+quadrature is selected, the UI reports that component and its square without claiming a
+complete two-quadrature magnitude. The sync manifest retains the signed components,
+counts, standard deviations, standard errors, squared magnitude and magnitude.
+
 \section{Archive replication}
 Each node first writes a normal local archive. A ZIP bundle excludes temporary files and
 nested sync copies. SHA-256 checksums protect transfer integrity. Extraction rejects path
@@ -1136,7 +1157,9 @@ bidirectional; failed transfers can be retried from the archive interface.
   \item Configure one Master and one or more Slaves with the same shared token.
   \item Test every enabled slave from \ui{Settings $>$ SYNC}.
   \item In the Control Console select \ui{SYNC}, load the master sequence and each slave
-  sequence, then configure a bounded scan.
+  sequence, then configure a bounded scan. Transfer Function scans may be saved in the
+  SYNC scheduled queue and use the same Slave
+  startup controls and require a working TTI connection only on the Master.
   \item Set master delay according to the physical trigger arrangement.
   \item Start and confirm that all nodes enter ready/running states.
   \item Monitor paired count, per-node progress and differential plots.

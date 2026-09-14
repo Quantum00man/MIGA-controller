@@ -714,7 +714,9 @@ class SyncNodePrepareRequest(BaseModel):
     master_node_id: str
     slave_node_id: str = Field("")
     scan_config: ScanConfig
-    shot_plan: List[List[Any]] = Field(default_factory=list)
+    # Standard SYNC plans are lists of sequence parameters. Specialized scan
+    # modes may additionally carry per-shot metadata (frequency, phase, repeat).
+    shot_plan: List[Any] = Field(default_factory=list)
     sequence_name: str = Field("slave.mot")
     sequence_content: str = Field("")
     sequence_content_base64: str = Field("")

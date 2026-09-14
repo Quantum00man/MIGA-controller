@@ -139,6 +139,35 @@ def test_execute_sync_task_uses_sync_manager_with_master_sequence_name():
     assert payload["slaves"][0]["phase_calibration"]["reference_t2_us2"] == 12.5
 
 
+def test_scheduled_sync_transfer_function_preserves_scan_plan_fields():
+    scheduler = make_scheduler()
+    task = sync_task()
+    task["config"].update({
+        "mode": "transfer_function",
+        "transfer_frequency_start_hz": 100.0,
+        "transfer_frequency_stop_hz": 300.0,
+        "transfer_frequency_step_hz": 100.0,
+        "transfer_repeats": 4,
+        "transfer_phase_degrees": [0.0, 90.0],
+        "transfer_phase_scan_mode": "frequency_interleaved",
+    })
+
+    scheduler.start({"timingMode": "sequential", "tasks": [task]})
+    stored = scheduler._state["tasks"][0]
+    scheduler._install_sequence = lambda queued_task: queued_task["sequence_file_name"]
+    scheduler._execute_task(stored)
+
+    payload = scheduler.sync_manager.started[0]
+    config = payload["scan_config"]
+    assert config["mode"] == "transfer_function"
+    assert config["transfer_frequency_start_hz"] == 100.0
+    assert config["transfer_frequency_stop_hz"] == 300.0
+    assert config["transfer_frequency_step_hz"] == 100.0
+    assert config["transfer_repeats"] == 4
+    assert config["transfer_phase_degrees"] == [0.0, 90.0]
+    assert config["transfer_phase_scan_mode"] == "frequency_interleaved"
+
+
 def test_existing_schedule_task_defaults_to_regular_scan():
     scheduler = make_scheduler()
     task = sync_task()

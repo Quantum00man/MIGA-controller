@@ -23,6 +23,7 @@ import zipfile
 
 import config
 from app.core.experiment_manager import ExperimentManager
+from app.analysis.transfer_function import build_differential_transfer_function_summary
 
 
 SYNC_RESULT_FIELDS = (
@@ -43,6 +44,12 @@ SYNC_RESULT_FIELDS = (
     "interferometer_phase_source_value",
     "interferometer_phase_calibration_id", "interferometer_phase_calibration_name",
     "interferometer_phase_reference_t2_us2",
+    "transfer_frequency_hz", "transfer_frequency_index", "transfer_frequency_count",
+    "transfer_repeat", "transfer_repeats", "transfer_phase_deg", "transfer_phase_index",
+    "transfer_phase_count", "transfer_phase_degrees", "transfer_phase_scan_mode",
+    "transfer_frequency_modulation_mhz", "transfer_atom_mirror_distance_m",
+    "transfer_phase_noise_sigma_mrad", "transfer_generator_model",
+    "transfer_generator_channel",
 )
 SYNC_STATUS_MAX_CONSECUTIVE_FAILURES = 3
 
@@ -368,26 +375,36 @@ class SyncManager:
         plan = prepared.get("shot_plan") or []
         scan_config = dict(prepared.get("scan_config") or {})
         node_name = str(self.manager.get_settings().get("sync_node_name") or "Slave")
+        transfer_mode = str(scan_config.get("mode") or "").strip().lower() == "transfer_function"
+        local_settings = self.manager.get_settings()
         parameters = []
         for index, raw_parameters in enumerate(plan):
-            shot_parameters = list(raw_parameters) if isinstance(raw_parameters, list) else [raw_parameters]
+            if isinstance(raw_parameters, dict):
+                raw_sequence_parameters = raw_parameters.get("sequence_parameters") or []
+                shot_parameters = list(raw_sequence_parameters) if isinstance(raw_sequence_parameters, list) else [raw_sequence_parameters]
+                shot_metadata = deepcopy(raw_parameters.get("metadata") or {})
+            else:
+                shot_parameters = list(raw_parameters) if isinstance(raw_parameters, list) else [raw_parameters]
+                shot_metadata = {}
+            display_parameters = shot_metadata.get("display_parameters") or shot_parameters
             parameters.append({
                 "sequence_parameters": [],
                 "metadata": {
+                    **shot_metadata,
                     "sync_run_id": sync_run_id,
                     "sync_role": "slave",
                     "sync_node_id": node_name,
                     "sync_shot_index": index,
-                    "sync_p0": shot_parameters[0] if shot_parameters else None,
+                    "sync_p0": display_parameters[0] if display_parameters else None,
                     # Slave analysis is tagged with the shared P0 only. The
                     # remaining Master parameters are retained for audit but
                     # are never written into the Slave sequence.
-                    "sync_parameters": shot_parameters[:1],
+                    "sync_parameters": list(display_parameters[:1]),
                     "sync_master_parameters": shot_parameters,
                 },
             })
         scan_config.update({
-            "mode": "standard",
+            "mode": "transfer_function" if transfer_mode else "standard",
             "parameter_source": "classic",
             "marker_axes": [],
             "averages": 1,
@@ -400,6 +417,27 @@ class SyncManager:
             "sync_master_node_id": prepared.get("master_node_id"),
             "sync_shot_plan": plan,
         })
+        if transfer_mode:
+            # The Master owns the only signal generator. The Slave merely runs
+            # the aligned fixed sequence and analyzes its response using its own
+            # calibration/geometry settings, without generator settling delays.
+            scan_config.update({
+                "_transfer_control_generator": False,
+                "transfer_settling_time_s": 0.0,
+                "transfer_generator_model": str(local_settings.get("tti_model") or "TG5012A").strip().upper(),
+                "transfer_generator_channel": int(local_settings.get("tti_channel", 1)),
+                "transfer_frequency_modulation_mhz": float(local_settings.get("transfer_frequency_modulation_mhz", 1.0)),
+                "transfer_atom_mirror_distance_m": float(local_settings.get("transfer_atom_mirror_distance_m", 2.23)),
+                "transfer_phase_noise_sigma_mrad": float(local_settings.get("transfer_phase_noise_sigma_mrad", 100.0)),
+            })
+            for item in parameters:
+                item["metadata"].update({
+                    "transfer_generator_model": scan_config["transfer_generator_model"],
+                    "transfer_generator_channel": scan_config["transfer_generator_channel"],
+                    "transfer_frequency_modulation_mhz": scan_config["transfer_frequency_modulation_mhz"],
+                    "transfer_atom_mirror_distance_m": scan_config["transfer_atom_mirror_distance_m"],
+                    "transfer_phase_noise_sigma_mrad": scan_config["transfer_phase_noise_sigma_mrad"],
+                })
         result = self.manager.start_scan(scan_config, parameters_override=parameters)
         if result.get("status") == "error":
             raise ValueError(result.get("message") or "Slave scan failed to start")
@@ -458,6 +496,7 @@ class SyncManager:
         for index, item in enumerate(parameters):
             values = self._plan_values(item)
             existing_metadata = item.get("metadata") if isinstance(item, dict) else {}
+            display_values = (existing_metadata or {}).get("display_parameters") or values
             decorated.append({
                 "sequence_parameters": values,
                 "metadata": {
@@ -466,8 +505,8 @@ class SyncManager:
                     "sync_role": "master",
                     "sync_node_id": node_name,
                     "sync_shot_index": index,
-                    "sync_p0": values[0] if values else None,
-                    "sync_parameters": values,
+                    "sync_p0": display_values[0] if display_values else None,
+                    "sync_parameters": list(display_values),
                 },
             })
         return decorated
@@ -489,7 +528,10 @@ class SyncManager:
         parameters = self.manager.build_scan_parameter_plan(scan_config)
         if not parameters:
             raise ValueError("Sync scan contains no shots")
-        shot_plan = [self._plan_values(item) for item in parameters]
+        # Preserve specialized per-shot metadata for Slaves. Sequence parameters
+        # remain empty for Transfer Function, so no Master value is written into
+        # a Slave sequence.
+        shot_plan = deepcopy(parameters)
         sync_run_id = f"sync_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid4().hex[:8]}"
         node_name = str(settings.get("sync_node_name") or "Master")
         delay_ms = max(0.0, float(payload.get("master_delay_ms") or 0.0))
@@ -558,6 +600,7 @@ class SyncManager:
                 "sync_role": "master",
                 "sync_master_delay_ms": delay_ms,
                 "sync_shot_plan": shot_plan,
+                "_transfer_control_generator": True,
             })
             # Install the runtime before start_scan launches its worker. A fast
             # first shot can otherwise arrive before the listener knows this run.
@@ -1156,4 +1199,5 @@ class SyncManager:
             "node_results": node_results,
             "archive_nodes": archive_nodes,
             "archive_replication": runtime.get("archive_replication") or {"status": "idle", "nodes": {}},
+            "transfer_function_differential_summary": build_differential_transfer_function_summary(pairs),
         })
