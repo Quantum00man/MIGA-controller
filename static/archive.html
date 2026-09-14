@@ -1830,6 +1830,7 @@
                                 <label class="form-label-small mb-0">MAX N</label><input type="number" class="form-control form-control-sm" style="width:88px" min="1" :max="syncPhaseMaxAllanOrder()" v-model.number="syncPhaseAllanOrder" @change="normalizeAndRenderSyncPhaseAllan">
                                 <div class="btn-group btn-group-sm"><button class="btn" :class="syncPhaseAllanScale === 'absolute' ? 'btn-primary' : 'btn-outline-primary'" @click="syncPhaseAllanScale='absolute'; renderSyncArchiveNodePlots()">Absolute</button><button class="btn" :class="syncPhaseAllanScale === 'relative' ? 'btn-primary' : 'btn-outline-primary'" @click="syncPhaseAllanScale='relative'; renderSyncArchiveNodePlots()">Relative</button></div>
                                 <div class="btn-group btn-group-sm"><button class="btn" :class="syncPhaseAllanXAxis === 'linear' ? 'btn-secondary' : 'btn-outline-secondary'" @click="syncPhaseAllanXAxis='linear'; renderSyncArchiveNodePlots()">Linear X</button><button class="btn" :class="syncPhaseAllanXAxis === 'log' ? 'btn-secondary' : 'btn-outline-secondary'" @click="syncPhaseAllanXAxis='log'; renderSyncArchiveNodePlots()">Log X</button></div>
+                                <div class="btn-group btn-group-sm"><button class="btn" :class="syncPhaseAllanYAxis === 'linear' ? 'btn-secondary' : 'btn-outline-secondary'" @click="syncPhaseAllanYAxis='linear'; renderSyncArchiveNodePlots()">Linear Y</button><button class="btn" :class="syncPhaseAllanYAxis === 'log' ? 'btn-secondary' : 'btn-outline-secondary'" @click="syncPhaseAllanYAxis='log'; renderSyncArchiveNodePlots()" title="Log Y displays positive values only">Log Y</button></div>
                                 <label class="form-label-small mb-0">P0 RANGE</label><input type="number" step="any" class="form-control form-control-sm" style="width:112px" v-model="syncPhaseP0MinInput" @keyup.enter="applySyncPhaseP0Range"><span class="small text-muted">to</span><input type="number" step="any" class="form-control form-control-sm" style="width:112px" v-model="syncPhaseP0MaxInput" @keyup.enter="applySyncPhaseP0Range">
                                 <button class="btn btn-outline-secondary btn-sm" @click="applySyncPhaseP0Range">Apply</button><button class="btn btn-outline-secondary btn-sm" @click="resetSyncPhaseP0Range">Full Range</button><span class="small text-muted">Chronological paired shots; averaging is not used for Allan.</span>
                                 <label class="form-label-small mb-0">SHOT INDEX RANGE</label><input type="number" step="1" class="form-control form-control-sm" style="width:112px" v-model="syncPhaseShotMinInput" @keyup.enter="applySyncPhaseShotRange"><span class="small text-muted">to</span><input type="number" step="1" class="form-control form-control-sm" style="width:112px" v-model="syncPhaseShotMaxInput" @keyup.enter="applySyncPhaseShotRange">
@@ -2236,6 +2237,13 @@
                                         @change="handleAllanOrderChange">
                                 </div>
                                 <div class="d-flex align-items-center gap-2">
+                                    <label class="form-label-small mb-0">Y AXIS</label>
+                                    <div class="btn-group btn-group-sm" role="group" aria-label="Allan y-axis scale">
+                                        <button class="btn" :aria-pressed="allanYAxisMode === 'linear'" :class="allanYAxisMode === 'linear' ? 'btn-dark' : 'btn-outline-dark'" @click="setAllanYAxisMode('linear')">Linear</button>
+                                        <button class="btn" :aria-pressed="allanYAxisMode === 'log'" :class="allanYAxisMode === 'log' ? 'btn-dark' : 'btn-outline-dark'" @click="setAllanYAxisMode('log')" title="Log Y displays positive values only">Log</button>
+                                    </div>
+                                </div>
+                                <div class="d-flex align-items-center gap-2">
                                     <label class="form-label-small mb-0">SCALE</label>
                                     <div class="btn-group btn-group-sm" role="group" aria-label="Allan scale">
                                         <button class="btn" :aria-pressed="allanScaleMode === 'absolute'"
@@ -2588,7 +2596,7 @@
                     syncPhaseSelectedNodes: [],
                     syncPhaseAggregation: 'shots', syncPhasePlotMode: 'series',
                     syncPhaseReferenceNode: 'master', syncPhaseTargetNode: '',
-                    syncPhaseAllanOrder: 1, syncPhaseAllanScale: 'absolute', syncPhaseAllanXAxis: 'linear',
+                    syncPhaseAllanOrder: 1, syncPhaseAllanScale: 'absolute', syncPhaseAllanXAxis: 'linear', syncPhaseAllanYAxis: 'linear',
                     syncPhaseP0Min: null, syncPhaseP0Max: null, syncPhaseP0MinInput: '', syncPhaseP0MaxInput: '',
                     syncPhaseShotMin: null, syncPhaseShotMax: null, syncPhaseShotMinInput: '', syncPhaseShotMaxInput: '',
                     syncPhaseCalibrationOptimization: {
@@ -2676,7 +2684,7 @@
                         busy: false, message: '', error: false, result: null
                     },
                     showDisplayMenu: false, showTofFitCurve: true, showTofRawCurve: true, showScanFitCurve: true,
-                    showRawData: true, phaseUnit: 'rad', maximizedView: null, currentTab: 'atoms', plotMode: 'series', transferFunctionStatistic: 'std', transferFunctionYAxisScale: 'linear', allanOrder: 1, allanScaleMode: 'absolute', allanXAxisMode: 'linear', allanP0AvailableMin: null, allanP0AvailableMax: null, allanP0Min: null, allanP0Max: null, allanP0MinInput: '', allanP0MaxInput: '', plotRevision: 0,
+                    showRawData: true, phaseUnit: 'rad', maximizedView: null, currentTab: 'atoms', plotMode: 'series', transferFunctionStatistic: 'std', transferFunctionYAxisScale: 'linear', allanOrder: 1, allanScaleMode: 'absolute', allanXAxisMode: 'linear', allanYAxisMode: 'linear', allanP0AvailableMin: null, allanP0AvailableMax: null, allanP0Min: null, allanP0Max: null, allanP0MinInput: '', allanP0MaxInput: '', plotRevision: 0,
                     tabs: [{ id: 'atoms', label: 'Atom Number' }, { id: 'amp', label: 'Max Voltage' }, { id: 'tail', label: 'Tail Mean' }, { id: 'sigma', label: 'Width (ms)' }, { id: 'temp', label: 'Temperature' }, { id: 'arrival', label: 'Arrival Time' }, { id: 'prob', label: 'Transition Prob.' }, { id: 'intf', label: 'Interferometer' }, { id: 'phase', label: 'Interferometer Phase' }],
                     historyMap: {}, layoutResBase: {}, layoutResUp: {}, layoutResDw: {}, layoutResTot: {}, layoutOscUp: {}, layoutOscDw: {},
                     publicationColumn: window.MigaPlotStyle?.getColumn() || 'double',
@@ -3457,6 +3465,13 @@
                     const nextMode = this.normalizeAllanXAxisMode(mode);
                     if (this.allanXAxisMode === nextMode) return;
                     this.allanXAxisMode = nextMode;
+                    this.plotRevision++;
+                    if (this.plotMode === 'allan') this.renderMainPlot();
+                },
+                setAllanYAxisMode(mode) {
+                    const nextMode = this.normalizeAllanXAxisMode(mode);
+                    if (this.allanYAxisMode === nextMode) return;
+                    this.allanYAxisMode = nextMode;
                     this.plotRevision++;
                     if (this.plotMode === 'allan') this.renderMainPlot();
                 },
@@ -6837,7 +6852,7 @@
                     let xTitle;
                     let title;
                     if (this.syncPhasePlotMode === 'allan') {
-                        traces = definitions.map(definition => {
+                        traces = definitions.flatMap(definition => {
                             const curve = this.syncPhaseAllanCurve(definition.rows);
                             const relative = this.syncPhaseAllanScale === 'relative';
                             const denominator = Math.abs(Number(curve.mean));
@@ -6850,7 +6865,10 @@
                             const plus = curve.errorPlus.map(value => value == null || errorScale == null ? null : value * errorScale);
                             const minus = curve.errorMinus.map(value => value == null || errorScale == null ? null : value * errorScale);
                             const customdata = curve.validWindowCounts.map((count, index) => [count, curve.edfWhite[index]]);
-                            return { x: curve.orders, y, customdata, error_y: { type: 'data', symmetric: false, array: plus, arrayminus: minus, visible: true, color: definition.color, thickness: 1.3, width: 4 }, type: 'scatter', mode: 'lines+markers', name: definition.kind === 'difference' ? `Difference: ${definition.label}` : definition.label, line: { color: definition.color, width: definition.kind === 'difference' ? 3 : 2, dash: definition.kind === 'difference' ? 'dash' : 'solid' }, marker: { size: 7, symbol: definition.kind === 'difference' ? 'diamond' : 'circle' }, hovertemplate: 'n=%{x}<br>Allan=%{y:.6g}<br>valid windows=%{customdata[0]}<br>white-noise EDF=%{customdata[1]:.4g}<extra>%{fullData.name}</extra>' };
+                            const name = definition.kind === 'difference' ? `Difference: ${definition.label}` : definition.label;
+                            const band = this.allanConfidenceBandTrace(curve.orders, y, plus, minus, definition.color, name, definition.id);
+                            const center = { x: curve.orders, y, customdata, type: 'scatter', mode: 'lines+markers', name, legendgroup: definition.id, line: { color: definition.color, width: definition.kind === 'difference' ? 3 : 2, dash: definition.kind === 'difference' ? 'dash' : 'solid' }, marker: { size: 7, symbol: definition.kind === 'difference' ? 'diamond' : 'circle' }, hovertemplate: 'n=%{x}<br>Allan=%{y:.6g}<br>valid windows=%{customdata[0]}<br>white-noise EDF=%{customdata[1]:.4g}<extra>%{fullData.name}</extra>' };
+                            return band ? [band, center] : [center];
                         });
                         xTitle = 'Allan Order n';
                         title = `All Hosts + Phase Difference · ${this.syncPhaseAllanScale === 'relative' ? 'Relative' : 'Absolute'} overlapping Allan`;
@@ -6868,7 +6886,7 @@
                     const layout = {
                         margin: { t: 52, b: 58, l: 76, r: 24 }, title: { text: title, font: { size: 14 }, x: 0.04 },
                         xaxis: { title: xTitle, type: this.syncPhasePlotMode === 'allan' ? this.syncPhaseAllanXAxis : 'linear', anchor: 'y', showline: true, mirror: true, ticks: 'inside', gridcolor: '#dde5ee' },
-                        yaxis: { title: relative ? 'Relative Allan deviation' : `Interferometer Δφ (${this.phaseUnit})`, anchor: 'x', showline: true, mirror: true, ticks: 'inside', gridcolor: '#dde5ee' },
+                        yaxis: { title: relative ? 'Relative Allan deviation' : `Interferometer Δφ (${this.phaseUnit})`, type: this.syncPhasePlotMode === 'allan' ? this.syncPhaseAllanYAxis : 'linear', anchor: 'x', showline: true, mirror: true, ticks: 'inside', gridcolor: '#dde5ee' },
                         legend: { orientation: 'h', x: 1, xanchor: 'right', y: 1.13 }, hovermode: 'closest', paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
                         uirevision: `sync-phase:${this.syncPhasePlotMode}:${this.syncPhaseSelectedNodes.join('|')}:${this.syncPhaseReferenceNode}:${this.syncPhaseTargetNode}`,
                     };
@@ -6921,7 +6939,7 @@
                         ['reference_node', this.syncPhaseReferenceNode], ['target_node', this.syncPhaseTargetNode],
                         ['selected_p0_min', this.syncPhaseP0Min ?? ''], ['selected_p0_max', this.syncPhaseP0Max ?? ''],
                         ['selected_shot_index_min', this.syncPhaseShotMin ?? ''], ['selected_shot_index_max', this.syncPhaseShotMax ?? ''],
-                        ['max_order', this.syncPhaseAllanOrder],
+                        ['max_order', this.syncPhaseAllanOrder], ['x_axis_mode', this.syncPhaseAllanXAxis], ['y_axis_mode', this.syncPhaseAllanYAxis],
                     ];
                     curves.forEach(item => {
                         const key = this.sanitizeFilenamePart(item.label);
@@ -7458,7 +7476,7 @@
                     return {
                         ...base,
                         margin: isUp ? { t: 42, b: 8, l: 68, r: 20 } : { t: 24, b: 44, l: 68, r: 20 },
-                        yaxis: { ...base.yaxis, title: yAxisTitle },
+                        yaxis: { ...base.yaxis, title: yAxisTitle, type: this.normalizeAllanXAxisMode(this.allanYAxisMode) },
                         xaxis: { ...base.xaxis, title: isUp ? '' : 'Allan Order n', showticklabels: !isUp, type: this.normalizeAllanXAxisMode(this.allanXAxisMode) },
                         title: {
                             text: summary
@@ -7498,6 +7516,14 @@
                     }
                     const meanValue = Math.abs(Number(series?.mean_value));
                     return values.map(value => value == null || !(meanValue > 1e-12) ? null : value / meanValue);
+                },
+                allanConfidenceBandTrace(xValues, yValues, plusValues, minusValues, color, name, legendgroup = '') {
+                    const points = xValues.map((x, index) => ({ rawX: x, rawY: yValues[index], rawPlus: plusValues[index], rawMinus: minusValues[index], x: Number(x), y: Number(yValues[index]), plus: Number(plusValues[index]), minus: Number(minusValues[index]) }))
+                        .filter(point => point.rawX != null && point.rawY != null && point.rawPlus != null && point.rawMinus != null && Number.isFinite(point.x) && Number.isFinite(point.y) && Number.isFinite(point.plus) && Number.isFinite(point.minus) && point.y - point.minus > 0);
+                    if (!points.length) return null;
+                    const upper = points.map(point => point.y + point.plus); const lower = points.map(point => point.y - point.minus);
+                    const fillcolor = String(color).startsWith('#') ? `${color}29` : color.replace(')', ', 0.16)').replace('rgb(', 'rgba(');
+                    return { x: [...points.map(point => point.x), ...points.map(point => point.x).reverse()], y: [...upper, ...lower.reverse()], type: 'scatter', mode: 'lines', line: { width: 0, color }, fill: 'toself', fillcolor, hoverinfo: 'skip', showlegend: false, legendgroup, name: `${name} 68% confidence band`, connectgaps: false };
                 },
                 build2DLayout(channel, metric, sourceLabel, xAxisIndex = 0, yAxisIndex = 1, subtitle = '') {
                     const base = this.buildCommonAnalysisLayout();
@@ -7796,19 +7822,25 @@
                     const totalShots = Number(allanData?.sequence_length ?? 0);
                     const availableShots = Number(allanData?.total_points ?? totalShots);
 
-                    const makeTrace = (series, color, channelName) => [{
+                    const makeTrace = (series, color, channelName) => {
+                        const y = this.getAllanDisplayValues(series);
+                        const plus = this.getAllanDisplayErrors(series, 'error_plus');
+                        const minus = this.getAllanDisplayErrors(series, 'error_minus');
+                        const band = this.allanConfidenceBandTrace(orders, y, plus, minus, color, channelName, channelName);
+                        const center = {
                         x: orders,
-                        y: this.getAllanDisplayValues(series),
+                        y,
                         mode: 'lines+markers',
                         type: 'scatter',
                         connectgaps: false,
                         name: `${channelName} ${this.allanScaleMode === 'relative' ? 'Relative Allan' : 'Allan'}`,
                         line: { color, width: 2 },
                         marker: { size: 7 },
-                        error_y: { type: 'data', symmetric: false, array: this.getAllanDisplayErrors(series, 'error_plus'), arrayminus: this.getAllanDisplayErrors(series, 'error_minus'), visible: true, color, thickness: 1.3, width: 4 },
                         customdata: orders.map((order, index) => [series.valid_window_counts?.[index] ?? 0, series.edf_white?.[index] ?? null]),
                         hovertemplate: `n=%{x}<br>${this.normalizeAllanScaleMode(this.allanScaleMode) === 'relative' ? 'Relative Allan' : 'Allan'}=%{y:.6g}<br>valid windows=%{customdata[0]}<br>white-noise EDF=%{customdata[1]:.4g}<extra>${channelName} · ${metric.label}</extra>`
-                    }];
+                        };
+                        return band ? [band, center] : [center];
+                    };
                     const buildSummary = (series) => {
                         const validCounts = Array.isArray(series?.valid_window_counts) ? series.valid_window_counts : [];
                         const validOrders = validCounts.filter(count => Number(count) > 0).length;
@@ -8312,6 +8344,7 @@
                             ['source', sourceLabel],
                             ['scale_mode', scaleMode],
                             ['x_axis_mode', this.normalizeAllanXAxisMode(this.allanXAxisMode)],
+                            ['y_axis_mode', this.normalizeAllanXAxisMode(this.allanYAxisMode)],
                             ['display_mode', allanData.display_mode || this.displayMode || 'saved'],
                             ['max_order', Number(allanData.used_max_order ?? this.allanOrder)],
                             ['sequence_length', Number(allanData.sequence_length ?? 0)],
@@ -8942,18 +8975,27 @@
                             const allanRows = rows.map(row => (
                                 (row.allan_deviations || []).find(item => Number(item.order) === Number(order)) || {}
                             ));
-                            return definitions.map(([field, label, dash, symbol, width]) => ({
-                                x: rows.map(row => plotX(row[xField])),
-                                y: allanRows.map(item => plotY(item[field])),
+                            return definitions.flatMap(([field, label, dash, symbol, width]) => {
+                                const x = rows.map(row => plotX(row[xField]));
+                                const y = allanRows.map(item => plotY(item[field]));
+                                const legendgroup = `allan-${order}`;
+                                const center = {
+                                x,
+                                y,
                                 customdata: rows.map((row, index) => [row.t2_us2, row.t_ms, allanRows[index].valid_window_count || 0, row.shot_count]),
                                 type: 'scatter', mode: 'lines+markers', name: `${label} n=${order}`,
                                 legendgroup: `allan-${order}`,
                                 line: { color, width, dash }, marker: { color, size: label === 'Measured' ? 8 : 6, symbol },
-                                error_y: label === 'Measured' ? { type: 'data', symmetric: false, array: allanRows.map(item => plotY(item.measured_error_plus_rad)), arrayminus: allanRows.map(item => plotY(item.measured_error_minus_rad)), visible: true, color, thickness: 1.3, width: 4 } : undefined,
                                 opacity: label === 'Measured' || label === 'Expected total' ? 1 : 0.72,
                                 connectgaps: false,
                                 hovertemplate: `${xTitle}=%{x:.9g}<br>σA(n=${order})=%{y:.6g} mrad<br>T²=%{customdata[0]:.9g} (μs)²<br>T=%{customdata[1]:.6g} ms<br>valid windows=%{customdata[2]}<br>shots=%{customdata[3]}<extra>${label} n=${order}</extra>`
-                            }));
+                                };
+                                if (label !== 'Measured') return [center];
+                                const plus = allanRows.map(item => plotY(item.measured_error_plus_rad));
+                                const minus = allanRows.map(item => plotY(item.measured_error_minus_rad));
+                                const band = this.allanConfidenceBandTrace(x, y, plus, minus, color, `${label} n=${order}`, legendgroup);
+                                return band ? [band, center] : [center];
+                            });
                         });
                     } else {
                         const definitions = [

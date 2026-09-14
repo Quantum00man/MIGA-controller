@@ -1,5 +1,6 @@
 import math
 import unittest
+from pathlib import Path
 
 from app.core.data_loader import DataLoader
 
@@ -50,6 +51,13 @@ class AllanStatisticsTests(unittest.TestCase):
         self.assertIsNone(channel["sequence_statistics"]["mean"])
         self.assertIsNone(channel["sequence_statistics"]["rms"])
         self.assertIsNone(channel["sequence_statistics"]["standard_deviation"])
+
+    def test_archive_allan_uses_confidence_bands_and_y_axis_modes(self):
+        archive = (Path(__file__).resolve().parents[1] / "static" / "archive.html").read_text(encoding="utf-8")
+        self.assertIn("allanConfidenceBandTrace", archive)
+        self.assertIn("allanYAxisMode", archive)
+        self.assertIn("syncPhaseAllanYAxis", archive)
+        self.assertNotIn("array: this.getAllanDisplayErrors(series, 'error_plus')", archive)
 
 
 if __name__ == "__main__":

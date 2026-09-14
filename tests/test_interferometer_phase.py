@@ -346,6 +346,8 @@ class InterferometerPhaseTests(unittest.TestCase):
         self.assertIn("this.syncPhaseSameP0(reference.p0, target.p0)", archive_html)
         self.assertIn("wrapped <= -Math.PI + 1e-12", archive_html)
         self.assertIn("syncPhaseAllanCurve", archive_html)
+        self.assertIn("syncPhaseAllanYAxis", archive_html)
+        self.assertIn("allanConfidenceBandTrace", archive_html)
         self.assertIn("Chronological paired shots; averaging is not used for Allan.", archive_html)
         self.assertIn("All Hosts + Phase Difference", archive_html)
         self.assertIn('v-for="nodeId in syncPhaseNodeIds()"', archive_html)

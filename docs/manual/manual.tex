@@ -1466,7 +1466,7 @@ filtered sequence length. The UI supports absolute or mean-normalized values, li
 logarithmic order axes, and displays valid-window count, mean, RMS and sample standard
 deviation for Fit and raw channels.
 
-All measured Allan curves include asymmetric one-standard-deviation confidence bars. Under
+All measured Allan curves include asymmetric one-standard-deviation confidence bands. Under
 the current white-noise assumption, the implementation forms the covariance of the actual
 overlapping windows (including gaps), moment-matches it to an equivalent number of
 chi-squared degrees of freedom $\nu_{\mathrm{eff}}$, and uses the central confidence level
@@ -1477,12 +1477,14 @@ $p=0.68268949$. For an estimated Allan deviation $s_A$, the limits are
   \sigma_{A,\mathrm{high}}=s_A\sqrt{\frac{\nu_{\mathrm{eff}}}
   {\chi^2_{(1-p)/2,\nu_{\mathrm{eff}}}}}.
 \end{equation}
-The CSV exports record both limits, the lower and upper error magnitudes, the white-noise
+The interactive Archive plots draw these limits as translucent filled bands to remain responsive
+at large Allan orders, and support both linear and logarithmic Y axes. The CSV exports record
+both limits, the lower and upper error magnitudes, the white-noise
 EDF and the valid-window count. Relative-mode limits and errors use the same mean
 normalization as the plotted deviation. In Phase Noise Analyze, confidence bars apply only
 to the measured curve; expected-total, detection and laser-frequency curves are configured
 models without parameter uncertainties. LabPlot exports preserve the measured asymmetric
-error bars.
+limits as error bars.
 
 The Archive Re-Analysis panel can optimize one parameter, or ALPHA and BETA jointly, in
 $[0,1]$. A selected sequence
