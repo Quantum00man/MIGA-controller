@@ -2141,8 +2141,30 @@ async def recalculate_archived_waveforms(req: ArchiveWaveformRequest):
 
 @router.post("/archive/scan-fit")
 async def fit_archive_scan(req: ArchiveScanFitRequest):
-    if len(req.x_values) != len(req.y_values):
+    x_values = req.x_values
+    y_values = req.y_values
+    y_std_values = req.y_std_values
+    point_counts_values = req.point_counts
+    if req.bragg_fit_method == "shot_level" and req.shot_source:
+        source = req.shot_source
+        try:
+            shots = data_loader.load_archive_scan_shots(
+                source["year"], source["month"], source["day"], source["run_id"],
+                source["metric_tab"], source.get("channel", "up"), source.get("source_key", "fit"),
+                source.get("node_id") or None,
+            )
+        except (KeyError, FileNotFoundError, ValueError) as exc:
+            raise HTTPException(400, f"Could not load all archive shots: {exc}")
+        x_values = [point[0] for point in shots]
+        y_values = [point[1] for point in shots]
+        y_std_values = None
+        point_counts_values = None
+    if len(x_values) != len(y_values):
         raise HTTPException(400, "x_values and y_values must have the same length")
+    if y_std_values is not None and len(y_std_values) != len(x_values):
+        raise HTTPException(400, "y_std_values must have the same length as x_values")
+    if point_counts_values is not None and len(point_counts_values) != len(x_values):
+        raise HTTPException(400, "point_counts must have the same length as x_values")
 
     model_definition = req.model.dict()
     model_error = fitting.validate_fit_model_definition(model_definition)
@@ -2155,7 +2177,7 @@ async def fit_archive_scan(req: ArchiveScanFitRequest):
         fit_min, fit_max = fit_max, fit_min
 
     filtered_pairs = []
-    for raw_x, raw_y in zip(req.x_values, req.y_values):
+    for index, (raw_x, raw_y) in enumerate(zip(x_values, y_values)):
         x_val = float(raw_x)
         y_val = float(raw_y)
         if not np.isfinite(x_val) or not np.isfinite(y_val):
@@ -2164,7 +2186,9 @@ async def fit_archive_scan(req: ArchiveScanFitRequest):
             continue
         if fit_max is not None and x_val > fit_max:
             continue
-        filtered_pairs.append((x_val, y_val))
+        raw_std = y_std_values[index] if y_std_values is not None else None
+        raw_count = point_counts_values[index] if point_counts_values is not None else None
+        filtered_pairs.append((x_val, y_val, raw_std, raw_count))
 
     if len(filtered_pairs) < 2:
         raise HTTPException(400, "Need at least 2 valid points inside the selected scan range")
@@ -2172,6 +2196,8 @@ async def fit_archive_scan(req: ArchiveScanFitRequest):
     filtered_pairs.sort(key=lambda item: item[0])
     x_data = np.asarray([item[0] for item in filtered_pairs], dtype=float)
     y_data = np.asarray([item[1] for item in filtered_pairs], dtype=float)
+    y_std_data = None if y_std_values is None else np.asarray([item[2] for item in filtered_pairs], dtype=float)
+    point_counts = None if point_counts_values is None else np.asarray([item[3] for item in filtered_pairs], dtype=float)
 
     eval_points = max(32, min(int(req.eval_points or 400), 4000))
     if np.isclose(x_data[0], x_data[-1]):
@@ -2186,6 +2212,9 @@ async def fit_archive_scan(req: ArchiveScanFitRequest):
             wavelength_nm=req.bragg_wavelength_nm,
             bragg_order=req.bragg_order,
             eval_x=eval_x,
+            fit_method=req.bragg_fit_method,
+            y_std=y_std_data,
+            counts=point_counts,
         )
         if fringe_result is None:
             raise HTTPException(400, "Bragg fringe fit failed. At least 4 distinct P0 points are required.")
@@ -2213,6 +2242,8 @@ async def fit_archive_scan(req: ArchiveScanFitRequest):
                 "symbolic_formula": "y = C + A cos[k_eff a (P0 x 10^-12) + phi0]",
                 "mid_fringe_x": fringe_result.mid_fringe_x,
                 "mid_fringe_spacing_us2": fringe_result.mid_fringe_spacing_us2,
+                "fit_method": fringe_result.fit_method,
+                "weighted_point_count": fringe_result.weighted_point_count,
             },
         }
 

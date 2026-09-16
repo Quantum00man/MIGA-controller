@@ -1405,6 +1405,15 @@
                                         v-model.number="scanFit.bragg_order" @change="deactivateScanFitOverlay(true)">
                                 </div>
                             </div>
+                            <div class="mt-2">
+                                <label class="form-label-small">FIT METHOD</label>
+                                <select class="form-select form-select-sm" v-model="scanFit.bragg_fit_method" @change="deactivateScanFitOverlay(true)">
+                                    <option value="legacy">Legacy — unweighted least squares</option>
+                                    <option value="weighted_sem">Weighted — inverse SEM²</option>
+                                    <option value="shot_level">Shot-level — fit every shot</option>
+                                </select>
+                                <div class="form-text">Weighted uses each P0 mean's repeat count and standard deviation. Shot-level fits every retained shot directly, so P0 values with more repeats contribute more observations.</div>
+                            </div>
                             <div class="form-text mt-2">
                                 P0 is interpreted as T² in (μs)². k<sub>eff</sub> = 4πn/λ.
                             </div>
@@ -1535,6 +1544,9 @@
                             <div v-else class="small text-muted mt-1">
                                 λ={{ formatMetricValue(scanFitResult.bragg?.wavelength_nm) }} nm · n={{ scanFitResult.bragg?.order }} ·
                                 k<sub>eff</sub>={{ formatMetricValue(scanFitResult.bragg?.effective_wavevector_rad_m) }} rad/m
+                            </div>
+                            <div v-if="scanFitResult.model_key === 'bragg_fringes'" class="small text-muted mt-1">
+                                Method: {{ formatBraggFitMethod(scanFitResult.bragg) }}
                             </div>
                             <div v-if="scanFitResult.model_key === 'bragg_fringes'" class="border-top mt-2 pt-2">
                                 <div class="small fw-bold text-dark">Mid-fringe P0 (T² in (μs)²)</div>
@@ -2704,6 +2716,7 @@
                         range_max: '',
                         bragg_wavelength_nm: 780.0,
                         bragg_order: 1,
+                        bragg_fit_method: 'legacy',
                         model_key: 'gaussian',
                         save_name: '',
                         model_definition: { key: 'gaussian', label: 'Gaussian', formula: '', parameters: [], roles: {}, area_mode: 'window_integral' }
@@ -3122,6 +3135,7 @@
                         range_max: '',
                         bragg_wavelength_nm: 780.0,
                         bragg_order: 1,
+                        bragg_fit_method: 'legacy',
                         model_key: this.defaultScanFitModels[0]?.key || 'gaussian',
                         save_name: '',
                         model_definition: this.cloneFitModel(this.defaultScanFitModels[0] || this.baseFitModel('gaussian'))
@@ -3205,6 +3219,8 @@
                     const braggOrder = Number.parseInt(normalized.bragg_order, 10);
                     normalized.bragg_wavelength_nm = Number.isFinite(wavelength) && wavelength > 0 ? wavelength : 780.0;
                     normalized.bragg_order = Number.isFinite(braggOrder) && braggOrder >= 1 ? braggOrder : 1;
+                    normalized.bragg_fit_method = ['weighted_sem', 'shot_level'].includes(normalized.bragg_fit_method)
+                        ? normalized.bragg_fit_method : 'legacy';
                     return normalized;
                 },
                 isBraggFringeFit() {
@@ -3635,7 +3651,10 @@
                     if (!this.loadedPoints.length) return 'Load a run first.';
                     if (this.getActiveScanDimensions() !== 1) return 'Scan fitting only supports 1D scan results.';
                     if (this.plotMode !== 'series') return 'Switch to Mean mode to fit scan data.';
-                    const series = this.getScanFitSeries();
+                    if (this.isBraggFringeFit() && this.scanFit.bragg_fit_method === 'shot_level' && this.displayMode !== 'saved') {
+                        return 'Shot-level fitting uses every stored archive shot; switch to Saved mode first.';
+                    }
+                    const series = this.getScanFitInputSeries();
                     if (!series.points.length) return 'No finite data points are available for the selected metric.';
                     return '';
                 },
@@ -3665,8 +3684,11 @@
                         points
                     };
                 },
+                getScanFitInputSeries() {
+                    return this.getScanFitSeries();
+                },
                 getScanFitBounds(points = null) {
-                    const sourcePoints = Array.isArray(points) ? points : this.getScanFitSeries().points;
+                    const sourcePoints = Array.isArray(points) ? points : this.getScanFitInputSeries().points;
                     if (!sourcePoints.length) return { min: null, max: null, hasRange: false };
                     return {
                         min: Number(sourcePoints[0].x),
@@ -4246,7 +4268,7 @@
                         return null;
                     }
 
-                    const series = this.getScanFitSeries();
+                    const series = this.getScanFitInputSeries();
                     const range = this.normalizeScanFitRange(series.points);
                     if (!range) {
                         this.scanFitResult = null;
@@ -4268,11 +4290,19 @@
                         const res = await axios.post('/archive/scan-fit', {
                             x_values: series.points.map(point => point.x),
                             y_values: series.points.map(point => point.y),
+                            y_std_values: series.points.map(point => Number.isFinite(point.std) ? point.std : null),
+                            point_counts: series.points.map(point => Number.isFinite(point.count) ? point.count : null),
                             fit_min: range.min,
                             fit_max: range.max,
                             eval_points: 400,
                             bragg_wavelength_nm: Number(this.scanFit.bragg_wavelength_nm),
                             bragg_order: Number.parseInt(this.scanFit.bragg_order, 10),
+                            bragg_fit_method: this.scanFit.bragg_fit_method,
+                            shot_source: this.scanFit.bragg_fit_method === 'shot_level' ? {
+                                year: this.selectedYear, month: this.selectedMonth, day: this.selectedDay,
+                                run_id: this.selectedRun || this.loadedRunId, node_id: this.loadedSyncNode || '',
+                                metric_tab: this.currentTab, channel: series.channel, source_key: series.sourceKey
+                            } : null,
                             model: this.buildScanFitRequestModel()
                         });
                         this.scanFit.active = true;
@@ -4338,6 +4368,12 @@
                 getScanFitResultSummary() {
                     if (!this.scanFitResult) return '';
                     return `${this.scanFitResult.metric_label} · ${this.scanFitResult.source_label} · ${this.scanFitResult.channel_label} · ${this.scanFitResult.model_label} · ${this.scanFitResult.point_count} pts · P0 ${this.formatScanFitBound(this.scanFitResult.fit_min)} to ${this.formatScanFitBound(this.scanFitResult.fit_max)}`;
+                },
+                formatBraggFitMethod(bragg = {}) {
+                    if (bragg?.fit_method === 'weighted_sem') {
+                        return 'Weighted SEM (' + (bragg.weighted_point_count || 0) + ' weighted P0 points)';
+                    }
+                    return bragg?.fit_method === 'shot_level' ? 'Shot-level (all retained shots)' : 'Legacy unweighted';
                 },
                 isThreeDimensionalView() {
                     return this.getActiveScanDimensions() === 3;

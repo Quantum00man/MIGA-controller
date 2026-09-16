@@ -878,11 +878,15 @@ class AnalysisParametersApplyRequest(BaseModel):
 class ArchiveScanFitRequest(BaseModel):
     x_values: List[float] = Field(default_factory=list)
     y_values: List[float] = Field(default_factory=list)
+    y_std_values: Optional[List[Optional[float]]] = Field(None)
+    point_counts: Optional[List[Optional[float]]] = Field(None)
     fit_min: Optional[float] = Field(None)
     fit_max: Optional[float] = Field(None)
     eval_points: int = Field(400, ge=32, le=4000)
     bragg_wavelength_nm: float = Field(780.0, gt=0)
     bragg_order: int = Field(1, ge=1)
+    bragg_fit_method: str = Field("legacy")
+    shot_source: Optional[Dict[str, str]] = Field(None)
     model: FitModelDefinition
 
 

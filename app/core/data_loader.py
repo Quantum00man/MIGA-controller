@@ -1100,6 +1100,42 @@ class DataLoader:
             stats_rows.append(row)
         return stats_rows
 
+    def load_archive_scan_shots(
+        self, year: str, month: str, day: str, run_id: str, metric_tab: str,
+        channel: str = "up", source_key: str = "fit", node_id: Optional[str] = None,
+    ) -> List[Tuple[float, float]]:
+        """Load every stored one-dimensional scan shot for an archive fit."""
+        root_run_dir = self._get_run_dir(year, month, day, run_id)
+        run_dir = self._resolve_archive_node_dir(root_run_dir, node_id)
+        config_data = self._load_config_data(run_dir)
+        if self._resolve_scan_dimensions(config_data) != 1:
+            raise ValueError("Shot-level scan fitting only supports 1D scan results")
+
+        metric = str(metric_tab or "").strip().lower()
+        channel_key = "dw" if str(channel or "").strip().lower() == "dw" else "up"
+        source = "raw" if str(source_key or "").strip().lower() == "raw" else "fit"
+        fields = {
+            "atoms": {"fit": ("atom_number_up", "atom_number_dw"), "raw": ("atom_number_up_nofit", "atom_number_dw_nofit")},
+            "temp": {"fit": ("temperature_up", "temperature_dw"), "raw": ("temperature_up_nofit", "temperature_dw_nofit")},
+            "sigma": {"fit": ("sigma_up", "sigma_dw"), "raw": ("sigma_up_nofit", "sigma_dw_nofit")},
+            "amp": {"fit": ("amplitude_up", "amplitude_dw"), "raw": ("amplitude_up_nofit", "amplitude_dw_nofit")},
+            "arrival": {"fit": ("arrival_time_up", "arrival_time_dw"), "raw": ("arrival_time_up_nofit", "arrival_time_dw_nofit")},
+            "prob": {"fit": ("transition_probability_up", "transition_probability_dw"), "raw": ("transition_probability_up_nofit", "transition_probability_dw_nofit")},
+            "intf": {"fit": ("intf_p1", "intf_p2"), "raw": ("intf_p1_nofit", "intf_p2_nofit")},
+            "tail": {"fit": ("tail_mean_up_raw", "tail_mean_dw_raw"), "raw": ("tail_mean_up_raw", "tail_mean_dw_raw")},
+        }
+        if metric not in fields:
+            raise ValueError("Shot-level Bragg fitting does not support the selected metric")
+        field = fields[metric][source][1 if channel_key == "dw" else 0]
+        shots: List[Tuple[float, float]] = []
+        for point in self._read_results_csv(run_dir, max_points=None):
+            params = self._get_group_params(point, scan_dimensions=1)
+            x_value = self._safe_scalar(params[0])
+            y_value = point.get(field)
+            if x_value is not None and y_value is not None and np.isfinite(x_value) and np.isfinite(y_value):
+                shots.append((float(x_value), float(y_value)))
+        return shots
+
     def _build_preview_map(self, points: List[Dict[str, Any]], scan_dimensions: int = 1) -> Dict[str, Dict[str, Any]]:
         preview_map: Dict[str, Dict[str, Any]] = {}
         for point in points:

@@ -46,6 +46,8 @@ class BraggFringeFitResult:
     angular_frequency_rad_per_us2: float
     mid_fringe_x: List[float]
     mid_fringe_spacing_us2: float
+    fit_method: str
+    weighted_point_count: int
 
 
 @dataclass
@@ -679,7 +681,12 @@ def perform_sync_differential_ellipse_fit(
     )
 
 
-def _fringe_linear_solution(x_centered: np.ndarray, y_data: np.ndarray, omega: float) -> Tuple[np.ndarray, float]:
+def _fringe_linear_solution(
+    x_centered: np.ndarray,
+    y_data: np.ndarray,
+    omega: float,
+    weights: Optional[np.ndarray] = None,
+) -> Tuple[np.ndarray, float]:
     design = np.column_stack(
         (
             np.ones_like(x_centered),
@@ -687,9 +694,36 @@ def _fringe_linear_solution(x_centered: np.ndarray, y_data: np.ndarray, omega: f
             np.sin(omega * x_centered),
         )
     )
-    coefficients, _, _, _ = np.linalg.lstsq(design, y_data, rcond=None)
+    if weights is None:
+        coefficients, _, _, _ = np.linalg.lstsq(design, y_data, rcond=None)
+    else:
+        sqrt_weights = np.sqrt(weights)
+        coefficients, _, _, _ = np.linalg.lstsq(design * sqrt_weights[:, None], y_data * sqrt_weights, rcond=None)
     residuals = y_data - design @ coefficients
-    return coefficients, float(np.dot(residuals, residuals))
+    if weights is None:
+        return coefficients, float(np.dot(residuals, residuals))
+    return coefficients, float(np.dot(weights, residuals ** 2))
+
+
+def _bragg_sem_weights(
+    y_std: Optional[np.ndarray], counts: Optional[np.ndarray], point_count: int,
+) -> Tuple[Optional[np.ndarray], int]:
+    """Return scale-normalized inverse-SEM-squared weights when usable."""
+    if y_std is None or counts is None or len(y_std) != point_count or len(counts) != point_count:
+        return None, 0
+    std = np.asarray(y_std, dtype=float)
+    n = np.asarray(counts, dtype=float)
+    valid = np.isfinite(std) & np.isfinite(n) & (std > 0) & (n >= 2)
+    if np.count_nonzero(valid) < 3:
+        return None, 0
+    sem2 = (std[valid] ** 2) / n[valid]
+    raw_weights = 1.0 / sem2
+    reference_weight = float(np.median(raw_weights))
+    weights = np.full(point_count, reference_weight, dtype=float)
+    weights[valid] = raw_weights
+    # Keep the objective numerically comparable to the legacy SSE.
+    weights /= reference_weight
+    return weights, int(np.count_nonzero(valid))
 
 
 def perform_bragg_fringe_fit(
@@ -698,6 +732,9 @@ def perform_bragg_fringe_fit(
     wavelength_nm: float = 780.0,
     bragg_order: int = 1,
     eval_x: Optional[np.ndarray] = None,
+    fit_method: str = "legacy",
+    y_std: Optional[np.ndarray] = None,
+    counts: Optional[np.ndarray] = None,
 ) -> Optional[BraggFringeFitResult]:
     """Fit C + A cos(k_eff a T^2 + phi0), with x=T^2 in (microseconds)^2."""
     if x_data is None or y_data is None or len(x_data) != len(y_data) or len(x_data) < 4:
@@ -709,15 +746,31 @@ def perform_bragg_fringe_fit(
 
     x_data = np.asarray(x_data, dtype=float)
     y_data = np.asarray(y_data, dtype=float)
+    requested_method = str(fit_method).strip().lower()
+    fit_method = requested_method if requested_method in {"weighted_sem", "shot_level"} else "legacy"
+    raw_y_std = None if y_std is None else np.asarray(y_std, dtype=float)
+    raw_counts = None if counts is None else np.asarray(counts, dtype=float)
+    if raw_y_std is not None and len(raw_y_std) != len(x_data):
+        return None
+    if raw_counts is not None and len(raw_counts) != len(x_data):
+        return None
     finite = np.isfinite(x_data) & np.isfinite(y_data)
     x_data = x_data[finite]
     y_data = y_data[finite]
+    if raw_y_std is not None:
+        raw_y_std = raw_y_std[finite]
+    if raw_counts is not None:
+        raw_counts = raw_counts[finite]
     if len(x_data) < 4:
         return None
 
     order = np.argsort(x_data)
     x_data = x_data[order]
     y_data = y_data[order]
+    if raw_y_std is not None:
+        raw_y_std = raw_y_std[order]
+    if raw_counts is not None:
+        raw_counts = raw_counts[order]
     span = float(x_data[-1] - x_data[0])
     if span <= 0:
         return None
@@ -732,6 +785,7 @@ def perform_bragg_fringe_fit(
 
     x_reference = float(np.mean(x_data))
     x_centered = x_data - x_reference
+    weights, weighted_point_count = _bragg_sem_weights(raw_y_std, raw_counts, len(x_data)) if fit_method == "weighted_sem" else (None, 0)
     wavelength_m = wavelength_nm * 1e-9
     effective_wavevector = 4.0 * np.pi * bragg_order / wavelength_m
     standard_gravity = 9.80665
@@ -750,7 +804,7 @@ def perform_bragg_fringe_fit(
     omega_grid = np.linspace(min_omega, max_omega, grid_size)
     errors = np.empty_like(omega_grid)
     for index, omega in enumerate(omega_grid):
-        _, errors[index] = _fringe_linear_solution(x_centered, y_data, float(omega))
+        _, errors[index] = _fringe_linear_solution(x_centered, y_data, float(omega), weights)
 
     candidate_indices = np.argsort(errors)[: min(12, len(errors))]
     best_omega = float(omega_grid[int(candidate_indices[0])])
@@ -763,7 +817,7 @@ def perform_bragg_fringe_fit(
         if upper <= lower:
             continue
         optimized = minimize_scalar(
-            lambda omega: _fringe_linear_solution(x_centered, y_data, float(omega))[1],
+            lambda omega: _fringe_linear_solution(x_centered, y_data, float(omega), weights)[1],
             bounds=(lower, upper),
             method="bounded",
             options={"xatol": max(grid_step * 1e-5, np.finfo(float).eps)},
@@ -772,7 +826,7 @@ def perform_bragg_fringe_fit(
             best_omega = float(optimized.x)
             best_error = float(optimized.fun)
 
-    coefficients, best_error = _fringe_linear_solution(x_centered, y_data, best_omega)
+    coefficients, best_error = _fringe_linear_solution(x_centered, y_data, best_omega, weights)
     offset = float(coefficients[0])
     cosine_coefficient = float(coefficients[1])
     sine_coefficient = float(coefficients[2])
@@ -809,6 +863,8 @@ def perform_bragg_fringe_fit(
         angular_frequency_rad_per_us2=float(best_omega),
         mid_fringe_x=mid_fringe_x,
         mid_fringe_spacing_us2=mid_fringe_spacing,
+        fit_method="weighted_sem" if weights is not None else ("shot_level" if fit_method == "shot_level" else "legacy"),
+        weighted_point_count=weighted_point_count,
     )
 
 

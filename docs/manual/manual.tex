@@ -1264,7 +1264,30 @@ With $x=T^2$ expressed in \si{\micro\second\squared}, the model is
   k_{\mathrm{eff}}=\frac{4\pi n}{\lambda}.
 \end{equation}
 For a fixed candidate $\omega$, the offset and cosine/sine coefficients form a linear
-least-squares problem. The implementation scans a bounded frequency grid, refines the best
+least-squares problem. The Archive fit panel offers two methods. \ui{Legacy} gives every
+displayed $P_0$ mean the same weight, preserving the historical result. \ui{Weighted
+(inverse SEM$^2$)} uses the repeat count $n_i$ and sample standard deviation $s_i$ of
+each displayed mean, with
+\begin{equation}
+  w_i=\frac{1}{\operatorname{SEM}_i^2}=\frac{n_i}{s_i^2},
+  \qquad \min_{C,b,d}\sum_i w_i\left[y_i-C-b\cos(\omega x_i)-d\sin(\omega x_i)\right]^2 .
+\end{equation}
+The latter prevents a noisy $P_0$ mean from influencing $A$ and $C$ as much as a
+well-repeated point. A point without a finite positive standard deviation and at least two
+repeats receives the typical valid weight; if fewer than three points have usable SEMs,
+the weighted selection safely falls back to Legacy. \ui{Shot-level} instead supplies every
+retained shot $(x_{ij},y_{ij})$ to the same fit, minimizing
+\begin{equation}
+  \min_{C,b,d}\sum_i\sum_{j=1}^{n_i}
+  \left[y_{ij}-C-b\cos(\omega x_i)-d\sin(\omega x_i)\right]^2 .
+\end{equation}
+It therefore retains within-$P_0$ scatter and naturally gives a $P_0$ with more retained
+shots more influence, rather than first reducing it to a single mean. It reads the complete
+stored archive result set, not the display-limited point sample, and is therefore available
+in Archive \ui{Saved} mode. Use Shot-level when individual shots have comparable uncertainty;
+use inverse-SEM$^2$ weighting when the
+per-$P_0$ shot variance differs substantially. In all cases,
+$A=\sqrt{b^2+d^2}$. The implementation scans a bounded frequency grid, refines the best
 candidates with scalar minimization, and rejects frequencies above the sampling limit or
 the acceleration projection of standard gravity. It then reports
 \begin{equation}
