@@ -50,6 +50,11 @@ class SyncPhaseCalibrationOptimizationTests(unittest.TestCase):
         self.assertIn("shot_index_min: this.syncPhaseShotMin", archive_html)
         self.assertIn("selected_shot_index_min", archive_html)
         self.assertIn("settings.shot_index_min", archive_html)
+        self.assertIn("TTI FREQUENCY (HZ)", archive_html)
+        self.assertIn("GENERATOR PHASE", archive_html)
+        self.assertIn("transfer_frequency_hz: transferFunction", archive_html)
+        self.assertIn("Apply A/C to Archive", archive_html)
+        self.assertIn("syncArchiveHasPhaseOverrides", archive_html)
 
     def test_joint_ac_optimization_reduces_sync_allan_and_std(self):
         random = np.random.default_rng(44)
@@ -149,6 +154,39 @@ class SyncPhaseCalibrationOptimizationTests(unittest.TestCase):
         self.assertEqual([row["shot"] for row in response["series"]], [20, 21, 22, 23, 24, 25, 26, 30, 31])
         self.assertEqual(response["settings"]["shot_index_min"], 20)
         self.assertEqual(response["settings"]["shot_index_max"], 31)
+
+    def test_archive_endpoint_filters_one_transfer_frequency_and_generator_phase(self):
+        master_cal = calibration(1.0, 0.1, "master-cal")
+        slave_cal = calibration(1.2, 0.2, "slave-cal")
+        rows_master = []
+        rows_slave = []
+        for shot in range(16):
+            phase = 1.4 + 0.01 * math.sin(shot)
+            frequency = 100.0 if shot < 8 else 200.0
+            generator_phase = 0.0 if shot < 8 else 90.0
+            master = {"sync_shot_index": shot, "sync_p0": 50.0, "intf_p1": 0.1 + math.cos(phase), "transfer_frequency_hz": frequency, "transfer_phase_deg": generator_phase}
+            slave = {"sync_shot_index": shot, "sync_p0": 50.0, "intf_p1": 0.2 + 1.2 * math.cos(phase + 0.05), "transfer_frequency_hz": frequency, "transfer_phase_deg": generator_phase}
+            rows_master.append(master)
+            rows_slave.append(slave)
+        loaded = {
+            "sync_manifest": {"node_results": {"master": rows_master, "slaves": {"slave-a": rows_slave}}},
+            "archive_phase_reference_contexts": {
+                "master": {"effective_calibration": master_cal},
+                "slave-a": {"effective_calibration": slave_cal},
+            },
+        }
+        request = ArchiveSyncPhaseCalibrationOptimizeRequest(
+            year="2026", month="09", day="01", run_id="sync01",
+            reference_node_id="master", target_node_id="slave-a",
+            transfer_frequency_hz=100.0, transfer_phase_deg=0.0,
+        )
+        with patch("app.api.routes.data_loader.load_run", return_value=loaded):
+            response = asyncio.run(optimize_archive_sync_phase_calibrations(request))
+
+        self.assertEqual(response["pair_count"], 8)
+        self.assertEqual([row["shot"] for row in response["series"]], list(range(8)))
+        self.assertEqual(response["settings"]["transfer_frequency_hz"], 100.0)
+        self.assertEqual(response["settings"]["transfer_phase_deg"], 0.0)
 
     def test_allan_n1_does_not_bridge_missing_actual_shots(self):
         from app.analysis.phase_calibration_optimization import _allan_one

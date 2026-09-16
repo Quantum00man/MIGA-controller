@@ -1512,6 +1512,22 @@
                                 <input class="form-check-input" type="checkbox" id="syncShowRaw" v-model="showRawData">
                                 <label class="form-check-label small fw-bold text-muted" for="syncShowRaw">{{ syncViewMode === 'node' ? 'Show NoFit' : 'Use NoFit' }}</label>
                             </div>
+                            <div v-if="syncViewMode === 'node' && config.mode === 'transfer_function'" class="btn-group btn-group-sm" role="group" aria-label="SYNC Transfer Function statistic">
+                                <button class="btn" :aria-pressed="transferFunctionStatistic === 'std'"
+                                    :class="transferFunctionStatistic === 'std' ? 'btn-dark' : 'btn-outline-dark'"
+                                    @click="setTransferFunctionStatistic('std')">Standard deviation</button>
+                                <button class="btn" :aria-pressed="transferFunctionStatistic === 'mean'"
+                                    :class="transferFunctionStatistic === 'mean' ? 'btn-dark' : 'btn-outline-dark'"
+                                    @click="setTransferFunctionStatistic('mean')">Mean value</button>
+                                <button class="btn" :aria-pressed="transferFunctionStatistic === 's2'"
+                                    :class="transferFunctionStatistic === 's2' ? 'btn-dark' : 'btn-outline-dark'"
+                                    :disabled="currentTab !== 'phase'" title="S² is defined for Interferometer Phase"
+                                    @click="setTransferFunctionStatistic('s2')">S²</button>
+                                <button class="btn" :aria-pressed="transferFunctionStatistic === 'phase2'"
+                                    :class="transferFunctionStatistic === 'phase2' ? 'btn-dark' : 'btn-outline-dark'"
+                                    :disabled="currentTab !== 'phase'" title="Unnormalized squared phase and fixed Allan noise floor"
+                                    @click="setTransferFunctionStatistic('phase2')">ΔΦ²</button>
+                            </div>
                         </div>
                     </div>
                     <div v-if="syncViewMode === 'node'" class="analysis-metric-nav-wrap">

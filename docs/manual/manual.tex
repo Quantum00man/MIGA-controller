@@ -1129,14 +1129,14 @@ queue. In SYNC mode, the Master defines the common frequency
 grid, selected \ang{0}/\ang{90} generator phases, scan order and repeat count, and is the
 only node that connects to or changes the TTI generator. Slaves start through the normal
 SYNC prepare/start sequence, execute their fixed local sequence without a generator
-settling delay. For each Slave, every matched shot is first differenced and normalized
-by the common frequency-modulation wave-vector amplitude and the difference in the two
-atom--mirror distances. With $\delta k=2\pi\Delta\nu_{780}/c$ and
-$\Delta L=L_{\mathrm{Master}}-L_{\mathrm{Slave}}$, the signed quadrature is
+settling delay. For each Slave, every matched shot is normalized using that node's own
+atom--mirror distance before subtraction. With
+$\delta k=2\pi\Delta\nu_{780}/c$, the signed quadrature is
 \begin{equation}
  \Delta S_\psi(f)=\operatorname{mean}_{q}\left[
- \frac{\Phi_{\mathrm{Master},\psi,q}-\Phi_{\mathrm{Slave},\psi,q}}
- {2\delta k\Delta L}\right],\qquad \psi\in\{0^\circ,90^\circ\}.
+ \frac{\Phi_{\mathrm{Master},\psi,q}}{2\delta kL_{\mathrm{Master}}}
+ -\frac{\Phi_{\mathrm{Slave},\psi,q}}{2\delta kL_{\mathrm{Slave}}}
+ \right],\qquad \psi\in\{0^\circ,90^\circ\}.
 \end{equation}
 and the differential magnitude is
 \begin{equation}
@@ -1400,6 +1400,12 @@ The Archive page submits the selected nodes and controls to the endpoint
 \end{center}
 The server reads the paired raw signal fields and both effective calibrations from the
 selected archive.
+
+For a Transfer Function SYNC archive, the optimizer additionally requires one TTI carrier
+frequency and one generator phase (ang{0} or ang{90}). Only paired shots matching both
+values contribute. The two generator phases are never mixed in an Allan calculation,
+because they represent distinct response quadratures. At least eight valid paired shots
+are required for the selected frequency--phase subset.
 
 \subsection{Objective and constraints}
 The selectable SYNC metric $m(d)$ is

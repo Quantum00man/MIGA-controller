@@ -301,6 +301,8 @@ def optimize_sync_phase_calibrations(
             {
                 "shot": item.get("shot"),
                 "p0": item.get("p0"),
+                "transfer_frequency_hz": item.get("transfer_frequency_hz"),
+                "transfer_phase_deg": item.get("transfer_phase_deg"),
                 "before_rad": float(before_series[index]) if np.isfinite(before_series[index]) else None,
                 "after_rad": float(after_series[index]) if np.isfinite(after_series[index]) else None,
                 "reference_before_rad": float(reference_before_series[index]) if np.isfinite(reference_before_series[index]) else None,

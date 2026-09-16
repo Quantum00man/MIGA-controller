@@ -1861,6 +1861,8 @@
                                         <span class="badge bg-light text-dark border">{{ syncArchiveNodeLabel(syncPhaseTargetNode) }} − {{ syncArchiveNodeLabel(syncPhaseReferenceNode) }}</span>
                                     </div>
                                     <div class="row g-2 align-items-end">
+                                        <div v-if="isTransferFunctionArchive()" class="col-sm-6 col-lg-2"><label class="form-label-small">TTI FREQUENCY (HZ)</label><select class="form-select form-select-sm" v-model.number="syncPhaseCalibrationOptimization.transferFrequencyHz"><option v-for="frequency in syncTransferFunctionOptimizationFrequencies()" :key="frequency" :value="frequency">{{ Number(frequency).toPrecision(9) }}</option></select></div>
+                                        <div v-if="isTransferFunctionArchive()" class="col-sm-6 col-lg-2"><label class="form-label-small">GENERATOR PHASE</label><select class="form-select form-select-sm" v-model.number="syncPhaseCalibrationOptimization.transferPhaseDeg"><option :value="0">0°</option><option :value="90">90°</option></select></div>
                                         <div class="col-sm-6 col-lg-2"><label class="form-label-small">OBJECTIVE</label><select class="form-select form-select-sm" v-model="syncPhaseCalibrationOptimization.objective"><option value="allan">Allan n=1</option><option value="std">Standard deviation</option><option value="combined">Combined</option></select></div>
                                         <div class="col-sm-6 col-lg-2" v-if="syncPhaseCalibrationOptimization.objective === 'combined'"><label class="form-label-small">ALLAN WEIGHT</label><input type="number" class="form-control form-control-sm" min="0" max="1" step="0.05" v-model.number="syncPhaseCalibrationOptimization.combinedAllanWeight"></div>
                                         <div class="col-sm-6 col-lg-2"><label class="form-label-small">A/C BOUNDS (%)</label><input type="number" class="form-control form-control-sm" min="0.1" max="50" step="1" v-model.number="syncPhaseCalibrationOptimization.boundPercent"></div>
@@ -1868,7 +1870,7 @@
                                         <div class="col-sm-6 col-lg-2"><label class="form-label-small">PRIOR WEIGHT</label><input type="number" class="form-control form-control-sm" min="0" max="1000" step="0.01" v-model.number="syncPhaseCalibrationOptimization.priorWeight"></div>
                                         <div class="col-sm-6 col-lg-2"><button class="btn btn-primary btn-sm w-100 fw-bold" @click="runSyncPhaseCalibrationOptimization" :disabled="syncPhaseCalibrationOptimization.loading"><span v-if="syncPhaseCalibrationOptimization.loading" class="spinner-border spinner-border-sm me-1"></span>{{ syncPhaseCalibrationOptimization.loading ? 'Optimizing…' : 'Optimize A/C' }}</button></div>
                                     </div>
-                                    <div class="form-text">Uses the current P0 and actual shot-index ranges. Larger fringe/prior weights keep A and C closer to the original calibration.</div>
+                                    <div class="form-text">{{ isTransferFunctionArchive() ? 'Uses one selected TTI frequency and generator phase, plus the actual shot-index range. Allan never combines 0° and 90° shots.' : 'Uses the current P0 and actual shot-index ranges.' }} Larger fringe/prior weights keep A and C closer to the original calibration.</div>
                                     <div v-if="syncPhaseCalibrationOptimization.error" class="alert alert-danger small py-2 mt-2 mb-0">{{ syncPhaseCalibrationOptimization.error }}</div>
                                     <div v-if="syncPhaseCalibrationOptimization.message" class="alert alert-success small py-2 mt-2 mb-0">{{ syncPhaseCalibrationOptimization.message }}</div>
                                     <div v-if="syncPhaseCalibrationOptimization.saved.length" class="row g-2 align-items-end mt-1">
@@ -1890,6 +1892,7 @@
                                                 <input v-if="!syncPhaseCalibrationOptimization.result.id" type="text" class="form-control form-control-sm" style="width:190px" maxlength="120" placeholder="Optional result name" v-model.trim="syncPhaseCalibrationOptimization.name">
                                                 <button v-if="!syncPhaseCalibrationOptimization.result.id" class="btn btn-success btn-sm" @click="saveSyncPhaseCalibrationOptimization" :disabled="syncPhaseCalibrationOptimization.saving">{{ syncPhaseCalibrationOptimization.saving ? 'Saving…' : 'Save result' }}</button>
                                                 <span v-else class="badge bg-success align-self-center">Saved separately from original archive data</span>
+                                                <button class="btn btn-warning btn-sm" @click="applySyncPhaseCalibrationOptimization" :disabled="syncPhaseCalibrationOptimization.applying">{{ syncPhaseCalibrationOptimization.applying ? 'Applying…' : 'Apply A/C to Archive' }}</button>
                                                 <button class="btn btn-outline-secondary btn-sm" @click="resetSyncPhaseCalibrationOptimizationPreview">Reset preview</button>
                                             </div>
                                         </div>
@@ -2617,7 +2620,8 @@
                     syncPhaseCalibrationOptimization: {
                         objective: 'allan', combinedAllanWeight: 0.5, boundPercent: 10,
                         fringeWeight: 1, priorWeight: 0.05,
-                        loading: false, saving: false, deleting: false,
+                        transferFrequencyHz: null, transferPhaseDeg: 0,
+                        loading: false, saving: false, applying: false, deleting: false,
                         error: '', message: '', result: null, name: '',
                         saved: [], selectedId: '',
                     },
@@ -6606,6 +6610,18 @@
                     const scale = this.phaseUnit === 'mrad' ? 1000 : 1;
                     return `${(parsed * scale).toPrecision(6)} ${this.phaseUnit}`;
                 },
+                syncTransferFunctionOptimizationFrequencies() {
+                    const values = new Set();
+                    this.syncArchivePairs().forEach(pair => {
+                        const master = pair?.master || {};
+                        const slave = pair?.slave || {};
+                        const masterFrequency = Number(master.transfer_frequency_hz);
+                        const slaveFrequency = Number(slave.transfer_frequency_hz);
+                        if (Number.isFinite(masterFrequency) && Number.isFinite(slaveFrequency)
+                            && Math.abs(masterFrequency - slaveFrequency) <= 1e-9) values.add(masterFrequency);
+                    });
+                    return [...values].sort((a, b) => a - b);
+                },
                 clearSyncPhaseCalibrationOptimization() {
                     this.syncPhaseCalibrationOptimization.error = '';
                     this.syncPhaseCalibrationOptimization.message = '';
@@ -6622,6 +6638,18 @@
                     const boundPercent = Math.max(0.1, Math.min(50, Number(state.boundPercent) || 10));
                     const allanWeight = Math.max(0, Math.min(1, Number(state.combinedAllanWeight) || 0));
                     state.boundPercent = boundPercent; state.combinedAllanWeight = allanWeight;
+                    const transferFunction = this.isTransferFunctionArchive();
+                    if (transferFunction && !Number.isFinite(Number(state.transferFrequencyHz))) {
+                        const frequencies = this.syncTransferFunctionOptimizationFrequencies();
+                        if (frequencies.length) state.transferFrequencyHz = frequencies[0];
+                    }
+                    const transferFrequencyHz = Number(state.transferFrequencyHz);
+                    const transferPhaseDeg = Number(state.transferPhaseDeg);
+                    if (transferFunction && (!Number.isFinite(transferFrequencyHz) || ![0, 90].includes(transferPhaseDeg))) {
+                        state.loading = false;
+                        state.error = 'Select one finite TTI frequency and one generator phase (0° or 90°).';
+                        return;
+                    }
                     try {
                         const response = await axios.post('/archive/sync-phase-calibration-optimize', {
                             year: this.selectedYear, month: this.selectedMonth, day: this.selectedDay, run_id: this.selectedRun,
@@ -6630,10 +6658,12 @@
                             parameter_bound_fraction: boundPercent / 100,
                             fringe_weight: Math.max(0, Number(state.fringeWeight) || 0),
                             prior_weight: Math.max(0, Number(state.priorWeight) || 0),
-                            p0_min: this.syncPhaseP0Min !== null && this.syncPhaseP0Min !== '' && Number.isFinite(Number(this.syncPhaseP0Min)) ? Number(this.syncPhaseP0Min) : null,
-                            p0_max: this.syncPhaseP0Max !== null && this.syncPhaseP0Max !== '' && Number.isFinite(Number(this.syncPhaseP0Max)) ? Number(this.syncPhaseP0Max) : null,
+                            p0_min: !transferFunction && this.syncPhaseP0Min !== null && this.syncPhaseP0Min !== '' && Number.isFinite(Number(this.syncPhaseP0Min)) ? Number(this.syncPhaseP0Min) : null,
+                            p0_max: !transferFunction && this.syncPhaseP0Max !== null && this.syncPhaseP0Max !== '' && Number.isFinite(Number(this.syncPhaseP0Max)) ? Number(this.syncPhaseP0Max) : null,
                             shot_index_min: this.syncPhaseShotMin !== null && this.syncPhaseShotMin !== '' && Number.isFinite(Number(this.syncPhaseShotMin)) ? Math.trunc(Number(this.syncPhaseShotMin)) : null,
                             shot_index_max: this.syncPhaseShotMax !== null && this.syncPhaseShotMax !== '' && Number.isFinite(Number(this.syncPhaseShotMax)) ? Math.trunc(Number(this.syncPhaseShotMax)) : null,
+                            transfer_frequency_hz: transferFunction ? transferFrequencyHz : null,
+                            transfer_phase_deg: transferFunction ? transferPhaseDeg : null,
                         });
                         state.result = response.data;
                         await this.$nextTick();
@@ -6678,6 +6708,25 @@
                         state.saving = false;
                     }
                 },
+                async applySyncPhaseCalibrationOptimization() {
+                    const state = this.syncPhaseCalibrationOptimization;
+                    if (!state.result || state.applying) return;
+                    state.applying = true; state.error = ''; state.message = '';
+                    try {
+                        const response = await axios.post('/archive/sync-phase-calibration-optimization/apply', {
+                            year: this.selectedYear, month: this.selectedMonth, day: this.selectedDay, run_id: this.selectedRun,
+                            result: state.result,
+                        });
+                        await this.loadRun(this.syncArchiveNodeSource || 'master');
+                        state.message = response.data?.sync?.status === 'synced'
+                            ? 'Optimized A/C applied to this Archive and synchronized to the SYNC nodes.'
+                            : 'Optimized A/C applied to this Archive. SYNC metadata distribution is pending.';
+                    } catch (error) {
+                        state.error = error.response?.data?.detail || error.message || 'Unable to apply optimized A/C to this Archive.';
+                    } finally {
+                        state.applying = false;
+                    }
+                },
                 async applySavedSyncPhaseCalibrationOptimization() {
                     const saved = this.selectedSavedSyncPhaseCalibrationOptimization();
                     if (!saved) return;
@@ -6708,6 +6757,12 @@
                     }
                     if (settings.shot_index_max != null && Number.isFinite(Number(settings.shot_index_max))) {
                         this.syncPhaseShotMax = Math.trunc(Number(settings.shot_index_max)); this.syncPhaseShotMaxInput = String(this.syncPhaseShotMax);
+                    }
+                    if (settings.transfer_frequency_hz != null && Number.isFinite(Number(settings.transfer_frequency_hz))) {
+                        state.transferFrequencyHz = Number(settings.transfer_frequency_hz);
+                    }
+                    if ([0, 90].includes(Number(settings.transfer_phase_deg))) {
+                        state.transferPhaseDeg = Number(settings.transfer_phase_deg);
                     }
                     state.message = 'Saved optimization applied as a preview. Original archive data remain unchanged.';
                     await this.$nextTick();
@@ -7324,13 +7379,13 @@
                     const selectedSlave = String(this.syncArchiveSlaveId || '');
                     const saved = Array.isArray(this.syncManifest?.transfer_function_differential_summary)
                         ? this.syncManifest.transfer_function_differential_summary : [];
-                    if (saved.length && Number(this.syncManifest?.transfer_function_differential_formula_version) >= 3) {
+                    if (saved.length && Number(this.syncManifest?.transfer_function_differential_formula_version) >= 4 && !this.syncArchiveHasPhaseOverrides()) {
                         return saved.filter(row => !selectedSlave || String(row.slave_node_id || '') === selectedSlave)
                             .slice().sort((a, b) => Number(a.frequency_hz) - Number(b.frequency_hz));
                     }
 
-                    // Rebuild legacy summaries from paired shots so pre-v2 archives
-                    // use the paired phase-difference baseline normalization too.
+                    // Rebuild legacy summaries from paired shots using each node's
+                    // local Bragg-phase normalization before the paired subtraction.
                     const c = 299792458;
                     const groups = new Map();
                     this.syncArchivePairs().forEach(pair => {
@@ -7340,18 +7395,22 @@
                         const frequency = Number(master.transfer_frequency_hz ?? slave.transfer_frequency_hz);
                         const phase = Number(master.transfer_phase_deg ?? slave.transfer_phase_deg);
                         if (!Number.isFinite(frequency) || ![0, 90].includes(phase)) return;
-                        const masterPhase = Number(master.interferometer_phase);
-                        const slavePhase = Number(slave.interferometer_phase);
-                        const modulationHz = Number(master.transfer_frequency_modulation_mhz) * 1e6;
-                        const baseline = Number(master.transfer_atom_mirror_distance_m)
-                            - Number(slave.transfer_atom_mirror_distance_m);
-                        const denominator = 4 * Math.PI * modulationHz * baseline / c;
-                        if (![masterPhase, slavePhase, denominator].every(Number.isFinite) || denominator === 0) return;
+                        const normalized = record => {
+                            const phaseValue = Number(record.interferometer_phase);
+                            const modulationHz = Number(record.transfer_frequency_modulation_mhz) * 1e6;
+                            const distance = Number(record.transfer_atom_mirror_distance_m);
+                            const denominator = 4 * Math.PI * modulationHz * distance / c;
+                            return Number.isFinite(phaseValue) && Number.isFinite(denominator) && denominator !== 0
+                                ? phaseValue / denominator : null;
+                        };
+                        const masterS = normalized(master);
+                        const slaveS = normalized(slave);
+                        if (masterS === null || slaveS === null) return;
                         const slaveId = String(pair.slave_node_id || slave.sync_node_id || 'slave');
                         if (selectedSlave && slaveId !== selectedSlave) return;
                         const key = `${slaveId}:${frequency.toPrecision(15)}`;
                         const group = groups.get(key) || { slave_node_id: slaveId, frequency_hz: frequency, values: { 0: [], 90: [] } };
-                        group.values[phase].push((masterPhase - slavePhase) / denominator);
+                        group.values[phase].push(masterS - slaveS);
                         groups.set(key, group);
                     });
                     const statistics = values => {
@@ -7381,6 +7440,9 @@
                             quadrature_complete: zero.mean !== null && ninety.mean !== null,
                         };
                     });
+                },
+                syncArchiveHasPhaseOverrides() {
+                    return Object.values(this.archivePhaseReferenceContexts || {}).some(context => context?.has_override === true);
                 },
                 async downloadSyncTransferFunctionDifferentialCSV() {
                     const rows = this.syncArchiveTransferDifferentialRows();

@@ -673,6 +673,76 @@ class DataLoader:
         temporary.replace(path)
         return saved
 
+    def apply_sync_phase_calibration_optimization(
+        self,
+        year: str,
+        month: str,
+        day: str,
+        run_id: str,
+        optimization_payload: Dict[str, Any],
+        current_phase_calibration: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Dict[str, Any]]:
+        """Apply optimized A/C values as reversible, archive-local node overrides."""
+        root_run_dir = self._get_run_dir(year, month, day, run_id)
+        if not (root_run_dir / "sync_manifest.json").is_file():
+            raise ValueError("Phase calibration optimizations can only be applied to a SYNC archive")
+        payload = dict(optimization_payload or {})
+        reference_node_id = str(payload.get("reference_node_id") or "").strip()
+        target_node_id = str(payload.get("target_node_id") or "").strip()
+        if not reference_node_id or not target_node_id or reference_node_id == target_node_id:
+            raise ValueError("The optimization must identify two different SYNC nodes")
+        optimized = {
+            reference_node_id: payload.get("optimized_reference_calibration"),
+            target_node_id: payload.get("optimized_target_calibration"),
+        }
+        if not all(isinstance(calibration, dict) for calibration in optimized.values()):
+            raise ValueError("The optimization does not contain both optimized node calibrations")
+        contexts = self.archive_phase_reference_contexts(
+            year, month, day, run_id, current_phase_calibration=current_phase_calibration
+        )
+        store = self._read_archive_phase_reference_store(root_run_dir)
+        updated_at = datetime.now(timezone.utc).isoformat()
+        selected_settings = dict(payload.get("settings") or {})
+        for node_id, optimized_calibration in optimized.items():
+            context = contexts.get(node_id) or {}
+            original = deepcopy(context.get("original_calibration"))
+            if not isinstance(original, dict):
+                raise ValueError(f"No saved fringe calibration is available for node {node_id}")
+            calibration = deepcopy(optimized_calibration)
+            parameters = calibration.get("parameter_values") or {}
+            try:
+                amplitude = float(parameters.get("A"))
+                offset = float(parameters.get("C"))
+            except (TypeError, ValueError):
+                raise ValueError(f"Optimized calibration for node {node_id} has invalid A/C values")
+            if not math.isfinite(amplitude) or amplitude <= 0 or not math.isfinite(offset):
+                raise ValueError(f"Optimized calibration for node {node_id} has invalid A/C values")
+            calibration["archive_reference_override"] = True
+            calibration["archive_reference_node_id"] = node_id
+            calibration["archive_reference_source"] = "sync_ac_optimization"
+            calibration["sync_ac_optimization"] = {
+                "reference_node_id": reference_node_id,
+                "target_node_id": target_node_id,
+                "transfer_frequency_hz": selected_settings.get("transfer_frequency_hz"),
+                "transfer_phase_deg": selected_settings.get("transfer_phase_deg"),
+                "applied_at": updated_at,
+            }
+            store.setdefault("original_calibrations", {}).setdefault(node_id, original)
+            store.setdefault("overrides", {})[node_id] = {
+                "node_id": node_id,
+                "updated_at": updated_at,
+                "calibration": calibration,
+            }
+        store["revision"] = int(store.get("revision") or 0) + 1
+        store["updated_at"] = updated_at
+        store["updated_by"] = "sync_ac_optimization"
+        store["sync_status"] = "pending"
+        store["sync_message"] = "Waiting for SYNC phase metadata distribution"
+        self._write_archive_phase_reference_store(root_run_dir, store)
+        return self.archive_phase_reference_contexts(
+            year, month, day, run_id, current_phase_calibration=current_phase_calibration
+        )
+
     def delete_sync_phase_calibration_optimization(
         self, year: str, month: str, day: str, run_id: str, optimization_id: str
     ) -> bool:

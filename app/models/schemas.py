@@ -913,6 +913,8 @@ class ArchiveSyncPhaseCalibrationOptimizeRequest(BaseModel):
     p0_max: Optional[float] = Field(None)
     shot_index_min: Optional[int] = Field(None)
     shot_index_max: Optional[int] = Field(None)
+    transfer_frequency_hz: Optional[float] = Field(None)
+    transfer_phase_deg: Optional[float] = Field(None)
 
 
 class ArchiveSyncPhaseCalibrationSaveRequest(BaseModel):
@@ -921,6 +923,14 @@ class ArchiveSyncPhaseCalibrationSaveRequest(BaseModel):
     day: str
     run_id: str
     name: str = Field("")
+    result: Dict[str, Any]
+
+
+class ArchiveSyncPhaseCalibrationApplyRequest(BaseModel):
+    year: str
+    month: str
+    day: str
+    run_id: str
     result: Dict[str, Any]
 
 

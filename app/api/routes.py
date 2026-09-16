@@ -1,6 +1,7 @@
 import base64
 import ipaddress
 import json
+import math
 import os
 import shutil
 import tempfile
@@ -90,6 +91,7 @@ from app.models.schemas import (
     AnalysisParametersApplyRequest,
     ArchiveScanFitRequest,
     ArchiveSyncDifferentialFitRequest,
+    ArchiveSyncPhaseCalibrationApplyRequest,
     ArchiveSyncPhaseCalibrationOptimizeRequest,
     ArchiveSyncPhaseCalibrationSaveRequest,
     ArchiveLabPlotExportRequest,
@@ -2341,6 +2343,13 @@ async def optimize_archive_sync_phase_calibrations(req: ArchiveSyncPhaseCalibrat
                 return None
             return result if np.isfinite(result) else None
 
+        def transfer_value(row: Dict[str, Any], field: str) -> Optional[float]:
+            try:
+                value = float(row.get(field))
+            except (TypeError, ValueError):
+                return None
+            return value if np.isfinite(value) else None
+
         reference_rows = rows_for(req.reference_node_id)
         target_rows = rows_for(req.target_node_id)
         reference_by_shot = {shot_number(row, index): row for index, row in enumerate(reference_rows)}
@@ -2354,18 +2363,40 @@ async def optimize_archive_sync_phase_calibrations(req: ArchiveSyncPhaseCalibrat
                 continue
             reference_p0 = p0_value(reference_row)
             target_p0 = p0_value(target_row)
-            if reference_p0 is None or target_p0 is None:
-                continue
-            if abs(reference_p0 - target_p0) > 1e-9 * max(1.0, abs(reference_p0), abs(target_p0)):
-                continue
-            if req.p0_min is not None and target_p0 < req.p0_min:
-                continue
-            if req.p0_max is not None and target_p0 > req.p0_max:
-                continue
+            transfer_selection = req.transfer_frequency_hz is not None
+            if not transfer_selection:
+                if reference_p0 is None or target_p0 is None:
+                    continue
+                if abs(reference_p0 - target_p0) > 1e-9 * max(1.0, abs(reference_p0), abs(target_p0)):
+                    continue
+                if req.p0_min is not None and target_p0 < req.p0_min:
+                    continue
+                if req.p0_max is not None and target_p0 > req.p0_max:
+                    continue
             if req.shot_index_min is not None and shot < req.shot_index_min:
                 continue
             if req.shot_index_max is not None and shot > req.shot_index_max:
                 continue
+            if req.transfer_frequency_hz is not None:
+                reference_frequency = transfer_value(reference_row, "transfer_frequency_hz")
+                target_frequency = transfer_value(target_row, "transfer_frequency_hz")
+                if reference_frequency is None or target_frequency is None:
+                    continue
+                if not (
+                    math.isclose(reference_frequency, target_frequency, abs_tol=1e-9)
+                    and math.isclose(target_frequency, req.transfer_frequency_hz, abs_tol=1e-9)
+                ):
+                    continue
+            if req.transfer_phase_deg is not None:
+                reference_phase = transfer_value(reference_row, "transfer_phase_deg")
+                target_phase = transfer_value(target_row, "transfer_phase_deg")
+                if reference_phase is None or target_phase is None:
+                    continue
+                if not (
+                    math.isclose(reference_phase, target_phase, abs_tol=1e-9)
+                    and math.isclose(target_phase, req.transfer_phase_deg, abs_tol=1e-9)
+                ):
+                    continue
             try:
                 reference_signal = float(reference_row.get(reference_field))
                 target_signal = float(target_row.get(target_field))
@@ -2376,6 +2407,8 @@ async def optimize_archive_sync_phase_calibrations(req: ArchiveSyncPhaseCalibrat
             pairs.append({
                 "shot": shot,
                 "p0": target_p0,
+                "transfer_frequency_hz": transfer_value(target_row, "transfer_frequency_hz"),
+                "transfer_phase_deg": transfer_value(target_row, "transfer_phase_deg"),
                 "reference_signal": reference_signal,
                 "target_signal": target_signal,
             })
@@ -2406,6 +2439,8 @@ async def optimize_archive_sync_phase_calibrations(req: ArchiveSyncPhaseCalibrat
             "p0_max": req.p0_max,
             "shot_index_min": req.shot_index_min,
             "shot_index_max": req.shot_index_max,
+            "transfer_frequency_hz": req.transfer_frequency_hz,
+            "transfer_phase_deg": req.transfer_phase_deg,
         }
         return result
     except FileNotFoundError as exc:
@@ -2428,6 +2463,31 @@ async def save_archive_sync_phase_calibration_optimization(
             req.result,
             req.name,
         )
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.post("/archive/sync-phase-calibration-optimization/apply")
+async def apply_archive_sync_phase_calibration_optimization(
+    req: ArchiveSyncPhaseCalibrationApplyRequest,
+    request: Request,
+):
+    try:
+        contexts = await run_in_threadpool(
+            data_loader.apply_sync_phase_calibration_optimization,
+            req.year,
+            req.month,
+            req.day,
+            req.run_id,
+            req.result,
+            manager.get_active_bragg_phase_calibration(),
+        )
+        sync_result = await _synchronize_archive_phase_metadata(
+            req.year, req.month, req.day, req.run_id, request
+        )
+        return {"status": "success", "contexts": contexts, "sync": sync_result}
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc))
     except ValueError as exc:
