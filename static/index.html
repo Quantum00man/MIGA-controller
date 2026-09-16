@@ -1044,6 +1044,9 @@
                             Live 1D quadrature scan. {{ config.transfer_phase_scan_mode === 'frequency_interleaved'
                                 ? 'Measures every selected phase at each frequency before advancing.'
                                 : 'Completes the full frequency sweep at one phase before starting the next.' }}
+                            Frequency order: {{ config.transfer_frequency_order === 'symmetric_converging'
+                                ? 'alternate the two endpoints and converge toward the center.'
+                                : 'scan from Start to Stop.' }}
                         </div>
                         <div class="row g-2">
                             <div class="col-4">
@@ -1460,6 +1463,14 @@
                                     <option value="frequency_interleaved">Alternate phases at each frequency</option>
                                 </select>
                             </div>
+                            <div class="col-md-5">
+                                <label class="form-label small text-muted mb-1" for="transferFrequencyOrder">Frequency order</label>
+                                <select id="transferFrequencyOrder" class="form-select form-select-sm"
+                                    v-model="config.transfer_frequency_order">
+                                    <option value="sequential">Start to Stop</option>
+                                    <option value="symmetric_converging">Endpoints toward center</option>
+                                </select>
+                            </div>
                             <div class="col-md-5 d-flex align-items-end">
                                 <div class="form-check border rounded px-3 py-2 w-100 bg-white">
                                     <input id="transferControlOutput" class="form-check-input ms-0 me-2" type="checkbox"
@@ -1789,6 +1800,7 @@
                         transfer_settling_time_s: 5,
                         transfer_phase_degrees: [0, 90],
                         transfer_phase_scan_mode: 'phase_blocks',
+                        transfer_frequency_order: 'sequential',
                         transfer_control_output: false,
                         transfer_calibrate_zero_phase: false,
                         transfer_zero_phase_repeats: 50,
@@ -3802,6 +3814,8 @@ loadScheduledTaskIntoEditor(taskId) {
                                 : [0, 90];
                             this.config.transfer_phase_scan_mode = ['phase_blocks', 'frequency_interleaved'].includes(this.config.transfer_phase_scan_mode)
                                 ? this.config.transfer_phase_scan_mode : 'phase_blocks';
+                            this.config.transfer_frequency_order = ['sequential', 'symmetric_converging'].includes(this.config.transfer_frequency_order)
+                                ? this.config.transfer_frequency_order : 'sequential';
                             this.config.transfer_control_output = this.config.transfer_control_output === true;
     this.config.scan_dimensions = this.resolveScanDimensionsFromConfig(this.config);
     this.config.dim2_enabled = this.config.scan_dimensions >= 2;
@@ -4216,6 +4230,8 @@ finishScheduledRun(finalStatus = 'IDLE') {
                         payload.transfer_phase_degrees = phases;
                         payload.transfer_phase_scan_mode = ['phase_blocks', 'frequency_interleaved'].includes(payload.transfer_phase_scan_mode)
                             ? payload.transfer_phase_scan_mode : 'phase_blocks';
+                        payload.transfer_frequency_order = ['sequential', 'symmetric_converging'].includes(payload.transfer_frequency_order)
+                            ? payload.transfer_frequency_order : 'sequential';
                         payload.transfer_control_output = payload.transfer_control_output === true;
                         payload.transfer_calibrate_zero_phase = payload.transfer_calibrate_zero_phase === true;
                         payload.transfer_zero_phase_repeats = Math.round(Number(payload.transfer_zero_phase_repeats));

@@ -941,6 +941,16 @@ frequency points (default interval: 10). It requires \ui{frequency-interleaved} 
 ordering, so that the \ang{0} and \ang{90} acquisitions for one frequency always use the
 same phase-zero block. The final incomplete interval reuses its most recent reference.
 
+The \ui{Frequency order} selector controls only the order in which the configured
+frequency points are visited; it does not change the frequencies included in the final
+response. \ui{Start to Stop} uses the conventional monotonic order. \ui{Endpoints toward
+center} visits the first configured frequency, then the last, then the second, then the
+second-to-last, and so on until reaching the center. For example,
+\( [f_1,f_2,f_3,f_4,f_5] \) is acquired as
+\( [f_1,f_5,f_2,f_4,f_3] \). With frequency-interleaved phases, each visited frequency
+still completes its \ang{0} and \ang{90} measurements before moving on, and periodic
+zero-phase calibration counts these completed frequency points in the selected order.
+
 The Settings tab contains three independent commissioning actions:
 \begin{itemize}
   \item \ui{Test Connection} opens the configured socket and verifies that \code{*IDN?}

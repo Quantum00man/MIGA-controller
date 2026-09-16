@@ -90,6 +90,7 @@ class ScanConfig(BaseModel):
     transfer_settling_time_s: float = Field(5.0, ge=0.0, le=3600.0)
     transfer_phase_degrees: List[float] = Field(default_factory=lambda: [0.0, 90.0])
     transfer_phase_scan_mode: str = Field("phase_blocks")
+    transfer_frequency_order: str = Field("sequential")
     transfer_control_output: bool = Field(False)
     transfer_calibrate_zero_phase: bool = Field(False)
     transfer_zero_phase_repeats: int = Field(50, ge=2, le=100000)
@@ -137,6 +138,13 @@ class ScanConfig(BaseModel):
             raise ValueError(
                 "Transfer Function phase scan mode must be phase_blocks or frequency_interleaved"
             )
+        return normalized
+
+    @validator("transfer_frequency_order")
+    def validate_transfer_frequency_order(cls, value):
+        normalized = str(value or "sequential").strip().lower()
+        if normalized not in {"sequential", "symmetric_converging"}:
+            raise ValueError("Transfer Function frequency order must be sequential or symmetric_converging")
         return normalized
 
     @validator("ac_stark_raman_group")

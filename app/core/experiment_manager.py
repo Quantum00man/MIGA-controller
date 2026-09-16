@@ -1282,6 +1282,9 @@ class ExperimentManager:
             raise ValueError(
                 "Transfer Function phase scan mode must be phase_blocks or frequency_interleaved"
             )
+        frequency_order = str(scan_config.get("transfer_frequency_order") or "sequential").strip().lower()
+        if frequency_order not in {"sequential", "symmetric_converging"}:
+            raise ValueError("Transfer Function frequency order must be sequential or symmetric_converging")
         control_output = bool(scan_config.get("transfer_control_output", False))
         calibrate_zero_phase = bool(scan_config.get("transfer_calibrate_zero_phase", False))
         zero_phase_repeats = int(scan_config.get("transfer_zero_phase_repeats", 50))
@@ -1309,6 +1312,16 @@ class ExperimentManager:
             current += effective_step
         if not frequencies:
             frequencies = [round(start, 6)]
+        if frequency_order == "symmetric_converging":
+            ordered_frequencies: List[float] = []
+            left, right = 0, len(frequencies) - 1
+            while left <= right:
+                ordered_frequencies.append(frequencies[left])
+                if left != right:
+                    ordered_frequencies.append(frequencies[right])
+                left += 1
+                right -= 1
+            frequencies = ordered_frequencies
 
         parameters: List[Dict[str, Any]] = []
         def append_zero_phase_baseline(block_id: int, frequency: float) -> None:
@@ -1352,6 +1365,7 @@ class ExperimentManager:
                         "transfer_phase_count": len(phase_degrees),
                         "transfer_phase_degrees": phase_degrees,
                         "transfer_phase_scan_mode": phase_scan_mode,
+                        "transfer_frequency_order": frequency_order,
                         "transfer_control_output": control_output,
                         "transfer_zero_phase_block_id": (
                             (frequency_index - 1) // zero_phase_frequency_interval
@@ -1388,6 +1402,7 @@ class ExperimentManager:
         scan_config["transfer_phase_noise_sigma_mrad"] = phase_noise_sigma_mrad
         scan_config["transfer_phase_degrees"] = phase_degrees
         scan_config["transfer_phase_scan_mode"] = phase_scan_mode
+        scan_config["transfer_frequency_order"] = frequency_order
         scan_config["transfer_control_output"] = control_output
         scan_config["transfer_calibrate_zero_phase"] = calibrate_zero_phase
         scan_config["transfer_zero_phase_repeats"] = zero_phase_repeats
