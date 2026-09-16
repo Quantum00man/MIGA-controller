@@ -282,6 +282,22 @@ class TransferFunctionPlanTests(unittest.TestCase):
         self.assertEqual([item["metadata"]["transfer_zero_phase_repeat"] for item in baseline], [1, 2, 3])
         self.assertEqual(len(plan), 7)
 
+    def test_plan_inserts_periodic_zero_phase_after_complete_frequency_points(self):
+        config = {
+            "scan_dimensions": 1, "parameter_source": "classic", "mode": "transfer_function",
+            "randomize": False, "transfer_frequency_start_hz": 100, "transfer_frequency_stop_hz": 300,
+            "transfer_frequency_step_hz": 100, "transfer_repeats": 2,
+            "transfer_phase_degrees": [0, 90], "transfer_phase_scan_mode": "frequency_interleaved",
+            "transfer_control_output": True, "transfer_calibrate_zero_phase": True,
+            "transfer_zero_phase_repeats": 3, "transfer_periodic_zero_phase": True,
+            "transfer_zero_phase_frequency_interval": 2,
+        }
+        plan = self.manager._build_transfer_function_execution(config)
+        baseline_indices = [index for index, item in enumerate(plan) if item["metadata"].get("transfer_zero_phase_baseline")]
+        self.assertEqual(baseline_indices, [0, 1, 2, 11, 12, 13])
+        self.assertEqual([plan[index]["metadata"]["transfer_zero_phase_block_id"] for index in baseline_indices], [0, 0, 0, 1, 1, 1])
+        self.assertEqual(len(plan), 18)
+
     def test_invalid_phase_scan_mode_is_rejected(self):
         config = {
             "scan_dimensions": 1,

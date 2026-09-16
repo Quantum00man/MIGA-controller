@@ -1289,6 +1289,12 @@ class ExperimentManager:
             raise ValueError("Transfer Function zero-phase calibration requires TTI OUTPUT control")
         if zero_phase_repeats < 2:
             raise ValueError("Transfer Function zero-phase calibration requires at least 2 repeats")
+        periodic_zero_phase = bool(scan_config.get("transfer_periodic_zero_phase", False))
+        zero_phase_frequency_interval = int(scan_config.get("transfer_zero_phase_frequency_interval", 10))
+        if periodic_zero_phase and (not calibrate_zero_phase or phase_scan_mode != "frequency_interleaved"):
+            raise ValueError("Periodic zero-phase calibration requires initial calibration and frequency-interleaved phases")
+        if zero_phase_frequency_interval < 1:
+            raise ValueError("Periodic zero-phase calibration interval must be at least one frequency")
 
         direction = 1.0 if stop >= start else -1.0
         effective_step = abs(step) * direction
@@ -1305,19 +1311,22 @@ class ExperimentManager:
             frequencies = [round(start, 6)]
 
         parameters: List[Dict[str, Any]] = []
-        if calibrate_zero_phase:
+        def append_zero_phase_baseline(block_id: int, frequency: float) -> None:
             for repeat_index in range(1, zero_phase_repeats + 1):
                 parameters.append({
                     "sequence_parameters": [],
                     "metadata": {
-                        "display_parameters": [frequencies[0]],
-                        "transfer_frequency_hz": frequencies[0],
+                        "display_parameters": [frequency],
+                        "transfer_frequency_hz": frequency,
                         "transfer_phase_deg": phase_degrees[0],
                         "transfer_zero_phase_baseline": True,
+                        "transfer_zero_phase_block_id": block_id,
                         "transfer_zero_phase_repeat": repeat_index,
                         "transfer_zero_phase_repeats": zero_phase_repeats,
                     },
                 })
+        if calibrate_zero_phase:
+            append_zero_phase_baseline(0, frequencies[0])
 
         def append_frequency_phase_block(
             phase_index: int,
@@ -1344,6 +1353,10 @@ class ExperimentManager:
                         "transfer_phase_degrees": phase_degrees,
                         "transfer_phase_scan_mode": phase_scan_mode,
                         "transfer_control_output": control_output,
+                        "transfer_zero_phase_block_id": (
+                            (frequency_index - 1) // zero_phase_frequency_interval
+                            if periodic_zero_phase else 0
+                        ),
                     },
                 })
 
@@ -1353,6 +1366,8 @@ class ExperimentManager:
                     append_frequency_phase_block(
                         phase_index, phase_deg, frequency_index, frequency
                     )
+                if periodic_zero_phase and frequency_index % zero_phase_frequency_interval == 0 and frequency_index < len(frequencies):
+                    append_zero_phase_baseline(frequency_index // zero_phase_frequency_interval, frequencies[frequency_index])
         else:
             for phase_index, phase_deg in enumerate(phase_degrees, start=1):
                 for frequency_index, frequency in enumerate(frequencies, start=1):
@@ -1376,6 +1391,8 @@ class ExperimentManager:
         scan_config["transfer_control_output"] = control_output
         scan_config["transfer_calibrate_zero_phase"] = calibrate_zero_phase
         scan_config["transfer_zero_phase_repeats"] = zero_phase_repeats
+        scan_config["transfer_periodic_zero_phase"] = periodic_zero_phase
+        scan_config["transfer_zero_phase_frequency_interval"] = zero_phase_frequency_interval
         scan_config["transfer_frequency_values_hz"] = frequencies
         scan_config["transfer_repeats"] = repeats
         return parameters
@@ -2759,6 +2776,11 @@ class ExperimentManager:
                     metadata["transfer_generator_model"] = transfer_model
                     metadata["transfer_generator_channel"] = transfer_channel
                     is_zero_baseline = bool(metadata.get("transfer_zero_phase_baseline", False))
+                    if transfer_control_output and is_zero_baseline and transfer_output_enabled:
+                        self.status.message = f"Disabling {transfer_model} CH{transfer_channel} OUTPUT for zero-phase recalibration..."
+                        if tti_client is not None:
+                            tti_client.set_output(False)
+                        transfer_output_enabled = False
                     if transfer_control_output and not is_zero_baseline and not transfer_output_enabled:
                         self.status.message = f"Enabling {transfer_model} CH{transfer_channel} OUTPUT after zero-phase calibration..."
                         if tti_client is not None:
@@ -2938,7 +2960,7 @@ class ExperimentManager:
         ac_stark_results: List[ScanResult] = []
         lock_in_results: List[ScanResult] = []
         transfer_function_results: List[ScanResult] = []
-        transfer_zero_phase_samples: List[float] = []
+        transfer_zero_phase_samples: Dict[int, List[float]] = {}
         phase_noise_results: List[ScanResult] = []
 
         try:
@@ -2964,20 +2986,22 @@ class ExperimentManager:
                 )
                 metadata = job.get("metadata") or {}
                 if result is not None and metadata.get("transfer_zero_phase_baseline"):
+                    block_id = int(metadata.get("transfer_zero_phase_block_id", 0))
+                    samples = transfer_zero_phase_samples.setdefault(block_id, [])
                     value = getattr(result, "interferometer_phase", None)
                     if value is not None and math.isfinite(float(value)):
-                        transfer_zero_phase_samples.append(float(value))
+                        samples.append(float(value))
                     expected = max(2, int((scan_config or {}).get("transfer_zero_phase_repeats", 50)))
                     if int(metadata.get("transfer_zero_phase_repeat", 0)) == expected:
-                        if len(transfer_zero_phase_samples) < 2:
+                        if len(samples) < 2:
                             self._scan_finalize_error = "Zero-phase calibration produced fewer than two valid phase shots"
                         else:
-                            reference = float(np.mean(transfer_zero_phase_samples))
+                            reference = float(np.mean(samples))
                             scan_config["_transfer_zero_phase_rad"] = reference
-                            scan_config["_transfer_zero_phase_valid_count"] = len(transfer_zero_phase_samples)
+                            scan_config["_transfer_zero_phase_valid_count"] = len(samples)
                             scan_config["_transfer_zero_phase_std_rad"] = (
-                                float(np.std(transfer_zero_phase_samples, ddof=1))
-                                if len(transfer_zero_phase_samples) >= 2 else None
+                                float(np.std(samples, ddof=1))
+                                if len(samples) >= 2 else None
                             )
                 if result is not None and result.ac_stark_ratio is not None:
                     ac_stark_results.append(result)

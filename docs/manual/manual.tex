@@ -936,6 +936,10 @@ interferometer phase as this run's zero. It then enables OUTPUT and records subs
 transfer-function phases as $\Delta\Phi=\Phi-\Phi_{\mathrm{zero}}$. The zero is run-local:
 it never modifies the Settings Bragg calibration. Baseline shots are retained in the raw
 archive but excluded from the frequency-response summary.
+The optional periodic mode repeats this baseline after a selected number of complete
+frequency points (default interval: 10). It requires \ui{frequency-interleaved} phase
+ordering, so that the \ang{0} and \ang{90} acquisitions for one frequency always use the
+same phase-zero block. The final incomplete interval reuses its most recent reference.
 
 The Settings tab contains three independent commissioning actions:
 \begin{itemize}

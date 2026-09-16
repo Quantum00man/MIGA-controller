@@ -1476,6 +1476,15 @@
                                         <span class="input-group-text">Baseline shots</span>
                                         <input type="number" min="2" step="1" class="form-control" v-model.number="config.transfer_zero_phase_repeats">
                                     </div>
+                                    <div v-if="config.transfer_calibrate_zero_phase" class="form-check mt-2">
+                                        <input id="transferPeriodicZeroPhase" class="form-check-input" type="checkbox"
+                                            v-model="config.transfer_periodic_zero_phase">
+                                        <label class="form-check-label small" for="transferPeriodicZeroPhase">Repeat calibration every</label>
+                                        <input v-if="config.transfer_periodic_zero_phase" type="number" min="1" step="1"
+                                            class="form-control form-control-sm d-inline-block ms-1" style="width: 76px;"
+                                            v-model.number="config.transfer_zero_phase_frequency_interval">
+                                        <span v-if="config.transfer_periodic_zero_phase" class="small ms-1">complete frequency points (requires interleaved phases)</span>
+                                    </div>
                                 </div>
                             </div>
                             <div class="col-12 form-text mt-1">When enabled, OUTPUT is turned ON once at scan start and is turned OFF when the scan finishes, stops, or fails.</div>
@@ -1779,6 +1788,8 @@
                         transfer_control_output: false,
                         transfer_calibrate_zero_phase: false,
                         transfer_zero_phase_repeats: 50,
+                        transfer_periodic_zero_phase: false,
+                        transfer_zero_phase_frequency_interval: 10,
                         ramsey_delta_start_mhz: 0,
                         ramsey_delta_stop_mhz: 1,
                         ramsey_delta_step_mhz: 0.1,
@@ -4209,6 +4220,14 @@ finishScheduledRun(finalStatus = 'IDLE') {
                         }
                         if (payload.transfer_calibrate_zero_phase && !payload.transfer_control_output) {
                             throw new Error('Enable TTI OUTPUT control to use zero-phase calibration.');
+                        }
+                        payload.transfer_periodic_zero_phase = payload.transfer_periodic_zero_phase === true;
+                        payload.transfer_zero_phase_frequency_interval = Math.round(Number(payload.transfer_zero_phase_frequency_interval));
+                        if (!Number.isInteger(payload.transfer_zero_phase_frequency_interval) || payload.transfer_zero_phase_frequency_interval < 1) {
+                            throw new Error('Periodic zero-phase calibration interval must be at least one frequency.');
+                        }
+                        if (payload.transfer_periodic_zero_phase && (!payload.transfer_calibrate_zero_phase || payload.transfer_phase_scan_mode !== 'frequency_interleaved')) {
+                            throw new Error('Periodic zero-phase calibration requires initial calibration and frequency-interleaved phases.');
                         }
                         payload.transfer_settling_time_s = 5;
                         payload.scan_dimensions = 1;
