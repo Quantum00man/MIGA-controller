@@ -1947,7 +1947,7 @@
                                 </select>
                                 <div class="btn-group btn-group-sm" role="group" aria-label="Differential Transfer Function y-axis scale">
                                     <button class="btn" :class="transferFunctionYAxisScale === 'linear' ? 'btn-secondary' : 'btn-outline-secondary'" @click="transferFunctionYAxisScale='linear'; renderSyncArchivePlot()">Linear Y</button>
-                                    <button class="btn" :class="transferFunctionYAxisScale === 'log' ? 'btn-secondary' : 'btn-outline-secondary'" @click="transferFunctionYAxisScale='log'; renderSyncArchivePlot()" title="Log Y shows |ΔS|² only">Log Y</button>
+                                    <button class="btn" :class="transferFunctionYAxisScale === 'log' ? 'btn-secondary' : 'btn-outline-secondary'" @click="transferFunctionYAxisScale='log'; renderSyncArchivePlot()" title="Apply logarithmic Y scaling to both differential plots">Log Y</button>
                                 </div>
                                 <button class="btn btn-outline-success btn-sm" @click="downloadSyncTransferFunctionDifferentialCSV" :disabled="!syncArchiveTransferDifferentialRows().length">
                                     <i class="bi bi-download me-1"></i>Differential TF CSV
@@ -7510,7 +7510,7 @@
                     const saved = Array.isArray(this.syncManifest?.transfer_function_differential_summary)
                         ? this.syncManifest.transfer_function_differential_summary : [];
                     const previewScale = this.syncTransferNormalizationOptimization?.result?.scale_after;
-                    if (saved.length && Number(this.syncManifest?.transfer_function_differential_formula_version) >= 6 && !this.syncArchiveHasPhaseOverrides() && !this.syncAnalysisCopy.selectedId && !Object.keys(this.syncTransferNormalization?.slave_scales || {}).length && !Number.isFinite(Number(previewScale))) {
+                    if (saved.length && Number(this.syncManifest?.transfer_function_differential_formula_version) >= 7 && !this.syncArchiveHasPhaseOverrides() && !this.syncAnalysisCopy.selectedId && !Object.keys(this.syncTransferNormalization?.slave_scales || {}).length && !Number.isFinite(Number(previewScale))) {
                         return saved.filter(row => !selectedSlave || String(row.slave_node_id || '') === selectedSlave)
                             .slice().sort((a, b) => Number(a.frequency_hz) - Number(b.frequency_hz));
                     }
@@ -7569,6 +7569,15 @@
                         const ninety = statistics(group.values[90]);
                         const phaseDifferenceZero = statistics(group.phase_differences[0]);
                         const phaseDifferenceNinety = statistics(group.phase_differences[90]);
+                        const phaseDifferenceMagnitude = phaseDifferenceZero.mean === null || phaseDifferenceNinety.mean === null
+                            ? null : Math.hypot(phaseDifferenceZero.mean, phaseDifferenceNinety.mean);
+                        const phaseDifferenceMagnitudeSem = phaseDifferenceMagnitude === null || phaseDifferenceMagnitude === 0
+                            || phaseDifferenceZero.sem === null || phaseDifferenceNinety.sem === null
+                            ? null
+                            : Math.hypot(
+                                phaseDifferenceZero.mean * phaseDifferenceZero.sem,
+                                phaseDifferenceNinety.mean * phaseDifferenceNinety.sem,
+                            ) / phaseDifferenceMagnitude;
                         const available = [zero.mean, ninety.mean].filter(value => value !== null);
                         const differentialS2 = available.length ? available.reduce((sum, value) => sum + value ** 2, 0) : null;
                         return {
@@ -7582,6 +7591,7 @@
                             delta_s_90deg_s2_sem: ninety.mean === null || ninety.sem === null ? null : 2 * Math.abs(ninety.mean) * ninety.sem,
                             phase_difference_0deg_count: phaseDifferenceZero.count, phase_difference_0deg_mean_rad: phaseDifferenceZero.mean, phase_difference_0deg_std_rad: phaseDifferenceZero.std, phase_difference_0deg_sem_rad: phaseDifferenceZero.sem,
                             phase_difference_90deg_count: phaseDifferenceNinety.count, phase_difference_90deg_mean_rad: phaseDifferenceNinety.mean, phase_difference_90deg_std_rad: phaseDifferenceNinety.std, phase_difference_90deg_sem_rad: phaseDifferenceNinety.sem,
+                            phase_difference_magnitude_rad: phaseDifferenceMagnitude, phase_difference_magnitude_sem_rad: phaseDifferenceMagnitudeSem,
                             differential_s2: differentialS2,
                             differential_magnitude: differentialS2 === null ? null : Math.sqrt(differentialS2),
                             quadrature_complete: zero.mean !== null && ninety.mean !== null,
@@ -7600,6 +7610,7 @@
                         'delta_s_90deg_count', 'delta_s_90deg_mean', 'delta_s_90deg_std', 'delta_s_90deg_sem', 'delta_s_90deg_s2', 'delta_s_90deg_s2_sem',
                         'phase_difference_0deg_count', 'phase_difference_0deg_mean_rad', 'phase_difference_0deg_std_rad', 'phase_difference_0deg_sem_rad',
                         'phase_difference_90deg_count', 'phase_difference_90deg_mean_rad', 'phase_difference_90deg_std_rad', 'phase_difference_90deg_sem_rad',
+                        'phase_difference_magnitude_rad', 'phase_difference_magnitude_sem_rad',
                         'differential_s2', 'differential_magnitude', 'quadrature_complete'
                     ];
                     const csv = '\uFEFF' + [fields, ...rows.map(row => fields.map(field => row[field] ?? ''))]
@@ -7648,19 +7659,29 @@
                     if (!element || typeof Plotly === 'undefined') return;
                     const rows = this.syncArchiveTransferDifferentialRows();
                     const label = this.syncArchiveNodeLabel(this.syncArchiveSlaveId);
-                    const traces = [[0, '#c62828', 'dash'], [90, '#1565c0', 'dot']].map(([phase, color, dash]) => ({
+                    const traces = [{
+                        x: rows.map(row => Number(row.frequency_hz)), y: rows.map(row => row.phase_difference_magnitude_rad),
+                        error_y: { type: 'data', array: rows.map(row => row.phase_difference_magnitude_sem_rad ?? 0), visible: true },
+                        type: 'scatter', mode: 'lines+markers', name: 'Quadrature |mean(Δφ)|',
+                        line: { color: '#198754', width: 3 }, marker: { color: '#198754', size: 8, symbol: 'diamond' }, connectgaps: false,
+                        hovertemplate: 'Frequency=%{x:.9g} Hz<br>√(mean(Δφ₀)² + mean(Δφ₉₀)²)=%{y:.6g} rad<extra></extra>'
+                    }, ...[[0, '#c62828', 'dash'], [90, '#1565c0', 'dot']].map(([phase, color, dash]) => ({
                         x: rows.map(row => Number(row.frequency_hz)),
                         y: rows.map(row => Math.abs(row[`phase_difference_${phase}deg_mean_rad`])),
                         error_y: { type: 'data', array: rows.map(row => row[`phase_difference_${phase}deg_sem_rad`] ?? 0), visible: true },
                         type: 'scatter', mode: 'lines+markers', name: `|mean(Δφ)| ${phase}°`,
                         line: { color, width: 2, dash }, marker: { color, size: 7 }, connectgaps: false,
                         hovertemplate: `Frequency=%{x:.9g} Hz<br>|mean(φ<sub>M</sub> − φ<sub>S</sub>)| (${phase}°)=%{y:.6g} rad<extra></extra>`
-                    }));
+                    }))];
                     Plotly.react(element, traces, {
                         margin: { l: 78, r: 35, t: 52, b: 68 },
                         title: `Absolute Mean Interferometer Phase Difference · Master − ${label}`,
                         xaxis: { title: 'TTI carrier frequency (Hz)', showline: true, mirror: true, ticks: 'inside', gridcolor: '#dde5ee' },
-                        yaxis: { title: '|mean(φ Master − φ Slave)| (rad)', rangemode: 'tozero', showline: true, mirror: true, ticks: 'inside', gridcolor: '#dde5ee' },
+                        yaxis: {
+                            title: '|mean(φ Master − φ Slave)| (rad)', type: this.transferFunctionYAxisScale,
+                            ...(this.transferFunctionYAxisScale === 'log' ? {} : { rangemode: 'tozero' }),
+                            showline: true, mirror: true, ticks: 'inside', gridcolor: '#dde5ee'
+                        },
                         legend: { orientation: 'h', x: .5, xanchor: 'center', y: 1.12 },
                         annotations: rows.length ? [] : [{ text: 'No valid paired phase data', showarrow: false, xref: 'paper', yref: 'paper', x: .5, y: .5 }],
                         paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', hovermode: 'closest'

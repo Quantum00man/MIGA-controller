@@ -5699,10 +5699,15 @@ finishScheduledRun(finalStatus = 'IDLE') {
                                 ...group, deltaS0, deltaS90,
                                 phaseDifference0: this.sampleMean(group.phaseDifferences[0]),
                                 phaseDifference90: this.sampleMean(group.phaseDifferences[90]),
+                                phaseDifferenceMagnitude: null,
                                 differentialS2: available.length ? available.reduce((sum, value) => sum + value ** 2, 0) : null,
                                 differentialMagnitude: available.length ? Math.sqrt(available.reduce((sum, value) => sum + value ** 2, 0)) : null,
                             };
-                        });
+                        }).map(row => ({
+                            ...row,
+                            phaseDifferenceMagnitude: Number.isFinite(row.phaseDifference0) && Number.isFinite(row.phaseDifference90)
+                                ? Math.hypot(row.phaseDifference0, row.phaseDifference90) : null,
+                        }));
                 },
                 renderSyncTransferFunctionDifferential(element) {
                     const rows = this.syncTransferFunctionDifferentialRows();
@@ -5749,6 +5754,12 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     slaveIds.forEach((slaveId, index) => {
                         const selected = rows.filter(row => row.slaveId === slaveId);
                         const color = colors[index % colors.length];
+                        traces.push({
+                            x: selected.map(row => row.frequency), y: selected.map(row => row.phaseDifferenceMagnitude),
+                            type: 'scatter', mode: 'lines+markers', name: `${slaveId} quadrature |mean(Δφ)|`,
+                            line: { color, width: 3 }, marker: { color, size: 8, symbol: 'diamond' }, connectgaps: false,
+                            hovertemplate: 'Frequency=%{x:.9g} Hz<br>√(mean(Δφ₀)² + mean(Δφ₉₀)²)=%{y:.6g} rad<extra></extra>'
+                        });
                         [[0, 'dash'], [90, 'dot']].forEach(([phase, dash]) => traces.push({
                             x: selected.map(row => row.frequency),
                             y: selected.map(row => Math.abs(phase === 0 ? row.phaseDifference0 : row.phaseDifference90)),
@@ -5761,7 +5772,10 @@ finishScheduledRun(finalStatus = 'IDLE') {
                         margin: { l: 75, r: 35, t: 45, b: 70 },
                         title: 'Absolute Mean Interferometer Phase Difference · Master − Slave',
                         xaxis: { title: 'TTI carrier frequency (Hz)' },
-                        yaxis: { title: '|mean(φ Master − φ Slave)| (rad)', rangemode: 'tozero' },
+                        yaxis: {
+                            title: '|mean(φ Master − φ Slave)| (rad)', type: this.transferFunctionYAxisScale,
+                            ...(this.transferFunctionYAxisScale === 'log' ? {} : { rangemode: 'tozero' })
+                        },
                         hovermode: 'closest', legend: { orientation: 'h' },
                         annotations: rows.length ? [] : [{ text: 'No valid paired phase data', showarrow: false, xref: 'paper', yref: 'paper', x: .5, y: .5 }]
                     }, { responsive: true, displaylogo: false });

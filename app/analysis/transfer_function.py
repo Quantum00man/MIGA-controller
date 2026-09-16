@@ -12,7 +12,7 @@ SPEED_OF_LIGHT_M_S = 299_792_458.0
 DEFAULT_ATOM_MIRROR_DISTANCE_M = 2.23
 # Backward-compatible name for integrations that imported the former constant.
 ATOM_MIRROR_DISTANCE_M = DEFAULT_ATOM_MIRROR_DISTANCE_M
-SYNC_DIFFERENTIAL_FORMULA_VERSION = 6
+SYNC_DIFFERENTIAL_FORMULA_VERSION = 7
 
 
 METRIC_FIELDS = {
@@ -343,6 +343,20 @@ def build_differential_transfer_function_summary(
         row["differential_s2"] = float(sum(value * value for value in available)) if available else None
         row["differential_magnitude"] = math.sqrt(row["differential_s2"]) if row["differential_s2"] is not None else None
         row["quadrature_complete"] = all(value is not None for value in means)
+        phase_zero = row.get("phase_difference_0deg_mean_rad")
+        phase_ninety = row.get("phase_difference_90deg_mean_rad")
+        if phase_zero is not None and phase_ninety is not None:
+            phase_magnitude = math.hypot(phase_zero, phase_ninety)
+            row["phase_difference_magnitude_rad"] = phase_magnitude
+            sem_zero = row.get("phase_difference_0deg_sem_rad")
+            sem_ninety = row.get("phase_difference_90deg_sem_rad")
+            row["phase_difference_magnitude_sem_rad"] = (
+                math.hypot(phase_zero * sem_zero, phase_ninety * sem_ninety) / phase_magnitude
+                if phase_magnitude > 0 and sem_zero is not None and sem_ninety is not None else None
+            )
+        else:
+            row["phase_difference_magnitude_rad"] = None
+            row["phase_difference_magnitude_sem_rad"] = None
         rows.append(row)
     return rows
 

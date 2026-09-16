@@ -1,3 +1,4 @@
+import math
 import unittest
 import csv
 import json
@@ -388,6 +389,13 @@ class TransferFunctionStatisticsTests(unittest.TestCase):
         self.assertAlmostEqual(
             row["phase_difference_90deg_mean_rad"],
             5.0 * master_amplitude - 2.0 * slave_amplitude,
+        )
+        self.assertAlmostEqual(
+            row["phase_difference_magnitude_rad"],
+            math.hypot(
+                3.0 * master_amplitude - slave_amplitude,
+                5.0 * master_amplitude - 2.0 * slave_amplitude,
+            ),
         )
         self.assertTrue(row["quadrature_complete"])
 
