@@ -2397,7 +2397,9 @@ class ExperimentManager:
         save_step_index: Optional[int] = None,
         stream_type: str = 'scan_point',
         extra_payload: Optional[Dict[str, Any]] = None,
+        execution_config: Optional[Dict[str, Any]] = None,
     ) -> Tuple[Optional[ScanResult], Dict[str, Any]]:
+        execution_config = execution_config or {}
         settings = self.settings
         storage_step = 1
         selected_fit_model = fitting.get_fit_model_by_key(
@@ -2958,6 +2960,7 @@ class ExperimentManager:
                     fit_config,
                     data_manager=self.data_manager,
                     stream_type='scan_point',
+                    execution_config=scan_config,
                 )
                 metadata = job.get("metadata") or {}
                 if result is not None and metadata.get("transfer_zero_phase_baseline"):
