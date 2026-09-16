@@ -7280,13 +7280,13 @@
                     const selectedSlave = String(this.syncArchiveSlaveId || '');
                     const saved = Array.isArray(this.syncManifest?.transfer_function_differential_summary)
                         ? this.syncManifest.transfer_function_differential_summary : [];
-                    if (saved.length) {
+                    if (saved.length && Number(this.syncManifest?.transfer_function_differential_formula_version) >= 2) {
                         return saved.filter(row => !selectedSlave || String(row.slave_node_id || '') === selectedSlave)
                             .slice().sort((a, b) => Number(a.frequency_hz) - Number(b.frequency_hz));
                     }
 
-                    // Backward-compatible reconstruction for archives captured
-                    // before the differential summary was stored in the manifest.
+                    // Rebuild legacy summaries from paired shots so pre-v2 archives
+                    // use the paired phase-difference baseline normalization too.
                     const c = 299792458;
                     const groups = new Map();
                     this.syncArchivePairs().forEach(pair => {
@@ -7296,20 +7296,18 @@
                         const frequency = Number(master.transfer_frequency_hz ?? slave.transfer_frequency_hz);
                         const phase = Number(master.transfer_phase_deg ?? slave.transfer_phase_deg);
                         if (!Number.isFinite(frequency) || ![0, 90].includes(phase)) return;
-                        const normalized = record => {
-                            const measured = Number(record.interferometer_phase);
-                            const modulation = Number(record.transfer_frequency_modulation_mhz);
-                            const distance = Number(record.transfer_atom_mirror_distance_m);
-                            const amplitude = 4 * Math.PI * distance * modulation * 1e6 / c;
-                            return Number.isFinite(measured) && Number.isFinite(amplitude) && amplitude > 0
-                                ? measured / amplitude : null;
-                        };
-                        const masterS = normalized(master);
-                        const slaveS = normalized(slave);
-                        if (masterS === null || slaveS === null) return;
-                        const key = frequency.toPrecision(15);
-                        const group = groups.get(key) || { frequency_hz: frequency, values: { 0: [], 90: [] } };
-                        group.values[phase].push(masterS - slaveS);
+                        const masterPhase = Number(master.interferometer_phase);
+                        const slavePhase = Number(slave.interferometer_phase);
+                        const modulationHz = Number(master.transfer_frequency_modulation_mhz) * 1e6;
+                        const baseline = Number(master.transfer_atom_mirror_distance_m)
+                            - Number(slave.transfer_atom_mirror_distance_m);
+                        const denominator = 4 * Math.PI * modulationHz * baseline / c;
+                        if (![masterPhase, slavePhase, denominator].every(Number.isFinite) || denominator === 0) return;
+                        const slaveId = String(pair.slave_node_id || slave.sync_node_id || 'slave');
+                        if (selectedSlave && slaveId !== selectedSlave) return;
+                        const key = `${slaveId}:${frequency.toPrecision(15)}`;
+                        const group = groups.get(key) || { slave_node_id: slaveId, frequency_hz: frequency, values: { 0: [], 90: [] } };
+                        group.values[phase].push((masterPhase - slavePhase) / denominator);
                         groups.set(key, group);
                     });
                     const statistics = values => {
@@ -7326,7 +7324,7 @@
                         const available = [zero.mean, ninety.mean].filter(value => value !== null);
                         const differentialS2 = available.length ? available.reduce((sum, value) => sum + value ** 2, 0) : null;
                         return {
-                            slave_node_id: selectedSlave,
+                            slave_node_id: group.slave_node_id,
                             frequency_hz: group.frequency_hz,
                             delta_s_0deg_count: zero.count, delta_s_0deg_mean: zero.mean, delta_s_0deg_std: zero.std, delta_s_0deg_sem: zero.sem,
                             delta_s_90deg_count: ninety.count, delta_s_90deg_mean: ninety.mean, delta_s_90deg_std: ninety.std, delta_s_90deg_sem: ninety.sem,

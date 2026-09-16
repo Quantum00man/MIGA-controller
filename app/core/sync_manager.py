@@ -23,7 +23,10 @@ import zipfile
 
 import config
 from app.core.experiment_manager import ExperimentManager
-from app.analysis.transfer_function import build_differential_transfer_function_summary
+from app.analysis.transfer_function import (
+    SYNC_DIFFERENTIAL_FORMULA_VERSION,
+    build_differential_transfer_function_summary,
+)
 
 
 SYNC_RESULT_FIELDS = (
@@ -1199,5 +1202,6 @@ class SyncManager:
             "node_results": node_results,
             "archive_nodes": archive_nodes,
             "archive_replication": runtime.get("archive_replication") or {"status": "idle", "nodes": {}},
+            "transfer_function_differential_formula_version": SYNC_DIFFERENTIAL_FORMULA_VERSION,
             "transfer_function_differential_summary": build_differential_transfer_function_summary(pairs),
         })

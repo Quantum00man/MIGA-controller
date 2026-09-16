@@ -313,27 +313,26 @@ class TransferFunctionPlanTests(unittest.TestCase):
 
 class TransferFunctionStatisticsTests(unittest.TestCase):
     def test_differential_summary_subtracts_signed_quadratures_before_squaring(self):
-        def record(phase, modulation, distance):
+        def record(phase, distance):
             return {
                 "interferometer_phase": phase,
                 "interferometer_phase_valid": True,
-                "transfer_frequency_modulation_mhz": modulation,
+                "transfer_frequency_modulation_mhz": 1.0,
                 "transfer_atom_mirror_distance_m": distance,
             }
 
-        master_amplitude = bragg_phase_modulation_rad(1.0, 2.0)
-        slave_amplitude = bragg_phase_modulation_rad(2.0, 3.0)
+        baseline_amplitude = 4.0 * math.pi * 1_000_000.0 * (4.0 - 2.0) / 299_792_458.0
         pairs = []
-        for phase_deg, master_s, slave_s in ((0.0, 3.0, 1.0), (90.0, 5.0, 2.0)):
+        for phase_deg, differential_s in ((0.0, 2.0), (90.0, 3.0)):
             pairs.append({
                 "slave_node_id": "slave_b",
                 "master": {
-                    **record(master_s * master_amplitude, 1.0, 2.0),
+                    **record(differential_s * baseline_amplitude, 4.0),
                     "transfer_frequency_hz": 100.0,
                     "transfer_phase_deg": phase_deg,
                 },
                 "slave": {
-                    **record(slave_s * slave_amplitude, 2.0, 3.0),
+                    **record(0.0, 2.0),
                     "transfer_frequency_hz": 100.0,
                     "transfer_phase_deg": phase_deg,
                 },

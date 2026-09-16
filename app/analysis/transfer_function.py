@@ -12,6 +12,7 @@ SPEED_OF_LIGHT_M_S = 299_792_458.0
 DEFAULT_ATOM_MIRROR_DISTANCE_M = 2.23
 # Backward-compatible name for integrations that imported the former constant.
 ATOM_MIRROR_DISTANCE_M = DEFAULT_ATOM_MIRROR_DISTANCE_M
+SYNC_DIFFERENTIAL_FORMULA_VERSION = 2
 
 
 METRIC_FIELDS = {
@@ -252,7 +253,7 @@ def build_transfer_function_summary(
 def build_differential_transfer_function_summary(
     pairs: Iterable[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
-    """Build signed Master-minus-Slave quadratures and their squared magnitude."""
+    """Build paired differential quadratures normalized by the baseline response."""
     grouped: Dict[tuple[str, float], Dict[float, List[float]]] = {}
     for pair in pairs:
         master = pair.get("master") or {}
@@ -268,19 +269,23 @@ def build_differential_transfer_function_summary(
         if not math.isfinite(frequency) or phase_deg not in {0.0, 90.0}:
             continue
 
-        normalized = []
-        for record in (master, slave):
-            amplitude = bragg_phase_modulation_rad(
-                record.get("transfer_frequency_modulation_mhz"),
-                record.get("transfer_atom_mirror_distance_m"),
-            )
-            measured = _value(record, ("interferometer_phase",))
-            normalized.append(measured / amplitude if measured is not None and amplitude else None)
-        if any(value is None for value in normalized):
+        try:
+            modulation_hz = float(master.get("transfer_frequency_modulation_mhz")) * 1_000_000.0
+            master_distance_m = float(master.get("transfer_atom_mirror_distance_m"))
+            slave_distance_m = float(slave.get("transfer_atom_mirror_distance_m"))
+        except (TypeError, ValueError):
+            continue
+        baseline_m = master_distance_m - slave_distance_m
+        denominator = (4.0 * math.pi * modulation_hz / SPEED_OF_LIGHT_M_S) * baseline_m
+        if not math.isfinite(denominator) or denominator == 0.0:
+            continue
+        master_phase = _value(master, ("interferometer_phase",))
+        slave_phase = _value(slave, ("interferometer_phase",))
+        if master_phase is None or slave_phase is None:
             continue
         slave_id = str(pair.get("slave_node_id") or slave.get("sync_node_id") or "slave")
         grouped.setdefault((slave_id, frequency), {0.0: [], 90.0: []})[phase_deg].append(
-            float(normalized[0] - normalized[1])
+            float((master_phase - slave_phase) / denominator)
         )
 
     rows: List[Dict[str, Any]] = []
