@@ -156,6 +156,8 @@ class TransferFunctionPlanTests(unittest.TestCase):
         archive_html = (Path(__file__).resolve().parents[1] / "static" / "archive.html").read_text(encoding="utf-8")
         self.assertIn("Differential Transfer Function", archive_html)
         self.assertIn("syncArchiveTransferDifferentialRows()", archive_html)
+        self.assertIn("syncArchiveTransferPhaseDifferencePlot", archive_html)
+        self.assertIn("phase_difference_0deg_mean_rad", archive_html)
         self.assertIn("renderSyncArchiveTransferFunctionPlot(element)", archive_html)
         self.assertIn("downloadSyncTransferFunctionDifferentialCSV", archive_html)
         self.assertIn("row.differential_s2", archive_html)
@@ -379,6 +381,14 @@ class TransferFunctionStatisticsTests(unittest.TestCase):
         self.assertAlmostEqual(row["delta_s_90deg_s2"], 9.0)
         self.assertAlmostEqual(row["differential_s2"], 13.0)
         self.assertAlmostEqual(row["differential_magnitude"], 13.0 ** 0.5)
+        self.assertAlmostEqual(
+            row["phase_difference_0deg_mean_rad"],
+            3.0 * master_amplitude - slave_amplitude,
+        )
+        self.assertAlmostEqual(
+            row["phase_difference_90deg_mean_rad"],
+            5.0 * master_amplitude - 2.0 * slave_amplitude,
+        )
         self.assertTrue(row["quadrature_complete"])
 
     def test_summary_uses_sample_standard_deviation_and_total_per_shot(self):

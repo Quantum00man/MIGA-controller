@@ -1591,6 +1591,10 @@
                     <div id="resultsPlotUp" class="analysis-plot-panel" style="height:360px"></div>
                     <div id="resultsPlotDw" class="analysis-plot-panel analysis-plot-panel-divider" :style="{height:'360px', display: currentTab === 'phase' ? 'none' : 'block'}"></div>
                 </div>
+                <div v-else-if="config.mode === 'transfer_function'">
+                    <div id="syncPlot" style="height:560px"></div>
+                    <div id="syncTransferPhaseDifferencePlot" class="analysis-plot-panel analysis-plot-panel-divider" style="height:380px"></div>
+                </div>
                 <div v-else id="syncPlot" style="height:560px"></div>
             </div>
 
@@ -5670,13 +5674,20 @@ finishScheduledRun(finalStatus = 'IDLE') {
                             return Number.isFinite(measuredPhase) && Number.isFinite(amplitude) && amplitude > 0
                                 ? measuredPhase / amplitude : null;
                         };
-                        const masterS = normalize(master);
-                        const slaveS = normalize(slave);
-                        if (masterS === null || slaveS === null) return;
                         const slaveId = String(pair.slave_node_id || slave.sync_node_id || 'slave');
                         const key = `${slaveId}|${frequency.toPrecision(15)}`;
-                        const group = groups.get(key) || { slaveId, frequency, components: { 0: [], 90: [] } };
-                        group.components[phase].push(masterS - slaveS);
+                        const group = groups.get(key) || {
+                            slaveId, frequency,
+                            components: { 0: [], 90: [] }, phaseDifferences: { 0: [], 90: [] }
+                        };
+                        const masterPhase = Number(master.interferometer_phase);
+                        const slavePhase = Number(slave.interferometer_phase);
+                        if (Number.isFinite(masterPhase) && Number.isFinite(slavePhase)) {
+                            group.phaseDifferences[phase].push(masterPhase - slavePhase);
+                        }
+                        const masterS = normalize(master);
+                        const slaveS = normalize(slave);
+                        if (masterS !== null && slaveS !== null) group.components[phase].push(masterS - slaveS);
                         groups.set(key, group);
                     });
                     return [...groups.values()].sort((a, b) => a.slaveId.localeCompare(b.slaveId) || a.frequency - b.frequency)
@@ -5686,6 +5697,8 @@ finishScheduledRun(finalStatus = 'IDLE') {
                             const available = [deltaS0, deltaS90].filter(value => value !== null);
                             return {
                                 ...group, deltaS0, deltaS90,
+                                phaseDifference0: this.sampleMean(group.phaseDifferences[0]),
+                                phaseDifference90: this.sampleMean(group.phaseDifferences[90]),
                                 differentialS2: available.length ? available.reduce((sum, value) => sum + value ** 2, 0) : null,
                                 differentialMagnitude: available.length ? Math.sqrt(available.reduce((sum, value) => sum + value ** 2, 0)) : null,
                             };
@@ -5723,6 +5736,34 @@ finishScheduledRun(finalStatus = 'IDLE') {
                         xaxis: { title: 'TTI carrier frequency (Hz)' },
                         yaxis: { title: this.transferFunctionYAxisScale === 'log' ? '|ΔS|²' : 'ΔS components / |ΔS|²', type: this.transferFunctionYAxisScale },
                         hovermode: 'closest', legend: { orientation: 'h' }
+                    }, { responsive: true, displaylogo: false });
+                    this.renderSyncTransferPhaseDifference();
+                },
+                renderSyncTransferPhaseDifference() {
+                    const element = document.getElementById('syncTransferPhaseDifferencePlot');
+                    if (!element || typeof Plotly === 'undefined') return;
+                    const rows = this.syncTransferFunctionDifferentialRows();
+                    const slaveIds = [...new Set(rows.map(row => row.slaveId))];
+                    const colors = ['#198754', '#6f42c1', '#fd7e14', '#0dcaf0'];
+                    const traces = [];
+                    slaveIds.forEach((slaveId, index) => {
+                        const selected = rows.filter(row => row.slaveId === slaveId);
+                        const color = colors[index % colors.length];
+                        [[0, 'dash'], [90, 'dot']].forEach(([phase, dash]) => traces.push({
+                            x: selected.map(row => row.frequency),
+                            y: selected.map(row => Math.abs(phase === 0 ? row.phaseDifference0 : row.phaseDifference90)),
+                            type: 'scatter', mode: 'lines+markers', name: `${slaveId} |mean(Δφ)| ${phase}°`,
+                            line: { color, width: 2, dash }, marker: { color, size: 6 }, connectgaps: false,
+                            hovertemplate: `Frequency=%{x:.9g} Hz<br>|mean(φ<sub>M</sub> − φ<sub>S</sub>)| (${phase}°)=%{y:.6g} rad<extra></extra>`
+                        }));
+                    });
+                    Plotly.react(element, traces, {
+                        margin: { l: 75, r: 35, t: 45, b: 70 },
+                        title: 'Absolute Mean Interferometer Phase Difference · Master − Slave',
+                        xaxis: { title: 'TTI carrier frequency (Hz)' },
+                        yaxis: { title: '|mean(φ Master − φ Slave)| (rad)', rangemode: 'tozero' },
+                        hovermode: 'closest', legend: { orientation: 'h' },
+                        annotations: rows.length ? [] : [{ text: 'No valid paired phase data', showarrow: false, xref: 'paper', yref: 'paper', x: .5, y: .5 }]
                     }, { responsive: true, displaylogo: false });
                 },
                 renderSyncPlot() {

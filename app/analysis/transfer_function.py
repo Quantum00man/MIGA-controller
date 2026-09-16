@@ -12,7 +12,7 @@ SPEED_OF_LIGHT_M_S = 299_792_458.0
 DEFAULT_ATOM_MIRROR_DISTANCE_M = 2.23
 # Backward-compatible name for integrations that imported the former constant.
 ATOM_MIRROR_DISTANCE_M = DEFAULT_ATOM_MIRROR_DISTANCE_M
-SYNC_DIFFERENTIAL_FORMULA_VERSION = 4
+SYNC_DIFFERENTIAL_FORMULA_VERSION = 6
 
 
 METRIC_FIELDS = {
@@ -261,7 +261,7 @@ def build_differential_transfer_function_summary(
     slave_normalization_scales: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     """Build paired differences of each node's locally normalized quadratures."""
-    grouped: Dict[tuple[str, float], Dict[float, List[float]]] = {}
+    grouped: Dict[tuple[str, float], Dict[float, Dict[str, List[float]]]] = {}
     for pair in pairs:
         master = pair.get("master") or {}
         slave = pair.get("slave") or {}
@@ -283,6 +283,16 @@ def build_differential_transfer_function_summary(
             continue
         if not math.isfinite(slave_scale) or slave_scale <= 0:
             continue
+        master_phase = _value(master, ("interferometer_phase",))
+        slave_phase = _value(slave, ("interferometer_phase",))
+        if master_phase is None or slave_phase is None:
+            continue
+        component_group = grouped.setdefault(
+            (slave_id, frequency),
+            {0.0: {"normalized": [], "phase": []}, 90.0: {"normalized": [], "phase": []}},
+        )[phase_deg]
+        component_group["phase"].append(float(master_phase - slave_phase))
+
         normalized = []
         for index, record in enumerate((master, slave)):
             amplitude = bragg_phase_modulation_rad(
@@ -295,16 +305,15 @@ def build_differential_transfer_function_summary(
             normalized.append(measured / amplitude if measured is not None and amplitude else None)
         if any(value is None for value in normalized):
             continue
-        grouped.setdefault((slave_id, frequency), {0.0: [], 90.0: []})[phase_deg].append(
-            float(normalized[0] - normalized[1])
-        )
+        component_group["normalized"].append(float(normalized[0] - normalized[1]))
 
     rows: List[Dict[str, Any]] = []
     for (slave_id, frequency), components in sorted(grouped.items(), key=lambda item: (item[0][0], item[0][1])):
         row: Dict[str, Any] = {"slave_node_id": slave_id, "frequency_hz": frequency}
         means: List[Optional[float]] = []
         for phase_deg in (0.0, 90.0):
-            values = components[phase_deg]
+            values = components[phase_deg]["normalized"]
+            phase_values = components[phase_deg]["phase"]
             mean = float(np.mean(values)) if values else None
             std = float(np.std(values, ddof=1)) if len(values) >= 2 else None
             label = f"{int(phase_deg)}deg"
@@ -317,6 +326,17 @@ def build_differential_transfer_function_summary(
                 float(2.0 * abs(mean) * row[f"delta_s_{label}_sem"])
                 if mean is not None and row[f"delta_s_{label}_sem"] is not None
                 else None
+            )
+            phase_mean = float(np.mean(phase_values)) if phase_values else None
+            phase_std = (
+                float(np.std(phase_values, ddof=1)) if len(phase_values) >= 2 else None
+            )
+            row[f"phase_difference_{label}_count"] = len(phase_values)
+            row[f"phase_difference_{label}_mean_rad"] = phase_mean
+            row[f"phase_difference_{label}_std_rad"] = phase_std
+            row[f"phase_difference_{label}_sem_rad"] = (
+                phase_std / math.sqrt(len(phase_values))
+                if phase_std is not None else None
             )
             means.append(mean)
         available = [value for value in means if value is not None]

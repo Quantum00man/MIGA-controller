@@ -2015,6 +2015,7 @@
                     </div>
                     <div v-else class="sync-archive-plot-wrap">
                         <div id="syncArchivePlot" class="sync-archive-square-plot"></div>
+                        <div v-if="isTransferFunctionArchive()" id="syncArchiveTransferPhaseDifferencePlot" class="sync-archive-square-plot mt-3"></div>
                     </div>
                 </section>
                 <section v-if="archivePhaseReferenceEditorVisible()" class="card mb-4 border-0 shadow-sm">
@@ -2800,6 +2801,7 @@
                 handleArchiveWindowResize() {
                     if (this.syncArchiveViewMode === 'differential') {
                         this.resizePlot('syncArchivePlot');
+                        if (this.isTransferFunctionArchive()) this.resizePlot('syncArchiveTransferPhaseDifferencePlot');
                     }
                     this.resizePlot('archivePhaseReferencePlot');
                 },
@@ -7508,7 +7510,7 @@
                     const saved = Array.isArray(this.syncManifest?.transfer_function_differential_summary)
                         ? this.syncManifest.transfer_function_differential_summary : [];
                     const previewScale = this.syncTransferNormalizationOptimization?.result?.scale_after;
-                    if (saved.length && Number(this.syncManifest?.transfer_function_differential_formula_version) >= 4 && !this.syncArchiveHasPhaseOverrides() && !this.syncAnalysisCopy.selectedId && !Object.keys(this.syncTransferNormalization?.slave_scales || {}).length && !Number.isFinite(Number(previewScale))) {
+                    if (saved.length && Number(this.syncManifest?.transfer_function_differential_formula_version) >= 6 && !this.syncArchiveHasPhaseOverrides() && !this.syncAnalysisCopy.selectedId && !Object.keys(this.syncTransferNormalization?.slave_scales || {}).length && !Number.isFinite(Number(previewScale))) {
                         return saved.filter(row => !selectedSlave || String(row.slave_node_id || '') === selectedSlave)
                             .slice().sort((a, b) => Number(a.frequency_hz) - Number(b.frequency_hz));
                     }
@@ -7532,19 +7534,26 @@
                             return Number.isFinite(phaseValue) && Number.isFinite(denominator) && denominator !== 0
                                 ? phaseValue / denominator : null;
                         };
+                        const slaveId = String(pair.slave_node_id || slave.sync_node_id || 'slave');
+                        if (selectedSlave && slaveId !== selectedSlave) return;
+                        const key = `${slaveId}:${frequency.toPrecision(15)}`;
+                        const group = groups.get(key) || {
+                            slave_node_id: slaveId, frequency_hz: frequency,
+                            values: { 0: [], 90: [] }, phase_differences: { 0: [], 90: [] }
+                        };
+                        const masterPhase = Number(master.interferometer_phase);
+                        const slavePhase = Number(slave.interferometer_phase);
+                        if (Number.isFinite(masterPhase) && Number.isFinite(slavePhase)) {
+                            group.phase_differences[phase].push(masterPhase - slavePhase);
+                        }
                         const masterS = normalized(master);
                         const slaveS0 = normalized(slave);
-                        const slaveId = String(pair.slave_node_id || slave.sync_node_id || 'slave');
                         const previewApplies = String(this.syncTransferNormalizationOptimization?.result?.slave_node_id || '') === slaveId;
                         const slaveScale = previewApplies
                             ? Number(previewScale)
                             : Number((this.syncTransferNormalization?.slave_scales || {})[slaveId] ?? 1);
                         const slaveS = Number.isFinite(slaveScale) && slaveScale > 0 && slaveS0 !== null ? slaveS0 / slaveScale : null;
-                        if (masterS === null || slaveS === null) return;
-                        if (selectedSlave && slaveId !== selectedSlave) return;
-                        const key = `${slaveId}:${frequency.toPrecision(15)}`;
-                        const group = groups.get(key) || { slave_node_id: slaveId, frequency_hz: frequency, values: { 0: [], 90: [] } };
-                        group.values[phase].push(masterS - slaveS);
+                        if (masterS !== null && slaveS !== null) group.values[phase].push(masterS - slaveS);
                         groups.set(key, group);
                     });
                     const statistics = values => {
@@ -7558,6 +7567,8 @@
                     return [...groups.values()].sort((a, b) => a.frequency_hz - b.frequency_hz).map(group => {
                         const zero = statistics(group.values[0]);
                         const ninety = statistics(group.values[90]);
+                        const phaseDifferenceZero = statistics(group.phase_differences[0]);
+                        const phaseDifferenceNinety = statistics(group.phase_differences[90]);
                         const available = [zero.mean, ninety.mean].filter(value => value !== null);
                         const differentialS2 = available.length ? available.reduce((sum, value) => sum + value ** 2, 0) : null;
                         return {
@@ -7569,6 +7580,8 @@
                             delta_s_90deg_count: ninety.count, delta_s_90deg_mean: ninety.mean, delta_s_90deg_std: ninety.std, delta_s_90deg_sem: ninety.sem,
                             delta_s_90deg_s2: ninety.mean === null ? null : ninety.mean ** 2,
                             delta_s_90deg_s2_sem: ninety.mean === null || ninety.sem === null ? null : 2 * Math.abs(ninety.mean) * ninety.sem,
+                            phase_difference_0deg_count: phaseDifferenceZero.count, phase_difference_0deg_mean_rad: phaseDifferenceZero.mean, phase_difference_0deg_std_rad: phaseDifferenceZero.std, phase_difference_0deg_sem_rad: phaseDifferenceZero.sem,
+                            phase_difference_90deg_count: phaseDifferenceNinety.count, phase_difference_90deg_mean_rad: phaseDifferenceNinety.mean, phase_difference_90deg_std_rad: phaseDifferenceNinety.std, phase_difference_90deg_sem_rad: phaseDifferenceNinety.sem,
                             differential_s2: differentialS2,
                             differential_magnitude: differentialS2 === null ? null : Math.sqrt(differentialS2),
                             quadrature_complete: zero.mean !== null && ninety.mean !== null,
@@ -7585,6 +7598,8 @@
                         'slave_node_id', 'frequency_hz',
                         'delta_s_0deg_count', 'delta_s_0deg_mean', 'delta_s_0deg_std', 'delta_s_0deg_sem', 'delta_s_0deg_s2', 'delta_s_0deg_s2_sem',
                         'delta_s_90deg_count', 'delta_s_90deg_mean', 'delta_s_90deg_std', 'delta_s_90deg_sem', 'delta_s_90deg_s2', 'delta_s_90deg_s2_sem',
+                        'phase_difference_0deg_count', 'phase_difference_0deg_mean_rad', 'phase_difference_0deg_std_rad', 'phase_difference_0deg_sem_rad',
+                        'phase_difference_90deg_count', 'phase_difference_90deg_mean_rad', 'phase_difference_90deg_std_rad', 'phase_difference_90deg_sem_rad',
                         'differential_s2', 'differential_magnitude', 'quadrature_complete'
                     ];
                     const csv = '\uFEFF' + [fields, ...rows.map(row => fields.map(field => row[field] ?? ''))]
@@ -7624,6 +7639,30 @@
                         yaxis: { title: linear ? '|ΔS₀|², |ΔS₉₀|² / |ΔS|²' : '|ΔS|²', type: this.transferFunctionYAxisScale, showline: true, mirror: true, ticks: 'inside', gridcolor: '#dde5ee' },
                         legend: { orientation: 'h', x: 0.5, xanchor: 'center', y: 1.12 },
                         annotations: rows.length ? [] : [{ text: 'No valid differential Transfer Function data', showarrow: false, xref: 'paper', yref: 'paper', x: 0.5, y: 0.5 }],
+                        paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', hovermode: 'closest'
+                    }, { responsive: true, displaylogo: false });
+                    this.renderSyncArchiveTransferPhaseDifferencePlot();
+                },
+                renderSyncArchiveTransferPhaseDifferencePlot() {
+                    const element = document.getElementById('syncArchiveTransferPhaseDifferencePlot');
+                    if (!element || typeof Plotly === 'undefined') return;
+                    const rows = this.syncArchiveTransferDifferentialRows();
+                    const label = this.syncArchiveNodeLabel(this.syncArchiveSlaveId);
+                    const traces = [[0, '#c62828', 'dash'], [90, '#1565c0', 'dot']].map(([phase, color, dash]) => ({
+                        x: rows.map(row => Number(row.frequency_hz)),
+                        y: rows.map(row => Math.abs(row[`phase_difference_${phase}deg_mean_rad`])),
+                        error_y: { type: 'data', array: rows.map(row => row[`phase_difference_${phase}deg_sem_rad`] ?? 0), visible: true },
+                        type: 'scatter', mode: 'lines+markers', name: `|mean(Δφ)| ${phase}°`,
+                        line: { color, width: 2, dash }, marker: { color, size: 7 }, connectgaps: false,
+                        hovertemplate: `Frequency=%{x:.9g} Hz<br>|mean(φ<sub>M</sub> − φ<sub>S</sub>)| (${phase}°)=%{y:.6g} rad<extra></extra>`
+                    }));
+                    Plotly.react(element, traces, {
+                        margin: { l: 78, r: 35, t: 52, b: 68 },
+                        title: `Absolute Mean Interferometer Phase Difference · Master − ${label}`,
+                        xaxis: { title: 'TTI carrier frequency (Hz)', showline: true, mirror: true, ticks: 'inside', gridcolor: '#dde5ee' },
+                        yaxis: { title: '|mean(φ Master − φ Slave)| (rad)', rangemode: 'tozero', showline: true, mirror: true, ticks: 'inside', gridcolor: '#dde5ee' },
+                        legend: { orientation: 'h', x: .5, xanchor: 'center', y: 1.12 },
+                        annotations: rows.length ? [] : [{ text: 'No valid paired phase data', showarrow: false, xref: 'paper', yref: 'paper', x: .5, y: .5 }],
                         paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', hovermode: 'closest'
                     }, { responsive: true, displaylogo: false });
                 },
