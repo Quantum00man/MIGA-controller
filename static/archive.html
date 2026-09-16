@@ -1823,7 +1823,8 @@
                                 <span class="small text-muted">Calibration host</span>
                                 <select class="form-select form-select-sm" style="width:auto" v-model="syncArchiveNodeSource" @change="handleSyncArchiveNodeSourceChange"><option v-for="nodeId in syncPhaseNodeIds()" :key="nodeId" :value="nodeId">{{ syncArchiveNodeLabel(nodeId) }}</option></select>
                                 <div class="btn-group btn-group-sm" role="group" aria-label="SYNC phase plot mode"><button class="btn" :class="syncPhasePlotMode === 'series' ? 'btn-dark' : 'btn-outline-dark'" @click="setSyncPhasePlotMode('series')">Series</button><button class="btn" :class="syncPhasePlotMode === 'allan' ? 'btn-dark' : 'btn-outline-dark'" @click="setSyncPhasePlotMode('allan')">Allan</button></div>
-                                <select v-if="syncPhasePlotMode === 'series'" class="form-select form-select-sm" style="width:auto" v-model="syncPhaseAggregation" @change="renderSyncArchiveNodePlots"><option value="shots">Every shot</option><option value="average">Averaged by P0</option></select>
+                                <span v-if="syncPhasePlotMode === 'series' && isTransferFunctionArchive()" class="badge bg-light text-dark border">Averaged by frequency and generator phase</span>
+                                <select v-else-if="syncPhasePlotMode === 'series'" class="form-select form-select-sm" style="width:auto" v-model="syncPhaseAggregation" @change="renderSyncArchiveNodePlots"><option value="shots">Every shot</option><option value="average">Averaged by P0</option></select>
                                 <button class="btn btn-outline-success btn-sm" @click="downloadSyncPhaseCSV" :disabled="!syncPhaseExportRows().length"><i class="bi bi-download me-1"></i>Phase CSV</button>
                             </div>
                             <div v-if="syncPhasePlotMode === 'allan'" class="col-12 d-flex flex-wrap align-items-center gap-2">
@@ -6367,16 +6368,39 @@
                         return { shot: target.shot, p0: target.p0, phase, rawDifference, reference, target, optimizationPreview: Boolean(optimizedRecord) };
                     }).filter(Boolean).sort((a, b) => a.shot - b.shot);
                 },
+                syncPhaseTransferFrequency(item) {
+                    const frequency = Number((item?.row || item?.target?.row)?.transfer_frequency_hz);
+                    return Number.isFinite(frequency) ? frequency : null;
+                },
+                syncPhaseGeneratorPhase(item) {
+                    const phase = Number((item?.row || item?.target?.row)?.transfer_phase_deg);
+                    return [0, 90].includes(phase) ? phase : null;
+                },
                 syncPhaseAggregateRows(rows) {
-                    if (this.syncPhaseAggregation !== 'average') return rows.map(item => ({ ...item, count: 1 }));
+                    const transferFunction = this.isTransferFunctionArchive();
+                    if (!transferFunction && this.syncPhaseAggregation !== 'average') return rows.map(item => ({ ...item, count: 1 }));
                     const groups = new Map();
                     rows.forEach(item => {
-                        const key = Number(item.p0).toFixed(9);
-                        const group = groups.get(key) || { p0: item.p0, phaseSum: 0, rawSum: 0, count: 0, shot: item.shot };
+                        const frequency = this.syncPhaseTransferFrequency(item);
+                        const generatorPhase = this.syncPhaseGeneratorPhase(item);
+                        if (transferFunction && (frequency === null || generatorPhase === null)) return;
+                        const key = transferFunction
+                            ? `${frequency.toPrecision(15)}:${generatorPhase}`
+                            : Number(item.p0).toFixed(9);
+                        const group = groups.get(key) || {
+                            p0: item.p0, frequency_hz: frequency, transfer_phase_deg: generatorPhase,
+                            phaseSum: 0, rawSum: 0, count: 0, shot: item.shot,
+                        };
                         group.phaseSum += Number(item.phase); group.rawSum += Number(item.rawDifference ?? item.phase); group.count += 1;
                         group.shot = Math.min(group.shot, item.shot); groups.set(key, group);
                     });
-                    return [...groups.values()].map(group => ({ p0: group.p0, phase: group.phaseSum / group.count, rawDifference: group.rawSum / group.count, count: group.count, shot: group.shot })).sort((a, b) => a.p0 - b.p0);
+                    return [...groups.values()].map(group => ({
+                        p0: group.p0, frequency_hz: group.frequency_hz, transfer_phase_deg: group.transfer_phase_deg,
+                        phase: group.phaseSum / group.count, rawDifference: group.rawSum / group.count,
+                        count: group.count, shot: group.shot,
+                    })).sort((a, b) => transferFunction
+                        ? (a.transfer_phase_deg - b.transfer_phase_deg) || (a.frequency_hz - b.frequency_hz)
+                        : a.p0 - b.p0);
                 },
                 ensureSyncPhaseNodes(initialize = false) {
                     const ids = this.syncPhaseNodeIds();
@@ -6887,14 +6911,34 @@
                         xTitle = 'Allan Order n';
                         title = `All Hosts + Phase Difference · ${this.syncPhaseAllanScale === 'relative' ? 'Relative' : 'Absolute'} overlapping Allan`;
                     } else {
-                        traces = definitions.map(definition => {
+                        const transferFunction = this.isTransferFunctionArchive();
+                        traces = definitions.flatMap(definition => {
                             const rows = this.syncPhaseAggregateRows(definition.rows);
-                            return { x: rows.map(item => item.p0), y: rows.map(item => item.phase * scale), customdata: rows.map(item => [item.shot, item.count || 1]), type: 'scatter', mode: 'lines+markers', name: definition.kind === 'difference' ? `Difference: ${definition.label}` : definition.label, line: { color: definition.color, width: definition.kind === 'difference' ? 3 : 2, dash: definition.kind === 'difference' ? 'dash' : 'solid' }, marker: { color: definition.color, symbol: definition.kind === 'difference' ? 'diamond' : 'circle', size: this.syncPhaseAggregation === 'average' ? 8 : 7, opacity: 0.82 }, hovertemplate: 'P0=%{x:.9g}<br>Δφ=%{y:.6g}<br>first shot=%{customdata[0]}<br>shots=%{customdata[1]}<extra>%{fullData.name}</extra>' };
+                            const phases = transferFunction ? [0, 90] : [null];
+                            return phases.map(generatorPhase => {
+                                const selected = generatorPhase === null ? rows : rows.filter(item => item.transfer_phase_deg === generatorPhase);
+                                const name = definition.kind === 'difference' ? `Difference: ${definition.label}` : definition.label;
+                                return {
+                                    x: selected.map(item => transferFunction ? item.frequency_hz : item.p0),
+                                    y: selected.map(item => item.phase * scale),
+                                    customdata: selected.map(item => [item.shot, item.count || 1, item.transfer_phase_deg]),
+                                    type: 'scatter', mode: 'lines+markers',
+                                    name: generatorPhase === null ? name : `${name} · ${generatorPhase}°`,
+                                    legendgroup: `${definition.id}:${generatorPhase ?? 'series'}`,
+                                    line: { color: definition.color, width: definition.kind === 'difference' ? 3 : 2, dash: generatorPhase === 90 ? 'dot' : (definition.kind === 'difference' ? 'dash' : 'solid') },
+                                    marker: { color: definition.color, symbol: definition.kind === 'difference' ? 'diamond' : 'circle', size: transferFunction || this.syncPhaseAggregation === 'average' ? 8 : 7, opacity: 0.82 },
+                                    hovertemplate: transferFunction
+                                        ? 'Frequency=%{x:.9g} Hz<br>Generator phase=%{customdata[2]}°<br>Δφ=%{y:.6g}<br>first shot=%{customdata[0]}<br>shots=%{customdata[1]}<extra>%{fullData.name}</extra>'
+                                        : 'P0=%{x:.9g}<br>Δφ=%{y:.6g}<br>first shot=%{customdata[0]}<br>shots=%{customdata[1]}<extra>%{fullData.name}</extra>',
+                                };
+                            }).filter(trace => trace.x.length);
                         });
-                        xTitle = 'Parameter P0';
+                        xTitle = transferFunction ? 'TTI carrier frequency (Hz)' : 'Parameter P0';
                         const hostCount = definitions.filter(definition => definition.kind === 'host').length;
                         const hasDifference = definitions.some(definition => definition.kind === 'difference');
-                        title = !definitions.length ? 'Select one or more phase traces' : (hostCount && hasDifference ? 'Host Phase + Gradient Phase Difference' : (hasDifference ? 'Gradient Phase Difference · Target − Reference' : (hostCount > 1 ? 'All Hosts Interferometer Phase' : `${definitions[0]?.label || ''} Interferometer Phase`)));
+                        title = transferFunction
+                            ? 'SYNC Transfer Function Phase · Per-frequency mean'
+                            : (!definitions.length ? 'Select one or more phase traces' : (hostCount && hasDifference ? 'Host Phase + Gradient Phase Difference' : (hasDifference ? 'Gradient Phase Difference · Target − Reference' : (hostCount > 1 ? 'All Hosts Interferometer Phase' : `${definitions[0]?.label || ''} Interferometer Phase`))));
                     }
                     const relative = this.syncPhasePlotMode === 'allan' && this.syncPhaseAllanScale === 'relative';
                     const layout = {
@@ -7280,7 +7324,7 @@
                     const selectedSlave = String(this.syncArchiveSlaveId || '');
                     const saved = Array.isArray(this.syncManifest?.transfer_function_differential_summary)
                         ? this.syncManifest.transfer_function_differential_summary : [];
-                    if (saved.length && Number(this.syncManifest?.transfer_function_differential_formula_version) >= 2) {
+                    if (saved.length && Number(this.syncManifest?.transfer_function_differential_formula_version) >= 3) {
                         return saved.filter(row => !selectedSlave || String(row.slave_node_id || '') === selectedSlave)
                             .slice().sort((a, b) => Number(a.frequency_hz) - Number(b.frequency_hz));
                     }
@@ -7327,7 +7371,11 @@
                             slave_node_id: group.slave_node_id,
                             frequency_hz: group.frequency_hz,
                             delta_s_0deg_count: zero.count, delta_s_0deg_mean: zero.mean, delta_s_0deg_std: zero.std, delta_s_0deg_sem: zero.sem,
+                            delta_s_0deg_s2: zero.mean === null ? null : zero.mean ** 2,
+                            delta_s_0deg_s2_sem: zero.mean === null || zero.sem === null ? null : 2 * Math.abs(zero.mean) * zero.sem,
                             delta_s_90deg_count: ninety.count, delta_s_90deg_mean: ninety.mean, delta_s_90deg_std: ninety.std, delta_s_90deg_sem: ninety.sem,
+                            delta_s_90deg_s2: ninety.mean === null ? null : ninety.mean ** 2,
+                            delta_s_90deg_s2_sem: ninety.mean === null || ninety.sem === null ? null : 2 * Math.abs(ninety.mean) * ninety.sem,
                             differential_s2: differentialS2,
                             differential_magnitude: differentialS2 === null ? null : Math.sqrt(differentialS2),
                             quadrature_complete: zero.mean !== null && ninety.mean !== null,
@@ -7339,8 +7387,8 @@
                     if (!rows.length) return;
                     const fields = [
                         'slave_node_id', 'frequency_hz',
-                        'delta_s_0deg_count', 'delta_s_0deg_mean', 'delta_s_0deg_std', 'delta_s_0deg_sem',
-                        'delta_s_90deg_count', 'delta_s_90deg_mean', 'delta_s_90deg_std', 'delta_s_90deg_sem',
+                        'delta_s_0deg_count', 'delta_s_0deg_mean', 'delta_s_0deg_std', 'delta_s_0deg_sem', 'delta_s_0deg_s2', 'delta_s_0deg_s2_sem',
+                        'delta_s_90deg_count', 'delta_s_90deg_mean', 'delta_s_90deg_std', 'delta_s_90deg_sem', 'delta_s_90deg_s2', 'delta_s_90deg_s2_sem',
                         'differential_s2', 'differential_magnitude', 'quadrature_complete'
                     ];
                     const csv = '\uFEFF' + [fields, ...rows.map(row => fields.map(field => row[field] ?? ''))]
@@ -7364,12 +7412,12 @@
                     if (linear) {
                         [[0, '#c62828'], [90, '#1565c0']].forEach(([phase, color]) => traces.push({
                             x: rows.map(row => Number(row.frequency_hz)),
-                            y: rows.map(row => row[`delta_s_${phase}deg_mean`]),
-                            error_y: { type: 'data', array: rows.map(row => row[`delta_s_${phase}deg_sem`] ?? 0), visible: true },
-                            type: 'scatter', mode: 'lines+markers', name: `ΔS${phase}`,
+                            y: rows.map(row => row[`delta_s_${phase}deg_s2`]),
+                            error_y: { type: 'data', array: rows.map(row => row[`delta_s_${phase}deg_s2_sem`] ?? 0), visible: true },
+                            type: 'scatter', mode: 'lines+markers', name: `|ΔS${phase}|²`,
                             line: { color, width: 1.8, dash: phase === 0 ? 'dash' : 'dot' }, marker: { color, size: 7 },
                             connectgaps: false,
-                            hovertemplate: `Frequency=%{x:.9g} Hz<br>ΔS${phase}=%{y:.6g}<extra></extra>`
+                            hovertemplate: `Frequency=%{x:.9g} Hz<br>|ΔS${phase}|²=%{y:.6g}<extra></extra>`
                         }));
                     }
                     const label = this.syncArchiveNodeLabel(this.syncArchiveSlaveId);
@@ -7377,7 +7425,7 @@
                         margin: { l: 78, r: 35, t: 52, b: 68 },
                         title: `Differential Transfer Function · Master − ${label}`,
                         xaxis: { title: 'TTI carrier frequency (Hz)', showline: true, mirror: true, ticks: 'inside', gridcolor: '#dde5ee' },
-                        yaxis: { title: linear ? 'ΔS components / |ΔS|²' : '|ΔS|²', type: this.transferFunctionYAxisScale, showline: true, mirror: true, ticks: 'inside', gridcolor: '#dde5ee' },
+                        yaxis: { title: linear ? '|ΔS₀|², |ΔS₉₀|² / |ΔS|²' : '|ΔS|²', type: this.transferFunctionYAxisScale, showline: true, mirror: true, ticks: 'inside', gridcolor: '#dde5ee' },
                         legend: { orientation: 'h', x: 0.5, xanchor: 'center', y: 1.12 },
                         annotations: rows.length ? [] : [{ text: 'No valid differential Transfer Function data', showarrow: false, xref: 'paper', yref: 'paper', x: 0.5, y: 0.5 }],
                         paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', hovermode: 'closest'

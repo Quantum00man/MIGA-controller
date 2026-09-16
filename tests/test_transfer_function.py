@@ -158,6 +158,8 @@ class TransferFunctionPlanTests(unittest.TestCase):
         self.assertIn("renderSyncArchiveTransferFunctionPlot(element)", archive_html)
         self.assertIn("downloadSyncTransferFunctionDifferentialCSV", archive_html)
         self.assertIn("row.differential_s2", archive_html)
+        self.assertIn("Averaged by frequency and generator phase", archive_html)
+        self.assertIn("SYNC Transfer Function Phase · Per-frequency mean", archive_html)
 
     def setUp(self):
         self.manager = ExperimentManager.__new__(ExperimentManager)
@@ -341,6 +343,8 @@ class TransferFunctionStatisticsTests(unittest.TestCase):
         row = build_differential_transfer_function_summary(pairs)[0]
         self.assertAlmostEqual(row["delta_s_0deg_mean"], 2.0)
         self.assertAlmostEqual(row["delta_s_90deg_mean"], 3.0)
+        self.assertAlmostEqual(row["delta_s_0deg_s2"], 4.0)
+        self.assertAlmostEqual(row["delta_s_90deg_s2"], 9.0)
         self.assertAlmostEqual(row["differential_s2"], 13.0)
         self.assertAlmostEqual(row["differential_magnitude"], 13.0 ** 0.5)
         self.assertTrue(row["quadrature_complete"])

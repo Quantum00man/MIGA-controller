@@ -12,7 +12,7 @@ SPEED_OF_LIGHT_M_S = 299_792_458.0
 DEFAULT_ATOM_MIRROR_DISTANCE_M = 2.23
 # Backward-compatible name for integrations that imported the former constant.
 ATOM_MIRROR_DISTANCE_M = DEFAULT_ATOM_MIRROR_DISTANCE_M
-SYNC_DIFFERENTIAL_FORMULA_VERSION = 2
+SYNC_DIFFERENTIAL_FORMULA_VERSION = 3
 
 
 METRIC_FIELDS = {
@@ -301,6 +301,12 @@ def build_differential_transfer_function_summary(
             row[f"delta_s_{label}_mean"] = mean
             row[f"delta_s_{label}_std"] = std
             row[f"delta_s_{label}_sem"] = std / math.sqrt(len(values)) if std is not None else None
+            row[f"delta_s_{label}_s2"] = float(mean * mean) if mean is not None else None
+            row[f"delta_s_{label}_s2_sem"] = (
+                float(2.0 * abs(mean) * row[f"delta_s_{label}_sem"])
+                if mean is not None and row[f"delta_s_{label}_sem"] is not None
+                else None
+            )
             means.append(mean)
         available = [value for value in means if value is not None]
         row["differential_s2"] = float(sum(value * value for value in available)) if available else None
