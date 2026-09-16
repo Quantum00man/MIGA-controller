@@ -24,6 +24,80 @@ MAX_WAVEFORM_PREVIEW_STEPS = 48
 
 
 class DataLoader:
+    def _sync_analysis_copies_dir(self, year: str, month: str, day: str, run_id: str) -> Path:
+        return self._get_run_dir(year, month, day, run_id) / "sync_analysis_copies"
+
+    def load_sync_analysis_copies(self, year: str, month: str, day: str, run_id: str) -> List[Dict[str, Any]]:
+        copies_dir = self._sync_analysis_copies_dir(year, month, day, run_id)
+        copies: List[Dict[str, Any]] = []
+        if not copies_dir.is_dir():
+            return copies
+        for path in copies_dir.glob("*.json"):
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if isinstance(payload, dict) and str(payload.get("id") or "").strip():
+                copies.append(self._sanitize_structure({
+                    "id": payload.get("id"), "name": payload.get("name"),
+                    "created_at": payload.get("created_at"), "storage_mode": payload.get("storage_mode"),
+                }))
+        return sorted(copies, key=lambda item: str(item.get("created_at") or ""), reverse=True)
+
+    def load_sync_analysis_copy(
+        self, year: str, month: str, day: str, run_id: str, copy_id: Optional[str]
+    ) -> Optional[Dict[str, Any]]:
+        selected = str(copy_id or "").strip()
+        if not selected:
+            return None
+        if not selected.isalnum():
+            raise ValueError("Invalid SYNC analysis copy identifier")
+        path = self._sync_analysis_copies_dir(year, month, day, run_id) / f"{selected}.json"
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            raise ValueError("Selected SYNC analysis copy was not found")
+        except (OSError, ValueError):
+            raise ValueError("Selected SYNC analysis copy could not be read")
+        if not isinstance(payload, dict) or str(payload.get("id") or "") != selected:
+            raise ValueError("Selected SYNC analysis copy is invalid")
+        return self._sanitize_structure(payload)
+
+    def save_sync_analysis_copy(
+        self, year: str, month: str, day: str, run_id: str, name: str,
+        phase_calibration_result: Optional[Dict[str, Any]],
+        transfer_normalization_result: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        run_dir = self._get_run_dir(year, month, day, run_id)
+        if not (run_dir / "sync_manifest.json").is_file():
+            raise ValueError("Analysis copies can only be saved for a SYNC archive")
+        clean_name = str(name or "").strip()
+        if not clean_name:
+            raise ValueError("Analysis copy name is required")
+        if not isinstance(phase_calibration_result, dict) and not isinstance(transfer_normalization_result, dict):
+            raise ValueError("Optimize A/C or r before saving an analysis copy")
+        record = self._sanitize_structure({
+            "version": 1,
+            "id": uuid.uuid4().hex,
+            "name": clean_name,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "phase_calibration_result": deepcopy(phase_calibration_result) if isinstance(phase_calibration_result, dict) else None,
+            "transfer_normalization_result": deepcopy(transfer_normalization_result) if isinstance(transfer_normalization_result, dict) else None,
+            "storage_mode": "analysis_snapshot",
+        })
+        copies_dir = self._sync_analysis_copies_dir(year, month, day, run_id)
+        copies_dir.mkdir(parents=True, exist_ok=True)
+        path = copies_dir / f"{record['id']}.json"
+        temporary = path.with_suffix(".json.tmp")
+        temporary.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+        temporary.replace(path)
+        return record
+
+    def load_sync_transfer_normalization(self, year: str, month: str, day: str, run_id: str) -> Dict[str, Any]:
+        path = self._get_run_dir(year, month, day, run_id) / "sync_transfer_normalization.json"
+        try: payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError): payload = {}
+        return payload if isinstance(payload, dict) else {}
     def __init__(self):
         self.base_dir = config.DATA_BASE_DIR
 
@@ -536,6 +610,45 @@ class DataLoader:
         for slave_key, records in (node_results.get("slaves") or {}).items():
             if isinstance(records, list):
                 node_results["slaves"][slave_key] = [convert(record, str(slave_key)) for record in records]
+        return output
+
+    def _apply_sync_analysis_copy(
+        self, contexts: Dict[str, Dict[str, Any]], analysis_copy: Optional[Dict[str, Any]]
+    ) -> Dict[str, Dict[str, Any]]:
+        if not isinstance(analysis_copy, dict):
+            return contexts
+        result = analysis_copy.get("phase_calibration_result")
+        if not isinstance(result, dict):
+            return contexts
+        calibrated = {
+            str(result.get("reference_node_id") or ""): result.get("optimized_reference_calibration"),
+            str(result.get("target_node_id") or ""): result.get("optimized_target_calibration"),
+        }
+        output = deepcopy(contexts)
+        for node_id, calibration in calibrated.items():
+            if node_id and isinstance(calibration, dict) and node_id in output:
+                output[node_id]["effective_calibration"] = deepcopy(calibration)
+                output[node_id]["has_override"] = True
+        return output
+
+    @staticmethod
+    def _sync_transfer_normalization_for_copy(
+        normalization: Dict[str, Any], analysis_copy: Optional[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        output = deepcopy(normalization) if isinstance(normalization, dict) else {}
+        result = analysis_copy.get("transfer_normalization_result") if isinstance(analysis_copy, dict) else None
+        if not isinstance(result, dict):
+            return output
+        slave_id = str(result.get("slave_node_id") or "").strip()
+        try:
+            scale = float(result.get("scale_after"))
+        except (TypeError, ValueError):
+            return output
+        if slave_id and math.isfinite(scale) and scale > 0:
+            scales = dict(output.get("slave_scales") or {})
+            scales[slave_id] = scale
+            output["slave_scales"] = scales
+            output["analysis_copy_result"] = deepcopy(result)
         return output
 
     def _archive_phase_reference_context(
@@ -1245,6 +1358,8 @@ class DataLoader:
         self, year: str, month: str, day: str, run_id: str, node_id: Optional[str] = None,
         current_phase_calibration: Optional[Dict[str, Any]] = None,
         phase_noise_allan_orders: Optional[List[int]] = None,
+        analysis_copy_id: Optional[str] = None,
+        analysis_copy_override: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         root_run_dir = self._get_run_dir(year, month, day, run_id)
         run_dir = self._resolve_archive_node_dir(root_run_dir, node_id)
@@ -1255,6 +1370,12 @@ class DataLoader:
         phase_node_key, phase_context, phase_contexts = self._archive_phase_reference_context(
             year, month, day, run_id, node_id, current_phase_calibration
         )
+        analysis_copy = (
+            deepcopy(analysis_copy_override) if isinstance(analysis_copy_override, dict)
+            else self.load_sync_analysis_copy(year, month, day, run_id, analysis_copy_id)
+        )
+        phase_contexts = self._apply_sync_analysis_copy(phase_contexts, analysis_copy)
+        phase_context = phase_contexts.get(phase_node_key) or phase_context
         has_phase_override = bool(phase_context.get("has_override"))
         has_phase_snapshot = "_interferometer_phase_calibration_snapshot" in config_data
         snapshot_calibration = config_data.get("_interferometer_phase_calibration_snapshot")
@@ -1346,6 +1467,11 @@ class DataLoader:
                 self.load_sync_phase_calibration_optimizations(year, month, day, run_id)
                 if sync_manifest else []
             ),
+            "sync_transfer_normalization": self._sync_transfer_normalization_for_copy(
+                self.load_sync_transfer_normalization(year, month, day, run_id), analysis_copy
+            ) if sync_manifest else {},
+            "sync_analysis_copies": self.load_sync_analysis_copies(year, month, day, run_id) if sync_manifest else [],
+            "selected_sync_analysis_copy": analysis_copy,
             "selected_sync_node": str(node_id or ""),
             "interferometer_phase_calibration": phase_calibration,
             "interferometer_phase_original_calibration": phase_context.get("original_calibration"),

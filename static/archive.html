@@ -1885,14 +1885,31 @@
                                             <button class="btn btn-outline-danger btn-sm flex-fill" @click="deleteSavedSyncPhaseCalibrationOptimization" :disabled="syncPhaseCalibrationOptimization.deleting || !syncPhaseCalibrationOptimization.selectedId">{{ syncPhaseCalibrationOptimization.deleting ? 'Deleting…' : 'Delete' }}</button>
                                         </div>
                                     </div>
+                                    <div v-if="isTransferFunctionArchive() && syncPhaseSelectedNodes.includes('master') && syncPhaseSelectedNodes.length === 2" class="border-top mt-3 pt-3">
+                                        <div class="fw-bold mb-1">Slave L-ratio normalization</div>
+                                        <div class="row g-2 align-items-end">
+                                            <div class="col-sm-4"><label class="form-label-small">TTI FREQUENCY (HZ)</label><select class="form-select form-select-sm" v-model.number="syncTransferNormalizationOptimization.frequencyHz"><option v-for="f in syncTransferFunctionOptimizationFrequencies()" :key="f" :value="f">{{ Number(f).toPrecision(9) }}</option></select></div>
+                                            <div class="col-sm-3"><label class="form-label-small">R BOUNDS (%)</label><input type="number" class="form-control form-control-sm" min="0.1" max="50" v-model.number="syncTransferNormalizationOptimization.boundPercent"></div>
+                                            <div class="col-sm-3"><button class="btn btn-primary btn-sm w-100" @click="runSyncTransferNormalizationOptimization" :disabled="syncTransferNormalizationOptimization.loading"><span v-if="syncTransferNormalizationOptimization.loading" class="spinner-border spinner-border-sm me-1"></span>{{ syncTransferNormalizationOptimization.loading ? 'Optimizing…' : 'Optimize r' }}</button></div>
+                                        </div>
+                                        <div v-if="syncTransferNormalizationOptimization.error" class="alert alert-danger small py-2 mt-2 mb-0">{{ syncTransferNormalizationOptimization.error }}</div>
+                                        <div v-if="syncTransferNormalizationOptimization.result" class="small mt-2">Preview: r={{ Number(syncTransferNormalizationOptimization.result.scale_after).toPrecision(7) }}, S²: {{ Number(syncTransferNormalizationOptimization.result.before.s2).toPrecision(6) }} → {{ Number(syncTransferNormalizationOptimization.result.after.s2).toPrecision(6) }}</div>
+                                    </div>
+                                    <div v-if="isTransferFunctionArchive()" class="border-top mt-3 pt-3">
+                                        <div class="fw-bold mb-1">Named analysis copies</div>
+                                        <div class="small text-muted mb-2">A copy stores the current A/C and r preview separately from the raw scan. Nothing is written until you save one.</div>
+                                        <div class="row g-2 align-items-end">
+                                            <div class="col-md-5"><label class="form-label-small">LOAD COPY</label><select class="form-select form-select-sm" v-model="syncAnalysisCopy.selectedId" @change="loadSelectedSyncAnalysisCopy"><option value="">Original analysis</option><option v-for="copy in syncAnalysisCopies" :key="copy.id" :value="String(copy.id)">{{ formatSyncAnalysisCopy(copy) }}</option></select></div>
+                                            <div class="col-md-4"><label class="form-label-small">NEW COPY NAME</label><input type="text" class="form-control form-control-sm" maxlength="120" placeholder="e.g. AC+r, 12 Hz" v-model.trim="syncAnalysisCopy.name"></div>
+                                            <div class="col-md-3"><button class="btn btn-success btn-sm w-100" @click="saveSyncAnalysisCopy" :disabled="syncAnalysisCopy.saving || !hasSyncAnalysisPreview()">{{ syncAnalysisCopy.saving ? 'Saving…' : 'Save analysis copy' }}</button></div>
+                                        </div>
+                                        <div v-if="syncAnalysisCopy.error" class="alert alert-danger small py-2 mt-2 mb-0">{{ syncAnalysisCopy.error }}</div>
+                                        <div v-if="syncAnalysisCopy.message" class="alert alert-success small py-2 mt-2 mb-0">{{ syncAnalysisCopy.message }}</div>
+                                    </div>
                                     <template v-if="syncPhaseCalibrationOptimization.result">
                                         <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mt-3">
                                             <span class="badge bg-primary">Optimization preview is applied to Phase Series, Allan and Sequence Statistics</span>
                                             <div class="d-flex flex-wrap gap-2">
-                                                <input v-if="!syncPhaseCalibrationOptimization.result.id" type="text" class="form-control form-control-sm" style="width:190px" maxlength="120" placeholder="Optional result name" v-model.trim="syncPhaseCalibrationOptimization.name">
-                                                <button v-if="!syncPhaseCalibrationOptimization.result.id" class="btn btn-success btn-sm" @click="saveSyncPhaseCalibrationOptimization" :disabled="syncPhaseCalibrationOptimization.saving">{{ syncPhaseCalibrationOptimization.saving ? 'Saving…' : 'Save result' }}</button>
-                                                <span v-else class="badge bg-success align-self-center">Saved separately from original archive data</span>
-                                                <button class="btn btn-warning btn-sm" @click="applySyncPhaseCalibrationOptimization" :disabled="syncPhaseCalibrationOptimization.applying">{{ syncPhaseCalibrationOptimization.applying ? 'Applying…' : 'Apply A/C to Archive' }}</button>
                                                 <button class="btn btn-outline-secondary btn-sm" @click="resetSyncPhaseCalibrationOptimizationPreview">Reset preview</button>
                                             </div>
                                         </div>
@@ -2625,6 +2642,8 @@
                         error: '', message: '', result: null, name: '',
                         saved: [], selectedId: '',
                     },
+                    syncTransferNormalization: {}, syncTransferNormalizationOptimization: { frequencyHz: null, boundPercent: 10, loading: false, error: '', result: null },
+                    syncAnalysisCopies: [], syncSelectedAnalysisCopy: null, syncAnalysisCopy: { selectedId: '', name: '', saving: false, error: '', message: '' },
                     syncArchiveSlaveId: '',
                     syncArchiveAxisX: { metric: 'intf_p', channel: 'up' },
                     syncArchiveAxisY: { metric: 'intf_p', channel: 'up' },
@@ -5231,7 +5250,7 @@
                     await this.loadRun();
                 },
 
-                async loadRun(requestedNodeId = '') {
+                async loadRun(requestedNodeId = '', requestedAnalysisCopyId = '') {
                     if (!this.selectedRun) return;
                     const requestedSyncNode = typeof requestedNodeId === 'string' ? requestedNodeId : '';
                     this.isLoading = true;
@@ -5289,6 +5308,12 @@
                     this.syncPhaseCalibrationOptimization.result = null;
                     this.syncPhaseCalibrationOptimization.saved = [];
                     this.syncPhaseCalibrationOptimization.selectedId = '';
+                    this.syncTransferNormalizationOptimization.loading = false;
+                    this.syncTransferNormalizationOptimization.error = '';
+                    this.syncTransferNormalizationOptimization.result = null;
+                    this.syncAnalysisCopies = [];
+                    this.syncSelectedAnalysisCopy = null;
+                    this.syncAnalysisCopy = { selectedId: String(requestedAnalysisCopyId || ''), name: '', saving: false, error: '', message: '' };
                     if (this.syncArchiveReplayTimer) clearInterval(this.syncArchiveReplayTimer);
                     this.syncArchiveReplayTimer = null;
                     this.syncArchiveReplayPlaying = false;
@@ -5307,6 +5332,7 @@
                     try {
                         const query = new URLSearchParams({ t: String(Date.now()) });
                         if (requestedSyncNode) query.set('node_id', requestedSyncNode);
+                        if (this.syncAnalysisCopy.selectedId) query.set('analysis_copy_id', this.syncAnalysisCopy.selectedId);
                         const url = `/archive/load/${this.selectedYear}/${this.selectedMonth}/${this.selectedDay}/${this.selectedRun}?${query.toString()}`;
                         const res = await axios.get(url);
 
@@ -5336,6 +5362,10 @@
                             ? String(this.syncDifferentialFits[this.syncDifferentialFits.length - 1].id || '') : '';
                         this.syncPhaseCalibrationOptimization.saved = Array.isArray(res.data.sync_phase_calibration_optimizations)
                             ? res.data.sync_phase_calibration_optimizations : [];
+                        this.syncTransferNormalization = res.data.sync_transfer_normalization || {};
+                        this.syncAnalysisCopies = Array.isArray(res.data.sync_analysis_copies) ? res.data.sync_analysis_copies : [];
+                        this.syncSelectedAnalysisCopy = res.data.selected_sync_analysis_copy || null;
+                        this.syncAnalysisCopy.selectedId = String(res.data.selected_sync_analysis_copy?.id || '');
                         this.syncPhaseCalibrationOptimization.selectedId = this.syncPhaseCalibrationOptimization.saved.length
                             ? String(this.syncPhaseCalibrationOptimization.saved[this.syncPhaseCalibrationOptimization.saved.length - 1].id || '') : '';
                         const localArchiveNode = Object.entries(this.syncManifest?.archive_nodes || {}).find(([, entry]) => entry?.local === true)?.[0] || '';
@@ -6622,6 +6652,68 @@
                     });
                     return [...values].sort((a, b) => a - b);
                 },
+                async runSyncTransferNormalizationOptimization() {
+                    const state = this.syncTransferNormalizationOptimization;
+                    const frequencies = this.syncTransferFunctionOptimizationFrequencies();
+                    if (!Number.isFinite(Number(state.frequencyHz)) && frequencies.length) state.frequencyHz = frequencies[0];
+                    const slave = (this.syncPhaseSelectedNodes || []).find(id => id !== 'master');
+                    if (!slave || !Number.isFinite(Number(state.frequencyHz)) || state.loading) return;
+                    state.loading = true; state.error = ''; state.result = null;
+                    try {
+                        const response = await axios.post('/archive/sync-transfer-normalization-optimize', {
+                            year: this.selectedYear, month: this.selectedMonth, day: this.selectedDay, run_id: this.selectedRun,
+                            slave_node_id: slave, transfer_frequency_hz: Number(state.frequencyHz),
+                            bound_fraction: Math.max(.001, Math.min(.5, Number(state.boundPercent || 10) / 100)),
+                            phase_calibration_result: this.currentSyncAnalysisPhaseResult(),
+                            analysis_copy_id: this.syncAnalysisCopy.selectedId || null,
+                        });
+                        state.result = response.data;
+                        this.renderSyncArchiveNodePlots();
+                    } catch (error) {
+                        state.error = error.response?.data?.detail || error.message || 'Normalization optimization failed.';
+                    } finally {
+                        state.loading = false;
+                    }
+                },
+                hasSyncAnalysisPreview() {
+                    return Boolean(this.currentSyncAnalysisPhaseResult() || this.currentSyncAnalysisNormalizationResult());
+                },
+                selectedSyncAnalysisCopy() {
+                    return this.syncSelectedAnalysisCopy;
+                },
+                currentSyncAnalysisPhaseResult() {
+                    return this.syncPhaseCalibrationOptimization.result || this.selectedSyncAnalysisCopy()?.phase_calibration_result || null;
+                },
+                currentSyncAnalysisNormalizationResult() {
+                    return this.syncTransferNormalizationOptimization.result || this.selectedSyncAnalysisCopy()?.transfer_normalization_result || null;
+                },
+                formatSyncAnalysisCopy(copy) {
+                    const name = String(copy?.name || 'Unnamed copy');
+                    const timestamp = copy?.created_at ? new Date(copy.created_at).toLocaleString() : '';
+                    return [name, timestamp].filter(Boolean).join(' · ');
+                },
+                async loadSelectedSyncAnalysisCopy() {
+                    await this.loadRun(this.syncArchiveNodeSource || 'master', this.syncAnalysisCopy.selectedId || '');
+                },
+                async saveSyncAnalysisCopy() {
+                    const state = this.syncAnalysisCopy;
+                    if (state.saving || !this.hasSyncAnalysisPreview()) return;
+                    state.saving = true; state.error = ''; state.message = '';
+                    try {
+                        const response = await axios.post('/archive/sync-analysis-copies/save', {
+                            year: this.selectedYear, month: this.selectedMonth, day: this.selectedDay, run_id: this.selectedRun,
+                            name: state.name || '',
+                            phase_calibration_result: this.currentSyncAnalysisPhaseResult(),
+                            transfer_normalization_result: this.currentSyncAnalysisNormalizationResult(),
+                        });
+                        await this.loadRun(this.syncArchiveNodeSource || 'master', String(response.data.id || ''));
+                        this.syncAnalysisCopy.message = 'Analysis copy saved. The raw scan and its original calibration were not changed.';
+                    } catch (error) {
+                        state.error = error.response?.data?.detail || error.message || 'Unable to save analysis copy.';
+                    } finally {
+                        state.saving = false;
+                    }
+                },
                 clearSyncPhaseCalibrationOptimization() {
                     this.syncPhaseCalibrationOptimization.error = '';
                     this.syncPhaseCalibrationOptimization.message = '';
@@ -7379,7 +7471,8 @@
                     const selectedSlave = String(this.syncArchiveSlaveId || '');
                     const saved = Array.isArray(this.syncManifest?.transfer_function_differential_summary)
                         ? this.syncManifest.transfer_function_differential_summary : [];
-                    if (saved.length && Number(this.syncManifest?.transfer_function_differential_formula_version) >= 4 && !this.syncArchiveHasPhaseOverrides()) {
+                    const previewScale = this.syncTransferNormalizationOptimization?.result?.scale_after;
+                    if (saved.length && Number(this.syncManifest?.transfer_function_differential_formula_version) >= 4 && !this.syncArchiveHasPhaseOverrides() && !this.syncAnalysisCopy.selectedId && !Object.keys(this.syncTransferNormalization?.slave_scales || {}).length && !Number.isFinite(Number(previewScale))) {
                         return saved.filter(row => !selectedSlave || String(row.slave_node_id || '') === selectedSlave)
                             .slice().sort((a, b) => Number(a.frequency_hz) - Number(b.frequency_hz));
                     }
@@ -7404,9 +7497,14 @@
                                 ? phaseValue / denominator : null;
                         };
                         const masterS = normalized(master);
-                        const slaveS = normalized(slave);
-                        if (masterS === null || slaveS === null) return;
+                        const slaveS0 = normalized(slave);
                         const slaveId = String(pair.slave_node_id || slave.sync_node_id || 'slave');
+                        const previewApplies = String(this.syncTransferNormalizationOptimization?.result?.slave_node_id || '') === slaveId;
+                        const slaveScale = previewApplies
+                            ? Number(previewScale)
+                            : Number((this.syncTransferNormalization?.slave_scales || {})[slaveId] ?? 1);
+                        const slaveS = Number.isFinite(slaveScale) && slaveScale > 0 && slaveS0 !== null ? slaveS0 / slaveScale : null;
+                        if (masterS === null || slaveS === null) return;
                         if (selectedSlave && slaveId !== selectedSlave) return;
                         const key = `${slaveId}:${frequency.toPrecision(15)}`;
                         const group = groups.get(key) || { slave_node_id: slaveId, frequency_hz: frequency, values: { 0: [], 90: [] } };

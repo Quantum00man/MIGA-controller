@@ -1476,11 +1476,19 @@ calibration quality needs review rather than automatic acceptance.
   \item The optimized per-node phases immediately feed the existing Phase Series, Allan
   plot and Sequence Statistics. Changing Allan order, $P_0$ filtering or the actual shot
   index range recalculates those views from the preview values.
+  \item For a Transfer Function archive, optionally optimize the Slave L-ratio $r$ at one
+  carrier frequency. The Master distance remains fixed and both ang{0} and \ang{90}
+  quadratures enter the objective $|\Delta S_0|^2+|\Delta S_{90}|^2$.
+  \item Enter a name and click \ui{Save analysis copy} to preserve the current A/C and/or
+  $r$ preview. A saved copy can later be selected from \ui{Load Copy}; several named
+  copies may coexist for the same scan.
   \item Click \ui{Reset preview} to restore the archived phases.
 \end{procedure}
 
 \warningtext{Optimization results are preview-only. They do not overwrite an archived
-run and do not save or activate a Settings calibration. A small Allan or standard
+run and do not save or activate a Settings calibration. Only \ui{Save analysis copy}
+writes a separate analysis snapshot to disk; it never changes raw scan data, the SYNC
+manifest, or global calibration settings. A small Allan or standard
 deviation alone is insufficient evidence of a valid calibration: also inspect curve
 agreement, parameter movement, valid-shot count and boundary warnings.}
 

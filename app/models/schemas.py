@@ -933,6 +933,25 @@ class ArchiveSyncPhaseCalibrationApplyRequest(BaseModel):
     run_id: str
     result: Dict[str, Any]
 
+class ArchiveSyncTransferNormalizationRequest(BaseModel):
+    year: str; month: str; day: str; run_id: str
+    slave_node_id: str
+    transfer_frequency_hz: float
+    bound_fraction: float = Field(0.1, gt=0, le=0.5)
+    result: Optional[Dict[str, Any]] = None
+    phase_calibration_result: Optional[Dict[str, Any]] = None
+    analysis_copy_id: Optional[str] = None
+
+
+class ArchiveSyncAnalysisCopySaveRequest(BaseModel):
+    year: str
+    month: str
+    day: str
+    run_id: str
+    name: str = Field(..., min_length=1, max_length=120)
+    phase_calibration_result: Optional[Dict[str, Any]] = None
+    transfer_normalization_result: Optional[Dict[str, Any]] = None
+
 
 class ArchiveLabPlotExportRequest(BaseModel):
     year: str

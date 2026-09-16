@@ -252,6 +252,7 @@ def build_transfer_function_summary(
 
 def build_differential_transfer_function_summary(
     pairs: Iterable[Dict[str, Any]],
+    slave_normalization_scales: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     """Build paired differences of each node's locally normalized quadratures."""
     grouped: Dict[tuple[str, float], Dict[float, List[float]]] = {}
@@ -269,17 +270,25 @@ def build_differential_transfer_function_summary(
         if not math.isfinite(frequency) or phase_deg not in {0.0, 90.0}:
             continue
 
+        slave_id = str(pair.get("slave_node_id") or slave.get("sync_node_id") or "slave")
+        try:
+            slave_scale = float((slave_normalization_scales or {}).get(slave_id, 1.0))
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(slave_scale) or slave_scale <= 0:
+            continue
         normalized = []
-        for record in (master, slave):
+        for index, record in enumerate((master, slave)):
             amplitude = bragg_phase_modulation_rad(
                 record.get("transfer_frequency_modulation_mhz"),
                 record.get("transfer_atom_mirror_distance_m"),
             )
             measured = _value(record, ("interferometer_phase",))
+            if index == 1 and amplitude is not None:
+                amplitude *= slave_scale
             normalized.append(measured / amplitude if measured is not None and amplitude else None)
         if any(value is None for value in normalized):
             continue
-        slave_id = str(pair.get("slave_node_id") or slave.get("sync_node_id") or "slave")
         grouped.setdefault((slave_id, frequency), {0.0: [], 90.0: []})[phase_deg].append(
             float(normalized[0] - normalized[1])
         )
@@ -310,3 +319,38 @@ def build_differential_transfer_function_summary(
         row["quadrature_complete"] = all(value is not None for value in means)
         rows.append(row)
     return rows
+
+
+def optimize_slave_normalization_scale(pairs: Iterable[Dict[str, Any]], slave_id: str, bound_fraction: Any = 0.1) -> Dict[str, Any]:
+    """Fix Master L and minimize the two-quadrature differential S² by scaling Slave L."""
+    bound = float(bound_fraction)
+    if not math.isfinite(bound) or bound <= 0 or bound > 0.5:
+        raise ValueError("Normalization-scale bound must be between 0 and 50%")
+    components: Dict[float, List[tuple[float, float]]] = {0.0: [], 90.0: []}
+    for pair in pairs:
+        master, slave = pair.get("master") or {}, pair.get("slave") or {}
+        if str(pair.get("slave_node_id") or slave.get("sync_node_id") or "slave") != str(slave_id):
+            continue
+        try: phase = float(master.get("transfer_phase_deg", slave.get("transfer_phase_deg")))
+        except (TypeError, ValueError): continue
+        if phase not in components: continue
+        values = []
+        for record in (master, slave):
+            amplitude = bragg_phase_modulation_rad(record.get("transfer_frequency_modulation_mhz"), record.get("transfer_atom_mirror_distance_m"))
+            measured = _value(record, ("interferometer_phase",))
+            values.append(measured / amplitude if measured is not None and amplitude else None)
+        if all(value is not None for value in values): components[phase].append((float(values[0]), float(values[1])))
+    if not components[0.0] or not components[90.0]:
+        raise ValueError("Both 0° and 90° need valid paired shots for normalization-scale optimization")
+    means = {phase: (float(np.mean([v[0] for v in values])), float(np.mean([v[1] for v in values]))) for phase, values in components.items()}
+    numerator = sum(a * b for a, b in means.values()); denominator = sum(b * b for _, b in means.values())
+    if denominator <= 0: raise ValueError("Slave normalized response is zero; scale is not identifiable")
+    unconstrained = denominator / numerator if numerator > 0 else 1.0
+    scale = min(1.0 + bound, max(1.0 - bound, unconstrained))
+    def summary(value: float) -> Dict[str, Any]:
+        delta = {phase: a - b / value for phase, (a, b) in means.items()}
+        return {"delta_s_0deg": delta[0.0], "delta_s_90deg": delta[90.0], "s2": delta[0.0] ** 2 + delta[90.0] ** 2}
+    return {"slave_node_id": str(slave_id), "bound_fraction": bound, "scale_before": 1.0, "scale_after": scale,
+            "at_bound": math.isclose(scale, 1.0 - bound) or math.isclose(scale, 1.0 + bound),
+            "counts": {"0deg": len(components[0.0]), "90deg": len(components[90.0])},
+            "before": summary(1.0), "after": summary(scale)}

@@ -19,6 +19,7 @@ from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 from typing import Dict, Any, List, Optional
 from app.analysis import fitting, interferometer_phase, phase_calibration_optimization
+from app.analysis.transfer_function import optimize_slave_normalization_scale
 from app.core.experiment_manager import ExperimentManager
 from app.core.data_loader import DataLoader
 from app.core.archive_collection_store import ArchiveCollectionStore
@@ -92,6 +93,8 @@ from app.models.schemas import (
     ArchiveScanFitRequest,
     ArchiveSyncDifferentialFitRequest,
     ArchiveSyncPhaseCalibrationApplyRequest,
+    ArchiveSyncAnalysisCopySaveRequest,
+    ArchiveSyncTransferNormalizationRequest,
     ArchiveSyncPhaseCalibrationOptimizeRequest,
     ArchiveSyncPhaseCalibrationSaveRequest,
     ArchiveLabPlotExportRequest,
@@ -1660,12 +1663,16 @@ async def batch_archive_favorites(req: ArchiveFavoriteBatchRequest):
         raise HTTPException(400, str(exc))
 
 @router.get("/archive/load/{year}/{month}/{day}/{run_id}")
-async def load_archived_run(year: str, month: str, day: str, run_id: str, node_id: str = ""):
+async def load_archived_run(
+    year: str, month: str, day: str, run_id: str, node_id: str = "", analysis_copy_id: str = ""
+):
     try: return data_loader.load_run(
         year, month, day, run_id, node_id=node_id or None,
         current_phase_calibration=manager.get_active_bragg_phase_calibration(),
+        analysis_copy_id=analysis_copy_id or None,
     )
     except FileNotFoundError: raise HTTPException(404, "Run not found")
+    except ValueError as exc: raise HTTPException(400, str(exc))
     except Exception as e: raise HTTPException(500, str(e))
 
 
@@ -2491,6 +2498,38 @@ async def apply_archive_sync_phase_calibration_optimization(
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc))
     except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+@router.post("/archive/sync-transfer-normalization-optimize")
+async def optimize_archive_sync_transfer_normalization(req: ArchiveSyncTransferNormalizationRequest):
+    try:
+        analysis_override = {"phase_calibration_result": req.phase_calibration_result} if isinstance(req.phase_calibration_result, dict) else None
+        loaded = await run_in_threadpool(
+            data_loader.load_run, req.year, req.month, req.day, req.run_id, None,
+            manager.get_active_bragg_phase_calibration(), None, req.analysis_copy_id, analysis_override,
+        )
+        pairs = []
+        for pair in (loaded.get("sync_manifest") or {}).get("pairs", []):
+            try:
+                frequency = float((pair.get("master") or {}).get("transfer_frequency_hz"))
+            except (TypeError, ValueError):
+                continue
+            if math.isclose(frequency, req.transfer_frequency_hz, abs_tol=1e-9):
+                pairs.append(pair)
+        result = optimize_slave_normalization_scale(pairs, req.slave_node_id, req.bound_fraction)
+        result["transfer_frequency_hz"] = req.transfer_frequency_hz
+        return result
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(400, str(exc))
+
+@router.post("/archive/sync-analysis-copies/save")
+async def save_archive_sync_analysis_copy(req: ArchiveSyncAnalysisCopySaveRequest):
+    try:
+        return await run_in_threadpool(
+            data_loader.save_sync_analysis_copy, req.year, req.month, req.day, req.run_id, req.name,
+            req.phase_calibration_result, req.transfer_normalization_result,
+        )
+    except (TypeError, ValueError) as exc:
         raise HTTPException(400, str(exc))
 
 
