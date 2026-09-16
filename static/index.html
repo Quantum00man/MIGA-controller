@@ -1467,6 +1467,17 @@
                                     <label class="form-check-label small fw-bold" for="transferControlOutput">Control TTI OUTPUT during scan</label>
                                 </div>
                             </div>
+                            <div class="col-12">
+                                <div class="form-check border rounded px-3 py-2 bg-light">
+                                    <input id="transferCalibrateZeroPhase" class="form-check-input ms-0 me-2" type="checkbox"
+                                        v-model="config.transfer_calibrate_zero_phase">
+                                    <label class="form-check-label small fw-bold" for="transferCalibrateZeroPhase">Calibrate zero phase with OUTPUT OFF before scan</label>
+                                    <div v-if="config.transfer_calibrate_zero_phase" class="input-group input-group-sm mt-2" style="max-width: 260px;">
+                                        <span class="input-group-text">Baseline shots</span>
+                                        <input type="number" min="2" step="1" class="form-control" v-model.number="config.transfer_zero_phase_repeats">
+                                    </div>
+                                </div>
+                            </div>
                             <div class="col-12 form-text mt-1">When enabled, OUTPUT is turned ON once at scan start and is turned OFF when the scan finishes, stops, or fails.</div>
                         </div>
                     </div>
@@ -1766,6 +1777,8 @@
                         transfer_phase_degrees: [0, 90],
                         transfer_phase_scan_mode: 'phase_blocks',
                         transfer_control_output: false,
+                        transfer_calibrate_zero_phase: false,
+                        transfer_zero_phase_repeats: 50,
                         ramsey_delta_start_mhz: 0,
                         ramsey_delta_stop_mhz: 1,
                         ramsey_delta_step_mhz: 0.1,
@@ -3270,7 +3283,8 @@ getLiveEstimatedShotCount() {
             });
             const phaseCount = Array.isArray(this.config.transfer_phase_degrees) && this.config.transfer_phase_degrees.length
                 ? this.config.transfer_phase_degrees.length : 2;
-            return frequencyCount * Math.max(2, Math.round(Number(this.config.transfer_repeats) || 2)) * phaseCount;
+            const scanShots = frequencyCount * Math.max(2, Math.round(Number(this.config.transfer_repeats) || 2)) * phaseCount;
+            return scanShots + (this.config.transfer_calibrate_zero_phase ? Math.max(2, Math.round(Number(this.config.transfer_zero_phase_repeats) || 50)) : 0);
         }
         if (this.config.mode === 'ramsey_interferometer') {
             const deltaCount = this.estimateAxisPointCount({
@@ -3422,7 +3436,8 @@ estimateScanStepCount(configObj = this.config) {
             ? configObj.transfer_phase_degrees.map(Number).filter(value => value === 0 || value === 90)
             : [];
         const phaseCount = new Set(phases).size || 2;
-        return frequencyCount * Math.max(2, Math.round(Number(configObj.transfer_repeats) || 2)) * phaseCount;
+        const scanShots = frequencyCount * Math.max(2, Math.round(Number(configObj.transfer_repeats) || 2)) * phaseCount;
+        return scanShots + (configObj.transfer_calibrate_zero_phase ? Math.max(2, Math.round(Number(configObj.transfer_zero_phase_repeats) || 50)) : 0);
     }
     if (String(configObj.mode || '') === 'lock_in') {
         return Math.max(1, Math.round(Number(configObj.averages) || 1)) * 4;
@@ -4187,6 +4202,14 @@ finishScheduledRun(finalStatus = 'IDLE') {
                         payload.transfer_phase_scan_mode = ['phase_blocks', 'frequency_interleaved'].includes(payload.transfer_phase_scan_mode)
                             ? payload.transfer_phase_scan_mode : 'phase_blocks';
                         payload.transfer_control_output = payload.transfer_control_output === true;
+                        payload.transfer_calibrate_zero_phase = payload.transfer_calibrate_zero_phase === true;
+                        payload.transfer_zero_phase_repeats = Math.round(Number(payload.transfer_zero_phase_repeats));
+                        if (!Number.isInteger(payload.transfer_zero_phase_repeats) || payload.transfer_zero_phase_repeats < 2) {
+                            throw new Error('Transfer Function zero-phase calibration requires at least 2 repeats.');
+                        }
+                        if (payload.transfer_calibrate_zero_phase && !payload.transfer_control_output) {
+                            throw new Error('Enable TTI OUTPUT control to use zero-phase calibration.');
+                        }
                         payload.transfer_settling_time_s = 5;
                         payload.scan_dimensions = 1;
                         payload.dim2_enabled = false;

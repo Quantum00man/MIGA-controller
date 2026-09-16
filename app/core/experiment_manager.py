@@ -1283,6 +1283,12 @@ class ExperimentManager:
                 "Transfer Function phase scan mode must be phase_blocks or frequency_interleaved"
             )
         control_output = bool(scan_config.get("transfer_control_output", False))
+        calibrate_zero_phase = bool(scan_config.get("transfer_calibrate_zero_phase", False))
+        zero_phase_repeats = int(scan_config.get("transfer_zero_phase_repeats", 50))
+        if calibrate_zero_phase and not control_output:
+            raise ValueError("Transfer Function zero-phase calibration requires TTI OUTPUT control")
+        if zero_phase_repeats < 2:
+            raise ValueError("Transfer Function zero-phase calibration requires at least 2 repeats")
 
         direction = 1.0 if stop >= start else -1.0
         effective_step = abs(step) * direction
@@ -1299,6 +1305,19 @@ class ExperimentManager:
             frequencies = [round(start, 6)]
 
         parameters: List[Dict[str, Any]] = []
+        if calibrate_zero_phase:
+            for repeat_index in range(1, zero_phase_repeats + 1):
+                parameters.append({
+                    "sequence_parameters": [],
+                    "metadata": {
+                        "display_parameters": [frequencies[0]],
+                        "transfer_frequency_hz": frequencies[0],
+                        "transfer_phase_deg": phase_degrees[0],
+                        "transfer_zero_phase_baseline": True,
+                        "transfer_zero_phase_repeat": repeat_index,
+                        "transfer_zero_phase_repeats": zero_phase_repeats,
+                    },
+                })
 
         def append_frequency_phase_block(
             phase_index: int,
@@ -1355,6 +1374,8 @@ class ExperimentManager:
         scan_config["transfer_phase_degrees"] = phase_degrees
         scan_config["transfer_phase_scan_mode"] = phase_scan_mode
         scan_config["transfer_control_output"] = control_output
+        scan_config["transfer_calibrate_zero_phase"] = calibrate_zero_phase
+        scan_config["transfer_zero_phase_repeats"] = zero_phase_repeats
         scan_config["transfer_frequency_values_hz"] = frequencies
         scan_config["transfer_repeats"] = repeats
         return parameters
@@ -2549,6 +2570,15 @@ class ExperimentManager:
                     phase_calibration, metadata["phase_noise_t2_us2"]
                 )
             phase_result = interferometer_phase.calculate_phase(phase_input, phase_calibration)
+            if (
+                str(execution_config.get("mode") or "").strip().lower() == "transfer_function"
+                and not metadata.get("transfer_zero_phase_baseline", False)
+                and phase_result.get("interferometer_phase_valid")
+            ):
+                reference_phase = execution_config.get("_transfer_zero_phase_rad")
+                if reference_phase is not None and math.isfinite(float(reference_phase)):
+                    phase_result = dict(phase_result)
+                    phase_result["interferometer_phase"] = float(phase_result["interferometer_phase"]) - float(reference_phase)
 
             manager_for_save = data_manager or self.data_manager
             volt_up_store = volt_up[::storage_step]
@@ -2684,6 +2714,8 @@ class ExperimentManager:
         transfer_channel = int(scan_config.get("transfer_generator_channel", 1))
         transfer_control_output = bool(scan_config.get("transfer_control_output", False))
         transfer_control_generator = bool(scan_config.get("_transfer_control_generator", True))
+        transfer_calibrate_zero_phase = bool(scan_config.get("transfer_calibrate_zero_phase", False))
+        transfer_output_enabled = False
 
         try:
             if transfer_mode and transfer_control_generator and not config.USE_SIMULATION:
@@ -2696,10 +2728,15 @@ class ExperimentManager:
                 ))
                 identity = tti_client.connect()
                 print(f"[Transfer Function] Connected to {identity}; using CH{transfer_channel}")
-                if transfer_control_output:
+                if transfer_control_output and not transfer_calibrate_zero_phase:
                     self.status.message = f"Enabling {transfer_model} CH{transfer_channel} OUTPUT..."
                     tti_client.set_output(True)
+                    transfer_output_enabled = True
                     print(f"[Transfer Function] {transfer_model} CH{transfer_channel} OUTPUT ON")
+                elif transfer_control_output and transfer_calibrate_zero_phase:
+                    self.status.message = f"Disabling {transfer_model} CH{transfer_channel} OUTPUT for zero-phase calibration..."
+                    tti_client.set_output(False)
+                    print(f"[Transfer Function] {transfer_model} CH{transfer_channel} OUTPUT OFF for zero-phase calibration")
             if ramsey_mode and not config.USE_SIMULATION:
                 rigol_client = RigolGeneratorClient(RigolConnectionSettings(
                     host=str(self.settings.get("rigol_host") or "").strip(),
@@ -2719,6 +2756,13 @@ class ExperimentManager:
                 if transfer_mode:
                     metadata["transfer_generator_model"] = transfer_model
                     metadata["transfer_generator_channel"] = transfer_channel
+                    is_zero_baseline = bool(metadata.get("transfer_zero_phase_baseline", False))
+                    if transfer_control_output and not is_zero_baseline and not transfer_output_enabled:
+                        self.status.message = f"Enabling {transfer_model} CH{transfer_channel} OUTPUT after zero-phase calibration..."
+                        if tti_client is not None:
+                            tti_client.set_output(True)
+                        transfer_output_enabled = True
+                        active_transfer_frequency = None
                     phase_deg = float((metadata or {}).get("transfer_phase_deg"))
                     phase_changed = active_transfer_phase is None or phase_deg != active_transfer_phase
                     if phase_changed:
@@ -2794,7 +2838,7 @@ class ExperimentManager:
             print(f"[Acq Error] {traceback.format_exc()}")
         finally:
             if tti_client is not None:
-                if transfer_control_output:
+                if transfer_control_output and transfer_output_enabled:
                     try:
                         tti_client.set_output(False)
                         print(f"[Transfer Function] {transfer_model} CH{transfer_channel} OUTPUT OFF")
@@ -2892,6 +2936,7 @@ class ExperimentManager:
         ac_stark_results: List[ScanResult] = []
         lock_in_results: List[ScanResult] = []
         transfer_function_results: List[ScanResult] = []
+        transfer_zero_phase_samples: List[float] = []
         phase_noise_results: List[ScanResult] = []
 
         try:
@@ -2914,11 +2959,28 @@ class ExperimentManager:
                     data_manager=self.data_manager,
                     stream_type='scan_point',
                 )
+                metadata = job.get("metadata") or {}
+                if result is not None and metadata.get("transfer_zero_phase_baseline"):
+                    value = getattr(result, "interferometer_phase", None)
+                    if value is not None and math.isfinite(float(value)):
+                        transfer_zero_phase_samples.append(float(value))
+                    expected = max(2, int((scan_config or {}).get("transfer_zero_phase_repeats", 50)))
+                    if int(metadata.get("transfer_zero_phase_repeat", 0)) == expected:
+                        if len(transfer_zero_phase_samples) < 2:
+                            self._scan_finalize_error = "Zero-phase calibration produced fewer than two valid phase shots"
+                        else:
+                            reference = float(np.mean(transfer_zero_phase_samples))
+                            scan_config["_transfer_zero_phase_rad"] = reference
+                            scan_config["_transfer_zero_phase_valid_count"] = len(transfer_zero_phase_samples)
+                            scan_config["_transfer_zero_phase_std_rad"] = (
+                                float(np.std(transfer_zero_phase_samples, ddof=1))
+                                if len(transfer_zero_phase_samples) >= 2 else None
+                            )
                 if result is not None and result.ac_stark_ratio is not None:
                     ac_stark_results.append(result)
                 if result is not None and result.lock_in_block_index is not None:
                     lock_in_results.append(result)
-                if result is not None and result.transfer_frequency_hz is not None:
+                if result is not None and result.transfer_frequency_hz is not None and not metadata.get("transfer_zero_phase_baseline"):
                     transfer_function_results.append(result)
                 if result is not None and (scan_config or {}).get('mode') == 'phase_noise':
                     phase_noise_results.append(result)
@@ -2951,6 +3013,9 @@ class ExperimentManager:
                             scan_config.get("transfer_phase_degrees"),
                             scan_config.get("transfer_atom_mirror_distance_m", 2.23),
                             scan_config.get("transfer_phase_noise_sigma_mrad", 100.0),
+                            scan_config.get("_transfer_zero_phase_rad"),
+                            scan_config.get("_transfer_zero_phase_std_rad"),
+                            scan_config.get("_transfer_zero_phase_valid_count"),
                         )
                     )
                 except Exception as exc:

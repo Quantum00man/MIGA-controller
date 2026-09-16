@@ -929,6 +929,13 @@ and the uploaded \code{.mot} sequence is executed unchanged, so it requires no
 \code{PARAMETER} placeholder.
 Set \ui{Allan phase-noise $\sigma$ at current average} in
 \ui{Settings $>$ Transfer Function}; its default is \SI{100}{\milli\radian}.
+Optionally enable \ui{Calibrate zero phase with OUTPUT OFF before scan}. This requires
+\ui{Control TTI OUTPUT during scan}; the controller forces OUTPUT OFF, acquires 50 shots
+by default at the first selected frequency and phase, and uses the mean valid calibrated
+interferometer phase as this run's zero. It then enables OUTPUT and records subsequent
+transfer-function phases as $\Delta\Phi=\Phi-\Phi_{\mathrm{zero}}$. The zero is run-local:
+it never modifies the Settings Bragg calibration. Baseline shots are retained in the raw
+archive but excluded from the frequency-response summary.
 
 The Settings tab contains three independent commissioning actions:
 \begin{itemize}

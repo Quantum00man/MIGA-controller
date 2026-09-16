@@ -91,6 +91,8 @@ class ScanConfig(BaseModel):
     transfer_phase_degrees: List[float] = Field(default_factory=lambda: [0.0, 90.0])
     transfer_phase_scan_mode: str = Field("phase_blocks")
     transfer_control_output: bool = Field(False)
+    transfer_calibrate_zero_phase: bool = Field(False)
+    transfer_zero_phase_repeats: int = Field(50, ge=2, le=100000)
     ramsey_delta_start_mhz: float = Field(0.0, ge=0.0)
     ramsey_delta_stop_mhz: float = Field(1.0, ge=0.0)
     ramsey_delta_step_mhz: float = Field(0.1, gt=0.0)

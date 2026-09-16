@@ -268,6 +268,20 @@ class TransferFunctionPlanTests(unittest.TestCase):
         )
         self.assertTrue(all(point["metadata"]["transfer_control_output"] for point in plan))
 
+    def test_plan_prepends_output_off_zero_phase_calibration(self):
+        config = {
+            "scan_dimensions": 1, "parameter_source": "classic", "mode": "transfer_function",
+            "randomize": False, "transfer_frequency_start_hz": 100, "transfer_frequency_stop_hz": 100,
+            "transfer_frequency_step_hz": 100, "transfer_repeats": 2,
+            "transfer_control_output": True, "transfer_calibrate_zero_phase": True,
+            "transfer_zero_phase_repeats": 3,
+        }
+        plan = self.manager._build_transfer_function_execution(config)
+        baseline = plan[:3]
+        self.assertTrue(all(item["metadata"]["transfer_zero_phase_baseline"] for item in baseline))
+        self.assertEqual([item["metadata"]["transfer_zero_phase_repeat"] for item in baseline], [1, 2, 3])
+        self.assertEqual(len(plan), 7)
+
     def test_invalid_phase_scan_mode_is_rejected(self):
         config = {
             "scan_dimensions": 1,

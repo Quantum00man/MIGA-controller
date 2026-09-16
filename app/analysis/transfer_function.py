@@ -79,6 +79,9 @@ def build_transfer_function_summary(
     phase_degrees: Any = None,
     atom_mirror_distance_m: Any = DEFAULT_ATOM_MIRROR_DISTANCE_M,
     phase_noise_sigma_mrad: Any = 100.0,
+    zero_phase_reference_rad: Any = None,
+    zero_phase_reference_std_rad: Any = None,
+    zero_phase_reference_count: Any = None,
 ) -> List[Dict[str, Any]]:
     phase_amplitude = bragg_phase_modulation_rad(
         frequency_modulation_mhz,
@@ -135,6 +138,9 @@ def build_transfer_function_summary(
         row: Dict[str, Any] = {
             "frequency_hz": frequency,
             "shot_count": len(samples),
+            "zero_phase_reference_rad": zero_phase_reference_rad,
+            "zero_phase_reference_std_rad": zero_phase_reference_std_rad,
+            "zero_phase_reference_count": zero_phase_reference_count,
         }
         for output_name, fields in METRIC_FIELDS.items():
             values = [value for item in samples if (value := _value(item, fields)) is not None]
