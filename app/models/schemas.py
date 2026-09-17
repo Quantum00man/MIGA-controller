@@ -143,8 +143,10 @@ class ScanConfig(BaseModel):
     @validator("transfer_frequency_order")
     def validate_transfer_frequency_order(cls, value):
         normalized = str(value or "sequential").strip().lower()
-        if normalized not in {"sequential", "symmetric_converging"}:
-            raise ValueError("Transfer Function frequency order must be sequential or symmetric_converging")
+        if normalized not in {"sequential", "symmetric_converging", "random"}:
+            raise ValueError(
+                "Transfer Function frequency order must be sequential, symmetric_converging or random"
+            )
         return normalized
 
     @validator("ac_stark_raman_group")

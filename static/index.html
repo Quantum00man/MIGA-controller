@@ -1046,7 +1046,9 @@
                                 : 'Completes the full frequency sweep at one phase before starting the next.' }}
                             Frequency order: {{ config.transfer_frequency_order === 'symmetric_converging'
                                 ? 'alternate the two endpoints and converge toward the center.'
-                                : 'scan from Start to Stop.' }}
+                                : config.transfer_frequency_order === 'random'
+                                    ? 'visit every frequency once in a new random order for this scan.'
+                                    : 'scan from Start to Stop.' }}
                         </div>
                         <div class="row g-2">
                             <div class="col-4">
@@ -1469,6 +1471,7 @@
                                     v-model="config.transfer_frequency_order">
                                     <option value="sequential">Start to Stop</option>
                                     <option value="symmetric_converging">Endpoints toward center</option>
+                                    <option value="random">Random</option>
                                 </select>
                             </div>
                             <div class="col-md-5 d-flex align-items-end">
@@ -3814,7 +3817,7 @@ loadScheduledTaskIntoEditor(taskId) {
                                 : [0, 90];
                             this.config.transfer_phase_scan_mode = ['phase_blocks', 'frequency_interleaved'].includes(this.config.transfer_phase_scan_mode)
                                 ? this.config.transfer_phase_scan_mode : 'phase_blocks';
-                            this.config.transfer_frequency_order = ['sequential', 'symmetric_converging'].includes(this.config.transfer_frequency_order)
+                            this.config.transfer_frequency_order = ['sequential', 'symmetric_converging', 'random'].includes(this.config.transfer_frequency_order)
                                 ? this.config.transfer_frequency_order : 'sequential';
                             this.config.transfer_control_output = this.config.transfer_control_output === true;
     this.config.scan_dimensions = this.resolveScanDimensionsFromConfig(this.config);
@@ -4230,7 +4233,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                         payload.transfer_phase_degrees = phases;
                         payload.transfer_phase_scan_mode = ['phase_blocks', 'frequency_interleaved'].includes(payload.transfer_phase_scan_mode)
                             ? payload.transfer_phase_scan_mode : 'phase_blocks';
-                        payload.transfer_frequency_order = ['sequential', 'symmetric_converging'].includes(payload.transfer_frequency_order)
+                        payload.transfer_frequency_order = ['sequential', 'symmetric_converging', 'random'].includes(payload.transfer_frequency_order)
                             ? payload.transfer_frequency_order : 'sequential';
                         payload.transfer_control_output = payload.transfer_control_output === true;
                         payload.transfer_calibrate_zero_phase = payload.transfer_calibrate_zero_phase === true;

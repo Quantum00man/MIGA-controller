@@ -923,9 +923,10 @@ Select \ui{Transfer Function} under \ui{Scan Logic}. Enter the inclusive carrier
 start, stop and nonzero step, then set \ui{Repeats per frequency}; at least two repeats are
 required so that a sample standard deviation can be evaluated. Immediately below that
 field, select one or both generator phases. The defaults are \ang{0} and \ang{90}; the UI
-does not allow the final selected phase to be cleared. Transfer Function is an ordered,
-one-dimensional Live scan. Randomization and alternate parameter sources are disabled,
-and the uploaded \code{.mot} sequence is executed unchanged, so it requires no
+does not allow the final selected phase to be cleared. Transfer Function is a
+one-dimensional Live scan. General parameter randomization and alternate parameter
+sources are disabled; frequency ordering is instead selected explicitly below. The
+uploaded \code{.mot} sequence is executed unchanged, so it requires no
 \code{PARAMETER} placeholder.
 Set \ui{Allan phase-noise $\sigma$ at current average} in
 \ui{Settings $>$ Transfer Function}; its default is \SI{100}{\milli\radian}.
@@ -945,11 +946,14 @@ The \ui{Frequency order} selector controls only the order in which the configure
 frequency points are visited; it does not change the frequencies included in the final
 response. \ui{Start to Stop} uses the conventional monotonic order. \ui{Endpoints toward
 center} visits the first configured frequency, then the last, then the second, then the
-second-to-last, and so on until reaching the center. For example,
+second-to-last, and so on until reaching the center. \ui{Random} creates one new
+without-replacement random permutation of the configured frequency points for each scan.
+For example,
 \( [f_1,f_2,f_3,f_4,f_5] \) is acquired as
 \( [f_1,f_5,f_2,f_4,f_3] \). With frequency-interleaved phases, each visited frequency
-still completes its \ang{0} and \ang{90} measurements before moving on, and periodic
-zero-phase calibration counts these completed frequency points in the selected order.
+still completes its \ang{0} and \ang{90} measurements before moving on. With phase-block
+ordering, every phase reuses that same selected frequency order. Periodic zero-phase
+calibration counts completed frequency points in the selected order.
 
 The Settings tab contains three independent commissioning actions:
 \begin{itemize}

@@ -285,6 +285,27 @@ class TransferFunctionPlanTests(unittest.TestCase):
         )
         self.assertEqual(config["transfer_frequency_values_hz"], [100.0, 500.0, 200.0, 400.0, 300.0])
 
+    def test_plan_can_randomize_frequency_order_once_for_all_phase_blocks(self):
+        config = {
+            "scan_dimensions": 1, "parameter_source": "classic", "mode": "transfer_function",
+            "randomize": False, "transfer_frequency_start_hz": 100, "transfer_frequency_stop_hz": 300,
+            "transfer_frequency_step_hz": 100, "transfer_repeats": 2,
+            "transfer_phase_degrees": [0, 90], "transfer_frequency_order": "random",
+        }
+
+        def reverse_in_place(values):
+            values.reverse()
+
+        with patch("app.core.experiment_manager.random.shuffle", side_effect=reverse_in_place) as shuffle:
+            plan = self.manager._build_transfer_function_execution(config)
+
+        self.assertEqual(shuffle.call_count, 1)
+        self.assertEqual(config["transfer_frequency_values_hz"], [300.0, 200.0, 100.0])
+        self.assertEqual(
+            [point["metadata"]["transfer_frequency_hz"] for point in plan],
+            ([300.0] * 2 + [200.0] * 2 + [100.0] * 2) * 2,
+        )
+
     def test_plan_prepends_output_off_zero_phase_calibration(self):
         config = {
             "scan_dimensions": 1, "parameter_source": "classic", "mode": "transfer_function",
@@ -486,6 +507,7 @@ class TransferFunctionStatisticsTests(unittest.TestCase):
         self.assertIn('v-model="config.transfer_phase_scan_mode"', index_html)
         self.assertIn('v-model="config.transfer_frequency_order"', index_html)
         self.assertIn('symmetric_converging', index_html)
+        self.assertIn('<option value="random">Random</option>', index_html)
         self.assertIn('v-model="config.transfer_control_output"', index_html)
 
         settings_html = (

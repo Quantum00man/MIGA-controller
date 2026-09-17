@@ -1283,8 +1283,10 @@ class ExperimentManager:
                 "Transfer Function phase scan mode must be phase_blocks or frequency_interleaved"
             )
         frequency_order = str(scan_config.get("transfer_frequency_order") or "sequential").strip().lower()
-        if frequency_order not in {"sequential", "symmetric_converging"}:
-            raise ValueError("Transfer Function frequency order must be sequential or symmetric_converging")
+        if frequency_order not in {"sequential", "symmetric_converging", "random"}:
+            raise ValueError(
+                "Transfer Function frequency order must be sequential, symmetric_converging or random"
+            )
         control_output = bool(scan_config.get("transfer_control_output", False))
         calibrate_zero_phase = bool(scan_config.get("transfer_calibrate_zero_phase", False))
         zero_phase_repeats = int(scan_config.get("transfer_zero_phase_repeats", 50))
@@ -1322,6 +1324,8 @@ class ExperimentManager:
                 left += 1
                 right -= 1
             frequencies = ordered_frequencies
+        elif frequency_order == "random":
+            random.shuffle(frequencies)
 
         parameters: List[Dict[str, Any]] = []
         def append_zero_phase_baseline(block_id: int, frequency: float) -> None:
