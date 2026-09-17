@@ -1175,6 +1175,22 @@ single-node responses. If only one quadrature is selected, the UI reports that c
 square without claiming a complete two-quadrature magnitude. The sync manifest retains the signed components,
 counts, standard deviations, standard errors, squared magnitude and magnitude.
 
+The SYNC differential view additionally shows the path-difference-normalized phase
+response, using the Master's calibrated actual SI{780}{\nano\meter} modulation amplitude:
+\begin{equation}
+ R_{\Delta L}(f)=\left|\frac{\Delta\Phi(f)}
+ {2\delta k(L_{\mathrm{Master}}-L_{\mathrm{Slave}})}\right|^2,
+ \qquad
+ \Delta\Phi^2=\overline{\Delta\phi_0}^{\,2}+\overline{\Delta\phi_{90}}^{\,2}.
+\end{equation}
+It is displayed only when both quadratures and a nonzero path difference are available.
+For independent per-node Allan phase-noise deviations, its plotted noise floor is
+\begin{equation}
+ R_{\Delta L,\mathrm{noise}}=
+ \frac{2(\sigma_{A,\mathrm{Master}}^2+\sigma_{A,\mathrm{Slave}}^2)}
+ {[2\delta k(L_{\mathrm{Master}}-L_{\mathrm{Slave}})]^2}.
+\end{equation}
+
 \section{Archive replication}
 Each node first writes a normal local archive. A ZIP bundle excludes temporary files and
 nested sync copies. SHA-256 checksums protect transfer integrity. Extraction rejects path

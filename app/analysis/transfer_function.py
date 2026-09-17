@@ -12,7 +12,7 @@ SPEED_OF_LIGHT_M_S = 299_792_458.0
 DEFAULT_ATOM_MIRROR_DISTANCE_M = 2.23
 # Backward-compatible name for integrations that imported the former constant.
 ATOM_MIRROR_DISTANCE_M = DEFAULT_ATOM_MIRROR_DISTANCE_M
-SYNC_DIFFERENTIAL_FORMULA_VERSION = 8
+SYNC_DIFFERENTIAL_FORMULA_VERSION = 9
 
 
 METRIC_FIELDS = {
@@ -71,6 +71,29 @@ def bragg_phase_modulation_rad(
     ):
         return None
     return (4.0 * math.pi * distance_m / SPEED_OF_LIGHT_M_S) * modulation_hz
+
+
+def differential_path_phase_modulation_rad(master: Dict[str, Any], slave: Dict[str, Any]) -> Optional[float]:
+    """Return 2 Δk (L_master - L_slave), using the Master's 780-nm FM calibration."""
+    try:
+        modulation_hz = float(master.get("transfer_frequency_modulation_mhz")) * 1_000_000.0
+        master_distance_m = float(master.get("transfer_atom_mirror_distance_m"))
+        slave_distance_m = float(slave.get("transfer_atom_mirror_distance_m"))
+    except (AttributeError, TypeError, ValueError):
+        return None
+    distance_difference_m = master_distance_m - slave_distance_m
+    if (
+        not math.isfinite(modulation_hz)
+        or modulation_hz <= 0
+        or not math.isfinite(master_distance_m)
+        or master_distance_m <= 0
+        or not math.isfinite(slave_distance_m)
+        or slave_distance_m <= 0
+        or not math.isfinite(distance_difference_m)
+        or distance_difference_m == 0
+    ):
+        return None
+    return (4.0 * math.pi * modulation_hz / SPEED_OF_LIGHT_M_S) * distance_difference_m
 
 
 def build_transfer_function_summary(
@@ -295,9 +318,29 @@ def build_differential_transfer_function_summary(
             continue
         component_group = grouped.setdefault(
             (slave_id, frequency),
-            {0.0: {"normalized": [], "phase": [], "noise_s2": []}, 90.0: {"normalized": [], "phase": [], "noise_s2": []}},
+            {
+                0.0: {"normalized": [], "phase": [], "noise_s2": [], "path_normalized": [], "path_noise_s2": []},
+                90.0: {"normalized": [], "phase": [], "noise_s2": [], "path_normalized": [], "path_noise_s2": []},
+            },
         )[phase_deg]
-        component_group["phase"].append(float(master_phase - slave_phase))
+        phase_difference = float(master_phase - slave_phase)
+        component_group["phase"].append(phase_difference)
+
+        path_denominator = differential_path_phase_modulation_rad(master, slave)
+        if path_denominator is not None:
+            component_group["path_normalized"].append(phase_difference / path_denominator)
+            try:
+                master_sigma_rad = float(master.get("transfer_phase_noise_sigma_mrad")) / 1000.0
+                slave_sigma_rad = float(slave.get("transfer_phase_noise_sigma_mrad")) / 1000.0
+            except (TypeError, ValueError):
+                master_sigma_rad = slave_sigma_rad = None
+            if all(
+                value is not None and math.isfinite(value) and value >= 0
+                for value in (master_sigma_rad, slave_sigma_rad)
+            ):
+                component_group["path_noise_s2"].append(
+                    (master_sigma_rad ** 2 + slave_sigma_rad ** 2) / path_denominator ** 2
+                )
 
         normalized = []
         for index, record in enumerate((master, slave)):
@@ -336,9 +379,12 @@ def build_differential_transfer_function_summary(
     for (slave_id, frequency), components in sorted(grouped.items(), key=lambda item: (item[0][0], item[0][1])):
         row: Dict[str, Any] = {"slave_node_id": slave_id, "frequency_hz": frequency}
         means: List[Optional[float]] = []
+        path_means: List[Optional[float]] = []
+        path_noise_floors: List[Optional[float]] = []
         for phase_deg in (0.0, 90.0):
             values = components[phase_deg]["normalized"]
             phase_values = components[phase_deg]["phase"]
+            path_values = components[phase_deg]["path_normalized"]
             mean = float(np.mean(values)) if values else None
             std = float(np.std(values, ddof=1)) if len(values) >= 2 else None
             label = f"{int(phase_deg)}deg"
@@ -368,6 +414,14 @@ def build_differential_transfer_function_summary(
                 if phase_std is not None else None
             )
             means.append(mean)
+            path_mean = float(np.mean(path_values)) if path_values else None
+            row[f"phase_path_normalized_{label}_mean"] = path_mean
+            row[f"phase_path_normalized_{label}_s2"] = path_mean ** 2 if path_mean is not None else None
+            path_means.append(path_mean)
+            path_noise_values = components[phase_deg]["path_noise_s2"]
+            path_noise_floor = float(np.mean(path_noise_values)) if path_noise_values else None
+            row[f"phase_path_normalized_{label}_noise_s2"] = path_noise_floor
+            path_noise_floors.append(path_noise_floor)
         available = [value for value in means if value is not None]
         row["differential_s2"] = float(sum(value * value for value in available)) if available else None
         component_noise_floors = [
@@ -381,6 +435,16 @@ def build_differential_transfer_function_summary(
         )
         row["differential_magnitude"] = math.sqrt(row["differential_s2"]) if row["differential_s2"] is not None else None
         row["quadrature_complete"] = all(value is not None for value in means)
+        row["differential_path_s2"] = (
+            float(sum(value * value for value in path_means))
+            if len(path_means) == 2 and all(value is not None for value in path_means)
+            else None
+        )
+        row["differential_path_noise_s2"] = (
+            float(sum(value for value in path_noise_floors if value is not None))
+            if len(path_noise_floors) == 2 and all(value is not None for value in path_noise_floors)
+            else None
+        )
         phase_zero = row.get("phase_difference_0deg_mean_rad")
         phase_ninety = row.get("phase_difference_90deg_mean_rad")
         if phase_zero is not None and phase_ninety is not None:

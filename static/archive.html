@@ -2016,6 +2016,7 @@
                     <div v-else class="sync-archive-plot-wrap">
                         <div id="syncArchivePlot" class="sync-archive-square-plot"></div>
                         <div v-if="isTransferFunctionArchive()" id="syncArchiveTransferPhaseDifferencePlot" class="sync-archive-square-plot mt-3"></div>
+                        <div v-if="isTransferFunctionArchive()" id="syncArchiveTransferPathNormalizedPlot" class="sync-archive-square-plot mt-3"></div>
                     </div>
                 </section>
                 <section v-if="archivePhaseReferenceEditorVisible()" class="card mb-4 border-0 shadow-sm">
@@ -2801,7 +2802,10 @@
                 handleArchiveWindowResize() {
                     if (this.syncArchiveViewMode === 'differential') {
                         this.resizePlot('syncArchivePlot');
-                        if (this.isTransferFunctionArchive()) this.resizePlot('syncArchiveTransferPhaseDifferencePlot');
+                        if (this.isTransferFunctionArchive()) {
+                            this.resizePlot('syncArchiveTransferPhaseDifferencePlot');
+                            this.resizePlot('syncArchiveTransferPathNormalizedPlot');
+                        }
                     }
                     this.resizePlot('archivePhaseReferencePlot');
                 },
@@ -7510,7 +7514,7 @@
                     const saved = Array.isArray(this.syncManifest?.transfer_function_differential_summary)
                         ? this.syncManifest.transfer_function_differential_summary : [];
                     const previewScale = this.syncTransferNormalizationOptimization?.result?.scale_after;
-                    if (saved.length && Number(this.syncManifest?.transfer_function_differential_formula_version) >= 8 && !this.syncArchiveHasPhaseOverrides() && !this.syncAnalysisCopy.selectedId && !Object.keys(this.syncTransferNormalization?.slave_scales || {}).length && !Number.isFinite(Number(previewScale))) {
+                    if (saved.length && Number(this.syncManifest?.transfer_function_differential_formula_version) >= 9 && !this.syncArchiveHasPhaseOverrides() && !this.syncAnalysisCopy.selectedId && !Object.keys(this.syncTransferNormalization?.slave_scales || {}).length && !Number.isFinite(Number(previewScale))) {
                         return saved.filter(row => !selectedSlave || String(row.slave_node_id || '') === selectedSlave)
                             .slice().sort((a, b) => Number(a.frequency_hz) - Number(b.frequency_hz));
                     }
@@ -7547,12 +7551,26 @@
                         const key = `${slaveId}:${frequency.toPrecision(15)}`;
                         const group = groups.get(key) || {
                             slave_node_id: slaveId, frequency_hz: frequency,
-                            values: { 0: [], 90: [] }, noise_s2: { 0: [], 90: [] }, phase_differences: { 0: [], 90: [] }
+                            values: { 0: [], 90: [] }, noise_s2: { 0: [], 90: [] }, phase_differences: { 0: [], 90: [] },
+                            path_normalized: { 0: [], 90: [] }, path_noise_s2: { 0: [], 90: [] }
                         };
                         const masterPhase = Number(master.interferometer_phase);
                         const slavePhase = Number(slave.interferometer_phase);
                         if (Number.isFinite(masterPhase) && Number.isFinite(slavePhase)) {
-                            group.phase_differences[phase].push(masterPhase - slavePhase);
+                            const phaseDifference = masterPhase - slavePhase;
+                            group.phase_differences[phase].push(phaseDifference);
+                            const masterModulationHz = Number(master.transfer_frequency_modulation_mhz) * 1e6;
+                            const masterDistance = Number(master.transfer_atom_mirror_distance_m);
+                            const slaveDistance = Number(slave.transfer_atom_mirror_distance_m);
+                            const pathDenominator = 4 * Math.PI * masterModulationHz * (masterDistance - slaveDistance) / c;
+                            if (Number.isFinite(pathDenominator) && pathDenominator !== 0) {
+                                group.path_normalized[phase].push(phaseDifference / pathDenominator);
+                                const masterSigmaRad = Number(master.transfer_phase_noise_sigma_mrad) / 1000;
+                                const slaveSigmaRad = Number(slave.transfer_phase_noise_sigma_mrad) / 1000;
+                                if (Number.isFinite(masterSigmaRad) && masterSigmaRad >= 0 && Number.isFinite(slaveSigmaRad) && slaveSigmaRad >= 0) {
+                                    group.path_noise_s2[phase].push((masterSigmaRad ** 2 + slaveSigmaRad ** 2) / pathDenominator ** 2);
+                                }
+                            }
                         }
                         const masterS = normalized(master);
                         const slaveS0 = normalized(slave);
@@ -7588,6 +7606,12 @@
                             ? group.noise_s2[90].reduce((sum, value) => sum + value, 0) / group.noise_s2[90].length : null;
                         const phaseDifferenceZero = statistics(group.phase_differences[0]);
                         const phaseDifferenceNinety = statistics(group.phase_differences[90]);
+                        const pathZero = statistics(group.path_normalized[0]);
+                        const pathNinety = statistics(group.path_normalized[90]);
+                        const pathNoiseZero = group.path_noise_s2[0].length
+                            ? group.path_noise_s2[0].reduce((sum, value) => sum + value, 0) / group.path_noise_s2[0].length : null;
+                        const pathNoiseNinety = group.path_noise_s2[90].length
+                            ? group.path_noise_s2[90].reduce((sum, value) => sum + value, 0) / group.path_noise_s2[90].length : null;
                         const phaseDifferenceMagnitude = phaseDifferenceZero.mean === null || phaseDifferenceNinety.mean === null
                             ? null : Math.hypot(phaseDifferenceZero.mean, phaseDifferenceNinety.mean);
                         const phaseDifferenceMagnitudeSem = phaseDifferenceMagnitude === null || phaseDifferenceMagnitude === 0
@@ -7613,6 +7637,12 @@
                             phase_difference_0deg_count: phaseDifferenceZero.count, phase_difference_0deg_mean_rad: phaseDifferenceZero.mean, phase_difference_0deg_std_rad: phaseDifferenceZero.std, phase_difference_0deg_sem_rad: phaseDifferenceZero.sem,
                             phase_difference_90deg_count: phaseDifferenceNinety.count, phase_difference_90deg_mean_rad: phaseDifferenceNinety.mean, phase_difference_90deg_std_rad: phaseDifferenceNinety.std, phase_difference_90deg_sem_rad: phaseDifferenceNinety.sem,
                             phase_difference_magnitude_rad: phaseDifferenceMagnitude, phase_difference_magnitude_sem_rad: phaseDifferenceMagnitudeSem,
+                            phase_path_normalized_0deg_mean: pathZero.mean, phase_path_normalized_0deg_s2: pathZero.mean === null ? null : pathZero.mean ** 2, phase_path_normalized_0deg_noise_s2: pathNoiseZero,
+                            phase_path_normalized_90deg_mean: pathNinety.mean, phase_path_normalized_90deg_s2: pathNinety.mean === null ? null : pathNinety.mean ** 2, phase_path_normalized_90deg_noise_s2: pathNoiseNinety,
+                            differential_path_s2: [pathZero.mean, pathNinety.mean].filter(value => value !== null).length === 2
+                                ? [pathZero.mean, pathNinety.mean].filter(value => value !== null).reduce((sum, value) => sum + value ** 2, 0) : null,
+                            differential_path_noise_s2: [pathNoiseZero, pathNoiseNinety].filter(value => value !== null).length === 2
+                                ? [pathNoiseZero, pathNoiseNinety].filter(value => value !== null).reduce((sum, value) => sum + value, 0) : null,
                             differential_s2: differentialS2,
                             differential_noise_s2: [zeroNoiseS2, ninetyNoiseS2].some(value => value !== null)
                                 ? [zeroNoiseS2, ninetyNoiseS2].filter(value => value !== null).reduce((sum, value) => sum + value, 0) : null,
@@ -7634,6 +7664,9 @@
                         'phase_difference_0deg_count', 'phase_difference_0deg_mean_rad', 'phase_difference_0deg_std_rad', 'phase_difference_0deg_sem_rad',
                         'phase_difference_90deg_count', 'phase_difference_90deg_mean_rad', 'phase_difference_90deg_std_rad', 'phase_difference_90deg_sem_rad',
                         'phase_difference_magnitude_rad', 'phase_difference_magnitude_sem_rad',
+                        'phase_path_normalized_0deg_mean', 'phase_path_normalized_0deg_s2', 'phase_path_normalized_0deg_noise_s2',
+                        'phase_path_normalized_90deg_mean', 'phase_path_normalized_90deg_s2', 'phase_path_normalized_90deg_noise_s2',
+                        'differential_path_s2', 'differential_path_noise_s2',
                         'differential_s2', 'differential_noise_s2', 'differential_magnitude', 'quadrature_complete'
                     ];
                     const csv = '\uFEFF' + [fields, ...rows.map(row => fields.map(field => row[field] ?? ''))]
@@ -7715,6 +7748,33 @@
                         },
                         legend: { orientation: 'h', x: .5, xanchor: 'center', y: 1.12 },
                         annotations: rows.length ? [] : [{ text: 'No valid paired phase data', showarrow: false, xref: 'paper', yref: 'paper', x: .5, y: .5 }],
+                        paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', hovermode: 'closest'
+                    }, { responsive: true, displaylogo: false });
+                    this.renderSyncArchiveTransferPathNormalizedPlot();
+                },
+                renderSyncArchiveTransferPathNormalizedPlot() {
+                    const element = document.getElementById('syncArchiveTransferPathNormalizedPlot');
+                    if (!element || typeof Plotly === 'undefined') return;
+                    const rows = this.syncArchiveTransferDifferentialRows();
+                    const label = this.syncArchiveNodeLabel(this.syncArchiveSlaveId);
+                    const traces = [{
+                        x: rows.map(row => Number(row.frequency_hz)), y: rows.map(row => row.differential_path_s2),
+                        type: 'scatter', mode: 'lines+markers', name: '|ΔΦ / [2Δk(LM−LS)]|²',
+                        line: { color: '#198754', width: 3 }, marker: { color: '#198754', size: 8, symbol: 'diamond' }, connectgaps: false,
+                        hovertemplate: 'Frequency=%{x:.9g} Hz<br>|ΔΦ / [2Δk(L<sub>M</sub>−L<sub>S</sub>)]|²=%{y:.6g}<extra></extra>'
+                    }, {
+                        x: rows.map(row => Number(row.frequency_hz)), y: rows.map(row => row.differential_path_noise_s2),
+                        type: 'scatter', mode: 'lines', name: 'Allan phase-noise floor',
+                        line: { color: '#343a40', width: 2.4, dash: 'dash' }, connectgaps: false,
+                        hovertemplate: 'Frequency=%{x:.9g} Hz<br>Noise floor=%{y:.6g} (dimensionless)<extra></extra>'
+                    }];
+                    Plotly.react(element, traces, {
+                        margin: { l: 78, r: 35, t: 52, b: 68 },
+                        title: `Differential Phase Response Normalized by Path Difference · Master − ${label}`,
+                        xaxis: { title: 'TTI carrier frequency (Hz)', showline: true, mirror: true, ticks: 'inside', gridcolor: '#dde5ee' },
+                        yaxis: { title: '|ΔΦ / [2Δk(LM−LS)]|² (dimensionless)', type: this.transferFunctionYAxisScale, ...(this.transferFunctionYAxisScale === 'log' ? {} : { rangemode: 'tozero' }), showline: true, mirror: true, ticks: 'inside', gridcolor: '#dde5ee' },
+                        legend: { orientation: 'h', x: 0.5, xanchor: 'center', y: 1.12 },
+                        annotations: rows.length ? [] : [{ text: 'No valid path-normalized differential phase data', showarrow: false, xref: 'paper', yref: 'paper', x: 0.5, y: 0.5 }],
                         paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', hovermode: 'closest'
                     }, { responsive: true, displaylogo: false });
                 },

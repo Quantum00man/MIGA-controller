@@ -158,7 +158,10 @@ class TransferFunctionPlanTests(unittest.TestCase):
         self.assertIn("Differential Transfer Function", archive_html)
         self.assertIn("syncArchiveTransferDifferentialRows()", archive_html)
         self.assertIn("syncArchiveTransferPhaseDifferencePlot", archive_html)
+        self.assertIn("syncArchiveTransferPathNormalizedPlot", archive_html)
         self.assertIn("phase_difference_0deg_mean_rad", archive_html)
+        self.assertIn("differential_path_s2", archive_html)
+        self.assertIn("differential_path_noise_s2", archive_html)
         self.assertIn("renderSyncArchiveTransferFunctionPlot(element)", archive_html)
         self.assertIn("downloadSyncTransferFunctionDifferentialCSV", archive_html)
         self.assertIn("row.differential_s2", archive_html)
@@ -437,7 +440,23 @@ class TransferFunctionStatisticsTests(unittest.TestCase):
                 5.0 * master_amplitude - 2.0 * slave_amplitude,
             ),
         )
+        path_denominator = 4.0 * math.pi * 1_000_000.0 * (2.0 - 3.0) / 299_792_458.0
+        expected_path_s2 = (
+            (3.0 * master_amplitude - slave_amplitude) ** 2
+            + (5.0 * master_amplitude - 2.0 * slave_amplitude) ** 2
+        ) / path_denominator ** 2
+        expected_path_noise_floor = 2.0 * (0.1 ** 2 + 0.1 ** 2) / path_denominator ** 2
+        self.assertAlmostEqual(row["differential_path_s2"], expected_path_s2)
+        self.assertAlmostEqual(row["differential_path_noise_s2"], expected_path_noise_floor)
         self.assertTrue(row["quadrature_complete"])
+
+        zero_path_pairs = [
+            {**pair, "slave": {**pair["slave"], "transfer_atom_mirror_distance_m": 2.0}}
+            for pair in pairs
+        ]
+        zero_path_row = build_differential_transfer_function_summary(zero_path_pairs)[0]
+        self.assertIsNone(zero_path_row["differential_path_s2"])
+        self.assertIsNone(zero_path_row["differential_path_noise_s2"])
 
     def test_summary_uses_sample_standard_deviation_and_total_per_shot(self):
         rows = [
