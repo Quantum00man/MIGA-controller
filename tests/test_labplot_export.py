@@ -104,6 +104,7 @@ def transfer_summary():
             "interferometer_phase_s2": index * 10.0,
             "interferometer_phase_phase2_rad2": 5 * (index / 10) ** 2,
             "interferometer_phase_noise_phase2_rad2": 0.02,
+            "interferometer_phase_noise_s2": 0.03,
             "transfer_phase_noise_sigma_mrad": 100.0,
         }
         for phase_deg, factor in ((0.0, 1.0), (90.0, 2.0)):
@@ -276,7 +277,7 @@ class LabPlotExportTests(unittest.TestCase):
             "Interferometer Phase Squared",
         })
         s2_curves = [item.attrib["name"] for item in worksheets["Transfer Function S2"].iter("xyCurve")]
-        self.assertEqual(s2_curves, ["0 deg", "90 deg", "Quadrature sum"])
+        self.assertEqual(s2_curves, ["0 deg", "90 deg", "Quadrature sum", "Allan phase-noise floor"])
         phase2_curves = [
             item.attrib["name"]
             for item in worksheets["Interferometer Phase Squared"].iter("xyCurve")

@@ -316,6 +316,16 @@ def _transfer_function_worksheets(
         )
         if quadrature:
             s2_curves.append(quadrature)
+        noise_floor = _transfer_curve(
+            ordered_rows,
+            "interferometer_phase_noise_s2",
+            "Allan phase-noise floor",
+            FIT_COLOR,
+            symbols=False,
+            line_style=2,
+        )
+        if noise_floor:
+            s2_curves.append(noise_floor)
         worksheets.append(Worksheet(
             "Transfer Function S2",
             [Plot("Transfer Function S2", x_label, "S2 (dimensionless)", s2_curves)],

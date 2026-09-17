@@ -369,6 +369,7 @@ class TransferFunctionStatisticsTests(unittest.TestCase):
                 "interferometer_phase_valid": True,
                 "transfer_frequency_modulation_mhz": modulation,
                 "transfer_atom_mirror_distance_m": distance,
+                "transfer_phase_noise_sigma_mrad": 100.0,
             }
 
         master_amplitude = bragg_phase_modulation_rad(1.0, 2.0)
@@ -395,6 +396,10 @@ class TransferFunctionStatisticsTests(unittest.TestCase):
         self.assertAlmostEqual(row["delta_s_0deg_s2"], 4.0)
         self.assertAlmostEqual(row["delta_s_90deg_s2"], 9.0)
         self.assertAlmostEqual(row["differential_s2"], 13.0)
+        expected_component_noise = (0.1 / master_amplitude) ** 2 + (0.1 / slave_amplitude) ** 2
+        self.assertAlmostEqual(row["delta_s_0deg_noise_s2"], expected_component_noise)
+        self.assertAlmostEqual(row["delta_s_90deg_noise_s2"], expected_component_noise)
+        self.assertAlmostEqual(row["differential_noise_s2"], 2 * expected_component_noise)
         self.assertAlmostEqual(row["differential_magnitude"], 13.0 ** 0.5)
         self.assertAlmostEqual(
             row["phase_difference_0deg_mean_rad"],
@@ -458,7 +463,7 @@ class TransferFunctionStatisticsTests(unittest.TestCase):
         self.assertIn("`${statisticLabel} quadrature sum`", archive_html)
         self.assertIn("Allan phase-noise floor", archive_html)
         self.assertIn("row.interferometer_phase_noise_phase2_rad2", archive_html)
-        self.assertNotIn("row.interferometer_phase_noise_s2", archive_html)
+        self.assertIn("row.interferometer_phase_noise_s2", archive_html)
         self.assertIn("`${fieldBase}_${phaseLabel}_${statistic}`", archive_html)
         self.assertIn("`${labels[index]} ${statisticLabel} at ${phaseDeg}°`", archive_html)
         self.assertIn("isSquareSummaryArchive()", archive_html)
@@ -585,6 +590,7 @@ class TransferFunctionStatisticsTests(unittest.TestCase):
         self.assertAlmostEqual(row["interferometer_phase_0deg_s2"], (0.2 / expected_phi) ** 2)
         self.assertEqual(row["transfer_phase_noise_sigma_mrad"], 250.0)
         self.assertAlmostEqual(row["interferometer_phase_noise_phase2_rad2"], 0.25 ** 2)
+        self.assertAlmostEqual(row["interferometer_phase_noise_s2"], (0.25 / expected_phi) ** 2)
 
     def test_s2_is_unavailable_without_archived_modulation_amplitude(self):
         summary = build_transfer_function_summary([
@@ -622,6 +628,7 @@ class TransferFunctionStatisticsTests(unittest.TestCase):
         self.assertAlmostEqual(summary[0]["interferometer_phase_90deg_phase2_rad2"], 0.4 ** 2)
         self.assertAlmostEqual(summary[0]["interferometer_phase_phase2_rad2"], 0.15 ** 2 + 0.4 ** 2)
         self.assertAlmostEqual(summary[0]["interferometer_phase_noise_phase2_rad2"], 2 * 0.1 ** 2)
+        self.assertAlmostEqual(summary[0]["interferometer_phase_noise_s2"], 2 * (0.1 / phase_amplitude) ** 2)
         self.assertEqual(summary[0]["transfer_phase_noise_sigma_mrad"], 100.0)
 
     def test_summary_contains_per_phase_statistics_for_each_plotted_metric(self):
@@ -684,6 +691,7 @@ class TransferFunctionStatisticsTests(unittest.TestCase):
         self.assertAlmostEqual(summary[0]["interferometer_phase_0deg_phase2_rad2"], 0.1 ** 2)
         self.assertIsNone(summary[0]["interferometer_phase_phase2_rad2"])
         self.assertAlmostEqual(summary[0]["interferometer_phase_noise_phase2_rad2"], 0.1 ** 2)
+        self.assertAlmostEqual(summary[0]["interferometer_phase_noise_s2"], (0.1 / bragg_phase_modulation_rad(1.0)) ** 2)
 
     def test_transfer_csv_exports_phase_and_flat_s2_columns(self):
         self.assertIn("TTI_Phase_Deg", RESULTS_CSV_HEADER)
@@ -709,7 +717,7 @@ class TransferFunctionStatisticsTests(unittest.TestCase):
         self.assertIn("interferometer_phase_90deg_phase2_rad2", row)
         self.assertIn("interferometer_phase_phase2_rad2", row)
         self.assertIn("interferometer_phase_noise_phase2_rad2", row)
-        self.assertNotIn("interferometer_phase_noise_s2", row)
+        self.assertIn("interferometer_phase_noise_s2", row)
         self.assertNotIn("interferometer_phase_s2_components", row)
 
     def test_archive_overwrite_persists_transfer_normalization_and_summary(self):

@@ -12,7 +12,7 @@ SPEED_OF_LIGHT_M_S = 299_792_458.0
 DEFAULT_ATOM_MIRROR_DISTANCE_M = 2.23
 # Backward-compatible name for integrations that imported the former constant.
 ATOM_MIRROR_DISTANCE_M = DEFAULT_ATOM_MIRROR_DISTANCE_M
-SYNC_DIFFERENTIAL_FORMULA_VERSION = 7
+SYNC_DIFFERENTIAL_FORMULA_VERSION = 8
 
 
 METRIC_FIELDS = {
@@ -233,6 +233,12 @@ def build_transfer_function_summary(
             if phase_components and noise_sigma_rad is not None
             else None
         )
+        row["interferometer_phase_noise_s2"] = (
+            float(row["interferometer_phase_noise_phase2_rad2"] / phase_amplitude ** 2)
+            if row["interferometer_phase_noise_phase2_rad2"] is not None
+            and phase_amplitude is not None
+            else None
+        )
         if len(phase_components) == 2:
             component_values = [component.get("s2") for component in phase_components]
             row["interferometer_phase_s2"] = (
@@ -289,7 +295,7 @@ def build_differential_transfer_function_summary(
             continue
         component_group = grouped.setdefault(
             (slave_id, frequency),
-            {0.0: {"normalized": [], "phase": []}, 90.0: {"normalized": [], "phase": []}},
+            {0.0: {"normalized": [], "phase": [], "noise_s2": []}, 90.0: {"normalized": [], "phase": [], "noise_s2": []}},
         )[phase_deg]
         component_group["phase"].append(float(master_phase - slave_phase))
 
@@ -306,6 +312,25 @@ def build_differential_transfer_function_summary(
         if any(value is None for value in normalized):
             continue
         component_group["normalized"].append(float(normalized[0] - normalized[1]))
+        noise_s2_values = []
+        for index, record in enumerate((master, slave)):
+            try:
+                sigma_rad = float(record.get("transfer_phase_noise_sigma_mrad")) / 1000.0
+            except (TypeError, ValueError):
+                sigma_rad = None
+            amplitude = bragg_phase_modulation_rad(
+                record.get("transfer_frequency_modulation_mhz"),
+                record.get("transfer_atom_mirror_distance_m"),
+            )
+            if index == 1 and amplitude is not None:
+                amplitude *= slave_scale
+            if (sigma_rad is None or not math.isfinite(sigma_rad) or sigma_rad < 0
+                    or amplitude is None or amplitude <= 0):
+                noise_s2_values = []
+                break
+            noise_s2_values.append((sigma_rad / amplitude) ** 2)
+        if len(noise_s2_values) == 2:
+            component_group["noise_s2"].append(float(sum(noise_s2_values)))
 
     rows: List[Dict[str, Any]] = []
     for (slave_id, frequency), components in sorted(grouped.items(), key=lambda item: (item[0][0], item[0][1])):
@@ -327,6 +352,10 @@ def build_differential_transfer_function_summary(
                 if mean is not None and row[f"delta_s_{label}_sem"] is not None
                 else None
             )
+            noise_values = components[phase_deg]["noise_s2"]
+            row[f"delta_s_{label}_noise_s2"] = (
+                float(np.mean(noise_values)) if noise_values else None
+            )
             phase_mean = float(np.mean(phase_values)) if phase_values else None
             phase_std = (
                 float(np.std(phase_values, ddof=1)) if len(phase_values) >= 2 else None
@@ -341,6 +370,15 @@ def build_differential_transfer_function_summary(
             means.append(mean)
         available = [value for value in means if value is not None]
         row["differential_s2"] = float(sum(value * value for value in available)) if available else None
+        component_noise_floors = [
+            row.get("delta_s_0deg_noise_s2"),
+            row.get("delta_s_90deg_noise_s2"),
+        ]
+        row["differential_noise_s2"] = (
+            float(sum(value for value in component_noise_floors if value is not None))
+            if any(value is not None for value in component_noise_floors)
+            else None
+        )
         row["differential_magnitude"] = math.sqrt(row["differential_s2"]) if row["differential_s2"] is not None else None
         row["quadrature_complete"] = all(value is not None for value in means)
         phase_zero = row.get("phase_difference_0deg_mean_rad")

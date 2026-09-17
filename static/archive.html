@@ -2503,7 +2503,7 @@
                     </div>
                     <div class="labplot-summary mb-3">
                         <template v-if="isTransferFunctionArchive()">
-                            Transfer Function uses TTI carrier frequency as the x-axis. Mean and standard-deviation worksheets contain separate phase curves; Interferometer Phase also exports S² and an unnormalized ΔΦ² worksheet with the fixed Allan noise floor.
+                            Transfer Function uses TTI carrier frequency as the x-axis. Mean and standard-deviation worksheets contain separate phase curves; Interferometer Phase exports S² and an unnormalized ΔΦ² worksheet, each with the fixed Allan noise floor.
                         </template>
                         <template v-else-if="isPhaseNoiseArchive()">
                             Exports a Standard Deviation worksheet and an Allan Deviation worksheet with one stacked plot per selected order ({{ phaseNoiseAllanOrders.map(order => `n=${order}`).join(', ') }}). The current T/T² x-axis selection is preserved.
@@ -7510,7 +7510,7 @@
                     const saved = Array.isArray(this.syncManifest?.transfer_function_differential_summary)
                         ? this.syncManifest.transfer_function_differential_summary : [];
                     const previewScale = this.syncTransferNormalizationOptimization?.result?.scale_after;
-                    if (saved.length && Number(this.syncManifest?.transfer_function_differential_formula_version) >= 7 && !this.syncArchiveHasPhaseOverrides() && !this.syncAnalysisCopy.selectedId && !Object.keys(this.syncTransferNormalization?.slave_scales || {}).length && !Number.isFinite(Number(previewScale))) {
+                    if (saved.length && Number(this.syncManifest?.transfer_function_differential_formula_version) >= 8 && !this.syncArchiveHasPhaseOverrides() && !this.syncAnalysisCopy.selectedId && !Object.keys(this.syncTransferNormalization?.slave_scales || {}).length && !Number.isFinite(Number(previewScale))) {
                         return saved.filter(row => !selectedSlave || String(row.slave_node_id || '') === selectedSlave)
                             .slice().sort((a, b) => Number(a.frequency_hz) - Number(b.frequency_hz));
                     }
@@ -7534,12 +7534,20 @@
                             return Number.isFinite(phaseValue) && Number.isFinite(denominator) && denominator !== 0
                                 ? phaseValue / denominator : null;
                         };
+                        const normalizedNoiseS2 = (record, scale = 1) => {
+                            const sigmaRad = Number(record.transfer_phase_noise_sigma_mrad) / 1000;
+                            const modulationHz = Number(record.transfer_frequency_modulation_mhz) * 1e6;
+                            const distance = Number(record.transfer_atom_mirror_distance_m);
+                            const denominator = 4 * Math.PI * modulationHz * distance / c * scale;
+                            return Number.isFinite(sigmaRad) && sigmaRad >= 0 && Number.isFinite(denominator) && denominator > 0
+                                ? (sigmaRad / denominator) ** 2 : null;
+                        };
                         const slaveId = String(pair.slave_node_id || slave.sync_node_id || 'slave');
                         if (selectedSlave && slaveId !== selectedSlave) return;
                         const key = `${slaveId}:${frequency.toPrecision(15)}`;
                         const group = groups.get(key) || {
                             slave_node_id: slaveId, frequency_hz: frequency,
-                            values: { 0: [], 90: [] }, phase_differences: { 0: [], 90: [] }
+                            values: { 0: [], 90: [] }, noise_s2: { 0: [], 90: [] }, phase_differences: { 0: [], 90: [] }
                         };
                         const masterPhase = Number(master.interferometer_phase);
                         const slavePhase = Number(slave.interferometer_phase);
@@ -7553,7 +7561,14 @@
                             ? Number(previewScale)
                             : Number((this.syncTransferNormalization?.slave_scales || {})[slaveId] ?? 1);
                         const slaveS = Number.isFinite(slaveScale) && slaveScale > 0 && slaveS0 !== null ? slaveS0 / slaveScale : null;
-                        if (masterS !== null && slaveS !== null) group.values[phase].push(masterS - slaveS);
+                        if (masterS !== null && slaveS !== null) {
+                            group.values[phase].push(masterS - slaveS);
+                            const masterNoiseS2 = normalizedNoiseS2(master);
+                            const slaveNoiseS2 = normalizedNoiseS2(slave, slaveScale);
+                            if (masterNoiseS2 !== null && slaveNoiseS2 !== null) {
+                                group.noise_s2[phase].push(masterNoiseS2 + slaveNoiseS2);
+                            }
+                        }
                         groups.set(key, group);
                     });
                     const statistics = values => {
@@ -7567,6 +7582,10 @@
                     return [...groups.values()].sort((a, b) => a.frequency_hz - b.frequency_hz).map(group => {
                         const zero = statistics(group.values[0]);
                         const ninety = statistics(group.values[90]);
+                        const zeroNoiseS2 = group.noise_s2[0].length
+                            ? group.noise_s2[0].reduce((sum, value) => sum + value, 0) / group.noise_s2[0].length : null;
+                        const ninetyNoiseS2 = group.noise_s2[90].length
+                            ? group.noise_s2[90].reduce((sum, value) => sum + value, 0) / group.noise_s2[90].length : null;
                         const phaseDifferenceZero = statistics(group.phase_differences[0]);
                         const phaseDifferenceNinety = statistics(group.phase_differences[90]);
                         const phaseDifferenceMagnitude = phaseDifferenceZero.mean === null || phaseDifferenceNinety.mean === null
@@ -7586,13 +7605,17 @@
                             delta_s_0deg_count: zero.count, delta_s_0deg_mean: zero.mean, delta_s_0deg_std: zero.std, delta_s_0deg_sem: zero.sem,
                             delta_s_0deg_s2: zero.mean === null ? null : zero.mean ** 2,
                             delta_s_0deg_s2_sem: zero.mean === null || zero.sem === null ? null : 2 * Math.abs(zero.mean) * zero.sem,
+                            delta_s_0deg_noise_s2: zeroNoiseS2,
                             delta_s_90deg_count: ninety.count, delta_s_90deg_mean: ninety.mean, delta_s_90deg_std: ninety.std, delta_s_90deg_sem: ninety.sem,
                             delta_s_90deg_s2: ninety.mean === null ? null : ninety.mean ** 2,
                             delta_s_90deg_s2_sem: ninety.mean === null || ninety.sem === null ? null : 2 * Math.abs(ninety.mean) * ninety.sem,
+                            delta_s_90deg_noise_s2: ninetyNoiseS2,
                             phase_difference_0deg_count: phaseDifferenceZero.count, phase_difference_0deg_mean_rad: phaseDifferenceZero.mean, phase_difference_0deg_std_rad: phaseDifferenceZero.std, phase_difference_0deg_sem_rad: phaseDifferenceZero.sem,
                             phase_difference_90deg_count: phaseDifferenceNinety.count, phase_difference_90deg_mean_rad: phaseDifferenceNinety.mean, phase_difference_90deg_std_rad: phaseDifferenceNinety.std, phase_difference_90deg_sem_rad: phaseDifferenceNinety.sem,
                             phase_difference_magnitude_rad: phaseDifferenceMagnitude, phase_difference_magnitude_sem_rad: phaseDifferenceMagnitudeSem,
                             differential_s2: differentialS2,
+                            differential_noise_s2: [zeroNoiseS2, ninetyNoiseS2].some(value => value !== null)
+                                ? [zeroNoiseS2, ninetyNoiseS2].filter(value => value !== null).reduce((sum, value) => sum + value, 0) : null,
                             differential_magnitude: differentialS2 === null ? null : Math.sqrt(differentialS2),
                             quadrature_complete: zero.mean !== null && ninety.mean !== null,
                         };
@@ -7606,12 +7629,12 @@
                     if (!rows.length) return;
                     const fields = [
                         'slave_node_id', 'frequency_hz',
-                        'delta_s_0deg_count', 'delta_s_0deg_mean', 'delta_s_0deg_std', 'delta_s_0deg_sem', 'delta_s_0deg_s2', 'delta_s_0deg_s2_sem',
-                        'delta_s_90deg_count', 'delta_s_90deg_mean', 'delta_s_90deg_std', 'delta_s_90deg_sem', 'delta_s_90deg_s2', 'delta_s_90deg_s2_sem',
+                        'delta_s_0deg_count', 'delta_s_0deg_mean', 'delta_s_0deg_std', 'delta_s_0deg_sem', 'delta_s_0deg_s2', 'delta_s_0deg_s2_sem', 'delta_s_0deg_noise_s2',
+                        'delta_s_90deg_count', 'delta_s_90deg_mean', 'delta_s_90deg_std', 'delta_s_90deg_sem', 'delta_s_90deg_s2', 'delta_s_90deg_s2_sem', 'delta_s_90deg_noise_s2',
                         'phase_difference_0deg_count', 'phase_difference_0deg_mean_rad', 'phase_difference_0deg_std_rad', 'phase_difference_0deg_sem_rad',
                         'phase_difference_90deg_count', 'phase_difference_90deg_mean_rad', 'phase_difference_90deg_std_rad', 'phase_difference_90deg_sem_rad',
                         'phase_difference_magnitude_rad', 'phase_difference_magnitude_sem_rad',
-                        'differential_s2', 'differential_magnitude', 'quadrature_complete'
+                        'differential_s2', 'differential_noise_s2', 'differential_magnitude', 'quadrature_complete'
                     ];
                     const csv = '\uFEFF' + [fields, ...rows.map(row => fields.map(field => row[field] ?? ''))]
                         .map(row => row.map(value => this.csvCell(value)).join(',')).join('\n');
@@ -7631,6 +7654,14 @@
                         connectgaps: false,
                         hovertemplate: 'Frequency=%{x:.9g} Hz<br>|ΔS|²=%{y:.6g}<br>n(0°/90°)=%{customdata}<extra></extra>'
                     }];
+                    traces.push({
+                        x: rows.map(row => Number(row.frequency_hz)),
+                        y: rows.map(row => row.differential_noise_s2),
+                        type: 'scatter', mode: 'lines', name: 'Allan phase-noise floor',
+                        line: { color: '#343a40', width: 2.4, dash: 'dash' },
+                        connectgaps: false,
+                        hovertemplate: 'Frequency=%{x:.9g} Hz<br>Noise floor=%{y:.6g} (dimensionless)<extra></extra>'
+                    });
                     if (linear) {
                         [[0, '#c62828'], [90, '#1565c0']].forEach(([phase, color]) => traces.push({
                             x: rows.map(row => Number(row.frequency_hz)),
@@ -8556,6 +8587,7 @@
                         ['S2_90deg', 'interferometer_phase_90deg_s2'],
                         ['Delta_Phi2_90deg_Rad2', 'interferometer_phase_90deg_phase2_rad2'],
                         ['S2_Quadrature_Sum', 'interferometer_phase_s2'],
+                        ['S2_Allan_Noise_Floor', 'interferometer_phase_noise_s2'],
                         ['Delta_Phi2_Quadrature_Sum_Rad2', 'interferometer_phase_phase2_rad2'],
                         ['Allan_Phase_Noise_Sigma_mrad', 'transfer_phase_noise_sigma_mrad'],
                         ['Delta_Phi2_Allan_Noise_Floor_Rad2', 'interferometer_phase_noise_phase2_rad2'],
@@ -9174,8 +9206,12 @@
                                     hovertemplate: `Frequency=%{x:.9g} Hz<br>${hoverStatisticLabel} sum=%{y:.6g}<br>n=%{text}<extra></extra>`
                                 });
                             }
-                            if (statistic === 'phase2') {
-                                const noiseFloorValues = rows.map(row => numericOrNull(row.interferometer_phase_noise_phase2_rad2));
+                            if (['s2', 'phase2'].includes(statistic)) {
+                                const noiseFloorValues = rows.map(row => numericOrNull(
+                                    statistic === 's2'
+                                        ? row.interferometer_phase_noise_s2
+                                        : row.interferometer_phase_noise_phase2_rad2
+                                ));
                                 traces.push({
                                     x: rows.map(row => Number(row.frequency_hz)),
                                     y: noiseFloorValues,
@@ -9184,7 +9220,7 @@
                                     type: 'scatter', mode: 'lines', name: 'Allan phase-noise floor',
                                     line: { color: '#343a40', width: 2.4, dash: 'dash' },
                                     connectgaps: false,
-                                    hovertemplate: 'Frequency=%{x:.9g} Hz<br>Noise floor=%{y:.6g} rad²<br>n=%{text}<extra></extra>'
+                                    hovertemplate: `Frequency=%{x:.9g} Hz<br>Noise floor=%{y:.6g} ${statistic === 's2' ? '(dimensionless)' : 'rad²'}<br>n=%{text}<extra></extra>`
                                 });
                             }
                         } else if (configuredPhases.length > 0) {
