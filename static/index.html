@@ -1544,14 +1544,16 @@
                     <div class="analysis-header-top">
                         <div class="analysis-header-title"><i class="bi bi-bounding-box-circles fs-5 me-2"></i><span>SYNC Analysis</span></div>
                         <div class="analysis-header-actions d-flex flex-wrap gap-2 align-items-center">
-                            <select class="form-select form-select-sm" style="width:auto" v-model="syncViewMode" @change="handleSyncViewModeChange">
+                            <select v-if="!isBraggRabiSync()" class="form-select form-select-sm" style="width:auto" v-model="syncViewMode" @change="handleSyncViewModeChange">
                                 <option value="node">Node Data</option>
                                 <option value="lissajous">Differential</option>
                             </select>
-                            <select v-if="syncViewMode === 'node'" class="form-select form-select-sm" style="width:auto" v-model="syncDisplaySource" @change="renderSyncPlot">
+                            <span v-else class="badge bg-primary">Node Data</span>
+                            <select v-if="syncViewMode === 'node' && !isBraggRabiSyncComparison()" class="form-select form-select-sm" style="width:auto" v-model="syncDisplaySource" @change="renderSyncPlot">
                                 <option value="master">Master</option>
                                 <option v-for="slave in syncSlaves" :key="slave.id" :value="slave.id">{{ slave.name }}</option>
                             </select>
+                            <span v-if="isBraggRabiSyncComparison()" class="badge bg-light text-dark border">Master + Slave</span>
                             <select v-if="(syncViewMode === 'node' && currentTab === 'phase') || (syncViewMode === 'lissajous' && (syncAxisX.metric === 'phase' || syncAxisY.metric === 'phase'))" class="form-select form-select-sm" style="width:auto" v-model="phaseUnit" aria-label="Phase unit"><option value="rad">rad</option><option value="mrad">mrad</option></select>
                             <div class="form-check form-switch mb-0">
                                 <input class="form-check-input" type="checkbox" id="syncShowRaw" v-model="showRawData">
@@ -1583,7 +1585,7 @@
                             </li>
                         </ul>
                     </div>
-                    <div v-else class="row g-2 mt-2">
+                    <div v-else-if="!isBraggRabiSync()" class="row g-2 mt-2">
                         <div class="col-lg-6 d-flex gap-2">
                             <span class="badge bg-primary align-self-center">X</span>
                             <select class="form-select form-select-sm" v-model="syncAxisX.source" @change="syncAxesChanged"><option value="master">Master</option><option v-for="slave in syncSlaves" :key="slave.id" :value="slave.id">{{ slave.name }}</option></select>
@@ -5653,6 +5655,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     this.renderSyncPlot();
                 },
                 handleSyncViewModeChange() {
+                    if (this.isBraggRabiSync()) this.syncViewMode = 'node';
                     if (this.syncReplayPlaying) this.toggleSyncReplay();
                     this.$nextTick(() => {
                         if (this.syncViewMode === 'node') this.initPlots();
@@ -5673,6 +5676,10 @@ finishScheduledRun(finalStatus = 'IDLE') {
                         this.renderTransferFunctionPlot();
                         return;
                     }
+                    if (this.isBraggRabiSyncComparison()) {
+                        this.renderSyncBraggRabiComparisonPlots();
+                        return;
+                    }
                     const points = this.aggregateHistoryMap(this.syncHistoryMaps[this.syncDisplaySource] || {});
                     const metric = this.getMetricConfig();
                     const dimensions = Math.max(1, Math.min(3, points.reduce(
@@ -5686,6 +5693,54 @@ finishScheduledRun(finalStatus = 'IDLE') {
                         this.syncSliceState(points);
                         this.render3DPlot(points, metric);
                     }
+                },
+                isBraggRabiSync() {
+                    return this.isSyncMode() && String(this.config.mode || '').toLowerCase() === 'bragg_rabi';
+                },
+                isBraggRabiSyncComparison() {
+                    return this.isBraggRabiSync() && ['prob', 'intf'].includes(this.currentTab);
+                },
+                renderSyncBraggRabiComparisonPlots() {
+                    const metric = this.getMetricConfig();
+                    const sources = ['master', ...this.syncSlaves.map(slave => String(slave.id))]
+                        .filter(source => this.syncHistoryMaps[source]);
+                    const colors = ['#0d6efd', '#dc3545', '#198754', '#6f42c1'];
+                    const labelFor = source => source === 'master'
+                        ? 'Master'
+                        : (this.syncSlaves.find(slave => String(slave.id) === source)?.name || source);
+                    const makeTraces = (channel) => sources.flatMap((source, index) => {
+                        const series = this.build1DSeries(
+                            this.aggregateHistoryMap(this.syncHistoryMaps[source] || {}), metric
+                        );
+                        const fitValues = channel === 'up' ? series.fitUp : series.fitDw;
+                        const rawValues = channel === 'up' ? series.rawUp : series.rawDw;
+                        const color = colors[index % colors.length];
+                        const traces = [{
+                            x: series.x, y: fitValues, type: 'scatter', mode: 'lines+markers',
+                            name: `${labelFor(source)} (Fit)`,
+                            line: { color, width: 2.5 }, marker: { size: 8 }, connectgaps: false,
+                        }];
+                        if (this.showRawData) traces.push({
+                            x: series.x, y: rawValues, type: 'scatter', mode: 'lines+markers',
+                            name: `${labelFor(source)} (NoFit)`,
+                            line: { color, width: 1.2, dash: 'dot' },
+                            marker: { color, size: 6, symbol: 'circle-open', opacity: 0.65 },
+                            connectgaps: false,
+                        });
+                        return traces;
+                    });
+                    const upLayout = {
+                        ...this.build1DLayout('up', metric),
+                        title: { text: `Master + Slave | ${metric.nameUp}`, font: { size: 13 }, x: 0.05 },
+                    };
+                    const dwLayout = {
+                        ...this.build1DLayout('dw', metric),
+                        title: { text: `Master + Slave | ${metric.nameDw}`, font: { size: 13 }, x: 0.05 },
+                    };
+                    this.layoutResUp = upLayout;
+                    this.layoutResDw = dwLayout;
+                    Plotly.react('resultsPlotUp', makeTraces('up'), upLayout);
+                    Plotly.react('resultsPlotDw', makeTraces('dw'), dwLayout);
                 },
                 syncTransferFunctionDifferentialRows() {
                     const speedOfLight = 299792458;
@@ -5868,6 +5923,9 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     }, { responsive: true, displaylogo: false });
                 },
                 renderSyncPlot() {
+                    if (this.isBraggRabiSync() && this.syncViewMode !== 'node') {
+                        this.syncViewMode = 'node';
+                    }
                     if (this.syncViewMode === 'node') {
                         this.renderSyncNodePlots();
                         return;
