@@ -107,8 +107,14 @@ def generate_bragg_pulse(
     elif shape == "blackman":
         total_duration = fwhm / 0.405
         num_points = max(1, int(total_duration / clock_res))
+    elif shape == "square":
+        # A square pulse's FWHM is its plateau width. Match the existing
+        # clock-grid truncation convention used by the other shapes.
+        num_points = max(1, int(fwhm / clock_res))
     else:
-        raise ValueError(f"Unsupported shape '{shape}'. Please choose 'gaussian' or 'blackman'.")
+        raise ValueError(
+            f"Unsupported shape '{shape}'. Please choose 'gaussian', 'blackman' or 'square'."
+        )
 
     pulse_logic_duration = (num_points + 2) * clock_res
     param1_compensation = float(base_timing) - pulse_logic_duration
@@ -122,8 +128,10 @@ def generate_bragg_pulse(
     if shape == "gaussian":
         x_values = np.linspace(0, x_end, num_points)
         ideal_shape = np.exp(-((x_values - mean) ** 2) / (2 * std_dev ** 2))
-    else:
+    elif shape == "blackman":
         ideal_shape = np.blackman(num_points)
+    else:
+        ideal_shape = np.ones(num_points)
 
     y_values = [normalized_power_to_voltage(value, calibration) for value in ideal_shape]
     pulse_name = f"{shape.capitalize()}_pulse"

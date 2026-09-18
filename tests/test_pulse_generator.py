@@ -72,6 +72,20 @@ class BraggPulseGenerationTests(unittest.TestCase):
         self.assertIn(" = -3.000", lines[1])
         self.assertIn(" = -3.000", lines[-2])
 
+    def test_square_fwhm_is_the_clock_quantized_plateau_width(self):
+        pulse_code, compensation = generate_bragg_pulse(
+            fwhm=1.1,
+            shape="square",
+            base_timing=100,
+            calibration=CALIBRATION,
+        )
+        lines = pulse_code.splitlines()
+        self.assertTrue(lines[0].startswith("+500.0us Square_pulse = -3.000"))
+        self.assertEqual(len(lines), 7)  # start off, five plateau samples, end off
+        self.assertTrue(all(" = 0.500" in line for line in lines[1:-1]))
+        self.assertTrue(lines[-1].startswith("+0.2us Square_pulse = -3.000"))
+        self.assertEqual(compensation, "98.6")
+
     def test_pulse_cannot_exceed_base_timing(self):
         with self.assertRaisesRegex(ValueError, "exceeds base timing"):
             generate_bragg_pulse(

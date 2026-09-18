@@ -105,6 +105,13 @@ class ScanConfig(BaseModel):
     marker_axes: List[str] = Field(default_factory=list)
     interferometer_phase_calibration_override: Optional[Dict[str, Any]] = Field(None)
 
+    @validator("bragg_shape")
+    def validate_bragg_shape(cls, value):
+        normalized = str(value or "blackman").strip().lower()
+        if normalized not in {"blackman", "gaussian", "square"}:
+            raise ValueError("Bragg shape must be blackman, gaussian or square")
+        return normalized
+
     @validator("parameter_source")
     def normalize_parameter_source(cls, value):
         normalized = str(value or "classic").strip().lower()
@@ -166,8 +173,8 @@ class BraggSingleExportRequest(BaseModel):
     @validator("bragg_shape")
     def validate_bragg_shape(cls, value):
         normalized = str(value or "blackman").strip().lower()
-        if normalized not in {"blackman", "gaussian"}:
-            raise ValueError("Bragg shape must be blackman or gaussian")
+        if normalized not in {"blackman", "gaussian", "square"}:
+            raise ValueError("Bragg shape must be blackman, gaussian or square")
         return normalized
 
 

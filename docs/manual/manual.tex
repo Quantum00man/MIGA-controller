@@ -410,7 +410,7 @@ Rabi & $[P_0,P_{\mathrm{tot}}-P_0/2]$ & Couples pulse duration to a compensating
 Half & $[P_0,P_0/2]$ & Supplies the half-value as the second placeholder.\\
 Link & $[P_0,f_1(P_0),f_2(P_0,P_1),\ldots]$ & Evaluates ordered formulas with \code{math}, \code{numpy}, and preceding parameters.\\
 Phase Noise Analyze & Selected mid-fringe $P_0$ values plus Link formulas & Measures every selected $T^2$ consecutively for a configurable number of repeats and applies a per-point mid-fringe phase reference.\\
-Bragg Rabi & Derived MOT content & Generates a calibrated Gaussian or Blackman pulse and timing compensation.\\
+Bragg Rabi & Derived MOT content & Generates a calibrated Gaussian, Blackman or square pulse and timing compensation.\\
 Lock-in & ABBA blocks & Repeats two parameter states in the order A--B--B--A.\\
 AC Stark & Interleaved ratio plan & Coordinates MOT placeholders with generated DDS elements.\\
 \bottomrule
@@ -789,7 +789,7 @@ quality depends on the bounded grid, metric stability, initialization and trial 
 \markboth{Specialized workflows}{}
 
 \section{Calibrated Bragg pulse generation}
-The Bragg generator writes channel 32 with a sampled Gaussian or Blackman envelope. For a
+The Bragg generator writes channel 32 with a sampled Gaussian, Blackman or square envelope. For a
 Gaussian FWHM $w$,
 \begin{equation}
   \sigma=\frac{w}{2\sqrt{2\ln2}},\qquad t\in[0,8\sigma].
@@ -801,6 +801,9 @@ compensation is
   P_1=t_{\mathrm{base}}-(N_{\mathrm{sample}}+2)\Delta t.
 \end{equation}
 Negative compensation and more than two million samples are rejected.
+
+For a square envelope, the requested FWHM $w$ is the plateau width. As with the other
+envelopes, its realized duration is truncated to the configured clock grid.
 
 Normalized optical power is converted to voltage by inverting a generalized logistic
 calibration. For voltage $v$,
@@ -1988,7 +1991,7 @@ reports.\\
 replication.\\
 \pathcode{app/core/data_manager.py} & Run creation, CSV/JSON/NPZ persistence.\\
 \pathcode{app/core/data_loader.py} & Archive loading, recalculation, Allan and sync nodes.\\
-\pathcode{app/core/pulse_generator.py} & Calibrated Gaussian/Blackman Bragg pulses.\\
+\pathcode{app/core/pulse_generator.py} & Calibrated Gaussian/Blackman/square Bragg pulses.\\
 \pathcode{app/drivers/dds_table.py} & DDS XML, Raman calibration inversion and write/verify.\\
 \pathcode{app/drivers/tti_generator.py} & TG5012A/TGF3162 identity checks and selected-channel
 carrier-frequency/phase commands.\\

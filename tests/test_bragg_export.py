@@ -42,6 +42,12 @@ class BraggExportTests(unittest.TestCase):
         )
         self.assertEqual(filename, "experiment_50.5us.mot")
 
+    def test_single_export_supports_square_pulses(self):
+        payload, _ = build_single_bragg_export(
+            TEMPLATE, "experiment.mot", 2, "square", 1000, CALIBRATION
+        )
+        self.assertIn("Square_pulse", payload.decode("utf-8"))
+
     def test_default_display_name_resolves_to_seq0(self):
         self.assertEqual(sequence_filename_stem("Default (seq0.mot)"), "seq0")
 
