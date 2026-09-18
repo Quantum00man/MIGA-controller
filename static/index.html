@@ -313,6 +313,17 @@
             border-left: 1px solid #eee;
         }
 
+        .sync-transfer-differential-plot {
+            width: 100%;
+            height: clamp(360px, 46vw, 620px);
+        }
+
+        @media (max-width: 575px) {
+            .sync-transfer-differential-plot {
+                height: 420px;
+            }
+        }
+
         .analysis-tools {
             padding: 10px 14px 12px;
             border-bottom: 1px solid #eef2f7;
@@ -1606,9 +1617,9 @@
                     <div id="resultsPlotDw" class="analysis-plot-panel analysis-plot-panel-divider" :style="{height:'360px', display: currentTab === 'phase' ? 'none' : 'block'}"></div>
                 </div>
                 <div v-else-if="config.mode === 'transfer_function'">
-                    <div id="syncPlot" style="height:560px"></div>
-                    <div id="syncTransferPhaseDifferencePlot" class="analysis-plot-panel analysis-plot-panel-divider" style="height:380px"></div>
-                    <div id="syncTransferPathNormalizedPlot" class="analysis-plot-panel analysis-plot-panel-divider" style="height:380px"></div>
+                    <div id="syncPlot" class="sync-transfer-differential-plot"></div>
+                    <div id="syncTransferPhaseDifferencePlot" class="analysis-plot-panel analysis-plot-panel-divider sync-transfer-differential-plot"></div>
+                    <div id="syncTransferPathNormalizedPlot" class="analysis-plot-panel analysis-plot-panel-divider sync-transfer-differential-plot"></div>
                 </div>
                 <div v-else id="syncPlot" style="height:560px"></div>
             </div>

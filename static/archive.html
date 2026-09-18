@@ -516,17 +516,16 @@
         }
 
         .sync-archive-plot-wrap {
-            display: flex;
-            justify-content: center;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr);
+            gap: 16px;
             width: 100%;
             padding: 12px;
-            overflow: hidden;
         }
 
         .sync-archive-square-plot {
-            width: min(100%, clamp(320px, calc(100vh - 220px), 900px));
-            aspect-ratio: 1 / 1;
-            flex: 0 0 auto;
+            width: 100%;
+            height: clamp(360px, 46vw, 620px);
         }
 
         .sync-axis-range-panel {
@@ -538,7 +537,7 @@
 
         @media (max-width: 575px) {
             .sync-archive-plot-wrap { padding: 6px; }
-            .sync-archive-square-plot { width: 100%; }
+            .sync-archive-square-plot { height: 420px; }
         }
 
         .archive-display-menu {
