@@ -588,6 +588,52 @@
                     </div>
                 </div>
 
+                <div v-if="tab==='schedule-logs'">
+                    <div class="d-flex flex-wrap justify-content-between align-items-end gap-2 mb-3">
+                        <div>
+                            <h6 class="fw-bold mb-1">Persistent controller audit trail</h6>
+                            <div class="form-text">Records schedule and task lifecycle events only. Individual shot data is never written here.</div>
+                        </div>
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-outline-secondary btn-sm" @click="fetchScheduleLogs" :disabled="scheduleLogsBusy">
+                                <span v-if="scheduleLogsBusy" class="spinner-border spinner-border-sm me-1"></span>Refresh
+                            </button>
+                            <a class="btn btn-outline-primary btn-sm" :class="{disabled: !scheduleLogDate}" :href="scheduleLogDownloadUrl">Download JSONL</a>
+                        </div>
+                    </div>
+                    <div class="row g-2 align-items-end mb-3">
+                        <div class="col-sm-5 col-lg-4">
+                            <label class="form-label small text-muted fw-bold">Log date</label>
+                            <select class="form-select" v-model="scheduleLogDate" @change="fetchScheduleLogs">
+                                <option value="" :disabled="scheduleLogDates.length">Select a date</option>
+                                <option v-for="date in scheduleLogDates" :key="date" :value="date">{{ date }}</option>
+                            </select>
+                        </div>
+                        <div class="col-sm-4 col-lg-3 pb-2">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="scheduleLogsErrorsOnly" v-model="scheduleLogsErrorsOnly" @change="fetchScheduleLogs">
+                                <label class="form-check-label" for="scheduleLogsErrorsOnly">Errors only</label>
+                            </div>
+                        </div>
+                    </div>
+                    <div v-if="scheduleLogsError" class="alert alert-danger py-2">{{ scheduleLogsError }}</div>
+                    <div v-else-if="!scheduleLogs.length" class="alert alert-light border py-3 mb-0">No schedule events recorded for the selected date.</div>
+                    <div v-else class="table-responsive border rounded">
+                        <table class="table table-sm align-middle mb-0">
+                            <thead class="table-light"><tr><th>Time</th><th>Event</th><th>Task</th><th>Mode</th><th>Details</th></tr></thead>
+                            <tbody>
+                                <tr v-for="(entry, index) in scheduleLogs" :key="`${entry.timestamp_ms}_${index}`">
+                                    <td class="text-nowrap small">{{ formatScheduleLogTime(entry.timestamp) }}</td>
+                                    <td><span :class="['badge', scheduleLogBadgeClass(entry.event)]">{{ scheduleLogEventLabel(entry.event) }}</span></td>
+                                    <td class="small"><div>{{ entry.task_name || '—' }}</div><div v-if="entry.task_index" class="text-muted">Task {{ entry.task_index }}<span v-if="entry.task_count"> / {{ entry.task_count }}</span></div></td>
+                                    <td class="small">{{ entry.task_mode ? `${entry.task_mode} · ${entry.scan_mode || 'standard'}` : '—' }}</td>
+                                    <td class="small text-break">{{ scheduleLogDetail(entry) }}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
 
                 <div v-if="tab==='sync'">
                     <div class="row g-3">
@@ -1816,6 +1862,7 @@
                         { id: 'ramsey', group: 'instruments', label: 'Ramsey Interferometer', icon: 'bi-bezier', description: 'Configure the RIGOL DG4162 LAN connection, center frequency and manual channel tests for Ramsey scans.' },
                         { id: 'net', group: 'controller', label: 'Network', icon: 'bi-hdd-network', description: 'Select the acquisition platform and configure device connection limits.' },
                         { id: 'sync', group: 'controller', label: 'SYNC', icon: 'bi-bounding-box-circles', description: 'Configure Standalone, Master or Slave operation for synchronized differential measurements.' },
+                        { id: 'schedule-logs', group: 'controller', label: 'Schedule Logs', icon: 'bi-journal-text', description: 'Review permanently retained server-side schedule and task events, including failures.' },
                         { id: 'logic', group: 'controller', label: 'Logic & Channels', icon: 'bi-diagram-3', description: 'Set launch, trigger and linked-mode channel timing.' },
                         { id: 'paths', group: 'controller', label: 'System Paths', icon: 'bi-folder2-open', description: 'Configure executable and default template locations used by the controller.' },
                         { id: 'markers', group: 'tools', label: 'Sequence Markers', icon: 'bi-tags', description: 'Mark DDS, DAC, duration and ON/OFF values visually, then define their execution rules.' },
@@ -1827,6 +1874,8 @@
                     ttiTestPhaseDeg: 0, ttiPhaseTesting: false, ttiPhaseMessage: '', ttiPhaseError: false,
                     ttiOutputTesting: false, ttiOutputTarget: false, ttiOutputMessage: '', ttiOutputError: false,
                     rigolBusy: false, rigolMessage: '', rigolError: false,
+                    scheduleLogs: [], scheduleLogDates: [], scheduleLogDate: '', scheduleLogsErrorsOnly: false,
+                    scheduleLogsBusy: false, scheduleLogsError: '',
                     rigolCh1TestMhz: 110, rigolCh2TestMhz: 110, rigolDeltaTestMhz: 0.1,
                     markerBusy: false,
                     markerError: '',
@@ -1883,6 +1932,9 @@
                 savedMarkerDownloadUrl() {
                     if (!this.savedMarkerProfile) return '';
                     return `/sequence-markers/saved/download?profile_key=${encodeURIComponent(this.savedMarkerProfile)}`;
+                },
+                scheduleLogDownloadUrl() {
+                    return this.scheduleLogDate ? `/schedule/logs/download?date=${encodeURIComponent(this.scheduleLogDate)}` : '#';
                 },
                 markerDefinitionSuggestions() {
                     return Array.isArray(this.markerDocument?.definition_suggestions) ? this.markerDocument.definition_suggestions : [];
@@ -1941,6 +1993,7 @@
                 tab(value) {
                     if (value === 'bragg') this.$nextTick(() => this.renderBraggPlots());
                     if (value === 'phase') this.$nextTick(() => this.renderPhaseCalibrationPlot());
+                    if (value === 'schedule-logs') this.fetchScheduleLogs();
                 },
                 braggCalibrationSignature() {
                     if (this.tab === 'bragg') this.$nextTick(() => this.renderBraggPlots());
@@ -2350,6 +2403,51 @@
                 },
                 getActiveTabDefinition() {
                     return this.tabDefinitions.find(item => item.id === this.tab) || this.tabDefinitions[0];
+                },
+                formatScheduleLogTime(value) {
+                    const date = new Date(value);
+                    return Number.isNaN(date.getTime()) ? 'Unknown time' : date.toLocaleString();
+                },
+                scheduleLogEventLabel(event) {
+                    return {
+                        schedule_started: 'Schedule started', schedule_completed: 'Schedule completed',
+                        schedule_stop_requested: 'Stop requested', schedule_stopped: 'Schedule stopped',
+                        schedule_failed: 'Schedule failed', task_wait_started: 'Waiting',
+                        task_wait_finished: 'Wait complete', task_started: 'Task started',
+                        task_completed: 'Task completed', task_stopped: 'Task stopped', task_failed: 'Task failed',
+                    }[event] || String(event || 'Event');
+                },
+                scheduleLogBadgeClass(event) {
+                    if (['schedule_failed', 'task_failed'].includes(event)) return 'bg-danger';
+                    if (['schedule_stopped', 'task_stopped', 'schedule_stop_requested'].includes(event)) return 'bg-warning text-dark';
+                    if (['schedule_completed', 'task_completed'].includes(event)) return 'bg-success';
+                    return 'bg-secondary';
+                },
+                scheduleLogDetail(entry) {
+                    if (entry.detail) return entry.detail;
+                    if (entry.scheduled_for_ms) return `Scheduled for ${this.formatScheduleLogTime(entry.scheduled_for_ms)}`;
+                    if (entry.task_count) return `${entry.task_count} task(s) in queue`;
+                    return '—';
+                },
+                async fetchScheduleLogs() {
+                    this.scheduleLogsBusy = true;
+                    this.scheduleLogsError = '';
+                    try {
+                        const response = await axios.get('/schedule/logs', { params: {
+                            date: this.scheduleLogDate,
+                            errors_only: this.scheduleLogsErrorsOnly,
+                            limit: 500,
+                        }});
+                        const data = response.data || {};
+                        this.scheduleLogDates = Array.isArray(data.dates) ? data.dates : [];
+                        this.scheduleLogDate = data.date || this.scheduleLogDate || '';
+                        this.scheduleLogs = Array.isArray(data.records) ? data.records : [];
+                    } catch (error) {
+                        this.scheduleLogs = [];
+                        this.scheduleLogsError = error.response?.data?.detail || error.message || 'Unable to load schedule logs.';
+                    } finally {
+                        this.scheduleLogsBusy = false;
+                    }
                 },
                 formatPhaseNumber(value) {
                     const numeric = Number(value);

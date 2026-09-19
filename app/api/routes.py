@@ -617,6 +617,23 @@ async def get_schedule_status():
     return ExperimentResponse(status="success", message="Schedule status loaded", data=schedule_manager.get_status())
 
 
+@router.get("/schedule/logs")
+async def get_schedule_logs(date: str = "", errors_only: bool = False, limit: int = 500):
+    try:
+        return schedule_manager.get_logs(date=date, errors_only=errors_only, limit=limit)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+
+
+@router.get("/schedule/logs/download")
+async def download_schedule_log(date: str):
+    try:
+        payload, filename = schedule_manager.get_log_download(date)
+        return _attachment_response(payload, filename, "application/x-ndjson")
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+
+
 @router.get("/optimization/objective-metrics", response_model=ExperimentResponse)
 async def get_optimization_objective_metrics():
     return ExperimentResponse(status="success", message="Objective metrics loaded", data={"metrics": OBJECTIVE_METRICS})

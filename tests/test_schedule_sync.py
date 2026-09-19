@@ -223,3 +223,28 @@ def test_persisted_active_schedule_is_interrupted_instead_of_retried_after_resta
     assert "controller restart" in state["error"]
     assert state["errorAtMs"] is not None
     assert state["tasks"][0]["id"] == "sync_1"
+
+
+def test_schedule_logs_are_persistent_and_exclude_sequence_contents():
+    scheduler = make_scheduler()
+    task = sync_task()
+    task["sequence_snapshot"] = "private master sequence"
+    task["sync"]["slaves"][0]["sequence_content_base64"] = "private slave sequence"
+    scheduler._state["scheduleId"] = "audit-test"
+
+    with tempfile.TemporaryDirectory() as temporary:
+        log_dir = Path(temporary) / "schedule_logs"
+        with patch("app.core.schedule_manager.config.SCHEDULE_LOG_DIR", log_dir):
+            scheduler._log_event("task_started", task=task, task_index=1, task_count=3)
+            scheduler._log_event("task_failed", task=task, detail="Slave controller disconnected")
+            logs = scheduler.get_logs(errors_only=True)
+            payload, filename = scheduler.get_log_download(logs["date"])
+
+    assert len(logs["dates"]) == 1
+    assert len(logs["records"]) == 1
+    assert logs["records"][0]["event"] == "task_failed"
+    assert logs["records"][0]["detail"] == "Slave controller disconnected"
+    assert "sequence_snapshot" not in logs["records"][0]
+    assert b"private master sequence" not in payload
+    assert b"private slave sequence" not in payload
+    assert filename.endswith(".jsonl")

@@ -4,9 +4,11 @@ import shutil
 import tempfile
 import threading
 import time
+from datetime import datetime
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, List
+from uuid import uuid4
 
 import config
 from app.core.experiment_manager import ExperimentManager
@@ -34,6 +36,7 @@ class ScheduleManager:
         self.manager = manager or ExperimentManager()
         self.sync_manager = sync_manager
         self._lock = threading.RLock()
+        self._log_lock = threading.RLock()
         self._wake = threading.Event()
         self._state = self._load()
         if str(self._state.get("error") or "").startswith("Scheduled queue interrupted by controller restart"):
@@ -49,6 +52,7 @@ class ScheduleManager:
             "currentTaskStep": 0, "currentTaskTotalSteps": 0,
             "currentTaskStartedAtMs": None, "waitUntilMs": None,
             "scheduleStartedAtMs": None, "completedTaskIds": [],
+            "scheduleId": None,
             "timingMode": "sequential", "sequentialGapSec": 0,
             "tasks": [], "statusMessage": "IDLE", "error": None, "errorAtMs": None,
         }
@@ -120,6 +124,79 @@ class ScheduleManager:
         tmp = path.with_suffix(path.suffix + ".tmp")
         tmp.write_text(json.dumps(self._state, ensure_ascii=False, indent=2), encoding="utf-8")
         tmp.replace(path)
+
+    @staticmethod
+    def _public_task_details(task: Dict[str, Any] | None) -> Dict[str, Any]:
+        """Return task-level audit fields without sequence or per-shot contents."""
+        task = task if isinstance(task, dict) else {}
+        config_payload = task.get("config") if isinstance(task.get("config"), dict) else {}
+        return {
+            "task_id": task.get("id"),
+            "task_name": task.get("name"),
+            "task_mode": task.get("execution_mode"),
+            "scan_mode": config_payload.get("mode"),
+            "estimated_points": task.get("estimated_points"),
+        }
+
+    def _log_event(self, event: str, *, task: Dict[str, Any] | None = None, detail: str = "", **extra: Any) -> None:
+        """Append one durable schedule-level event. Logging must never stop a run."""
+        try:
+            now = datetime.now().astimezone()
+            with self._lock:
+                schedule_id = self._state.get("scheduleId")
+            record = {
+                "timestamp_ms": int(now.timestamp() * 1000),
+                "timestamp": now.isoformat(timespec="milliseconds"),
+                "event": str(event),
+                "schedule_id": schedule_id,
+                **self._public_task_details(task),
+            }
+            if detail:
+                record["detail"] = str(detail)
+            record.update({key: value for key, value in extra.items() if value is not None})
+            log_dir = Path(config.SCHEDULE_LOG_DIR)
+            log_dir.mkdir(parents=True, exist_ok=True)
+            path = log_dir / f"{now.date().isoformat()}.jsonl"
+            if not hasattr(self, "_log_lock"):
+                self._log_lock = threading.RLock()
+            with self._log_lock:
+                with path.open("a", encoding="utf-8") as handle:
+                    handle.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n")
+        except Exception as exc:
+            print(f"[Schedule] Unable to write audit log: {exc}")
+
+    def get_logs(self, date: str = "", errors_only: bool = False, limit: int = 500) -> Dict[str, Any]:
+        """Return recent events from a daily JSONL log without exposing task snapshots."""
+        log_dir = Path(config.SCHEDULE_LOG_DIR)
+        available_dates = sorted(
+            (path.stem for path in log_dir.glob("????-??-??.jsonl")), reverse=True
+        ) if log_dir.is_dir() else []
+        selected_date = str(date or (available_dates[0] if available_dates else "")).strip()
+        if selected_date and (len(selected_date) != 10 or selected_date not in available_dates):
+            raise ValueError("Schedule log date was not found")
+        records: List[Dict[str, Any]] = []
+        if selected_date:
+            path = log_dir / f"{selected_date}.jsonl"
+            try:
+                for line in path.read_text(encoding="utf-8").splitlines():
+                    item = json.loads(line)
+                    if isinstance(item, dict) and (not errors_only or item.get("event") in {"task_failed", "schedule_failed"}):
+                        records.append(item)
+            except (OSError, json.JSONDecodeError) as exc:
+                raise ValueError(f"Unable to read schedule log: {exc}") from exc
+        safe_limit = max(1, min(int(limit), 5000))
+        return {"dates": available_dates, "date": selected_date, "records": list(reversed(records[-safe_limit:]))}
+
+    def get_log_download(self, date: str) -> tuple[bytes, str]:
+        selected_date = str(date or "").strip()
+        try:
+            datetime.strptime(selected_date, "%Y-%m-%d")
+        except ValueError:
+            raise ValueError("A schedule log date is required")
+        path = Path(config.SCHEDULE_LOG_DIR) / f"{selected_date}.jsonl"
+        if not path.is_file():
+            raise ValueError("Schedule log date was not found")
+        return path.read_bytes(), path.name
 
     def get_status(self) -> Dict[str, Any]:
         with self._lock:
@@ -226,9 +303,12 @@ class ScheduleManager:
             self._state.update({
                 "active": True, "tasks": normalized, "timingMode": timing,
                 "sequentialGapSec": max(0.0, float(payload.get("sequentialGapSec") or 0)),
-                "scheduleStartedAtMs": int(time.time() * 1000), "statusMessage": "SCHEDULE READY",
+                "scheduleStartedAtMs": int(time.time() * 1000), "scheduleId": uuid4().hex,
+                "statusMessage": "SCHEDULE READY",
             })
             self._save_locked()
+        self._log_event("schedule_started", task_count=len(normalized), timing_mode=timing,
+                        sequential_gap_sec=self._state.get("sequentialGapSec"))
         self._wake.set()
         return self.get_status()
 
@@ -239,6 +319,7 @@ class ScheduleManager:
             self._state["stopRequested"] = True
             self._state["statusMessage"] = "STOPPING"
             self._save_locked()
+        self._log_event("schedule_stop_requested", detail="Stop requested by user")
         self._wake.set()
         if self.sync_manager is not None and self.sync_manager.status().get("active"):
             try:
@@ -349,18 +430,31 @@ class ScheduleManager:
                             raise ValueError(f"Task start time missing: {task['name']}")
                     elif completed and gap_sec > 0:
                         target_ms = int(time.time() * 1000 + gap_sec * 1000)
-                    if target_ms and target_ms > int(time.time() * 1000) and not self._wait_until(target_ms):
-                        break
+                    if target_ms and target_ms > int(time.time() * 1000):
+                        self._log_event("task_wait_started", task=task, scheduled_for_ms=target_ms)
+                        if not self._wait_until(target_ms):
+                            break
+                    if target_ms:
+                        self._log_event("task_wait_finished", task=task, scheduled_for_ms=target_ms)
                     self._set(currentTaskStartedAtMs=int(time.time() * 1000), statusMessage=f"TASK {index + 1}/{len(tasks)}")
-                    self._execute_task(task)
+                    self._log_event("task_started", task=task, task_index=index + 1, task_count=len(tasks))
+                    try:
+                        self._execute_task(task)
+                    except Exception as exc:
+                        self._log_event("task_failed", task=task, detail=str(exc), task_index=index + 1)
+                        raise
                     if self._should_stop():
+                        self._log_event("task_stopped", task=task, detail="Schedule stop requested", task_index=index + 1)
                         break
                     completed.add(task["id"])
                     self._set(completedTaskIds=list(completed), currentTaskStep=task.get("estimated_points", 0))
+                    self._log_event("task_completed", task=task, task_index=index + 1)
                 if self._should_stop():
                     self._set(active=False, waiting=False, waitUntilMs=None, statusMessage="STOPPED")
+                    self._log_event("schedule_stopped", detail="Schedule stopped before all tasks completed")
                 else:
                     self._set(active=False, waiting=False, waitUntilMs=None, statusMessage="IDLE")
+                    self._log_event("schedule_completed", completed_task_count=len(completed), task_count=len(tasks))
             except Exception as exc:
                 self._set(
                     active=False,
@@ -370,3 +464,4 @@ class ScheduleManager:
                     error=str(exc),
                     errorAtMs=int(time.time() * 1000),
                 )
+                self._log_event("schedule_failed", detail=str(exc))
