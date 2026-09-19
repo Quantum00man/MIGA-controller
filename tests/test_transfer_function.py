@@ -736,6 +736,8 @@ class TransferFunctionStatisticsTests(unittest.TestCase):
 
     def test_transfer_csv_exports_phase_and_flat_s2_columns(self):
         self.assertIn("TTI_Phase_Deg", RESULTS_CSV_HEADER)
+        self.assertIn("Transfer_Zero_Phase_Baseline", RESULTS_CSV_HEADER)
+        self.assertIn("Interferometer_Phase_Raw_Rad", RESULTS_CSV_HEADER)
         summary = build_transfer_function_summary([
             {
                 "transfer_frequency_hz": 100.0,
@@ -809,6 +811,28 @@ class TransferFunctionStatisticsTests(unittest.TestCase):
         summary = build_transfer_function_summary(rows)
         self.assertEqual(summary[0]["interferometer_phase_count"], 2)
         self.assertAlmostEqual(summary[0]["interferometer_phase_std"], 2 ** 0.5 / 10)
+
+    def test_archive_filters_baselines_and_can_rebase_from_another_block(self):
+        loader = DataLoader()
+        points = [
+            {"transfer_zero_phase_baseline": True, "transfer_zero_phase_block_id": 0,
+             "interferometer_phase_raw": 1.0, "interferometer_phase": 1.0},
+            {"transfer_zero_phase_baseline": True, "transfer_zero_phase_block_id": 0,
+             "interferometer_phase_raw": 1.2, "interferometer_phase": 1.2},
+            {"transfer_zero_phase_baseline": True, "transfer_zero_phase_block_id": 1,
+             "interferometer_phase_raw": 2.0, "interferometer_phase": 2.0},
+            {"transfer_frequency_hz": 100.0, "transfer_phase_deg": 0.0,
+             "transfer_zero_phase_block_id": 0, "interferometer_phase_raw": 1.5,
+             "interferometer_phase": 0.4, "interferometer_phase_valid": True},
+        ]
+        self.assertEqual(len(loader._transfer_response_points(points)), 1)
+        recorded = loader._apply_transfer_zero_phase_reference(points, {"transfer_zero_phase_reference_mode": "recorded"})
+        self.assertAlmostEqual(recorded[-1]["interferometer_phase"], 0.4)
+        alternate = loader._apply_transfer_zero_phase_reference(points, {
+            "transfer_zero_phase_reference_mode": "block",
+            "transfer_zero_phase_reference_block_id": 1,
+        })
+        self.assertAlmostEqual(alternate[-1]["interferometer_phase"], -0.5)
 
 
 if __name__ == "__main__":

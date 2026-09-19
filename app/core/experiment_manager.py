@@ -2608,6 +2608,7 @@ class ExperimentManager:
                     phase_calibration, metadata["phase_noise_t2_us2"]
                 )
             phase_result = interferometer_phase.calculate_phase(phase_input, phase_calibration)
+            raw_interferometer_phase = phase_result.get("interferometer_phase")
             if (
                 str(execution_config.get("mode") or "").strip().lower() == "transfer_function"
                 and not metadata.get("transfer_zero_phase_baseline", False)
@@ -2642,6 +2643,9 @@ class ExperimentManager:
                 transfer_frequency_hz=metadata.get('transfer_frequency_hz'),
                 transfer_repeat=metadata.get('transfer_repeat'),
                 transfer_phase_deg=metadata.get('transfer_phase_deg'),
+                transfer_zero_phase_baseline=bool(metadata.get('transfer_zero_phase_baseline', False)),
+                transfer_zero_phase_block_id=metadata.get('transfer_zero_phase_block_id'),
+                transfer_zero_phase_repeat=metadata.get('transfer_zero_phase_repeat'),
                 ramsey_delta_f_mhz=metadata.get('ramsey_delta_f_mhz'),
                 ramsey_repeat=metadata.get('ramsey_repeat'),
                 ramsey_center_frequency_mhz=metadata.get('ramsey_center_frequency_mhz'),
@@ -2705,6 +2709,7 @@ class ExperimentManager:
                 intf_p1_nofit=i_p1_nf,
                 intf_p2_nofit=i_p2_nf,
                 interferometer_phase=phase_result['interferometer_phase'],
+                interferometer_phase_raw=raw_interferometer_phase,
                 interferometer_phase_valid=phase_result['interferometer_phase_valid'],
                 interferometer_phase_source_value=phase_result['interferometer_phase_source_value'],
                 interferometer_phase_calibration_id=phase_result['interferometer_phase_calibration_id'],

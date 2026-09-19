@@ -37,6 +37,11 @@ class ScanResult:
     transfer_frequency_hz: Optional[float] = None
     transfer_repeat: Optional[int] = None
     transfer_phase_deg: Optional[float] = None
+    # Zero-phase provenance.  Keep this with each shot so raw calibration shots
+    # can be retained without being mistaken for transfer-response samples.
+    transfer_zero_phase_baseline: bool = False
+    transfer_zero_phase_block_id: Optional[int] = None
+    transfer_zero_phase_repeat: Optional[int] = None
 
     # Ramsey Interferometer provenance. The displayed parameter is delta f in MHz.
     ramsey_delta_f_mhz: Optional[float] = None
@@ -119,6 +124,9 @@ class ScanResult:
     # Single calibrated interferometer phase channel. Its source metric,
     # channel and Fit/NoFit mode are stored in the calibration snapshot.
     interferometer_phase: Optional[float] = None
+    # Calibrated phase before the run-local transfer zero is subtracted.
+    # This makes archive re-referencing reversible.
+    interferometer_phase_raw: Optional[float] = None
     interferometer_phase_valid: bool = False
     interferometer_phase_source_value: Optional[float] = None
     interferometer_phase_calibration_id: str = ""

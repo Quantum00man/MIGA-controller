@@ -1197,6 +1197,27 @@
                             <div class="col-12 form-text">Recalculate uses φ = 4πLΔν₇₈₀/c and updates the phase-resolved and quadrature S² curves.</div>
                         </div>
 
+                        <div class="row g-2 mb-3 border-top pt-2 mt-2" v-if="isTransferFunctionArchive()">
+                            <div class="col-12"><label class="form-label-small text-primary fw-bold">ZERO-PHASE REFERENCE</label></div>
+                            <div class="col-12">
+                                <select class="form-select form-select-sm" v-model="analysis.transfer_zero_phase_reference_mode">
+                                    <option value="recorded">Use the acquisition block for each shot</option>
+                                    <option value="block">Use one archived calibration block</option>
+                                    <option value="manual">Use a manual reference</option>
+                                </select>
+                            </div>
+                            <div class="col-12" v-if="analysis.transfer_zero_phase_reference_mode === 'block'">
+                                <select class="form-select form-select-sm" v-model.number="analysis.transfer_zero_phase_reference_block_id">
+                                    <option :value="null" disabled>Select calibration block</option>
+                                    <option v-for="block in transferZeroPhaseBlocks()" :key="block.id" :value="block.id">Block {{ block.id }} · {{ block.count }} shots · mean {{ formatMetricValue(block.mean) }} rad</option>
+                                </select>
+                            </div>
+                            <div class="col-12" v-if="analysis.transfer_zero_phase_reference_mode === 'manual'">
+                                <div class="input-group input-group-sm"><span class="input-group-text">Reference</span><input type="number" step="any" class="form-control" v-model.number="analysis.transfer_zero_phase_reference_rad"><span class="input-group-text">rad</span></div>
+                            </div>
+                            <div class="col-12 form-text">Recalculation uses the archived raw phase. Calibration shots remain in the raw archive but never enter Transfer Function statistics.</div>
+                        </div>
+
                         <div class="row g-2 mb-3 border-top pt-2 mt-2">
                             <div class="col-12"><label class="form-label-small text-muted fw-bold">SIGNAL FILTERS</label></div>
                             <div class="col-6">
@@ -3124,7 +3145,10 @@
                         intf_alpha: 0.35, intf_beta: 0.07636, intf_gamma: 0.25,
                         atom_area_method: 'legacy', atom_area_baseline_points: 2,
                         fit_model_key: 'gaussian', fit_models: [],
-                        std_p_interferometer: 1.1, laser_frequency_phase_noise_mrad: 100
+                        std_p_interferometer: 1.1, laser_frequency_phase_noise_mrad: 100,
+                        transfer_zero_phase_reference_mode: 'recorded',
+                        transfer_zero_phase_reference_block_id: null,
+                        transfer_zero_phase_reference_rad: null
                     };
                 },
                 baseFitParameter() {
@@ -3186,6 +3210,12 @@
                     normalized.transfer_atom_mirror_distance_m = Number.isFinite(distanceM) && distanceM > 0 ? distanceM : 2.23;
                     const transferNoiseMrad = Number(normalized.transfer_phase_noise_sigma_mrad ?? 100);
                     normalized.transfer_phase_noise_sigma_mrad = Number.isFinite(transferNoiseMrad) && transferNoiseMrad >= 0 ? transferNoiseMrad : 100;
+                    normalized.transfer_zero_phase_reference_mode = ['recorded', 'block', 'manual'].includes(normalized.transfer_zero_phase_reference_mode)
+                        ? normalized.transfer_zero_phase_reference_mode : 'recorded';
+                    const referenceBlock = Number(normalized.transfer_zero_phase_reference_block_id);
+                    normalized.transfer_zero_phase_reference_block_id = Number.isInteger(referenceBlock) && referenceBlock >= 0 ? referenceBlock : null;
+                    const manualReference = Number(normalized.transfer_zero_phase_reference_rad);
+                    normalized.transfer_zero_phase_reference_rad = Number.isFinite(manualReference) ? manualReference : null;
                     const detectionNoise = Number(normalized.std_p_interferometer ?? 1.1);
                     normalized.std_p_interferometer = Number.isFinite(detectionNoise) && detectionNoise >= 0 ? detectionNoise : 1.1;
                     const laserNoise = Number(normalized.laser_frequency_phase_noise_mrad ?? 100);
@@ -3411,6 +3441,20 @@
                         new_settings: this.normalizeAnalysis(this.analysis),
                         ...extra
                     };
+                },
+                transferZeroPhaseBlocks() {
+                    const blocks = new Map();
+                    (Array.isArray(this.loadedPoints) ? this.loadedPoints : []).forEach((point) => {
+                        if (!(point.transfer_zero_phase_baseline === true || point.transfer_zero_phase_baseline === 1 || point.transfer_zero_phase_baseline === '1')) return;
+                        const id = Number(point.transfer_zero_phase_block_id);
+                        const phase = Number(point.interferometer_phase_raw ?? point.interferometer_phase);
+                        if (!Number.isInteger(id) || id < 0 || !Number.isFinite(phase)) return;
+                        const values = blocks.get(id) || [];
+                        values.push(phase); blocks.set(id, values);
+                    });
+                    return [...blocks.entries()].sort((a, b) => a[0] - b[0]).map(([id, values]) => ({
+                        id, count: values.length, mean: values.reduce((sum, value) => sum + value, 0) / values.length
+                    }));
                 },
                 resolveScanDimensions(scanDimensions = null, configData = this.loadedConfig) {
                     const fallback = configData?.dim3_enabled ? 3 : (configData?.dim2_enabled ? 2 : 1);

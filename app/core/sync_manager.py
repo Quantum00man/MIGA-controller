@@ -43,12 +43,13 @@ SYNC_RESULT_FIELDS = (
     "arrival_time_up_nofit", "arrival_time_dw_nofit",
     "transition_probability_up_nofit", "transition_probability_dw_nofit",
     "intf_n1_nofit", "intf_n2_nofit", "intf_p1_nofit", "intf_p2_nofit",
-    "interferometer_phase", "interferometer_phase_valid",
+    "interferometer_phase", "interferometer_phase_raw", "interferometer_phase_valid",
     "interferometer_phase_source_value",
     "interferometer_phase_calibration_id", "interferometer_phase_calibration_name",
     "interferometer_phase_reference_t2_us2",
     "transfer_frequency_hz", "transfer_frequency_index", "transfer_frequency_count",
     "transfer_repeat", "transfer_repeats", "transfer_phase_deg", "transfer_phase_index",
+    "transfer_zero_phase_baseline", "transfer_zero_phase_block_id", "transfer_zero_phase_repeat",
     "transfer_phase_count", "transfer_phase_degrees", "transfer_phase_scan_mode",
     "transfer_frequency_modulation_mhz", "transfer_atom_mirror_distance_m",
     "transfer_phase_noise_sigma_mrad", "transfer_generator_model",
@@ -740,6 +741,11 @@ class SyncManager:
                     if master_payload.get("error") or slave_payload.get("error"):
                         self._emitted_pairs.add(key)
                         continue
+                    # Preserve each node's raw baseline in its own archive, but
+                    # never promote OUTPUT-OFF calibration shots to SYNC pairs.
+                    if master_payload.get("transfer_zero_phase_baseline") or slave_payload.get("transfer_zero_phase_baseline"):
+                        self._emitted_pairs.add(key)
+                        continue
                     pair = {
                         "stream_type": "sync_pair",
                         "sync_run_id": self._runtime.get("sync_run_id"),
@@ -759,6 +765,8 @@ class SyncManager:
                 for slave_id, shot_index in self._emitted_pairs
                 if not self._master_results.get(shot_index, {}).get("error")
                 and not self._slave_results.get(slave_id, {}).get(shot_index, {}).get("error")
+                and not self._master_results.get(shot_index, {}).get("transfer_zero_phase_baseline")
+                and not self._slave_results.get(slave_id, {}).get(shot_index, {}).get("transfer_zero_phase_baseline")
             )
         for pair in emitted:
             self.manager.publish_data(pair, notify_listeners=False)

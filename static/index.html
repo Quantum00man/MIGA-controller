@@ -5204,6 +5204,10 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     Plotly.react('resultsPlotDw', down.traces, down.layout);
                 },
                 recordTransferFunctionPoint(data) {
+                    // OUTPUT-OFF baseline shots are useful provenance, but are
+                    // not frequency-response samples and must not enter the
+                    // live mean/std history for the first formal frequency.
+                    if (data.transfer_zero_phase_baseline === true || data.transfer_zero_phase_baseline === 1 || data.transfer_zero_phase_baseline === '1') return;
                     const frequency = Number(data.transfer_frequency_hz);
                     if (!Number.isFinite(frequency)) return;
                     const modulationMhz = Number(data.transfer_frequency_modulation_mhz);

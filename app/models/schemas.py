@@ -499,6 +499,11 @@ class ArchiveAnalysisSettings(AnalysisSettings):
     transfer_phase_noise_sigma_mrad: float = Field(100.0, ge=0)
     std_p_interferometer: float = Field(1.1, ge=0)
     laser_frequency_phase_noise_mrad: float = Field(100.0, ge=0)
+    # Transfer-function archive-only phase-reference controls.  They never
+    # overwrite the acquisition record.
+    transfer_zero_phase_reference_mode: str = Field("recorded")
+    transfer_zero_phase_reference_block_id: Optional[int] = Field(None, ge=0)
+    transfer_zero_phase_reference_rad: Optional[float] = Field(None)
 
 
 class SyncSlaveSettings(BaseModel):

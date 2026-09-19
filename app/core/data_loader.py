@@ -24,6 +24,52 @@ MAX_WAVEFORM_PREVIEW_STEPS = 48
 
 
 class DataLoader:
+    @staticmethod
+    def _is_transfer_zero_phase_baseline(point: Dict[str, Any]) -> bool:
+        return bool(point.get("transfer_zero_phase_baseline", False))
+
+    def _transfer_response_points(self, points: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Return formal transfer shots, retaining calibration shots in raw archive data."""
+        return [point for point in points if not self._is_transfer_zero_phase_baseline(point)]
+
+    def _apply_transfer_zero_phase_reference(
+        self, points: List[Dict[str, Any]], settings: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        """Rebase transfer phases from persisted raw phases without touching disk."""
+        mode = str(settings.get("transfer_zero_phase_reference_mode") or "recorded").strip().lower()
+        selected_block = settings.get("transfer_zero_phase_reference_block_id")
+        manual_reference = self._parse_float(settings.get("transfer_zero_phase_reference_rad"))
+        references: Dict[int, List[float]] = {}
+        for point in points:
+            if not self._is_transfer_zero_phase_baseline(point):
+                continue
+            raw = self._parse_float(point.get("interferometer_phase_raw"))
+            if raw is None:
+                raw = self._parse_float(point.get("interferometer_phase"))
+            block_id = self._parse_int(point.get("transfer_zero_phase_block_id"), -1)
+            if raw is not None and block_id >= 0:
+                references.setdefault(block_id, []).append(raw)
+        means = {block_id: float(np.mean(values)) for block_id, values in references.items() if values}
+        rebased: List[Dict[str, Any]] = []
+        for point in points:
+            item = dict(point)
+            raw = self._parse_float(item.get("interferometer_phase_raw"))
+            if raw is None:
+                raw = self._parse_float(item.get("interferometer_phase"))
+            if raw is not None:
+                item["interferometer_phase_raw"] = raw
+            if raw is not None and not self._is_transfer_zero_phase_baseline(item):
+                block_id = self._parse_int(item.get("transfer_zero_phase_block_id"), -1)
+                reference = (
+                    manual_reference if mode == "manual" else
+                    means.get(self._parse_int(selected_block, -1)) if mode == "block" else
+                    means.get(block_id)
+                )
+                if reference is not None:
+                    item["interferometer_phase"] = raw - reference
+            rebased.append(item)
+        return rebased
+
     def _sync_analysis_copies_dir(self, year: str, month: str, day: str, run_id: str) -> Path:
         return self._get_run_dir(year, month, day, run_id) / "sync_analysis_copies"
 
@@ -944,6 +990,7 @@ class DataLoader:
             "intf_p1_nofit": self._parse_float(row.get("NF_Intf_P1")),
             "intf_p2_nofit": self._parse_float(row.get("NF_Intf_P2")),
             "interferometer_phase": self._parse_float(row.get("Interferometer_Phase_Rad")),
+            "interferometer_phase_raw": self._parse_float(row.get("Interferometer_Phase_Raw_Rad")),
             "interferometer_phase_valid": str(row.get("Interferometer_Phase_Valid") or "").strip().lower() in {"1", "true", "yes"},
             "interferometer_phase_source_value": self._parse_float(row.get("Interferometer_Phase_Source_Value")),
             "interferometer_phase_calibration_id": str(row.get("Interferometer_Phase_Calibration_ID") or ""),
@@ -973,6 +1020,9 @@ class DataLoader:
             "transfer_frequency_hz": self._parse_float(row.get("TTI_Frequency_Hz")),
             "transfer_repeat": self._parse_int(row.get("Transfer_Repeat"), -1),
             "transfer_phase_deg": self._parse_float(row.get("TTI_Phase_Deg")),
+            "transfer_zero_phase_baseline": str(row.get("Transfer_Zero_Phase_Baseline") or "").strip().lower() in {"1", "true", "yes"},
+            "transfer_zero_phase_block_id": self._parse_int(row.get("Transfer_Zero_Phase_Block"), -1),
+            "transfer_zero_phase_repeat": self._parse_int(row.get("Transfer_Zero_Phase_Repeat"), -1),
             "ramsey_delta_f_mhz": self._parse_float(row.get("Ramsey_Delta_F_MHz")),
             "ramsey_repeat": self._parse_int(row.get("Ramsey_Repeat"), -1),
             "ramsey_center_frequency_mhz": self._parse_float(row.get("Ramsey_Center_Frequency_MHz")),
@@ -1454,7 +1504,7 @@ class DataLoader:
         is_transfer_function = str(config_data.get("mode") or "").strip().lower() == "transfer_function"
         transfer_function_summary = (
             build_transfer_function_summary(
-                full_points,
+                self._transfer_response_points(full_points),
                 config_data.get("transfer_frequency_modulation_mhz"),
                 config_data.get("transfer_phase_degrees"),
                 config_data.get("transfer_atom_mirror_distance_m", 2.23),
@@ -1484,7 +1534,10 @@ class DataLoader:
             "stats": (
                 initial_step.get("stats", [])
                 if is_marker_optimization
-                else self._build_stats_array(full_points, scan_dimensions=scan_dimensions)
+                else self._build_stats_array(
+                    self._transfer_response_points(full_points) if is_transfer_function else full_points,
+                    scan_dimensions=scan_dimensions,
+                )
             ),
             "ac_stark_summary": self._build_ac_stark_summary(full_points),
             "lock_in_analysis": lock_in_analysis,
@@ -1767,6 +1820,11 @@ class DataLoader:
                             result, phase_noise.calibration_at_mid_fringe(calibration, reference)
                         )
                 recalculated_points.append(result)
+
+        if str(config_data.get("mode") or "").strip().lower() == "transfer_function":
+            for point in recalculated_points:
+                point["interferometer_phase_raw"] = point.get("interferometer_phase")
+            recalculated_points = self._apply_transfer_zero_phase_reference(recalculated_points, settings)
         return recalculated_points
 
     def calculate_allan_run(
@@ -1795,6 +1853,8 @@ class DataLoader:
 
         normalized_mode = "recalculated" if str(display_mode or "saved").strip().lower() == "recalculated" else "saved"
         all_points = self._load_allan_points(run_dir, config_data, normalized_mode, new_settings=new_settings)
+        if str(config_data.get("mode") or "").strip().lower() == "transfer_function":
+            all_points = self._transfer_response_points(all_points)
         _phase_node_key, phase_context, _phase_contexts = self._archive_phase_reference_context(
             year, month, day, run_id, node_id, current_phase_calibration
         )
@@ -2783,14 +2843,18 @@ class DataLoader:
                         )
                 recalculated_points.append(result)
 
+        is_transfer_function = str(config_data.get("mode") or "").strip().lower() == "transfer_function"
+        if is_transfer_function:
+            for point in recalculated_points:
+                point["interferometer_phase_raw"] = point.get("interferometer_phase")
+            recalculated_points = self._apply_transfer_zero_phase_reference(recalculated_points, settings)
         sampled_points = self._sample_sequence(recalculated_points, max_points)
         is_lock_in = str(config_data.get("mode") or "").strip().lower() == "lock_in"
         expected_lock_in_blocks = self._parse_int(config_data.get("averages"), 0) if is_lock_in else 0
         lock_in_analysis = build_lock_in_analysis(recalculated_points, expected_blocks=expected_lock_in_blocks) if is_lock_in else {}
-        is_transfer_function = str(config_data.get("mode") or "").strip().lower() == "transfer_function"
         transfer_function_summary = (
             build_transfer_function_summary(
-                recalculated_points,
+                self._transfer_response_points(recalculated_points),
                 settings.get(
                     "transfer_frequency_modulation_mhz",
                     config_data.get("transfer_frequency_modulation_mhz"),
@@ -2825,13 +2889,19 @@ class DataLoader:
             "scan_dimensions": scan_dimensions,
             "settings": settings,
             "data": sampled_points,
-            "stats": self._build_stats_array(recalculated_points, scan_dimensions=scan_dimensions),
+            "stats": self._build_stats_array(
+                self._transfer_response_points(recalculated_points) if is_transfer_function else recalculated_points,
+                scan_dimensions=scan_dimensions,
+            ),
             "ac_stark_summary": self._build_ac_stark_summary(recalculated_points),
             "lock_in_analysis": lock_in_analysis,
             "transfer_function_summary": transfer_function_summary,
             "phase_noise_summary": phase_noise_summary,
-            "preview_map": self._build_preview_map(recalculated_points, scan_dimensions=scan_dimensions),
-            "total_points": len(recalculated_points),
+            "preview_map": self._build_preview_map(
+                self._transfer_response_points(recalculated_points) if is_transfer_function else recalculated_points,
+                scan_dimensions=scan_dimensions,
+            ),
+            "total_points": len(self._transfer_response_points(recalculated_points)) if is_transfer_function else len(recalculated_points),
             "interferometer_phase_calibration": settings.get("_interferometer_phase_calibration"),
             "interferometer_phase_calibration_provenance": (
                 "archive_reference_override"
