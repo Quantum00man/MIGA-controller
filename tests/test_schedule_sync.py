@@ -248,3 +248,31 @@ def test_schedule_logs_are_persistent_and_exclude_sequence_contents():
     assert b"private master sequence" not in payload
     assert b"private slave sequence" not in payload
     assert filename.endswith(".jsonl")
+
+
+def test_task_start_retries_three_times_before_the_fourth_attempt_succeeds():
+    scheduler = make_scheduler()
+    task = sync_task()
+    task["execution_mode"] = "scan"
+    task.pop("sync")
+    scheduler._install_sequence = lambda queued_task: queued_task["sequence_file_name"]
+    responses = iter([
+        {"status": "error", "message": "controller busy"},
+        {"status": "error", "message": "controller busy"},
+        {"status": "error", "message": "controller busy"},
+        {"status": "success"},
+    ])
+    start_calls = []
+    def start_scan(config):
+        start_calls.append(config)
+        return next(responses)
+    scheduler.manager.start_scan = start_scan
+    scheduler._wait_until = lambda _target_ms: True
+    events = []
+    scheduler._log_event = lambda event, **kwargs: events.append((event, kwargs))
+
+    assert scheduler._execute_task_with_start_retries(task, 1, 1) is True
+    assert len(start_calls) == 4
+    assert len([event for event, _kwargs in events if event == "task_start_failed"]) == 3
+    assert len([event for event, _kwargs in events if event == "task_start_retry"]) == 3
+    assert events[-1][1]["retry_delay_s"] == 5

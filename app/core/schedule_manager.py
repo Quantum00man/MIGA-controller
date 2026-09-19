@@ -15,10 +15,16 @@ from app.core.experiment_manager import ExperimentManager
 from app.models.schemas import ScanConfig, SyncStartRequest
 
 
+class TaskStartError(RuntimeError):
+    """A task could not be accepted by its controller, before acquisition began."""
+
+
 class ScheduleManager:
     """Persistent, server-owned experiment queue."""
 
     _instance = None
+    TASK_START_RETRY_COUNT = 3
+    TASK_START_RETRY_DELAY_S = 5
 
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
@@ -180,7 +186,7 @@ class ScheduleManager:
             try:
                 for line in path.read_text(encoding="utf-8").splitlines():
                     item = json.loads(line)
-                    if isinstance(item, dict) and (not errors_only or item.get("event") in {"task_failed", "schedule_failed"}):
+                    if isinstance(item, dict) and (not errors_only or item.get("event") in {"task_start_failed", "task_failed", "schedule_failed"}):
                         records.append(item)
             except (OSError, json.JSONDecodeError) as exc:
                 raise ValueError(f"Unable to read schedule log: {exc}") from exc
@@ -359,25 +365,36 @@ class ScheduleManager:
 
     def _execute_task(self, task: Dict[str, Any]) -> None:
         temporary_path = None
-        sequence_name = task["sequence_file_name"]
-        if task.get("temporary_sequence"):
-            file_descriptor, raw_path = tempfile.mkstemp(prefix="miga_scheduled_", suffix=".mot")
-            os.close(file_descriptor)
-            temporary_path = Path(raw_path)
-            temporary_path.write_text(task["sequence_snapshot"], encoding="utf-8")
-        else:
-            sequence_name = self._install_sequence(task)
-        scan_config = deepcopy(task["config"])
-        scan_config["sequence_name"] = sequence_name
-        if temporary_path is not None:
-            scan_config["_template_path_override"] = str(temporary_path)
         try:
+            try:
+                sequence_name = task["sequence_file_name"]
+                if task.get("temporary_sequence"):
+                    file_descriptor, raw_path = tempfile.mkstemp(prefix="miga_scheduled_", suffix=".mot")
+                    os.close(file_descriptor)
+                    temporary_path = Path(raw_path)
+                    temporary_path.write_text(task["sequence_snapshot"], encoding="utf-8")
+                else:
+                    sequence_name = self._install_sequence(task)
+                scan_config = deepcopy(task["config"])
+                scan_config["sequence_name"] = sequence_name
+                if temporary_path is not None:
+                    scan_config["_template_path_override"] = str(temporary_path)
+                if task.get("execution_mode") == "sync":
+                    if self.sync_manager is None:
+                        raise TaskStartError("SYNC scheduling is unavailable")
+                    sync_payload = deepcopy(task.get("sync") or {})
+                    sync_payload["scan_config"] = scan_config
+                    self.sync_manager.start_master(sync_payload)
+                else:
+                    result = self.manager.start_scan(scan_config)
+                    if result.get("status") != "success":
+                        raise TaskStartError(result.get("message") or "Task start failed")
+            except TaskStartError:
+                raise
+            except Exception as exc:
+                raise TaskStartError(str(exc) or "Task start failed") from exc
+
             if task.get("execution_mode") == "sync":
-                if self.sync_manager is None:
-                    raise RuntimeError("SYNC scheduling is unavailable")
-                sync_payload = deepcopy(task.get("sync") or {})
-                sync_payload["scan_config"] = scan_config
-                self.sync_manager.start_master(sync_payload)
                 stop_sent = False
                 while self.sync_manager.status().get("active"):
                     if self._should_stop() and not stop_sent:
@@ -391,10 +408,6 @@ class ScheduleManager:
                 if sync_status.get("status") == "error":
                     raise RuntimeError(sync_status.get("message") or "SYNC task failed")
                 return
-
-            result = self.manager.start_scan(scan_config)
-            if result.get("status") != "success":
-                raise RuntimeError(result.get("message") or "Task start failed")
             while self.manager.status.is_running:
                 if self._should_stop():
                     self.manager.stop_scan()
@@ -402,6 +415,52 @@ class ScheduleManager:
         finally:
             if temporary_path is not None:
                 temporary_path.unlink(missing_ok=True)
+
+    def _execute_task_with_start_retries(self, task: Dict[str, Any], task_index: int, task_count: int) -> bool:
+        """Retry only controller acceptance failures; never replay an active task."""
+        total_attempts = self.TASK_START_RETRY_COUNT + 1
+        for attempt in range(1, total_attempts + 1):
+            self._set(
+                waiting=False,
+                waitUntilMs=None,
+                currentTaskStartedAtMs=int(time.time() * 1000),
+                statusMessage=(f"TASK {task_index}/{task_count}" if attempt == 1 else
+                               f"TASK {task_index}/{task_count} · START RETRY {attempt - 1}/{self.TASK_START_RETRY_COUNT}"),
+            )
+            try:
+                self._execute_task(task)
+                return True
+            except TaskStartError as exc:
+                self._log_event(
+                    "task_start_failed",
+                    task=task,
+                    detail=str(exc),
+                    task_index=task_index,
+                    attempt_number=attempt,
+                    total_attempt_limit=total_attempts,
+                )
+                if attempt >= total_attempts:
+                    raise RuntimeError(
+                        f"Task could not start after {total_attempts} attempts: {exc}"
+                    ) from exc
+                retry_number = attempt
+                self._log_event(
+                    "task_start_retry",
+                    task=task,
+                    detail=str(exc),
+                    task_index=task_index,
+                    retry_number=retry_number,
+                    retry_limit=self.TASK_START_RETRY_COUNT,
+                    retry_delay_s=self.TASK_START_RETRY_DELAY_S,
+                )
+                retry_at_ms = int(time.time() * 1000 + self.TASK_START_RETRY_DELAY_S * 1000)
+                self._set(
+                    statusMessage=(f"TASK {task_index}/{task_count} · START FAILED; "
+                                   f"RETRY {retry_number}/{self.TASK_START_RETRY_COUNT} IN {self.TASK_START_RETRY_DELAY_S}S"),
+                )
+                if not self._wait_until(retry_at_ms):
+                    return False
+        return False
 
     def _run(self) -> None:
         while True:
@@ -436,10 +495,10 @@ class ScheduleManager:
                             break
                     if target_ms:
                         self._log_event("task_wait_finished", task=task, scheduled_for_ms=target_ms)
-                    self._set(currentTaskStartedAtMs=int(time.time() * 1000), statusMessage=f"TASK {index + 1}/{len(tasks)}")
                     self._log_event("task_started", task=task, task_index=index + 1, task_count=len(tasks))
                     try:
-                        self._execute_task(task)
+                        if not self._execute_task_with_start_retries(task, index + 1, len(tasks)):
+                            break
                     except Exception as exc:
                         self._log_event("task_failed", task=task, detail=str(exc), task_index=index + 1)
                         raise

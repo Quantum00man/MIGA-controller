@@ -2412,13 +2412,13 @@
                     return {
                         schedule_started: 'Schedule started', schedule_completed: 'Schedule completed',
                         schedule_stop_requested: 'Stop requested', schedule_stopped: 'Schedule stopped',
-                        schedule_failed: 'Schedule failed', task_wait_started: 'Waiting',
+                        schedule_failed: 'Schedule failed', task_start_failed: 'Task start failed', task_wait_started: 'Waiting',
                         task_wait_finished: 'Wait complete', task_started: 'Task started',
                         task_completed: 'Task completed', task_stopped: 'Task stopped', task_failed: 'Task failed',
                     }[event] || String(event || 'Event');
                 },
                 scheduleLogBadgeClass(event) {
-                    if (['schedule_failed', 'task_failed'].includes(event)) return 'bg-danger';
+                    if (['schedule_failed', 'task_start_failed', 'task_failed'].includes(event)) return 'bg-danger';
                     if (['schedule_stopped', 'task_stopped', 'schedule_stop_requested'].includes(event)) return 'bg-warning text-dark';
                     if (['schedule_completed', 'task_completed'].includes(event)) return 'bg-success';
                     return 'bg-secondary';
