@@ -1582,7 +1582,45 @@ async def save_custom_scan_fitting_model(req: ScanFitModelSaveRequest):
 
 # --- 4. Archive ---
 @router.get("/archive/tree")
-async def get_archive_tree(): return data_loader.get_archive_tree()
+async def get_archive_tree(): return await run_in_threadpool(data_loader.get_archive_tree)
+
+
+@router.get("/archive/navigation/years")
+async def get_archive_years():
+    return {"years": await run_in_threadpool(data_loader.list_archive_years)}
+
+
+@router.get("/archive/navigation/months/{year}")
+async def get_archive_months(year: str):
+    try:
+        return {"year": year, "months": await run_in_threadpool(data_loader.list_archive_months, year)}
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.get("/archive/navigation/days/{year}/{month}")
+async def get_archive_days(year: str, month: str):
+    try:
+        return {"year": year, "month": month, "days": await run_in_threadpool(data_loader.list_archive_days, year, month)}
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.get("/archive/navigation/runs/{year}/{month}/{day}")
+async def get_archive_runs(year: str, month: str, day: str):
+    try:
+        runs = await run_in_threadpool(data_loader.list_archive_runs, year, month, day)
+        return {"year": year, "month": month, "day": day, "runs": runs}
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.get("/archive/latest")
+async def get_latest_archive_run():
+    try:
+        return await run_in_threadpool(data_loader.get_latest_archive_run)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
 
 
 @router.get("/archive/collections")

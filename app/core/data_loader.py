@@ -223,23 +223,86 @@ class DataLoader:
         return sequence_path, self._get_sequence_download_name(run_id, config_data)
 
     def get_archive_tree(self) -> Dict[str, Any]:
+        """Build the legacy full tree using only canonical archive directories."""
         tree = {}
-        if not self.base_dir.exists():
-            return tree
-        for year_dir in sorted(self.base_dir.iterdir()):
-            if year_dir.is_dir():
-                year = year_dir.name
-                tree[year] = {}
-                for month_dir in sorted(year_dir.iterdir()):
-                    if month_dir.is_dir():
-                        month = month_dir.name
-                        tree[year][month] = {}
-                        for day_dir in sorted(month_dir.iterdir()):
-                            if day_dir.is_dir():
-                                day = day_dir.name
-                                runs = [self._build_run_entry(r) for r in sorted(day_dir.iterdir()) if r.is_dir() and r.name.startswith("run")]
-                                tree[year][month][day] = runs
+        for year in self.list_archive_years():
+            tree[year] = {}
+            for month in self.list_archive_months(year):
+                tree[year][month] = {}
+                for day in self.list_archive_days(year, month):
+                    tree[year][month][day] = self.list_archive_runs(year, month, day)
         return tree
+
+    @staticmethod
+    def _is_archive_component(value: str, width: int) -> bool:
+        return len(value) == width and value.isdigit()
+
+    def list_archive_years(self) -> List[str]:
+        if not self.base_dir.is_dir():
+            return []
+        return sorted(
+            path.name for path in self.base_dir.iterdir()
+            if path.is_dir() and self._is_archive_component(path.name, 4)
+        )
+
+    def list_archive_months(self, year: str) -> List[str]:
+        if not self._is_archive_component(year, 4):
+            raise ValueError("Invalid archive year")
+        year_dir = self.base_dir / year
+        if not year_dir.is_dir():
+            return []
+        return sorted(
+            path.name for path in year_dir.iterdir()
+            if path.is_dir() and self._is_archive_component(path.name, 2)
+        )
+
+    def list_archive_days(self, year: str, month: str) -> List[str]:
+        if not self._is_archive_component(year, 4) or not self._is_archive_component(month, 2):
+            raise ValueError("Invalid archive year or month")
+        month_dir = self.base_dir / year / month
+        if not month_dir.is_dir():
+            return []
+        return sorted(
+            path.name for path in month_dir.iterdir()
+            if path.is_dir() and self._is_archive_component(path.name, 2)
+        )
+
+    def list_archive_runs(self, year: str, month: str, day: str) -> List[Dict[str, Any]]:
+        if not all((
+            self._is_archive_component(year, 4),
+            self._is_archive_component(month, 2),
+            self._is_archive_component(day, 2),
+        )):
+            raise ValueError("Invalid archive date")
+        day_dir = self.base_dir / year / month / day
+        if not day_dir.is_dir():
+            return []
+        return [
+            self._build_run_entry(path)
+            for path in sorted(day_dir.iterdir())
+            if path.is_dir() and path.name.startswith("run")
+        ]
+
+    def get_latest_archive_run(self) -> Dict[str, Any]:
+        """Locate the newest canonical run without parsing every historical config."""
+        for year in reversed(self.list_archive_years()):
+            for month in reversed(self.list_archive_months(year)):
+                for day in reversed(self.list_archive_days(year, month)):
+                    day_dir = self.base_dir / year / month / day
+                    run_dirs = sorted(
+                        (path for path in day_dir.iterdir() if path.is_dir() and path.name.startswith("run")),
+                        key=lambda path: path.name,
+                        reverse=True,
+                    )
+                    if run_dirs:
+                        return {
+                            "year": year,
+                            "month": month,
+                            "day": day,
+                            "run_id": run_dirs[0].name,
+                            "run": self._build_run_entry(run_dirs[0]),
+                        }
+        raise FileNotFoundError("No archived runs were found")
 
     def _sanitize_structure(self, data):
         if isinstance(data, dict):

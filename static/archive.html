@@ -895,8 +895,9 @@
                             </button>
                         </div>
                         <div v-if="archiveSourceMode === 'timeline'">
-                        <button class="btn btn-success w-100 mb-3 btn-sm fw-bold shadow-sm" @click="loadLatestRun">
-                            <i class="bi bi-lightning-charge-fill me-1"></i> Load Latest Run
+                        <button class="btn btn-success w-100 mb-3 btn-sm fw-bold shadow-sm" @click="loadLatestRun" :disabled="archiveNavigationBusy || isLoading">
+                            <span v-if="archiveNavigationBusy" class="spinner-border spinner-border-sm me-1"></span>
+                            <i v-else class="bi bi-lightning-charge-fill me-1"></i> Load Latest Run
                         </button>
 
                         <hr class="text-muted opacity-25 my-3">
@@ -904,22 +905,22 @@
                         <div class="row g-1 mb-2">
                             <div class="col-4">
                                 <label class="form-label-small" for="archive-year">YEAR</label>
-                                <select id="archive-year" class="form-select form-select-sm" v-model="selectedYear" @change="resetMonth">
+                                <select id="archive-year" class="form-select form-select-sm" v-model="selectedYear" @change="handleArchiveYearChange" :disabled="archiveNavigationBusy">
                                     <option v-for="y in Object.keys(archiveTree).reverse()" :key="y" :value="y">{{ y }}
                                     </option>
                                 </select>
                             </div>
                             <div class="col-4">
                                 <label class="form-label-small" for="archive-month">MONTH</label>
-                                <select id="archive-month" class="form-select form-select-sm" v-model="selectedMonth" @change="resetDay"
-                                    :disabled="!selectedYear">
+                                <select id="archive-month" class="form-select form-select-sm" v-model="selectedMonth" @change="handleArchiveMonthChange"
+                                    :disabled="!selectedYear || archiveNavigationBusy">
                                     <option v-for="m in getMonths().reverse()" :key="m" :value="m">{{ m }}</option>
                                 </select>
                             </div>
                             <div class="col-4">
                                 <label class="form-label-small" for="archive-day">DAY</label>
-                                <select id="archive-day" class="form-select form-select-sm" v-model="selectedDay" @change="resetRun"
-                                    :disabled="!selectedMonth">
+                                <select id="archive-day" class="form-select form-select-sm" v-model="selectedDay" @change="handleArchiveDayChange"
+                                    :disabled="!selectedMonth || archiveNavigationBusy">
                                     <option v-for="d in getDays().reverse()" :key="d" :value="d">{{ d }}</option>
                                 </select>
                             </div>
@@ -927,7 +928,7 @@
 
                         <div class="mb-3">
                             <label class="form-label-small" for="archive-run-id">RUN ID</label>
-                            <select id="archive-run-id" class="form-select form-select-sm" v-model="selectedRun" :disabled="!selectedDay">
+                            <select id="archive-run-id" class="form-select form-select-sm" v-model="selectedRun" :disabled="!selectedDay || archiveNavigationBusy">
                                 <option value="" disabled>Select Run...</option>
                                 <option v-for="r in getRuns().slice().reverse()" :key="r.id" :value="r.id">{{ r.display_name }}</option>
                             </select>
@@ -2635,7 +2636,7 @@
         createApp({
             data() {
                 return {
-                    archiveTree: {}, selectedYear: '', selectedMonth: '', selectedDay: '', selectedRun: '',
+                    archiveTree: {}, selectedYear: '', selectedMonth: '', selectedDay: '', selectedRun: '', archiveNavigationBusy: false,
                     archiveSourceMode: 'timeline',
                     collectionFolders: [], collectionFavorites: [], isLoadingCollections: false, collectionError: '',
                     selectedCollectionFolderId: null, collapsedCollectionFolderIds: [],
@@ -2806,7 +2807,7 @@
                 showScanFitCurve() { this.handleScanFitVisibilityChange(); }
             },
             mounted() {
-                this.fetchArchiveTree().then(() => this.loadSharedRunFromUrl());
+                this.fetchArchiveYears().then(() => this.loadSharedRunFromUrl());
                 this.fetchCollections();
                 this.fetchDefaultFitModels();
                 this.fetchDefaultScanFitModels();
@@ -3108,8 +3109,11 @@
                 async loadCollectionFavorite(favorite) {
                     if (!favorite || favorite.integrity === 'missing') return;
                     this.selectedYear = favorite.year;
+                    await this.fetchArchiveMonths(favorite.year);
                     this.selectedMonth = favorite.month;
+                    await this.fetchArchiveDays(favorite.year, favorite.month);
                     this.selectedDay = favorite.day;
+                    await this.fetchArchiveRuns(favorite.year, favorite.month, favorite.day);
                     this.selectedRun = favorite.run_id;
                     await this.loadRun();
                 },
@@ -5134,7 +5138,42 @@
                     this.resizeAnalysisPlots();
                 },
                 getTabTitle() { return this.tabs.find(t => t.id === this.currentTab)?.label || 'Results'; },
-                async fetchArchiveTree() { try { const res = await axios.get('/archive/tree'); this.archiveTree = res.data; } catch (e) { } },
+                async fetchArchiveYears() {
+                    this.archiveNavigationBusy = true;
+                    try {
+                        const res = await axios.get('/archive/navigation/years');
+                        const years = Array.isArray(res.data?.years) ? res.data.years : [];
+                        this.archiveTree = Object.fromEntries(years.map(year => [year, this.archiveTree?.[year] || {}]));
+                    } catch (error) {
+                        this.errorMsg = error.response?.data?.detail || error.message || 'Unable to load archive years.';
+                    } finally {
+                        this.archiveNavigationBusy = false;
+                    }
+                },
+                async fetchArchiveMonths(year = this.selectedYear) {
+                    if (!year) return [];
+                    const res = await axios.get(`/archive/navigation/months/${encodeURIComponent(year)}`);
+                    const months = Array.isArray(res.data?.months) ? res.data.months : [];
+                    this.archiveTree[year] = Object.fromEntries(months.map(month => [month, this.archiveTree?.[year]?.[month] || {}]));
+                    return months;
+                },
+                async fetchArchiveDays(year = this.selectedYear, month = this.selectedMonth) {
+                    if (!year || !month) return [];
+                    const res = await axios.get(`/archive/navigation/days/${encodeURIComponent(year)}/${encodeURIComponent(month)}`);
+                    const days = Array.isArray(res.data?.days) ? res.data.days : [];
+                    this.archiveTree[year] ||= {};
+                    this.archiveTree[year][month] = Object.fromEntries(days.map(day => [day, this.archiveTree?.[year]?.[month]?.[day] || []]));
+                    return days;
+                },
+                async fetchArchiveRuns(year = this.selectedYear, month = this.selectedMonth, day = this.selectedDay) {
+                    if (!year || !month || !day) return [];
+                    const res = await axios.get(`/archive/navigation/runs/${encodeURIComponent(year)}/${encodeURIComponent(month)}/${encodeURIComponent(day)}`);
+                    const runs = Array.isArray(res.data?.runs) ? res.data.runs : [];
+                    this.archiveTree[year] ||= {};
+                    this.archiveTree[year][month] ||= {};
+                    this.archiveTree[year][month][day] = runs;
+                    return runs;
+                },
                 loadedRunShareUrl(reference = this.loadedRunRef) {
                     if (!reference?.year || !reference?.month || !reference?.day || !reference?.run_id) return '';
                     const url = new URL(window.location.pathname || '/archive.html', window.location.origin);
@@ -5185,6 +5224,14 @@
                     if (!provided) return;
                     if (provided !== 4) {
                         this.errorMsg = 'The shared Archive link is incomplete.';
+                        return;
+                    }
+                    try {
+                        await this.fetchArchiveMonths(values.year);
+                        await this.fetchArchiveDays(values.year, values.month);
+                        await this.fetchArchiveRuns(values.year, values.month, values.day);
+                    } catch (error) {
+                        this.errorMsg = error.response?.data?.detail || error.message || 'Unable to load the shared Archive path.';
                         return;
                     }
                     const runs = this.archiveTree?.[values.year]?.[values.month]?.[values.day];
@@ -5329,17 +5376,50 @@
                 },
                 resetMonth() { this.selectedMonth = ''; this.selectedDay = ''; this.selectedRun = ''; },
                 resetDay() { this.selectedDay = ''; this.selectedRun = ''; }, resetRun() { },
+                async handleArchiveYearChange() {
+                    this.resetMonth();
+                    if (!this.selectedYear) return;
+                    this.archiveNavigationBusy = true;
+                    try { await this.fetchArchiveMonths(); }
+                    catch (error) { this.errorMsg = error.response?.data?.detail || error.message || 'Unable to load archive months.'; }
+                    finally { this.archiveNavigationBusy = false; }
+                },
+                async handleArchiveMonthChange() {
+                    this.resetDay();
+                    if (!this.selectedMonth) return;
+                    this.archiveNavigationBusy = true;
+                    try { await this.fetchArchiveDays(); }
+                    catch (error) { this.errorMsg = error.response?.data?.detail || error.message || 'Unable to load archive days.'; }
+                    finally { this.archiveNavigationBusy = false; }
+                },
+                async handleArchiveDayChange() {
+                    this.selectedRun = '';
+                    if (!this.selectedDay) return;
+                    this.archiveNavigationBusy = true;
+                    try { await this.fetchArchiveRuns(); }
+                    catch (error) { this.errorMsg = error.response?.data?.detail || error.message || 'Unable to load archive runs.'; }
+                    finally { this.archiveNavigationBusy = false; }
+                },
 
                 async loadLatestRun() {
-                    await this.fetchArchiveTree();
-                    const years = Object.keys(this.archiveTree).sort(); if (!years.length) return;
-                    this.selectedYear = years[years.length - 1];
-                    const months = this.getMonths(); if (!months.length) return;
-                    this.selectedMonth = months[months.length - 1];
-                    const days = this.getDays(); if (!days.length) return;
-                    this.selectedDay = days[days.length - 1];
-                    const runs = this.getRuns(); if (!runs.length) return;
-                    this.selectedRun = runs[runs.length - 1].id;
+                    this.archiveNavigationBusy = true;
+                    this.errorMsg = '';
+                    try {
+                        const res = await axios.get('/archive/latest');
+                        const latest = res.data || {};
+                        this.selectedYear = String(latest.year || '');
+                        this.selectedMonth = String(latest.month || '');
+                        this.selectedDay = String(latest.day || '');
+                        this.selectedRun = String(latest.run_id || '');
+                        await this.fetchArchiveMonths(this.selectedYear);
+                        await this.fetchArchiveDays(this.selectedYear, this.selectedMonth);
+                        await this.fetchArchiveRuns(this.selectedYear, this.selectedMonth, this.selectedDay);
+                    } catch (error) {
+                        this.errorMsg = error.response?.data?.detail || error.message || 'Unable to find the latest Archive run.';
+                        return;
+                    } finally {
+                        this.archiveNavigationBusy = false;
+                    }
                     await this.loadRun();
                 },
 

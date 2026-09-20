@@ -825,21 +825,21 @@
                 <div class="row g-2 mb-2">
                     <div class="col-4">
                         <label class="form-label small text-muted mb-1">Year</label>
-                        <select class="form-select form-select-sm" v-model="repeatYear" @change="resetRepeatDay">
+                        <select class="form-select form-select-sm" v-model="repeatYear" @change="handleRepeatYearChange" :disabled="archiveNavigationBusy">
                             <option value="" disabled>Select</option>
                             <option v-for="year in getRepeatYears().slice().reverse()" :key="year" :value="year">{{ year }}</option>
                         </select>
                     </div>
                     <div class="col-4">
                         <label class="form-label small text-muted mb-1">Month</label>
-                        <select class="form-select form-select-sm" v-model="repeatMonth" @change="resetRepeatRun" :disabled="!repeatYear">
+                        <select class="form-select form-select-sm" v-model="repeatMonth" @change="handleRepeatMonthChange" :disabled="!repeatYear || archiveNavigationBusy">
                             <option value="" disabled>Select</option>
                             <option v-for="month in getRepeatMonths().slice().reverse()" :key="month" :value="month">{{ month }}</option>
                         </select>
                     </div>
                     <div class="col-4">
                         <label class="form-label small text-muted mb-1">Day</label>
-                        <select class="form-select form-select-sm" v-model="repeatDay" @change="resetRepeatSelection" :disabled="!repeatMonth">
+                        <select class="form-select form-select-sm" v-model="repeatDay" @change="handleRepeatDayChange" :disabled="!repeatMonth || archiveNavigationBusy">
                             <option value="" disabled>Select</option>
                             <option v-for="day in getRepeatDays().slice().reverse()" :key="day" :value="day">{{ day }}</option>
                         </select>
@@ -847,7 +847,7 @@
                 </div>
                 <div class="mb-2">
                     <label class="form-label small text-muted mb-1">Run</label>
-                    <select class="form-select form-select-sm" v-model="repeatRun" :disabled="!repeatDay">
+                    <select class="form-select form-select-sm" v-model="repeatRun" :disabled="!repeatDay || archiveNavigationBusy">
                         <option value="" disabled>Select Run...</option>
                         <option v-for="run in getRepeatRuns().slice().reverse()" :key="run.id" :value="run.id">{{ run.display_name }}</option>
                     </select>
@@ -1929,7 +1929,7 @@
                         completedTaskIds: []
                     },
                     schedulerClockMs: Date.now(),
-                    archiveTree: {}, repeatYear: '', repeatMonth: '', repeatDay: '', repeatRun: '', isPresetLoading: false, loadedPresetInfo: null, showRepeatLoader: false,
+                    archiveTree: {}, repeatYear: '', repeatMonth: '', repeatDay: '', repeatRun: '', archiveNavigationBusy: false, isPresetLoading: false, loadedPresetInfo: null, showRepeatLoader: false,
                     showRawData: true, // Toggle State
                     maximizedView: null,
                     currentTab: 'atoms',
@@ -2908,7 +2908,7 @@
                 async toggleRepeatLoader() {
                     this.showRepeatLoader = !this.showRepeatLoader;
                     if (this.showRepeatLoader && !Object.keys(this.archiveTree || {}).length) {
-                        await this.fetchArchiveTree();
+                        await this.fetchArchiveNavigation();
                     }
                 },
                 normalizeRunEntry(entry) {
@@ -2957,36 +2957,69 @@
                 resetRepeatSelection() {
                     this.repeatRun = '';
                 },
-                ensureRepeatRunSelection() {
-                    const years = this.getRepeatYears();
-                    if (!years.length) return;
-                    if (!this.repeatYear || !years.includes(this.repeatYear)) {
-                        this.repeatYear = years[years.length - 1];
-                    }
-                    const months = this.getRepeatMonths();
-                    if (!months.length) return;
-                    if (!this.repeatMonth || !months.includes(this.repeatMonth)) {
-                        this.repeatMonth = months[months.length - 1];
-                    }
-                    const days = this.getRepeatDays();
-                    if (!days.length) return;
-                    if (!this.repeatDay || !days.includes(this.repeatDay)) {
-                        this.repeatDay = days[days.length - 1];
-                    }
-                    const runs = this.getRepeatRuns();
-                    if (!runs.length) return;
-                    if (!this.repeatRun || !runs.some(run => run.id === this.repeatRun)) {
-                        this.repeatRun = runs[runs.length - 1].id;
-                    }
+                async fetchRepeatMonths(year = this.repeatYear) {
+                    if (!year) return [];
+                    const res = await axios.get(`/archive/navigation/months/${encodeURIComponent(year)}`);
+                    const months = Array.isArray(res.data?.months) ? res.data.months : [];
+                    this.archiveTree[year] = Object.fromEntries(months.map(month => [month, this.archiveTree?.[year]?.[month] || {}]));
+                    return months;
                 },
-                async fetchArchiveTree() {
+                async fetchRepeatDays(year = this.repeatYear, month = this.repeatMonth) {
+                    if (!year || !month) return [];
+                    const res = await axios.get(`/archive/navigation/days/${encodeURIComponent(year)}/${encodeURIComponent(month)}`);
+                    const days = Array.isArray(res.data?.days) ? res.data.days : [];
+                    this.archiveTree[year] ||= {};
+                    this.archiveTree[year][month] = Object.fromEntries(days.map(day => [day, this.archiveTree?.[year]?.[month]?.[day] || []]));
+                    return days;
+                },
+                async fetchRepeatRuns(year = this.repeatYear, month = this.repeatMonth, day = this.repeatDay) {
+                    if (!year || !month || !day) return [];
+                    const res = await axios.get(`/archive/navigation/runs/${encodeURIComponent(year)}/${encodeURIComponent(month)}/${encodeURIComponent(day)}`);
+                    const runs = Array.isArray(res.data?.runs) ? res.data.runs : [];
+                    this.archiveTree[year] ||= {};
+                    this.archiveTree[year][month] ||= {};
+                    this.archiveTree[year][month][day] = runs;
+                    return runs;
+                },
+                async fetchArchiveNavigation() {
+                    this.archiveNavigationBusy = true;
                     try {
-                        const res = await axios.get('/archive/tree');
-                        this.archiveTree = res.data || {};
-                        this.ensureRepeatRunSelection();
+                        const res = await axios.get('/archive/navigation/years');
+                        const years = Array.isArray(res.data?.years) ? res.data.years : [];
+                        this.archiveTree = Object.fromEntries(years.map(year => [year, {}]));
+                        this.repeatYear = years[years.length - 1] || '';
+                        const months = await this.fetchRepeatMonths();
+                        this.repeatMonth = months[months.length - 1] || '';
+                        const days = await this.fetchRepeatDays();
+                        this.repeatDay = days[days.length - 1] || '';
+                        const runs = await this.fetchRepeatRuns();
+                        this.repeatRun = runs.length ? String(runs[runs.length - 1].id || runs[runs.length - 1].run_id || '') : '';
                     } catch (e) {
                         console.error(e);
+                    } finally {
+                        this.archiveNavigationBusy = false;
                     }
+                },
+                async handleRepeatYearChange() {
+                    this.resetRepeatDay();
+                    if (!this.repeatYear) return;
+                    this.archiveNavigationBusy = true;
+                    try { await this.fetchRepeatMonths(); } catch (error) { console.error(error); }
+                    finally { this.archiveNavigationBusy = false; }
+                },
+                async handleRepeatMonthChange() {
+                    this.resetRepeatRun();
+                    if (!this.repeatMonth) return;
+                    this.archiveNavigationBusy = true;
+                    try { await this.fetchRepeatDays(); } catch (error) { console.error(error); }
+                    finally { this.archiveNavigationBusy = false; }
+                },
+                async handleRepeatDayChange() {
+                    this.resetRepeatSelection();
+                    if (!this.repeatDay) return;
+                    this.archiveNavigationBusy = true;
+                    try { await this.fetchRepeatRuns(); } catch (error) { console.error(error); }
+                    finally { this.archiveNavigationBusy = false; }
                 },
                 applyLoadedRunPreset(payload = {}) {
                     let restoredSyncSlaves = null;
