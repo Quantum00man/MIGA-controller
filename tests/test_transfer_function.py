@@ -149,9 +149,32 @@ class TransferFunctionPlanTests(unittest.TestCase):
     def test_frontend_allows_scheduled_transfer_function_and_estimates_its_shots(self):
         index_html = (Path(__file__).resolve().parents[1] / "static" / "index.html").read_text(encoding="utf-8")
         self.assertIn('<option value="transfer_function">Transfer Function</option>', index_html)
-        self.assertIn("if (String(configObj.mode || '') === 'transfer_function')", index_html)
+        self.assertIn("isTransferFunctionMode(mode = this.config.mode)", index_html)
         self.assertIn("transfer_function: 'Transfer Function'", index_html)
         self.assertIn('aria-label="SYNC Transfer Function statistic"', index_html)
+
+    def test_burst_time_plan_uses_timing_parameters_at_fixed_tti_frequency(self):
+        config = {
+            "scan_dimensions": 1,
+            "parameter_source": "classic",
+            "mode": "transfer_burst_time_scan",
+            "randomize": False,
+            "start": 10,
+            "stop": 20,
+            "step": 10,
+            "dim1_type": "range",
+            "dim1_method": "step_size",
+            "param_type": "float",
+            "mode_param": 100,
+            "transfer_burst_time_frequency_hz": 2500,
+            "transfer_repeats": 2,
+            "transfer_phase_degrees": [0],
+        }
+        plan = self.manager._build_transfer_function_execution(config)
+        self.assertEqual([point["sequence_parameters"] for point in plan], [[10.0, 90.0], [10.0, 90.0], [20.0, 80.0], [20.0, 80.0]])
+        self.assertEqual([point["metadata"]["transfer_frequency_hz"] for point in plan], [10.0, 10.0, 20.0, 20.0])
+        self.assertTrue(all(point["metadata"]["transfer_generator_frequency_hz"] == 2500.0 for point in plan))
+        self.assertTrue(all(point["metadata"]["transfer_response_axis"] == "p0" for point in plan))
 
     def test_archive_exposes_sync_differential_transfer_function(self):
         archive_html = (Path(__file__).resolve().parents[1] / "static" / "archive.html").read_text(encoding="utf-8")

@@ -783,8 +783,8 @@
                 </div>
             </template>
 
-            <span class="section-label" v-if="!['transfer_function', 'ramsey_interferometer'].includes(config.mode)">Parameter Source</span>
-            <div class="card p-3 mb-3" v-if="!['transfer_function', 'ramsey_interferometer'].includes(config.mode)">
+            <span class="section-label" v-if="!['transfer_function', 'transfer_burst_time_scan', 'ramsey_interferometer'].includes(config.mode)">Parameter Source</span>
+            <div class="card p-3 mb-3" v-if="!['transfer_function', 'transfer_burst_time_scan', 'ramsey_interferometer'].includes(config.mode)">
                 <div class="btn-group btn-group-sm w-100" role="group" aria-label="Parameter source">
                     <input type="radio" class="btn-check" id="sourceClassic" value="classic" v-model="config.parameter_source"
                         :disabled="isRunning || isScheduleActive()">
@@ -918,10 +918,10 @@
                             v-model.number="config.scan_dimensions">
                         <label class="btn btn-outline-secondary" for="scan1d">1D</label>
                         <input type="radio" class="btn-check" name="scanDimension" id="scan2d" :value="2"
-                            v-model.number="config.scan_dimensions" :disabled="['ac_stark', 'lock_in', 'transfer_function', 'ramsey_interferometer', 'phase_noise'].includes(config.mode)">
+                            v-model.number="config.scan_dimensions" :disabled="['ac_stark', 'lock_in', 'transfer_function', 'transfer_burst_time_scan', 'ramsey_interferometer', 'phase_noise'].includes(config.mode)">
                         <label class="btn btn-outline-secondary" for="scan2d">2D</label>
                         <input type="radio" class="btn-check" name="scanDimension" id="scan3d" :value="3"
-                            v-model.number="config.scan_dimensions" :disabled="['ac_stark', 'lock_in', 'transfer_function', 'ramsey_interferometer', 'phase_noise'].includes(config.mode)">
+                            v-model.number="config.scan_dimensions" :disabled="['ac_stark', 'lock_in', 'transfer_function', 'transfer_burst_time_scan', 'ramsey_interferometer', 'phase_noise'].includes(config.mode)">
                         <label class="btn btn-outline-secondary" for="scan3d">3D</label>
                     </div>
                     <div class="form-text mt-2" v-if="config.scan_dimensions > 1">
@@ -1047,6 +1047,7 @@
                             <option value="lock_in" :disabled="isSyncMode()">Lock-in Measurement</option>
                             <option value="ac_stark" :disabled="isSyncMode()">AC Stark Centering</option>
                             <option value="transfer_function">Transfer Function</option>
+                            <option value="transfer_burst_time_scan">Transfer function Burst time scan</option>
                             <option value="ramsey_interferometer" :disabled="isSyncMode() || isScheduledMode()">Ramsey Interferometer</option>
                         </select>
                         <div v-if="isSyncMode()" class="form-text">SYNC supports Standard, Timing, Rabi, Half, Link, Bragg Rabi and Transfer Function. Only the Master controls TTI.</div>
@@ -1089,6 +1090,14 @@
                         </div>
                         <div class="form-text mt-2">The phase scan order is selected under Execution Control. Statistics are updated after every shot.</div>
                     </div>
+                    <div v-if="config.mode === 'transfer_burst_time_scan'" class="mt-1">
+                        <div class="alert alert-light border py-2 px-3 small mb-3">
+                            Fixed-frequency Transfer Function scan. P0 is scanned with Timing parameters <span class="font-monospace">[P0, Total − P0]</span>.
+                        </div>
+                        <label class="form-label small text-muted mb-1">Fixed TTI frequency (Hz)</label>
+                        <input type="number" min="0.000000001" step="any" class="form-control form-control-sm" v-model.number="config.transfer_burst_time_frequency_hz">
+                        <div class="form-text mt-2">TTI frequency is programmed once, then 0°/90° response statistics are aggregated at each P0 value.</div>
+                    </div>
                     <div v-if="config.mode === 'ramsey_interferometer'" class="mt-1">
                         <div class="alert alert-light border py-2 px-3 small mb-3">DG4162 CH1 = f₀ − Δf and CH2 = f₀ + Δf. The existing MOT sequence controls the external RF switch.</div>
                         <div class="row g-2">
@@ -1100,14 +1109,14 @@
                         </div>
                         <div class="form-text mt-2">Center frequency f₀ is configured in Settings → Ramsey Interferometer. Phase and OUTPUT are not changed during a scan.</div>
                     </div>
-                    <div v-if="['timing', 'rabi'].includes(config.mode)">
+                    <div v-if="['timing', 'rabi', 'transfer_burst_time_scan'].includes(config.mode)">
                         <label class="form-label small text-muted mb-1">Total Parameter</label>
                         <div class="input-group input-group-sm"><span class="input-group-text bg-white"><i
                                     class="bi bi-calculator"></i></span><input type="text" class="form-control"
                                 :class="{'is-invalid': needsModeParam() && !isValidModeParam(config.mode_param)}"
                                 inputmode="decimal" placeholder="Required numeric value" v-model="config.mode_param"></div>
                         <div class="invalid-feedback d-block small" v-if="needsModeParam() && !isValidModeParam(config.mode_param)">
-                            Timing/Rabi mode requires a numeric Total Parameter.
+                            Timing mode requires a numeric Total Parameter.
                         </div>
                     </div>
                     <div v-if="['link', 'phase_noise'].includes(config.mode)" class="mt-1">
@@ -1436,14 +1445,14 @@
                 <span class="section-label">Execution Control</span>
                 <div class="card p-3 mb-5 border-0 bg-transparent shadow-none ps-0 pe-0">
                     <div class="row g-2 align-items-center mb-3 px-1">
-                        <div v-if="config.mode !== 'phase_noise'" class="col-6"><label class="form-label small text-muted mb-1">{{ config.mode === 'transfer_function' ? 'Repeats per frequency' : (config.mode === 'ramsey_interferometer' ? 'Repeats per Δf' : (config.mode === 'ac_stark' ? 'Averages per half-point' : (config.mode === 'lock_in' ? 'ABBA blocks' : 'Averages'))) }}</label><input
-                                v-if="!['transfer_function', 'ramsey_interferometer'].includes(config.mode)" type="number" class="form-control form-control-sm" v-model.number="config.averages"
-                                min="1"><input v-else-if="config.mode === 'transfer_function'" type="number" class="form-control form-control-sm" v-model.number="config.transfer_repeats" min="2"><input v-else type="number" class="form-control form-control-sm" v-model.number="config.ramsey_repeats" min="1"></div>
+                        <div v-if="config.mode !== 'phase_noise'" class="col-6"><label class="form-label small text-muted mb-1">{{ isTransferFunctionMode() ? 'Repeats per point' : (config.mode === 'ramsey_interferometer' ? 'Repeats per Δf' : (config.mode === 'ac_stark' ? 'Averages per half-point' : (config.mode === 'lock_in' ? 'ABBA blocks' : 'Averages'))) }}</label><input
+                                v-if="!['transfer_function', 'transfer_burst_time_scan', 'ramsey_interferometer'].includes(config.mode)" type="number" class="form-control form-control-sm" v-model.number="config.averages"
+                                min="1"><input v-else-if="isTransferFunctionMode()" type="number" class="form-control form-control-sm" v-model.number="config.transfer_repeats" min="2"><input v-else type="number" class="form-control form-control-sm" v-model.number="config.ramsey_repeats" min="1"></div>
                         <div v-else class="col-6"><label class="form-label small text-muted mb-1">Phase Noise plan</label><div class="form-control form-control-sm bg-light">{{ config.phase_noise_mid_fringe_values.length }} T values × {{ config.phase_noise_repeats }} repeats</div></div>
                         <div class="col-6">
                             <div class="d-flex align-items-center gap-3 mt-4 flex-wrap">
                                 <div class="form-check mb-0"><input class="form-check-input" type="checkbox"
-                                        v-model="config.randomize" id="randCheck" :disabled="['ac_stark', 'lock_in', 'transfer_function', 'ramsey_interferometer', 'phase_noise'].includes(config.mode)"><label
+                                        v-model="config.randomize" id="randCheck" :disabled="['ac_stark', 'lock_in', 'transfer_function', 'transfer_burst_time_scan', 'ramsey_interferometer', 'phase_noise'].includes(config.mode)"><label
                                         class="form-check-label small" for="randCheck">Randomize</label></div>
                                 <div class="form-check mb-0"><input class="form-check-input" type="checkbox"
                                         v-model="config.ext_trigger" id="extTriggerCheck"><label
@@ -1451,7 +1460,7 @@
                             </div>
                         </div>
                     </div>
-                    <div v-if="config.mode === 'transfer_function'" class="mb-3 px-1">
+                    <div v-if="isTransferFunctionMode()" class="mb-3 px-1">
                         <label class="form-label small text-muted mb-1">TTI phase scans</label>
                         <div class="d-flex align-items-center gap-4 border rounded px-3 py-2 bg-white">
                             <div class="form-check mb-0">
@@ -1560,7 +1569,7 @@
                                 <input class="form-check-input" type="checkbox" id="syncShowRaw" v-model="showRawData">
                                 <label class="form-check-label small fw-bold text-muted" for="syncShowRaw">{{ syncViewMode === 'node' ? 'Show NoFit' : 'Use NoFit' }}</label>
                             </div>
-                            <div v-if="syncViewMode === 'node' && config.mode === 'transfer_function'" class="btn-group btn-group-sm" role="group" aria-label="SYNC Transfer Function statistic">
+                            <div v-if="syncViewMode === 'node' && isTransferFunctionMode()" class="btn-group btn-group-sm" role="group" aria-label="SYNC Transfer Function statistic">
                                 <button class="btn" :aria-pressed="transferFunctionStatistic === 'std'"
                                     :class="transferFunctionStatistic === 'std' ? 'btn-dark' : 'btn-outline-dark'"
                                     @click="setTransferFunctionStatistic('std')">Standard deviation</button>
@@ -1619,7 +1628,7 @@
                     <div id="resultsPlotUp" class="analysis-plot-panel" style="height:360px"></div>
                     <div id="resultsPlotDw" class="analysis-plot-panel analysis-plot-panel-divider" :style="{height:'360px', display: currentTab === 'phase' ? 'none' : 'block'}"></div>
                 </div>
-                <div v-else-if="config.mode === 'transfer_function'">
+                <div v-else-if="isTransferFunctionMode()">
                     <div id="syncPlot" class="sync-transfer-differential-plot"></div>
                     <div id="syncTransferPhaseDifferencePlot" class="analysis-plot-panel analysis-plot-panel-divider sync-transfer-differential-plot"></div>
                     <div id="syncTransferPathNormalizedPlot" class="analysis-plot-panel analysis-plot-panel-divider sync-transfer-differential-plot"></div>
@@ -1644,7 +1653,7 @@
                                 <option value="single">Single column (89 mm)</option>
                             </select>
                         </div>
-                        <div v-if="config.mode === 'transfer_function'" class="btn-group btn-group-sm" role="group" aria-label="Transfer Function statistic">
+                        <div v-if="isTransferFunctionMode()" class="btn-group btn-group-sm" role="group" aria-label="Transfer Function statistic">
                             <button class="btn" :aria-pressed="transferFunctionStatistic === 'std'"
                                 :class="transferFunctionStatistic === 'std' ? 'btn-dark' : 'btn-outline-dark'"
                                 @click="setTransferFunctionStatistic('std')">Standard deviation</button>
@@ -1660,7 +1669,7 @@
                                 :disabled="currentTab !== 'phase'" title="Unnormalized squared phase and fixed Allan noise floor"
                                 @click="setTransferFunctionStatistic('phase2')">ΔΦ²</button>
                         </div>
-                        <div v-if="config.mode === 'transfer_function'" class="btn-group btn-group-sm" role="group" aria-label="Transfer Function y-axis scale">
+                        <div v-if="isTransferFunctionMode()" class="btn-group btn-group-sm" role="group" aria-label="Transfer Function y-axis scale">
                             <button class="btn" :aria-pressed="transferFunctionYAxisScale === 'linear'"
                                 :class="transferFunctionYAxisScale === 'linear' ? 'btn-secondary' : 'btn-outline-secondary'"
                                 @click="setTransferFunctionYAxisScale('linear')">Linear Y</button>
@@ -1814,6 +1823,7 @@
                         transfer_frequency_start_hz: 1000,
                         transfer_frequency_stop_hz: 10000,
                         transfer_frequency_step_hz: 1000,
+                        transfer_burst_time_frequency_hz: 1000,
                         transfer_repeats: 10,
                         transfer_settling_time_s: 5,
                         transfer_phase_degrees: [0, 90],
@@ -2002,14 +2012,14 @@
                         return;
                     }
                     if (this.config.parameter_source === 'markers' && mode !== 'standard') {
-                        if (['transfer_function', 'ramsey_interferometer'].includes(mode)) {
+                        if (['transfer_function', 'transfer_burst_time_scan', 'ramsey_interferometer'].includes(mode)) {
                             this.config.parameter_source = 'classic';
                         } else {
                             this.config.mode = 'standard';
                             return;
                         }
                     }
-                    if (['ac_stark', 'lock_in', 'transfer_function', 'ramsey_interferometer'].includes(mode)) {
+                    if (['ac_stark', 'lock_in', 'transfer_function', 'transfer_burst_time_scan', 'ramsey_interferometer'].includes(mode)) {
                         this.config.scan_dimensions = 1;
                         this.config.dim2_enabled = false;
                         this.config.dim3_enabled = false;
@@ -2018,7 +2028,7 @@
                             this.runMode = 'live';
                             if (!['atoms', 'prob'].includes(this.currentTab)) this.currentTab = 'atoms';
                         }
-                        if (mode === 'transfer_function') {
+                        if (['transfer_function', 'transfer_burst_time_scan'].includes(mode)) {
                             this.config.parameter_source = 'classic';
                             this.config.averages = 1;
                             this.config.transfer_settling_time_s = 5;
@@ -3260,7 +3270,7 @@ isStartDisabled() {
 },
 getVisibleTabs() {
     if (this.config.mode === 'ac_stark') return this.tabs.filter(tab => ['atoms', 'prob'].includes(tab.id));
-    if (this.config.mode === 'transfer_function') return this.tabs.filter(tab => ['atoms', 'intf', 'phase'].includes(tab.id));
+    if (this.isTransferFunctionMode()) return this.tabs.filter(tab => ['atoms', 'intf', 'phase'].includes(tab.id));
     return this.tabs;
 },
 isStopDisabled() {
@@ -3351,13 +3361,14 @@ recordShotDuration(data = {}) {
 },
 getLiveEstimatedShotCount() {
     try {
-        if (this.config.mode === 'transfer_function') {
+        if (this.isTransferFunctionMode()) {
+            const burst = this.isTransferBurstTimeScan();
             const frequencyCount = this.estimateAxisPointCount({
-                scan_type: 'range', method: 'step_size',
-                start: this.config.transfer_frequency_start_hz,
-                stop: this.config.transfer_frequency_stop_hz,
-                step: this.config.transfer_frequency_step_hz,
-                list: ''
+                scan_type: burst ? this.config.dim1_type : 'range', method: burst ? this.config.dim1_method : 'step_size',
+                start: burst ? this.config.start : this.config.transfer_frequency_start_hz,
+                stop: burst ? this.config.stop : this.config.transfer_frequency_stop_hz,
+                step: burst ? this.config.step : this.config.transfer_frequency_step_hz,
+                list: burst ? this.config.custom_list : ''
             });
             const phaseCount = Array.isArray(this.config.transfer_phase_degrees) && this.config.transfer_phase_degrees.length
                 ? this.config.transfer_phase_degrees.length : 2;
@@ -3383,9 +3394,9 @@ getLiveEstimatedDurationSeconds() {
     const shots = this.getLiveEstimatedShotCount();
     if (shots <= 0) return 0;
     let seconds = shots * this.getSinglePointDurationSec();
-    if (this.config.mode === 'transfer_function') {
+    if (this.isTransferFunctionMode()) {
         const repeats = Math.max(2, Math.round(Number(this.config.transfer_repeats) || 2));
-        seconds += Math.ceil(shots / repeats) * 5;
+        seconds += (this.isTransferBurstTimeScan() ? 1 : Math.ceil(shots / repeats)) * 5;
     }
     if (this.config.mode === 'ramsey_interferometer') {
         const repeats = Math.max(1, Math.round(Number(this.config.ramsey_repeats) || 1));
@@ -3413,9 +3424,10 @@ getLiveHeaderStats() {
 getLiveEstimateSummary() {
     const shots = this.getLiveEstimatedShotCount();
     if (shots <= 0) return 'Estimate unavailable';
-    if (this.config.mode === 'transfer_function') {
+    if (this.isTransferFunctionMode()) {
         const repeats = Math.max(2, Math.round(Number(this.config.transfer_repeats) || 2));
-        return `${shots} shots at ${Math.ceil(shots / repeats)} frequencies | ${this.formatDuration(this.getLiveEstimatedDurationSeconds())} incl. 5 s settling/point`;
+        const points = Math.ceil(shots / repeats);
+        return `${shots} shots at ${points} ${this.isTransferBurstTimeScan() ? 'P0 points' : 'frequencies'} | ${this.formatDuration(this.getLiveEstimatedDurationSeconds())} incl. 5 s settling/${this.isTransferBurstTimeScan() ? 'scan' : 'point'}`;
     }
     if (this.config.mode === 'ramsey_interferometer') {
         const repeats = Math.max(1, Math.round(Number(this.config.ramsey_repeats) || 1));
@@ -3502,13 +3514,14 @@ estimateAxisPointCount(spec = {}) {
     return Math.max(count, 1);
 },
 estimateScanStepCount(configObj = this.config) {
-    if (String(configObj.mode || '') === 'transfer_function') {
+    if (this.isTransferFunctionMode(configObj.mode)) {
+        const burst = this.isTransferBurstTimeScan(configObj.mode);
         const frequencyCount = this.estimateAxisPointCount({
-            scan_type: 'range', method: 'step_size',
-            start: configObj.transfer_frequency_start_hz,
-            stop: configObj.transfer_frequency_stop_hz,
-            step: configObj.transfer_frequency_step_hz,
-            list: ''
+            scan_type: burst ? configObj.dim1_type : 'range', method: burst ? configObj.dim1_method : 'step_size',
+            start: burst ? configObj.start : configObj.transfer_frequency_start_hz,
+            stop: burst ? configObj.stop : configObj.transfer_frequency_stop_hz,
+            step: burst ? configObj.step : configObj.transfer_frequency_step_hz,
+            list: burst ? configObj.custom_list : ''
         });
         const phases = Array.isArray(configObj.transfer_phase_degrees)
             ? configObj.transfer_phase_degrees.map(Number).filter(value => value === 0 || value === 90)
@@ -3587,7 +3600,7 @@ refreshScheduledTaskEstimates() {
             const points = this.estimateScanStepCount(task.config);
             task.estimated_points = points;
             task.estimated_duration_sec = points * this.getSinglePointDurationSec();
-            if (String(task.config?.mode || '') === 'transfer_function') {
+            if (this.isTransferFunctionMode(task.config?.mode)) {
                 const repeats = Math.max(2, Math.round(Number(task.config.transfer_repeats) || 2));
                 task.estimated_duration_sec += Math.ceil(points / repeats) * 5;
             }
@@ -3613,22 +3626,24 @@ getScheduledTaskModeLabel(task) {
         phase_noise: 'Phase Noise Analyze',
         bragg_rabi: '1D Bragg Rabi scan',
         lock_in: 'Lock-in Measurement',
-        transfer_function: 'Transfer Function'
+        transfer_function: 'Transfer Function',
+        transfer_burst_time_scan: 'Transfer function Burst time scan'
     };
     return prefix + (modeMap[String(configObj.mode || 'standard')] || '1D scan');
 },
 getScheduledTaskAxisLabel(configObj = {}) {
-    if (String(configObj.mode || '') === 'transfer_function') {
+    if (this.isTransferFunctionMode(configObj.mode)) {
+        const burst = this.isTransferBurstTimeScan(configObj.mode);
         const frequencies = this.estimateAxisPointCount({
-            scan_type: 'range', method: 'step_size',
-            start: configObj.transfer_frequency_start_hz,
-            stop: configObj.transfer_frequency_stop_hz,
-            step: configObj.transfer_frequency_step_hz,
-            list: ''
+            scan_type: burst ? configObj.dim1_type : 'range', method: burst ? configObj.dim1_method : 'step_size',
+            start: burst ? configObj.start : configObj.transfer_frequency_start_hz,
+            stop: burst ? configObj.stop : configObj.transfer_frequency_stop_hz,
+            step: burst ? configObj.step : configObj.transfer_frequency_step_hz,
+            list: burst ? configObj.custom_list : ''
         });
         const phases = Array.isArray(configObj.transfer_phase_degrees) && configObj.transfer_phase_degrees.length
             ? configObj.transfer_phase_degrees.join('°/') + '°' : '0°/90°';
-        return `${frequencies} frequencies | phases:${phases} | repeats:${Math.max(2, Math.round(Number(configObj.transfer_repeats) || 2))}`;
+        return `${frequencies} ${burst ? 'P0 points' : 'frequencies'} | phases:${phases} | repeats:${Math.max(2, Math.round(Number(configObj.transfer_repeats) || 2))}`;
     }
     if (String(configObj.mode || '') === 'lock_in') {
         const blocks = Math.max(1, Math.round(Number(configObj.averages) || 1));
@@ -3771,6 +3786,10 @@ captureCurrentSyncSetupForTask() {
 },
 async addScheduledTaskFromCurrentSetup() {
     if (this.isScheduleActive()) return;
+    if (this.isTransferBurstTimeScan()) {
+        this.addLog('Transfer function Burst time scan is not available in the scheduled queue.');
+        return;
+    }
     if (this.config.mode === 'ac_stark') {
         this.addLog('AC Stark Centering is available in Live Mode only.');
         return;
@@ -3809,6 +3828,10 @@ async addScheduledTaskFromCurrentSetup() {
 },
 async updateSelectedScheduledTask() {
     if (this.isScheduleActive() || !this.selectedScheduledTaskId) return;
+    if (this.isTransferBurstTimeScan()) {
+        this.addLog('Transfer function Burst time scan is not available in the scheduled queue.');
+        return;
+    }
     if (this.config.mode === 'ac_stark') {
         this.addLog('AC Stark Centering cannot be added to a scheduled task.');
         return;
@@ -4044,6 +4067,9 @@ ensureScheduledTasksValid() {
     if (incompatibleTask) {
         throw new Error(`Task ${incompatibleTask.name} does not match the current run mode.`);
     }
+    if (this.scheduledTasks.some(task => this.isTransferBurstTimeScan(task.config?.mode))) {
+        throw new Error('Transfer function Burst time scan is not available in the scheduled queue.');
+    }
     if (this.scheduleSettings.timingMode === 'specific') {
         const missingTime = this.scheduledTasks.find((task) => !Number.isFinite(this.parseScheduledDateTime(task.scheduled_at)));
         if (missingTime) {
@@ -4248,12 +4274,21 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     const parsed = Number(value);
                     return Number.isFinite(parsed) ? parsed : Number.NaN;
                 },
+                isTransferFunctionMode(mode = this.config.mode) {
+                    return ['transfer_function', 'transfer_burst_time_scan'].includes(String(mode || '').trim().toLowerCase());
+                },
+                isTransferBurstTimeScan(mode = this.config.mode) {
+                    return String(mode || '').trim().toLowerCase() === 'transfer_burst_time_scan';
+                },
+                transferResponseAxisLabel(mode = this.config.mode) {
+                    return this.isTransferBurstTimeScan(mode) ? 'P0' : 'TTI carrier frequency (Hz)';
+                },
                 hasFiniteNumericValue(value) {
                     return value !== null && value !== undefined && value !== ''
                         && Number.isFinite(Number(value));
                 },
                 needsModeParam(mode = this.config.mode, scanDimensions = this.getConfiguredScanDimensions()) {
-                    return scanDimensions === 1 && ['timing', 'rabi'].includes(mode);
+                    return scanDimensions === 1 && ['timing', 'rabi', 'transfer_burst_time_scan'].includes(mode);
                 },
                 isValidModeParam(value) {
                     const parsed = this.parseNumericInput(value);
@@ -4263,13 +4298,16 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     const scanDimensions = Math.max(1, Math.min(3, Number(payload.scan_dimensions || this.resolveScanDimensionsFromConfig(payload)) || 1));
                     payload.run_label = String(payload.run_label || '').trim();
                     payload.sequence_name = String(sequenceNameOverride || payload.sequence_name || this.currentSequenceName || 'sequence.mot').trim();
-                    if (payload.mode === 'transfer_function') {
-                        ['transfer_frequency_start_hz', 'transfer_frequency_stop_hz', 'transfer_frequency_step_hz'].forEach((field) => {
+                    if (this.isTransferFunctionMode(payload.mode)) {
+                        const burst = this.isTransferBurstTimeScan(payload.mode);
+                        (burst ? ['transfer_burst_time_frequency_hz'] : ['transfer_frequency_start_hz', 'transfer_frequency_stop_hz', 'transfer_frequency_step_hz']).forEach((field) => {
                             const value = Number(payload[field]);
                             if (!Number.isFinite(value)) throw new Error(`${field} must be numeric.`);
                             payload[field] = value;
                         });
-                        if (payload.transfer_frequency_step_hz === 0) throw new Error('Transfer Function frequency step must not be zero.');
+                        if (!burst && payload.transfer_frequency_step_hz === 0) throw new Error('Transfer Function frequency step must not be zero.');
+                        if (burst && payload.transfer_burst_time_frequency_hz <= 0) throw new Error('Fixed TTI frequency must be greater than zero.');
+                        if (burst && !this.isValidModeParam(payload.mode_param)) throw new Error('Transfer function Burst time scan requires a numeric Total Parameter.');
                         payload.transfer_repeats = Math.round(Number(payload.transfer_repeats));
                         if (!Number.isInteger(payload.transfer_repeats) || payload.transfer_repeats < 2) {
                             throw new Error('Transfer Function requires at least 2 repeats per frequency.');
@@ -5374,7 +5412,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                                 type: 'scatter', mode: 'lines+markers', name: `${statisticLabel} at ${phaseDeg}°`,
                                 line: { color: componentColors[index], width: 2 }, marker: { color: componentColors[index], size: 7 },
                                 connectgaps: false,
-                                hovertemplate: `Frequency=%{x:.9g} Hz<br>${phaseDeg}° ${hoverStatisticLabel}=%{y:.6g}<br>n=%{customdata}<extra></extra>`
+                                hovertemplate: `${this.transferResponseAxisLabel()}=%{x:.9g}<br>${phaseDeg}° ${hoverStatisticLabel}=%{y:.6g}<br>n=%{customdata}<extra></extra>`
                             }));
                             if (phases.length === 2) {
                                 traces.push({
@@ -5389,7 +5427,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                                     type: 'scatter', mode: 'lines+markers', name: `${statisticLabel} quadrature sum`,
                                     line: { color: '#198754', width: 3 }, marker: { color: '#198754', size: 8, symbol: 'diamond' },
                                     connectgaps: false,
-                                    hovertemplate: `Frequency=%{x:.9g} Hz<br>${hoverStatisticLabel} sum=%{y:.6g}<br>n=%{customdata}<extra></extra>`
+                                    hovertemplate: `${this.transferResponseAxisLabel()}=%{x:.9g}<br>${hoverStatisticLabel} sum=%{y:.6g}<br>n=%{customdata}<extra></extra>`
                                 });
                             }
                             if (statistic === 'phase2' && phases.length > 0) {
@@ -5405,7 +5443,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                                     type: 'scatter', mode: 'lines', name: 'Allan phase-noise floor',
                                     line: { color: '#343a40', width: 2.4, dash: 'dash' },
                                     connectgaps: false,
-                                    hovertemplate: 'Frequency=%{x:.9g} Hz<br>Noise floor=%{y:.6g} rad²<br>n=%{customdata}<extra></extra>'
+                                    hovertemplate: `${this.transferResponseAxisLabel()}=%{x:.9g}<br>Noise floor=%{y:.6g} rad²<br>n=%{customdata}<extra></extra>`
                                 });
                             }
                         } else {
@@ -5429,7 +5467,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                                 line: { color: componentColors[index], width: 2 },
                                 marker: { color: componentColors[index], size: 7 },
                                 connectgaps: false,
-                                hovertemplate: `Frequency=%{x:.9g} Hz<br>Phase=${phaseDeg}°<br>${hoverStatisticLabel}=%{y:.6g}<br>n=%{customdata}<extra></extra>`
+                                hovertemplate: `${this.transferResponseAxisLabel()}=%{x:.9g}<br>Phase=${phaseDeg}°<br>${hoverStatisticLabel}=%{y:.6g}<br>n=%{customdata}<extra></extra>`
                             })) : [{
                                 x: points.map(point => point.frequency),
                                 y: points.map(point => {
@@ -5442,7 +5480,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                                 type: 'scatter', mode: 'lines+markers', name: `${channel} ${statisticLabel}`,
                                 line: { color, width: 2 }, marker: { color, size: 7 },
                                 connectgaps: false,
-                                hovertemplate: `Frequency=%{x:.9g} Hz<br>${hoverStatisticLabel}=%{y:.6g}<br>n=%{customdata}<extra></extra>`
+                                hovertemplate: `${this.transferResponseAxisLabel()}=%{x:.9g}<br>${hoverStatisticLabel}=%{y:.6g}<br>n=%{customdata}<extra></extra>`
                             }];
                         }
                         const base = this.buildCommonAnalysisLayout();
@@ -5451,14 +5489,14 @@ finishScheduledRun(finalStatus = 'IDLE') {
                             layout: {
                                 ...base,
                                 margin: isUp ? { t: 38, b: 8, l: 76, r: 20 } : { t: 10, b: 50, l: 76, r: 20 },
-                                xaxis: { ...base.xaxis, title: isUp ? '' : 'TTI carrier frequency (Hz)', showticklabels: !isUp },
+                                xaxis: { ...base.xaxis, title: isUp ? '' : this.transferResponseAxisLabel(), showticklabels: !isUp },
                                 yaxis: {
                                     ...base.yaxis,
                                     type: this.transferFunctionYAxisScale,
                                     title: statistic === 's2' ? 'S² (dimensionless)'
                                         : (statistic === 'phase2' ? 'ΔΦ² (rad²)' : `${label} ${statisticLabel}`)
                                 },
-                                title: { text: `${channel} | Transfer Function | ${sourceLabel} | ${statisticLabel}`, font: { size: 13 }, x: 0.05, y: 0.93 },
+                                title: { text: `${channel} | ${this.isTransferBurstTimeScan() ? 'Transfer function Burst time scan' : 'Transfer Function'} | ${sourceLabel} | ${statisticLabel}`, font: { size: 13 }, x: 0.05, y: 0.93 },
                                 showlegend: this.transferPhaseDegrees.length > 0 && traces.length > 0,
                                 legend: this.transferPhaseDegrees.length > 0 ? { orientation: 'h', x: 0.5, xanchor: 'center', y: 1.12 } : base.legend
                             }
@@ -5478,7 +5516,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                         return;
                     }
                     if (!document.getElementById('resultsPlotUp') || !document.getElementById('resultsPlotDw')) return;
-                    if (this.config.mode === 'transfer_function') {
+                    if (this.isTransferFunctionMode()) {
                         this.renderTransferFunctionPlot();
                         return;
                     }
@@ -5703,7 +5741,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                 },
                 renderSyncNodePlots() {
                     if (!document.getElementById('resultsPlotUp') || !document.getElementById('resultsPlotDw')) return;
-                    if (this.config.mode === 'transfer_function') {
+                    if (this.isTransferFunctionMode()) {
                         this.transferFunctionHistoryMap = {};
                         this.transferPhaseDegrees = [];
                         (this.syncNodeResults[this.syncDisplaySource] || []).forEach(record => {
@@ -5885,7 +5923,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     Plotly.react(element, traces, {
                         margin: { l: 75, r: 35, t: 45, b: 70 },
                         title: 'Differential Transfer Function · Master − Slave',
-                        xaxis: { title: 'TTI carrier frequency (Hz)' },
+                        xaxis: { title: this.transferResponseAxisLabel() },
                         yaxis: { title: this.transferFunctionYAxisScale === 'log' ? '|ΔS|²' : 'ΔS components / |ΔS|²', type: this.transferFunctionYAxisScale },
                         hovermode: 'closest', legend: { orientation: 'h' }
                     }, { responsive: true, displaylogo: false });
@@ -5918,7 +5956,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     Plotly.react(element, traces, {
                         margin: { l: 75, r: 35, t: 45, b: 70 },
                         title: 'Absolute Mean Interferometer Phase Difference · Master − Slave',
-                        xaxis: { title: 'TTI carrier frequency (Hz)' },
+                        xaxis: { title: this.transferResponseAxisLabel() },
                         yaxis: {
                             title: '|mean(φ Master − φ Slave)| (rad)', type: this.transferFunctionYAxisScale,
                             ...(this.transferFunctionYAxisScale === 'log' ? {} : { rangemode: 'tozero' })
@@ -5954,7 +5992,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     Plotly.react(element, traces, {
                         margin: { l: 75, r: 35, t: 45, b: 70 },
                         title: 'Differential Phase Response Normalized by Path Difference',
-                        xaxis: { title: 'TTI carrier frequency (Hz)' },
+                        xaxis: { title: this.transferResponseAxisLabel() },
                         yaxis: { title: '|ΔΦ / [2Δk(LM−LS)]|² (dimensionless)', type: this.transferFunctionYAxisScale, ...(this.transferFunctionYAxisScale === 'log' ? {} : { rangemode: 'tozero' }) },
                         hovermode: 'closest', legend: { orientation: 'h' },
                         annotations: rows.length ? [] : [{ text: 'No valid path-normalized differential phase data', showarrow: false, xref: 'paper', yref: 'paper', x: .5, y: .5 }]
@@ -5970,7 +6008,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     }
                     const element = document.getElementById('syncPlot');
                     if (!element || typeof Plotly === 'undefined') return;
-                    if (this.config.mode === 'transfer_function') {
+                    if (this.isTransferFunctionMode()) {
                         this.renderSyncTransferFunctionDifferential(element);
                         return;
                     }
@@ -6061,7 +6099,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     const isFinalImmediateStep = !this.isScheduleActive() && !this.isSyncMode() && total > 0 && this.currentStep >= total;
                     this.currentScanDimensions = scanDimensions;
                     this.statusMessage = isTransferFunctionPoint
-                        ? `Transfer Function: ${String(data.transfer_generator_model || 'TTI')} CH${Number(data.transfer_generator_channel || 1)} | ${Number(data.transfer_phase_deg).toPrecision(6)}° | ${Number(data.transfer_frequency_hz).toPrecision(8)} Hz | ${Number(data.transfer_repeat)}/${Number(this.config.transfer_repeats)}`
+                        ? `${this.isTransferBurstTimeScan() ? 'Transfer function Burst time scan' : 'Transfer Function'}: ${String(data.transfer_generator_model || 'TTI')} CH${Number(data.transfer_generator_channel || 1)} | ${Number(data.transfer_phase_deg).toPrecision(6)}° | ${this.isTransferBurstTimeScan() ? `P0=${Number(data.transfer_frequency_hz).toPrecision(8)}` : `${Number(data.transfer_frequency_hz).toPrecision(8)} Hz`} | ${Number(data.transfer_repeat)}/${Number(this.config.transfer_repeats)}`
                         : (isRamseyPoint
                         ? `Ramsey: Δf=${Number(data.ramsey_delta_f_mhz).toPrecision(8)} MHz | CH1=${Number(data.ramsey_ch1_frequency_mhz).toPrecision(9)} MHz | CH2=${Number(data.ramsey_ch2_frequency_mhz).toPrecision(9)} MHz | ${Number(data.ramsey_repeat)}/${Number(this.config.ramsey_repeats)}`
                         : (isAcStarkPoint
@@ -6103,7 +6141,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                                 this.recordTransferFunctionPoint(data);
                                 this.plotRevision++;
                                 this.renderMainPlot();
-                                this.addLog(`Transfer Function | ${String(data.transfer_generator_model || 'TTI')} CH${Number(data.transfer_generator_channel || 1)} | ${Number(data.transfer_phase_deg).toPrecision(6)}° | ${Number(data.transfer_frequency_hz).toPrecision(9)} Hz | repeat ${Number(data.transfer_repeat)}/${Number(this.config.transfer_repeats)}`);
+                                this.addLog(`${this.isTransferBurstTimeScan() ? 'Transfer function Burst time scan' : 'Transfer Function'} | ${String(data.transfer_generator_model || 'TTI')} CH${Number(data.transfer_generator_channel || 1)} | ${Number(data.transfer_phase_deg).toPrecision(6)}° | ${this.isTransferBurstTimeScan() ? `P0=${Number(data.transfer_frequency_hz).toPrecision(9)}` : `${Number(data.transfer_frequency_hz).toPrecision(9)} Hz`} | repeat ${Number(data.transfer_repeat)}/${Number(this.config.transfer_repeats)}`);
                                 if (isFinalImmediateStep) {
                                     this.finalizeImmediateScanCompletion(total);
                                 } else if (this.isRunning) {

@@ -251,6 +251,8 @@ class ScheduleManager:
             if not isinstance(task, dict) or not isinstance(task.get("sequence_snapshot"), str):
                 raise ValueError(f"Task {index + 1} has no sequence snapshot")
             config_payload = ScanConfig(**(task.get("config") or {})).dict()
+            if config_payload.get("mode") == "transfer_burst_time_scan":
+                raise ValueError("Transfer function Burst time scan is not available in the scheduled queue")
             if config_payload.get("parameter_source") == "markers":
                 raise ValueError("Auto Markers are available in Live only")
             if config_payload.get("mode") == "ac_stark":

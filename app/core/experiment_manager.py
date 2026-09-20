@@ -1237,6 +1237,7 @@ class ExperimentManager:
         return parameters
 
     def _build_transfer_function_execution(self, scan_config: Dict[str, Any]) -> List[Dict[str, Any]]:
+        burst_time_scan = str(scan_config.get("mode") or "").strip().lower() == "transfer_burst_time_scan"
         if self._resolve_scan_dimensions(scan_config) != 1:
             raise ValueError("Transfer Function only supports a 1D live scan")
         if scan_config.get("randomize"):
@@ -1247,9 +1248,12 @@ class ExperimentManager:
         start = float(scan_config.get("transfer_frequency_start_hz", 0))
         stop = float(scan_config.get("transfer_frequency_stop_hz", 0))
         step = float(scan_config.get("transfer_frequency_step_hz", 0))
-        if not all(math.isfinite(value) for value in (start, stop, step)):
+        fixed_generator_frequency = float(scan_config.get("transfer_burst_time_frequency_hz", 0))
+        if burst_time_scan and (not math.isfinite(fixed_generator_frequency) or fixed_generator_frequency <= 0):
+            raise ValueError("Transfer function Burst time scan requires a positive fixed TTI frequency")
+        if not burst_time_scan and not all(math.isfinite(value) for value in (start, stop, step)):
             raise ValueError("Transfer Function frequencies must be finite")
-        if step == 0:
+        if not burst_time_scan and step == 0:
             raise ValueError("Transfer Function frequency step cannot be zero")
         repeats = int(scan_config.get("transfer_repeats", 10))
         if repeats < 2:
@@ -1301,19 +1305,32 @@ class ExperimentManager:
         if zero_phase_frequency_interval < 1:
             raise ValueError("Periodic zero-phase calibration interval must be at least one frequency")
 
-        direction = 1.0 if stop >= start else -1.0
-        effective_step = abs(step) * direction
-        tolerance = abs(effective_step) * 1e-9 + 1e-12
-        compare = (lambda value: value <= stop + tolerance) if direction > 0 else (lambda value: value >= stop - tolerance)
-        frequencies: List[float] = []
-        current = start
-        while compare(current):
-            frequencies.append(round(current, 6))
+        timing_parameters: Dict[float, List[Any]] = {}
+        if burst_time_scan:
+            timing_config = dict(scan_config)
+            timing_config["mode"] = "timing"
+            generated_timing_parameters = self._generate_parameters(timing_config)
+            frequencies = []
+            for sequence_parameters in generated_timing_parameters:
+                p0 = float(sequence_parameters[0])
+                frequencies.append(p0)
+                timing_parameters[p0] = list(sequence_parameters)
             if len(frequencies) > 10000:
-                raise ValueError("Transfer Function scan exceeds 10000 frequency points")
-            current += effective_step
-        if not frequencies:
-            frequencies = [round(start, 6)]
+                raise ValueError("Transfer function Burst time scan exceeds 10000 P0 points")
+        else:
+            direction = 1.0 if stop >= start else -1.0
+            effective_step = abs(step) * direction
+            tolerance = abs(effective_step) * 1e-9 + 1e-12
+            compare = (lambda value: value <= stop + tolerance) if direction > 0 else (lambda value: value >= stop - tolerance)
+            frequencies: List[float] = []
+            current = start
+            while compare(current):
+                frequencies.append(round(current, 6))
+                if len(frequencies) > 10000:
+                    raise ValueError("Transfer Function scan exceeds 10000 frequency points")
+                current += effective_step
+            if not frequencies:
+                frequencies = [round(start, 6)]
         if frequency_order == "symmetric_converging":
             ordered_frequencies: List[float] = []
             left, right = 0, len(frequencies) - 1
@@ -1331,10 +1348,13 @@ class ExperimentManager:
         def append_zero_phase_baseline(block_id: int, frequency: float) -> None:
             for repeat_index in range(1, zero_phase_repeats + 1):
                 parameters.append({
-                    "sequence_parameters": [],
+                    "sequence_parameters": timing_parameters.get(frequency, []),
                     "metadata": {
                         "display_parameters": [frequency],
                         "transfer_frequency_hz": frequency,
+                        "transfer_generator_frequency_hz": fixed_generator_frequency if burst_time_scan else frequency,
+                        "transfer_burst_time_p0": frequency if burst_time_scan else None,
+                        "transfer_response_axis": "p0" if burst_time_scan else "frequency",
                         "transfer_phase_deg": phase_degrees[0],
                         "transfer_zero_phase_baseline": True,
                         "transfer_zero_phase_block_id": block_id,
@@ -1353,10 +1373,13 @@ class ExperimentManager:
         ) -> None:
             for repeat_index in range(1, repeats + 1):
                 parameters.append({
-                    "sequence_parameters": [],
+                    "sequence_parameters": timing_parameters.get(frequency, []),
                     "metadata": {
                         "display_parameters": [frequency],
                         "transfer_frequency_hz": frequency,
+                        "transfer_generator_frequency_hz": fixed_generator_frequency if burst_time_scan else frequency,
+                        "transfer_burst_time_p0": frequency if burst_time_scan else None,
+                        "transfer_response_axis": "p0" if burst_time_scan else "frequency",
                         "transfer_frequency_index": frequency_index,
                         "transfer_frequency_count": len(frequencies),
                         "transfer_repeat": repeat_index,
@@ -1413,6 +1436,8 @@ class ExperimentManager:
         scan_config["transfer_periodic_zero_phase"] = periodic_zero_phase
         scan_config["transfer_zero_phase_frequency_interval"] = zero_phase_frequency_interval
         scan_config["transfer_frequency_values_hz"] = frequencies
+        scan_config["transfer_burst_time_frequency_hz"] = fixed_generator_frequency if burst_time_scan else None
+        scan_config["transfer_response_axis"] = "p0" if burst_time_scan else "frequency"
         scan_config["transfer_repeats"] = repeats
         return parameters
 
@@ -1628,12 +1653,12 @@ class ExperimentManager:
     def build_scan_parameter_plan(self, scan_config: Dict[str, Any]) -> List[Any]:
         payload = dict(scan_config or {})
         mode = str(payload.get('mode') or 'standard').strip().lower()
-        supported_modes = {'standard', 'timing', 'rabi', 'half', 'link', 'bragg_rabi', 'transfer_function'}
+        supported_modes = {'standard', 'timing', 'rabi', 'half', 'link', 'bragg_rabi', 'transfer_function', 'transfer_burst_time_scan'}
         if mode not in supported_modes:
             raise ValueError(
                 "Sync mode supports Standard, Timing, Rabi, Half, Link, Bragg Rabi and Transfer Function scan logic"
             )
-        if mode == 'transfer_function':
+        if mode in {'transfer_function', 'transfer_burst_time_scan'}:
             # Transfer Function resolves node settings into the run config so
             # acquisition and archive summaries use the Master's snapshot.
             return self._build_transfer_function_execution(scan_config)
@@ -1699,7 +1724,7 @@ class ExperimentManager:
                 parameters, ac_stark_context = self._build_ac_stark_execution(scan_config)
             elif scan_config.get('mode') == 'lock_in':
                 parameters = self._build_lock_in_execution(scan_config)
-            elif scan_config.get('mode') == 'transfer_function':
+            elif scan_config.get('mode') in {'transfer_function', 'transfer_burst_time_scan'}:
                 parameters = self._build_transfer_function_execution(scan_config)
             elif scan_config.get('mode') == 'ramsey_interferometer':
                 parameters = self._build_ramsey_interferometer_execution(scan_config)
@@ -2610,7 +2635,7 @@ class ExperimentManager:
             phase_result = interferometer_phase.calculate_phase(phase_input, phase_calibration)
             raw_interferometer_phase = phase_result.get("interferometer_phase")
             if (
-                str(execution_config.get("mode") or "").strip().lower() == "transfer_function"
+                str(execution_config.get("mode") or "").strip().lower() in {"transfer_function", "transfer_burst_time_scan"}
                 and not metadata.get("transfer_zero_phase_baseline", False)
                 and phase_result.get("interferometer_phase_valid")
             ):
@@ -2746,7 +2771,8 @@ class ExperimentManager:
         print(f"--- Acquisition Started: {len(parameter_list)} points ---")
         total_steps = len(parameter_list)
         scan_dimensions = self._resolve_scan_dimensions(scan_config)
-        transfer_mode = str(scan_config.get("mode") or "").strip().lower() == "transfer_function"
+        transfer_mode = str(scan_config.get("mode") or "").strip().lower() in {'transfer_function', 'transfer_burst_time_scan'}
+        transfer_burst_time_mode = str(scan_config.get("mode") or "").strip().lower() == "transfer_burst_time_scan"
         ramsey_mode = str(scan_config.get("mode") or "").strip().lower() == "ramsey_interferometer"
         tti_client: Optional[TtiGeneratorClient] = None
         rigol_client: Optional[RigolGeneratorClient] = None
@@ -2815,13 +2841,18 @@ class ExperimentManager:
                     phase_changed = active_transfer_phase is None or phase_deg != active_transfer_phase
                     if phase_changed:
                         active_transfer_phase = phase_deg
-                        active_transfer_frequency = None
-                    frequency = float((metadata or {}).get("transfer_frequency_hz"))
+                        if transfer_burst_time_mode:
+                            self.status.message = f"Setting {transfer_model} CH{transfer_channel} phase to {phase_deg:g}°..."
+                            if tti_client is not None:
+                                tti_client.set_phase(phase_deg)
+                        else:
+                            active_transfer_frequency = None
+                    frequency = float((metadata or {}).get("transfer_generator_frequency_hz", (metadata or {}).get("transfer_frequency_hz")))
                     if active_transfer_frequency is None or frequency != active_transfer_frequency:
                         self.status.message = f"Setting {transfer_model} CH{transfer_channel} to {frequency:g} Hz at {phase_deg:g}°..."
                         if tti_client is not None:
                             tti_client.set_frequency(frequency)
-                            if phase_changed:
+                            if phase_changed and not transfer_burst_time_mode:
                                 tti_client.set_phase(phase_deg)
                         active_transfer_frequency = frequency
                         settling_time = float(scan_config.get("transfer_settling_time_s", 5.0))
@@ -3055,7 +3086,7 @@ class ExperimentManager:
                 except Exception as exc:
                     self._scan_finalize_error = f"Lock-in analysis save failed: {exc}"
                     print(f"[Lock-in] {self._scan_finalize_error}")
-            if scan_config and scan_config.get('mode') == 'transfer_function':
+            if scan_config and scan_config.get('mode') in {'transfer_function', 'transfer_burst_time_scan'}:
                 try:
                     self.data_manager.save_transfer_function_summary(
                         build_transfer_function_summary(

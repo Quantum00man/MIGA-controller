@@ -353,7 +353,7 @@ class DataManager:
             existing_analysis = data.get('_analysis_snapshot') if isinstance(data.get('_analysis_snapshot'), dict) else {}
             data['_system_settings_snapshot'] = {**existing_system, **new_settings}
             data['_analysis_snapshot'] = {**existing_analysis, **new_settings}
-            if str(data.get("mode") or "").strip().lower() == "transfer_function":
+            if str(data.get("mode") or "").strip().lower() in {"transfer_function", "transfer_burst_time_scan"}:
                 for key in (
                     "transfer_frequency_modulation_mhz",
                     "transfer_atom_mirror_distance_m",

@@ -2754,7 +2754,7 @@ async def overwrite_archived_run(req: ReAnalysisRequest):
             recalculated["data"],
             (
                 recalculated.get("transfer_function_summary")
-                if str(recalculated.get("config", {}).get("mode") or "").strip().lower() == "transfer_function"
+                if str(recalculated.get("config", {}).get("mode") or "").strip().lower() in {"transfer_function", "transfer_burst_time_scan"}
                 else None
             ),
         )

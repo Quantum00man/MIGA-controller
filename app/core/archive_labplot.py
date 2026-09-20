@@ -242,7 +242,7 @@ def _transfer_statistic_curves(
 
 
 def _transfer_function_worksheets(
-    metrics: Sequence[str], source: str, rows: Sequence[Dict[str, Any]]
+    metrics: Sequence[str], source: str, rows: Sequence[Dict[str, Any]], x_label: str = "TTI carrier frequency (Hz)"
 ) -> List[Worksheet]:
     ordered_rows = sorted(
         (row for row in rows if isinstance(row, dict)),
@@ -250,7 +250,6 @@ def _transfer_function_worksheets(
     )
     phases = _transfer_phase_degrees(ordered_rows)
     worksheets: List[Worksheet] = []
-    x_label = "TTI carrier frequency (Hz)"
 
     if "atoms" in metrics:
         suffix = "nofit" if source == "nofit" else "fit"
@@ -550,7 +549,7 @@ def build_archive_project(
         year, month, day, run_id, current_phase_calibration=current_phase_calibration
     )
     config_data = loaded_root.get("config") or {}
-    is_transfer_function = str(config_data.get("mode") or "").strip().lower() == "transfer_function"
+    is_transfer_function = str(config_data.get("mode") or "").strip().lower() in {"transfer_function", "transfer_burst_time_scan"}
     if is_transfer_function:
         selected = [item for item in metrics if item in {"atoms", "intf", "phase"}]
         summary = (
@@ -558,7 +557,9 @@ def build_archive_project(
             if transfer_function_summary is not None
             else loaded_root.get("transfer_function_summary") or []
         )
-        worksheets = _transfer_function_worksheets(selected, source, summary)
+        burst_time_scan = str(config_data.get("mode") or "").strip().lower() == "transfer_burst_time_scan"
+        x_label = "P0" if burst_time_scan else "TTI carrier frequency (Hz)"
+        worksheets = _transfer_function_worksheets(selected, source, summary, x_label=x_label)
         project_name = f"MIGA Transfer Function {day} {run_id}"
         normalization = summary[0] if summary else {}
         modulation_mhz = _finite(normalization.get("frequency_modulation_mhz"))
@@ -571,7 +572,7 @@ def build_archive_project(
         )))
         comment = (
             f"Transfer Function archive {year}-{month}-{day}/{run_id}; source={source}; "
-            f"x=TTI carrier frequency{'; ' + normalization_comment if normalization_comment else ''}; "
+            f"x={x_label}{'; ' + normalization_comment if normalization_comment else ''}; "
             "generated for LabPlot 2.12.1"
         )
         return build_project(project_name, worksheets, comment=comment)

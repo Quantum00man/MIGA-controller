@@ -934,6 +934,14 @@ one-dimensional Live scan. General parameter randomization and alternate paramet
 sources are disabled; frequency ordering is instead selected explicitly below. The
 uploaded \code{.mot} sequence is executed unchanged, so it requires no
 \code{PARAMETER} placeholder.
+
+\ui{Transfer function Burst time scan} is the fixed-carrier companion mode. Enter one
+TTI frequency and scan P0 using the Timing relation \code{[P0, Total-P0]}. The generator
+frequency is programmed once at the start of the run; the selected \ang{0}/\ang{90}
+quadratures, repeats, OUTPUT control and zero-phase calibration are otherwise identical
+to Transfer Function. Its live and archive response plots use P0 as the horizontal axis.
+The mode supports SYNC (the Master controls the TTI) but is not available in the scheduled
+queue.
 Set \ui{Allan phase-noise $\sigma$ at current average} in
 \ui{Settings $>$ Transfer Function}; its default is \SI{100}{\milli\radian}.
 Optionally enable \ui{Calibrate zero phase with OUTPUT OFF before scan}. This requires

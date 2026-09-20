@@ -379,7 +379,7 @@ class SyncManager:
         plan = prepared.get("shot_plan") or []
         scan_config = dict(prepared.get("scan_config") or {})
         node_name = str(self.manager.get_settings().get("sync_node_name") or "Slave")
-        transfer_mode = str(scan_config.get("mode") or "").strip().lower() == "transfer_function"
+        transfer_mode = str(scan_config.get("mode") or "").strip().lower() in {"transfer_function", "transfer_burst_time_scan"}
         local_settings = self.manager.get_settings()
         parameters = []
         for index, raw_parameters in enumerate(plan):
@@ -408,7 +408,7 @@ class SyncManager:
                 },
             })
         scan_config.update({
-            "mode": "transfer_function" if transfer_mode else "standard",
+            "mode": str(scan_config.get("mode") or "transfer_function") if transfer_mode else "standard",
             "parameter_source": "classic",
             "marker_axes": [],
             "averages": 1,

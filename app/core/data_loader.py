@@ -1564,7 +1564,7 @@ class DataLoader:
         is_lock_in = str(config_data.get("mode") or "").strip().lower() == "lock_in"
         expected_lock_in_blocks = self._parse_int(config_data.get("averages"), 0) if is_lock_in else 0
         lock_in_analysis = build_lock_in_analysis(full_points, expected_blocks=expected_lock_in_blocks) if is_lock_in else {}
-        is_transfer_function = str(config_data.get("mode") or "").strip().lower() == "transfer_function"
+        is_transfer_function = str(config_data.get("mode") or "").strip().lower() in {"transfer_function", "transfer_burst_time_scan"}
         transfer_function_summary = (
             build_transfer_function_summary(
                 self._transfer_response_points(full_points),
@@ -1884,7 +1884,7 @@ class DataLoader:
                         )
                 recalculated_points.append(result)
 
-        if str(config_data.get("mode") or "").strip().lower() == "transfer_function":
+        if str(config_data.get("mode") or "").strip().lower() in {"transfer_function", "transfer_burst_time_scan"}:
             for point in recalculated_points:
                 point["interferometer_phase_raw"] = point.get("interferometer_phase")
             recalculated_points = self._apply_transfer_zero_phase_reference(recalculated_points, settings)
@@ -1916,7 +1916,7 @@ class DataLoader:
 
         normalized_mode = "recalculated" if str(display_mode or "saved").strip().lower() == "recalculated" else "saved"
         all_points = self._load_allan_points(run_dir, config_data, normalized_mode, new_settings=new_settings)
-        if str(config_data.get("mode") or "").strip().lower() == "transfer_function":
+        if str(config_data.get("mode") or "").strip().lower() in {"transfer_function", "transfer_burst_time_scan"}:
             all_points = self._transfer_response_points(all_points)
         _phase_node_key, phase_context, _phase_contexts = self._archive_phase_reference_context(
             year, month, day, run_id, node_id, current_phase_calibration
@@ -2906,7 +2906,7 @@ class DataLoader:
                         )
                 recalculated_points.append(result)
 
-        is_transfer_function = str(config_data.get("mode") or "").strip().lower() == "transfer_function"
+        is_transfer_function = str(config_data.get("mode") or "").strip().lower() in {"transfer_function", "transfer_burst_time_scan"}
         if is_transfer_function:
             for point in recalculated_points:
                 point["interferometer_phase_raw"] = point.get("interferometer_phase")

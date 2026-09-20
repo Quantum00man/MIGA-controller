@@ -1896,7 +1896,7 @@
                                         <span class="badge bg-light text-dark border">{{ syncArchiveNodeLabel(syncPhaseTargetNode) }} − {{ syncArchiveNodeLabel(syncPhaseReferenceNode) }}</span>
                                     </div>
                                     <div class="row g-2 align-items-end">
-                                        <div v-if="isTransferFunctionArchive()" class="col-sm-6 col-lg-2"><label class="form-label-small">TTI FREQUENCY (HZ)</label><select class="form-select form-select-sm" v-model.number="syncPhaseCalibrationOptimization.transferFrequencyHz"><option v-for="frequency in syncTransferFunctionOptimizationFrequencies()" :key="frequency" :value="frequency">{{ Number(frequency).toPrecision(9) }}</option></select></div>
+                                        <div v-if="isTransferFunctionArchive()" class="col-sm-6 col-lg-2"><label class="form-label-small">{{ isTransferBurstTimeScanArchive() ? 'P0' : 'TTI FREQUENCY (HZ)' }}</label><select class="form-select form-select-sm" v-model.number="syncPhaseCalibrationOptimization.transferFrequencyHz"><option v-for="frequency in syncTransferFunctionOptimizationFrequencies()" :key="frequency" :value="frequency">{{ Number(frequency).toPrecision(9) }}</option></select></div>
                                         <div v-if="isTransferFunctionArchive()" class="col-sm-6 col-lg-2"><label class="form-label-small">GENERATOR PHASE</label><select class="form-select form-select-sm" v-model.number="syncPhaseCalibrationOptimization.transferPhaseDeg"><option :value="0">0°</option><option :value="90">90°</option></select></div>
                                         <div class="col-sm-6 col-lg-2"><label class="form-label-small">OBJECTIVE</label><select class="form-select form-select-sm" v-model="syncPhaseCalibrationOptimization.objective"><option value="allan">Allan n=1</option><option value="std">Standard deviation</option><option value="combined">Combined</option></select></div>
                                         <div class="col-sm-6 col-lg-2" v-if="syncPhaseCalibrationOptimization.objective === 'combined'"><label class="form-label-small">ALLAN WEIGHT</label><input type="number" class="form-control form-control-sm" min="0" max="1" step="0.05" v-model.number="syncPhaseCalibrationOptimization.combinedAllanWeight"></div>
@@ -1905,7 +1905,7 @@
                                         <div class="col-sm-6 col-lg-2"><label class="form-label-small">PRIOR WEIGHT</label><input type="number" class="form-control form-control-sm" min="0" max="1000" step="0.01" v-model.number="syncPhaseCalibrationOptimization.priorWeight"></div>
                                         <div class="col-sm-6 col-lg-2"><button class="btn btn-primary btn-sm w-100 fw-bold" @click="runSyncPhaseCalibrationOptimization" :disabled="syncPhaseCalibrationOptimization.loading"><span v-if="syncPhaseCalibrationOptimization.loading" class="spinner-border spinner-border-sm me-1"></span>{{ syncPhaseCalibrationOptimization.loading ? 'Optimizing…' : 'Optimize A/C' }}</button></div>
                                     </div>
-                                    <div class="form-text">{{ isTransferFunctionArchive() ? 'Uses one selected TTI frequency and generator phase, plus the actual shot-index range. Allan never combines 0° and 90° shots.' : 'Uses the current P0 and actual shot-index ranges.' }} Larger fringe/prior weights keep A and C closer to the original calibration.</div>
+                                    <div class="form-text">{{ isTransferFunctionArchive() ? `Uses one selected ${isTransferBurstTimeScanArchive() ? 'P0 value' : 'TTI frequency'} and generator phase, plus the actual shot-index range. Allan never combines 0° and 90° shots.` : 'Uses the current P0 and actual shot-index ranges.' }} Larger fringe/prior weights keep A and C closer to the original calibration.</div>
                                     <div v-if="syncPhaseCalibrationOptimization.error" class="alert alert-danger small py-2 mt-2 mb-0">{{ syncPhaseCalibrationOptimization.error }}</div>
                                     <div v-if="syncPhaseCalibrationOptimization.message" class="alert alert-success small py-2 mt-2 mb-0">{{ syncPhaseCalibrationOptimization.message }}</div>
                                     <div v-if="syncPhaseCalibrationOptimization.saved.length" class="row g-2 align-items-end mt-1">
@@ -2527,7 +2527,7 @@
                     </div>
                     <div class="labplot-summary mb-3">
                         <template v-if="isTransferFunctionArchive()">
-                            Transfer Function uses TTI carrier frequency as the x-axis. Mean and standard-deviation worksheets contain separate phase curves; Interferometer Phase exports S² and an unnormalized ΔΦ² worksheet, each with the fixed Allan noise floor.
+                            Transfer Function uses {{ isTransferBurstTimeScanArchive() ? 'P0' : 'TTI carrier frequency' }} as the x-axis. Mean and standard-deviation worksheets contain separate phase curves; Interferometer Phase exports S² and an unnormalized ΔΦ² worksheet, each with the fixed Allan noise floor.
                         </template>
                         <template v-else-if="isPhaseNoiseArchive()">
                             Exports a Standard Deviation worksheet and an Allan Deviation worksheet with one stacked plot per selected order ({{ phaseNoiseAllanOrders.map(order => `n=${order}`).join(', ') }}). The current T/T² x-axis selection is preserved.
@@ -3476,7 +3476,10 @@
                     return String(this.loadedConfig?.mode || "").trim().toLowerCase() === "lock_in";
                 },
                 isTransferFunctionArchive() {
-                    return String(this.loadedConfig?.mode || "").trim().toLowerCase() === "transfer_function";
+                    return ["transfer_function", "transfer_burst_time_scan"].includes(String(this.loadedConfig?.mode || "").trim().toLowerCase());
+                },
+                isTransferBurstTimeScanArchive() {
+                    return String(this.loadedConfig?.mode || "").trim().toLowerCase() === "transfer_burst_time_scan";
                 },
                 isRamseyInterferometerArchive() {
                     return String(this.loadedConfig?.mode || "").trim().toLowerCase() === "ramsey_interferometer";
@@ -3549,6 +3552,7 @@
                 },
                 getArchiveXAxisLabel() {
                     if (this.isTransferFunctionArchive()) {
+                        if (String(this.loadedConfig?.mode || '').trim().toLowerCase() === 'transfer_burst_time_scan') return 'P0';
                         const model = String(this.loadedConfig?.transfer_generator_model || 'TTI');
                         const channel = Number(this.loadedConfig?.transfer_generator_channel || 1);
                         return `${model} CH${channel} frequency (Hz)`;
@@ -7888,7 +7892,7 @@
                     Plotly.react(element, traces, {
                         margin: { l: 78, r: 35, t: 52, b: 68 },
                         title: `Differential Transfer Function · Master − ${label}`,
-                        xaxis: { title: 'TTI carrier frequency (Hz)', showline: true, mirror: true, ticks: 'inside', gridcolor: '#dde5ee' },
+                        xaxis: { title: this.getArchiveXAxisLabel(), showline: true, mirror: true, ticks: 'inside', gridcolor: '#dde5ee' },
                         yaxis: { title: linear ? '|ΔS₀|², |ΔS₉₀|² / |ΔS|²' : '|ΔS|²', type: this.transferFunctionYAxisScale, showline: true, mirror: true, ticks: 'inside', gridcolor: '#dde5ee' },
                         legend: { orientation: 'h', x: 0.5, xanchor: 'center', y: 1.12 },
                         annotations: rows.length ? [] : [{ text: 'No valid differential Transfer Function data', showarrow: false, xref: 'paper', yref: 'paper', x: 0.5, y: 0.5 }],
@@ -7918,7 +7922,7 @@
                     Plotly.react(element, traces, {
                         margin: { l: 78, r: 35, t: 52, b: 68 },
                         title: `Absolute Mean Interferometer Phase Difference · Master − ${label}`,
-                        xaxis: { title: 'TTI carrier frequency (Hz)', showline: true, mirror: true, ticks: 'inside', gridcolor: '#dde5ee' },
+                        xaxis: { title: this.getArchiveXAxisLabel(), showline: true, mirror: true, ticks: 'inside', gridcolor: '#dde5ee' },
                         yaxis: {
                             title: '|mean(φ Master − φ Slave)| (rad)', type: this.transferFunctionYAxisScale,
                             ...(this.transferFunctionYAxisScale === 'log' ? {} : { rangemode: 'tozero' }),
@@ -7949,7 +7953,7 @@
                     Plotly.react(element, traces, {
                         margin: { l: 78, r: 35, t: 52, b: 68 },
                         title: `Differential Phase Response Normalized by Path Difference · Master − ${label}`,
-                        xaxis: { title: 'TTI carrier frequency (Hz)', showline: true, mirror: true, ticks: 'inside', gridcolor: '#dde5ee' },
+                        xaxis: { title: this.getArchiveXAxisLabel(), showline: true, mirror: true, ticks: 'inside', gridcolor: '#dde5ee' },
                         yaxis: { title: '|ΔΦ / [2Δk(LM−LS)]|² (dimensionless)', type: this.transferFunctionYAxisScale, ...(this.transferFunctionYAxisScale === 'log' ? {} : { rangemode: 'tozero' }), showline: true, mirror: true, ticks: 'inside', gridcolor: '#dde5ee' },
                         legend: { orientation: 'h', x: 0.5, xanchor: 'center', y: 1.12 },
                         annotations: rows.length ? [] : [{ text: 'No valid path-normalized differential phase data', showarrow: false, xref: 'paper', yref: 'paper', x: 0.5, y: 0.5 }],
@@ -8777,11 +8781,11 @@
                         ? this.transferFunctionSummary
                         : [];
                     if (!rows.length) {
-                        this.errorMsg = 'Transfer Function CSV export failed: no frequency summary is available.';
+                        this.errorMsg = 'Transfer Function CSV export failed: no response summary is available.';
                         return;
                     }
                     const columns = [
-                        ['Frequency_Hz', 'frequency_hz'],
+                        [String(this.loadedConfig?.mode || '').trim().toLowerCase() === 'transfer_burst_time_scan' ? 'P0' : 'Frequency_Hz', 'frequency_hz'],
                         ['Shot_Count', 'shot_count'],
                         ['Frequency_Modulation_MHz_780nm', 'frequency_modulation_mhz'],
                         ['Atom_Mirror_Distance_M', 'atom_mirror_distance_m'],
