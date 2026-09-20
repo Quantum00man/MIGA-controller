@@ -3396,7 +3396,7 @@ getLiveEstimatedDurationSeconds() {
     let seconds = shots * this.getSinglePointDurationSec();
     if (this.isTransferFunctionMode()) {
         const repeats = Math.max(2, Math.round(Number(this.config.transfer_repeats) || 2));
-        seconds += (this.isTransferBurstTimeScan() ? 1 : Math.ceil(shots / repeats)) * 5;
+        seconds += Math.ceil(shots / repeats) * 5;
     }
     if (this.config.mode === 'ramsey_interferometer') {
         const repeats = Math.max(1, Math.round(Number(this.config.ramsey_repeats) || 1));
@@ -3427,7 +3427,7 @@ getLiveEstimateSummary() {
     if (this.isTransferFunctionMode()) {
         const repeats = Math.max(2, Math.round(Number(this.config.transfer_repeats) || 2));
         const points = Math.ceil(shots / repeats);
-        return `${shots} shots at ${points} ${this.isTransferBurstTimeScan() ? 'P0 points' : 'frequencies'} | ${this.formatDuration(this.getLiveEstimatedDurationSeconds())} incl. 5 s settling/${this.isTransferBurstTimeScan() ? 'scan' : 'point'}`;
+        return `${shots} shots at ${points} ${this.isTransferBurstTimeScan() ? 'P0 points' : 'frequencies'} | ${this.formatDuration(this.getLiveEstimatedDurationSeconds())} incl. 5 s settling/point`;
     }
     if (this.config.mode === 'ramsey_interferometer') {
         const repeats = Math.max(1, Math.round(Number(this.config.ramsey_repeats) || 1));

@@ -2778,6 +2778,7 @@ class ExperimentManager:
         rigol_client: Optional[RigolGeneratorClient] = None
         active_transfer_frequency: Optional[float] = None
         active_transfer_phase: Optional[float] = None
+        active_transfer_response_value: Optional[float] = None
         active_ramsey_delta: Optional[float] = None
         transfer_model = str(scan_config.get("transfer_generator_model") or "TG5012A").strip().upper()
         transfer_channel = int(scan_config.get("transfer_generator_channel", 1))
@@ -2831,14 +2832,21 @@ class ExperimentManager:
                         if tti_client is not None:
                             tti_client.set_output(False)
                         transfer_output_enabled = False
+                        active_transfer_response_value = None
                     if transfer_control_output and not is_zero_baseline and not transfer_output_enabled:
                         self.status.message = f"Enabling {transfer_model} CH{transfer_channel} OUTPUT after zero-phase calibration..."
                         if tti_client is not None:
                             tti_client.set_output(True)
                         transfer_output_enabled = True
                         active_transfer_frequency = None
+                        active_transfer_response_value = None
                     phase_deg = float((metadata or {}).get("transfer_phase_deg"))
                     phase_changed = active_transfer_phase is None or phase_deg != active_transfer_phase
+                    response_value = float((metadata or {}).get("transfer_frequency_hz"))
+                    response_changed = (
+                        active_transfer_response_value is None
+                        or response_value != active_transfer_response_value
+                    )
                     if phase_changed:
                         active_transfer_phase = phase_deg
                         if transfer_burst_time_mode:
@@ -2855,10 +2863,23 @@ class ExperimentManager:
                             if phase_changed and not transfer_burst_time_mode:
                                 tti_client.set_phase(phase_deg)
                         active_transfer_frequency = frequency
-                        settling_time = float(scan_config.get("transfer_settling_time_s", 5.0))
+                        settling_time = 0.0 if transfer_burst_time_mode else float(scan_config.get("transfer_settling_time_s", 5.0))
                         if transfer_control_generator and not config.USE_SIMULATION and settling_time > 0:
                             action = "confirmed" if transfer_model == "TG5012A" else "accepted"
                             self.status.message = f"{transfer_model} CH{transfer_channel} {action} {frequency:g} Hz at {phase_deg:g}°; settling {settling_time:g} s..."
+                            deadline = time.monotonic() + settling_time
+                            while not self.stop_flag and time.monotonic() < deadline:
+                                time.sleep(min(0.1, max(0.0, deadline - time.monotonic())))
+                        if self.stop_flag:
+                            break
+                    if transfer_burst_time_mode and (phase_changed or response_changed):
+                        active_transfer_response_value = response_value
+                        settling_time = float(scan_config.get("transfer_settling_time_s", 5.0))
+                        if transfer_control_generator and not config.USE_SIMULATION and settling_time > 0:
+                            self.status.message = (
+                                f"{transfer_model} CH{transfer_channel} fixed at {frequency:g} Hz; "
+                                f"P0={response_value:g} at {phase_deg:g}°; settling {settling_time:g} s..."
+                            )
                             deadline = time.monotonic() + settling_time
                             while not self.stop_flag and time.monotonic() < deadline:
                                 time.sleep(min(0.1, max(0.0, deadline - time.monotonic())))
