@@ -55,6 +55,21 @@ class ScanConfig(BaseModel):
     link_formulas: List[str] = Field(default_factory=list)
     phase_noise_mid_fringe_values: List[float] = Field(default_factory=list, max_length=200)
     phase_noise_repeats: int = Field(10, ge=2, le=100000)
+    bragg_calibration_target_fringe: int = Field(1, ge=1, le=1000)
+    bragg_calibration_coarse_repeats: int = Field(2, ge=1, le=100000)
+    bragg_calibration_fine_phase_half_range_rad: float = Field(0.6, gt=0, lt=math.pi / 2)
+    bragg_calibration_fine_points: int = Field(7, ge=5, le=101)
+    bragg_calibration_fine_repeats: int = Field(5, ge=1, le=100000)
+    bragg_calibration_min_contrast: float = Field(0.0, ge=0)
+    bragg_calibration_max_t2_uncertainty_us2: float = Field(0.0, ge=0)
+    bragg_calibration_name: str = Field("")
+    bragg_calibration_apply_active: bool = Field(False)
+
+    @validator("bragg_calibration_fine_points")
+    def validate_bragg_calibration_fine_points(cls, value):
+        if int(value) % 2 == 0:
+            raise ValueError("Bragg calibration fine point count must be odd")
+        return int(value)
 
     @validator("mode_param", pre=True)
     def normalize_mode_param(cls, value):

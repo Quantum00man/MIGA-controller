@@ -95,6 +95,30 @@ class InterferometerPhaseTests(unittest.TestCase):
         self.assertIn("phase", allan["metrics"])
         self.assertGreater(len(allan["metrics"]["phase"]["fit"]["up"]["y"]), 0)
 
+    def test_phase_noise_reanalysis_uses_each_shot_mid_fringe_reference(self):
+        cal = calibration(parameter_values={"A": 20.0, "C": 50.0, "phi0": 0.0}, reference_t2_us2=5.0)
+        points = [
+            {"interferometer_phase_reference_t2_us2": 5.0, "intf_p1": 50.0 + 20.0 * math.cos(0.01 * 5.0)},
+            {"interferometer_phase_reference_t2_us2": 15.0, "intf_p1": 50.0 + 20.0 * math.cos(0.01 * 15.0)},
+        ]
+        converted = DataLoader._apply_phase_calibration_to_points(points, cal, "phase_noise")
+        self.assertTrue(all(point["interferometer_phase_valid"] for point in converted))
+        self.assertAlmostEqual(converted[0]["interferometer_phase"], 0.0, places=10)
+        self.assertAlmostEqual(converted[1]["interferometer_phase"], 0.0, places=10)
+
+    def test_rebased_transfer_reanalysis_uses_the_newly_converted_raw_phase(self):
+        loader = DataLoader()
+        points = [
+            {"transfer_zero_phase_baseline": True, "transfer_zero_phase_block_id": 0,
+             "interferometer_phase": 1.0, "interferometer_phase_raw": 99.0},
+            {"transfer_zero_phase_block_id": 0, "interferometer_phase": 1.5,
+             "interferometer_phase_raw": 99.0},
+        ]
+        rebased = loader._rebase_converted_transfer_phases(points, {})
+        self.assertAlmostEqual(rebased[0]["interferometer_phase_raw"], 1.0)
+        self.assertAlmostEqual(rebased[1]["interferometer_phase_raw"], 1.5)
+        self.assertAlmostEqual(rebased[1]["interferometer_phase"], 0.5)
+
     def test_archive_with_legacy_snapshot_recalculates_monotonic_phase(self):
         cal = calibration()
         reference = 0.01 * 100.0 + 0.2

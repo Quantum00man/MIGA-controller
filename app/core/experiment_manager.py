@@ -21,11 +21,12 @@ import config
 from app.drivers.hardware import SequenceEditor, ExperimentDriver, RedPitayaDriver
 from app.drivers import dds_table
 from app.drivers.vcd_parser import VCDParser
-from app.analysis import fitting, physics, interferometer_phase, phase_noise
+from app.analysis import fitting, physics, interferometer_phase, phase_noise, bragg_fringe_calibration
 from app.analysis.lock_in import build_lock_in_analysis
 from app.analysis.transfer_function import build_transfer_function_summary
 from app.models.schemas import ScanConfig, default_ramsey_frequency_power_table
 from app.core.data_manager import DataManager
+from app.core.link_export import build_single_link_export
 from app.core.structures import ExperimentStatus, ScanResult
 from app.core.pulse_generator import generate_bragg_pulse
 from app.core.sequence_markers import (
@@ -76,6 +77,7 @@ class ExperimentManager:
         self._active_mode: Optional[str] = None
         self._scan_finalize_error: Optional[str] = None
         self._active_phase_calibration_for_run: Optional[Dict[str, Any]] = None
+        self._bragg_calibration_fine_plan_queue: Optional[queue.Queue] = None
 
     def _default_tmot_args(self) -> str:
         return config.TMOT_EXTRA_ARGS_WIN if config.IS_WINDOWS else config.TMOT_EXTRA_ARGS_LINUX
@@ -896,14 +898,23 @@ class ExperimentManager:
             'source': dict(source or {}),
         })
 
-    def save_bragg_phase_calibration(self, name: str, fit_result: Dict[str, Any], source: Dict[str, Any]) -> Dict[str, Any]:
+    def save_bragg_phase_calibration(
+        self,
+        name: str,
+        fit_result: Dict[str, Any],
+        source: Dict[str, Any],
+        *,
+        activate_if_empty: bool = True,
+    ) -> Dict[str, Any]:
         calibration = self.build_bragg_phase_calibration(name, fit_result, source)
         payload = self._load_user_json_payload()
         calibrations = self.get_bragg_phase_calibrations()
         calibrations.append(calibration)
         payload['bragg_phase_calibrations'] = calibrations
-        if not str(payload.get('active_bragg_phase_calibration_id') or '').strip():
+        if activate_if_empty and not str(payload.get('active_bragg_phase_calibration_id') or '').strip():
             payload['active_bragg_phase_calibration_id'] = calibration['id']
+        elif 'active_bragg_phase_calibration_id' not in payload:
+            payload['active_bragg_phase_calibration_id'] = ''
         self._save_user_json_payload(payload)
         return calibration
 
@@ -911,6 +922,8 @@ class ExperimentManager:
         payload = self._load_user_json_payload()
         target = str(payload.get('active_bragg_phase_calibration_id') or '').strip()
         calibrations = self.get_bragg_phase_calibrations()
+        if 'active_bragg_phase_calibration_id' in payload and not target:
+            return None
         if target:
             selected = next((item for item in calibrations if item.get('id') == target), None)
             if selected is not None:
@@ -1703,6 +1716,83 @@ class ExperimentManager:
         scan_config["interferometer_phase_calibration_override"] = deepcopy(calibration)
         return plan
 
+    def _link_parameters_at_p0(self, scan_config: Dict[str, Any], p0: float) -> List[Any]:
+        payload = dict(scan_config)
+        payload.update({
+            "mode": "link", "scan_dimensions": 1, "dim1_type": "list",
+            "custom_list": str(float(p0)), "param_type": "float",
+            "dim2_enabled": False, "dim3_enabled": False,
+            "averages": 1, "randomize": False,
+        })
+        return self._generate_parameters(payload)[0]
+
+    def _build_bragg_calibration_execution(self, scan_config: Dict[str, Any]) -> List[Dict[str, Any]]:
+        if self._resolve_scan_dimensions(scan_config) != 1:
+            raise ValueError("Bragg Fringes Calibration only supports a 1D P0 = T^2 scan")
+        repeats = int(scan_config.get("bragg_calibration_coarse_repeats", 2))
+        if repeats < 1 or repeats > 100000:
+            raise ValueError("Coarse repeats must be between 1 and 100000")
+        coarse_payload = dict(scan_config)
+        coarse_payload.update({"mode": "link", "averages": 1, "randomize": False})
+        base_parameters = self._generate_parameters(coarse_payload)
+        if len({round(float(parameters[0]), 12) for parameters in base_parameters}) < 4:
+            raise ValueError("Bragg Fringes Calibration requires at least four distinct coarse P0 = T^2 values")
+        plan = []
+        for parameters in base_parameters:
+            for repeat in range(1, repeats + 1):
+                plan.append({
+                    "sequence_parameters": parameters,
+                    "metadata": {
+                        "bragg_calibration_stage": "coarse",
+                        "bragg_calibration_repeat": repeat,
+                        "bragg_calibration_total_repeats": repeats,
+                    },
+                })
+        fine_points = int(scan_config.get("bragg_calibration_fine_points", 7))
+        fine_repeats = int(scan_config.get("bragg_calibration_fine_repeats", 5))
+        bragg_fringe_calibration.fine_phase_offsets(
+            float(scan_config.get("bragg_calibration_fine_phase_half_range_rad", 0.6)),
+            fine_points,
+        )
+        if fine_repeats < 1 or fine_repeats > 100000:
+            raise ValueError("Fine repeats must be between 1 and 100000")
+        scan_config["averages"] = 1
+        scan_config["randomize"] = False
+        scan_config["parameter_source"] = "classic"
+        scan_config["_bragg_calibration_coarse_shots"] = len(plan)
+        scan_config["_bragg_calibration_expected_total_shots"] = len(plan) + fine_points * fine_repeats
+        self._bragg_calibration_fine_plan_queue = queue.Queue(maxsize=1)
+        return plan
+
+    def _build_bragg_calibration_fine_plan(
+        self, scan_config: Dict[str, Any], coarse: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        values = bragg_fringe_calibration.build_fine_p0_values(
+            coarse["selected_mid_fringe_t2_us2"],
+            coarse["angular_frequency_rad_per_us2"],
+            float(scan_config.get("bragg_calibration_fine_phase_half_range_rad", 0.6)),
+            int(scan_config.get("bragg_calibration_fine_points", 7)),
+        )
+        repeats = int(scan_config.get("bragg_calibration_fine_repeats", 5))
+        plan = []
+        for order, p0 in enumerate(values, start=1):
+            parameters = self._link_parameters_at_p0(scan_config, p0)
+            phase_offset = float(coarse["angular_frequency_rad_per_us2"]) * (
+                float(p0) - float(coarse["selected_mid_fringe_t2_us2"])
+            )
+            for repeat in range(1, repeats + 1):
+                plan.append({
+                    "sequence_parameters": parameters,
+                    "metadata": {
+                        "bragg_calibration_stage": "fine",
+                        "bragg_calibration_fine_order": order,
+                        "bragg_calibration_phase_offset_rad": phase_offset,
+                        "bragg_calibration_repeat": repeat,
+                        "bragg_calibration_total_repeats": repeats,
+                    },
+                })
+        return plan
+
     def start_scan(
         self,
         scan_config: Dict[str, Any],
@@ -1730,6 +1820,8 @@ class ExperimentManager:
                 parameters = self._build_ramsey_interferometer_execution(scan_config)
             elif scan_config.get('mode') == 'phase_noise':
                 parameters = self._build_phase_noise_execution(scan_config)
+            elif scan_config.get('mode') == 'bragg_fringe_calibration':
+                parameters = self._build_bragg_calibration_execution(scan_config)
             else:
                 parameters = self._generate_parameters(scan_config)
             if parameters_override is None or not scan_config.get('_sync_slave'):
@@ -1752,7 +1844,8 @@ class ExperimentManager:
 
         self.stop_flag = False
         self._scan_finalize_error = None
-        self.status = ExperimentStatus(is_running=True, total_steps=len(parameters), message='Starting...')
+        total_steps = int(scan_config.get("_bragg_calibration_expected_total_shots", len(parameters)))
+        self.status = ExperimentStatus(is_running=True, total_steps=total_steps, message='Starting...')
 
         try:
             requested_phase_calibration = scan_config.get('interferometer_phase_calibration_override')
@@ -2769,7 +2862,7 @@ class ExperimentManager:
         ac_stark_context: Optional[Dict[str, Any]] = None,
     ):
         print(f"--- Acquisition Started: {len(parameter_list)} points ---")
-        total_steps = len(parameter_list)
+        total_steps = int(scan_config.get("_bragg_calibration_expected_total_shots", len(parameter_list)))
         scan_dimensions = self._resolve_scan_dimensions(scan_config)
         transfer_mode = str(scan_config.get("mode") or "").strip().lower() in {'transfer_function', 'transfer_burst_time_scan'}
         transfer_burst_time_mode = str(scan_config.get("mode") or "").strip().lower() == "transfer_burst_time_scan"
@@ -2815,7 +2908,22 @@ class ExperimentManager:
                 ))
                 identity = rigol_client.connect()
                 print(f"[Ramsey Interferometer] Connected to {identity}")
-            for idx, param_set in enumerate(parameter_list):
+            def execution_items():
+                yield from parameter_list
+                if str(scan_config.get("mode") or "").strip().lower() != "bragg_fringe_calibration":
+                    return
+                self.status.message = "Coarse fringe acquired. Waiting for coarse fit..."
+                fine_plan = None
+                while not self.stop_flag and fine_plan is None:
+                    try:
+                        fine_plan = self._bragg_calibration_fine_plan_queue.get(timeout=0.25)
+                    except queue.Empty:
+                        continue
+                if fine_plan:
+                    self.status.message = "Coarse fit passed. Starting local mid-fringe scan..."
+                    yield from fine_plan
+
+            for idx, param_set in enumerate(execution_items()):
                 if self.stop_flag:
                     break
                 metadata: Optional[Dict[str, Any]] = None
@@ -3025,6 +3133,71 @@ class ExperimentManager:
             summary.append(row)
         return summary
 
+    def _finalize_bragg_fringe_calibration(
+        self,
+        scan_config: Dict[str, Any],
+        coarse: Dict[str, Any],
+        fine_results: List[ScanResult],
+    ) -> Dict[str, Any]:
+        fine = bragg_fringe_calibration.fine_fit(
+            fine_results,
+            coarse,
+            half_range_rad=float(scan_config.get("bragg_calibration_fine_phase_half_range_rad", 0.6)),
+            minimum_contrast=float(scan_config.get("bragg_calibration_min_contrast", 0.0)),
+            maximum_t2_uncertainty_us2=float(
+                scan_config.get("bragg_calibration_max_t2_uncertainty_us2", 0.0)
+            ),
+        )
+        result = {
+            "version": 1,
+            "status": "passed" if fine["quality_passed"] else "quality_failed",
+            "source_metric": "intf_p1",
+            "source_label": "INTF P1 Fit",
+            "target_fringe_number": int(scan_config.get("bragg_calibration_target_fringe", 1)),
+            "coarse": coarse,
+            "fine": fine,
+            "saved_calibration": None,
+            "applied_active": False,
+            "generated_mot_filename": "",
+        }
+        if not fine["quality_passed"]:
+            self.data_manager.save_bragg_fringe_calibration_result(result)
+            return result
+
+        requested_name = str(scan_config.get("bragg_calibration_name") or "").strip()
+        name = requested_name or (
+            f"Bragg Fringe #{int(scan_config.get('bragg_calibration_target_fringe', 1))} "
+            f"{time.strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+        source = {
+            "type": "bragg_fringe_calibration_scan",
+            "run_id": self.data_manager.current_run_id_str,
+            "metric_tab": "intf",
+            "channel": "up",
+            "source_mode": "fit",
+            "target_fringe_number": int(scan_config.get("bragg_calibration_target_fringe", 1)),
+        }
+        parameters = self._link_parameters_at_p0(scan_config, fine["mid_fringe_t2_us2"])
+        sequence_path = self.data_manager.current_run_dir / "sequence.mot"
+        template_content, template_encoding = decode_mot_bytes(sequence_path.read_bytes())
+        mot_payload, mot_filename = build_single_link_export(
+            template_content,
+            template_encoding,
+            str(scan_config.get("sequence_name") or "sequence.mot"),
+            parameters,
+        )
+        calibration = self.save_bragg_phase_calibration(
+            name, fine["calibration_fit"], source, activate_if_empty=False,
+        )
+        apply_active = bool(scan_config.get("bragg_calibration_apply_active", False))
+        if apply_active:
+            calibration = self.set_active_bragg_phase_calibration(calibration["id"])
+        result["saved_calibration"] = calibration
+        result["applied_active"] = apply_active
+        result["generated_mot_filename"] = mot_filename
+        self.data_manager.save_bragg_fringe_calibration_result(result, mot_payload, mot_filename)
+        return result
+
     # --- THREAD 2: PROCESSING (CONSUMER) ---
     def _processing_loop(self, fit_config: Dict[str, Any], scan_config: Optional[Dict[str, Any]] = None):
         print("--- Processing Thread Started ---")
@@ -3038,6 +3211,11 @@ class ExperimentManager:
         transfer_function_results: List[ScanResult] = []
         transfer_zero_phase_samples: Dict[int, List[float]] = {}
         phase_noise_results: List[ScanResult] = []
+        bragg_calibration_coarse_results: List[ScanResult] = []
+        bragg_calibration_fine_results: List[ScanResult] = []
+        bragg_calibration_coarse_fit: Optional[Dict[str, Any]] = None
+        bragg_calibration_plan_sent = False
+        bragg_calibration_coarse_processed = 0
 
         try:
             while True:
@@ -3061,6 +3239,42 @@ class ExperimentManager:
                     execution_config=scan_config,
                 )
                 metadata = job.get("metadata") or {}
+                if metadata.get("bragg_calibration_stage") == "coarse":
+                    bragg_calibration_coarse_processed += 1
+                if result is not None and metadata.get("bragg_calibration_stage"):
+                    result.bragg_calibration_stage = str(metadata["bragg_calibration_stage"])
+                    if result.bragg_calibration_stage == "coarse":
+                        bragg_calibration_coarse_results.append(result)
+                    elif result.bragg_calibration_stage == "fine":
+                        bragg_calibration_fine_results.append(result)
+                if (
+                    scan_config
+                    and scan_config.get("mode") == "bragg_fringe_calibration"
+                    and not bragg_calibration_plan_sent
+                    and bragg_calibration_coarse_processed
+                    >= int(scan_config.get("_bragg_calibration_coarse_shots", 0))
+                ):
+                    bragg_calibration_plan_sent = True
+                    try:
+                        bragg_calibration_coarse_fit = bragg_fringe_calibration.coarse_fit(
+                            bragg_calibration_coarse_results,
+                            int(scan_config.get("bragg_calibration_target_fringe", 1)),
+                        )
+                        fine_plan = self._build_bragg_calibration_fine_plan(
+                            scan_config, bragg_calibration_coarse_fit
+                        )
+                        self._bragg_calibration_fine_plan_queue.put(fine_plan)
+                        self.publish_data({
+                            "stream_type": "bragg_calibration_coarse_fit",
+                            "bragg_fringe_calibration": bragg_calibration_coarse_fit,
+                        })
+                    except Exception as exc:
+                        self._scan_finalize_error = f"Bragg coarse fringe analysis failed: {exc}"
+                        self.data_manager.save_bragg_fringe_calibration_result({
+                            "version": 1, "status": "coarse_failed", "error": str(exc),
+                            "target_fringe_number": int(scan_config.get("bragg_calibration_target_fringe", 1)),
+                        })
+                        self._bragg_calibration_fine_plan_queue.put([])
                 if result is not None and metadata.get("transfer_zero_phase_baseline"):
                     block_id = int(metadata.get("transfer_zero_phase_block_id", 0))
                     samples = transfer_zero_phase_samples.setdefault(block_id, [])
@@ -3136,6 +3350,52 @@ class ExperimentManager:
                 except Exception as exc:
                     self._scan_finalize_error = f"Phase Noise summary save failed: {exc}"
                     print(f"[Phase Noise] {self._scan_finalize_error}")
+            if (
+                scan_config
+                and scan_config.get("mode") == "bragg_fringe_calibration"
+                and bragg_calibration_coarse_fit is not None
+                and bragg_calibration_fine_results
+                and not self.stop_flag
+                and not self._scan_finalize_error
+            ):
+                try:
+                    result = self._finalize_bragg_fringe_calibration(
+                        scan_config, bragg_calibration_coarse_fit, bragg_calibration_fine_results
+                    )
+                    self.publish_data({
+                        "stream_type": "bragg_calibration_result",
+                        "bragg_fringe_calibration": result,
+                    })
+                    if not result.get("fine", {}).get("quality_passed"):
+                        self._scan_finalize_error = "Bragg fine scan completed, but quality checks failed"
+                except Exception as exc:
+                    self._scan_finalize_error = f"Bragg fine fringe analysis failed: {exc}"
+                    self.data_manager.save_bragg_fringe_calibration_result({
+                        "version": 1, "status": "fine_failed", "error": str(exc),
+                        "coarse": bragg_calibration_coarse_fit,
+                    })
+                    print(f"[Bragg Calibration] {self._scan_finalize_error}")
+            elif (
+                scan_config
+                and scan_config.get("mode") == "bragg_fringe_calibration"
+                and self.stop_flag
+            ):
+                self.data_manager.save_bragg_fringe_calibration_result({
+                    "version": 1, "status": "stopped",
+                    "coarse": bragg_calibration_coarse_fit,
+                    "message": "The scan was stopped before a calibration could be applied",
+                })
+            elif (
+                scan_config
+                and scan_config.get("mode") == "bragg_fringe_calibration"
+                and bragg_calibration_coarse_fit is not None
+                and self._scan_finalize_error
+            ):
+                self.data_manager.save_bragg_fringe_calibration_result({
+                    "version": 1, "status": "fine_failed",
+                    "error": self._scan_finalize_error,
+                    "coarse": bragg_calibration_coarse_fit,
+                })
             self.data_manager.close_run()
             self.status.is_running = False
             if self._scan_finalize_error:

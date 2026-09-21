@@ -212,6 +212,17 @@ class DataManager:
                     writer.writeheader()
                     writer.writerows(allan_rows)
 
+    def save_bragg_fringe_calibration_result(
+        self, result: Dict[str, Any], mot_payload: Optional[bytes] = None, mot_filename: str = ""
+    ) -> None:
+        if not self.current_run_dir:
+            return
+        with open(self.current_run_dir / "bragg_fringe_calibration.json", "w", encoding="utf-8") as handle:
+            json.dump(result, handle, ensure_ascii=False, indent=2)
+        if mot_payload is not None:
+            safe_name = Path(mot_filename or "bragg_mid_fringe.mot").name
+            (self.current_run_dir / safe_name).write_bytes(mot_payload)
+
     def _init_csv(self, path: Path):
         self.csv_handle = open(path, 'w', newline='')
         self.csv_writer = csv.writer(self.csv_handle)

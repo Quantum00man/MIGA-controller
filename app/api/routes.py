@@ -1866,6 +1866,17 @@ async def download_archived_sequence(year: str, month: str, day: str, run_id: st
         raise HTTPException(500, str(exc))
 
 
+@router.get("/archive/bragg-fringe-calibration/{year}/{month}/{day}/{run_id}/mot")
+async def download_bragg_fringe_calibration_mot(year: str, month: str, day: str, run_id: str):
+    try:
+        path, filename = data_loader.get_bragg_fringe_calibration_mot(year, month, day, run_id)
+        return FileResponse(path=path, media_type="text/plain", filename=filename)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except (OSError, ValueError) as exc:
+        raise HTTPException(400, str(exc))
+
+
 @router.post("/archive/mid-fringe-schedule")
 async def prepare_archive_mid_fringe_schedule(req: ArchiveMidFringeScheduleRequest):
     try:

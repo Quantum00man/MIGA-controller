@@ -918,10 +918,10 @@
                             v-model.number="config.scan_dimensions">
                         <label class="btn btn-outline-secondary" for="scan1d">1D</label>
                         <input type="radio" class="btn-check" name="scanDimension" id="scan2d" :value="2"
-                            v-model.number="config.scan_dimensions" :disabled="['ac_stark', 'lock_in', 'transfer_function', 'transfer_burst_time_scan', 'ramsey_interferometer', 'phase_noise'].includes(config.mode)">
+                            v-model.number="config.scan_dimensions" :disabled="['ac_stark', 'lock_in', 'transfer_function', 'transfer_burst_time_scan', 'ramsey_interferometer', 'phase_noise', 'bragg_fringe_calibration'].includes(config.mode)">
                         <label class="btn btn-outline-secondary" for="scan2d">2D</label>
                         <input type="radio" class="btn-check" name="scanDimension" id="scan3d" :value="3"
-                            v-model.number="config.scan_dimensions" :disabled="['ac_stark', 'lock_in', 'transfer_function', 'transfer_burst_time_scan', 'ramsey_interferometer', 'phase_noise'].includes(config.mode)">
+                            v-model.number="config.scan_dimensions" :disabled="['ac_stark', 'lock_in', 'transfer_function', 'transfer_burst_time_scan', 'ramsey_interferometer', 'phase_noise', 'bragg_fringe_calibration'].includes(config.mode)">
                         <label class="btn btn-outline-secondary" for="scan3d">3D</label>
                     </div>
                     <div class="form-text mt-2" v-if="config.scan_dimensions > 1">
@@ -930,7 +930,7 @@
                     </div>
                 </div>
 
-                <span class="section-label" v-if="!['ac_stark', 'lock_in', 'transfer_function', 'ramsey_interferometer', 'phase_noise'].includes(config.mode)">Parameter P0</span>
+                <span class="section-label" v-if="!['ac_stark', 'lock_in', 'transfer_function', 'ramsey_interferometer', 'phase_noise'].includes(config.mode)">{{ config.mode === 'bragg_fringe_calibration' ? 'P0 = T² (µs²)' : 'Parameter P0' }}</span>
                 <div class="card p-3" v-if="!['ac_stark', 'lock_in', 'transfer_function', 'ramsey_interferometer', 'phase_noise'].includes(config.mode)">
                     <div v-if="config.parameter_source === 'markers'" class="mb-3">
                         <label class="form-label small fw-bold text-primary mb-1">P0 Marker</label>
@@ -969,16 +969,16 @@
                     </div>
                     <div v-if="!useList1" class="row g-2">
                         <div class="col-4"><label class="form-label small mb-1"
-                                :class="config.scan_dimensions === 1 && config.mode === 'bragg_rabi' ? 'text-primary fw-bold' : 'text-muted'">{{ config.scan_dimensions === 1 && config.mode ===
-                                'bragg_rabi' ? 'FWHM Start' : 'Start' }}</label><input type="text" class="form-control form-control-sm"
+                                :class="config.scan_dimensions === 1 && ['bragg_rabi', 'bragg_fringe_calibration'].includes(config.mode) ? 'text-primary fw-bold' : 'text-muted'">{{ config.scan_dimensions === 1 && config.mode ===
+                                'bragg_rabi' ? 'FWHM Start' : (config.mode === 'bragg_fringe_calibration' ? 'T² Start (µs²)' : 'Start') }}</label><input type="text" class="form-control form-control-sm"
                                 v-model="config.start"></div>
                         <div class="col-4"><label class="form-label small mb-1"
-                                :class="config.scan_dimensions === 1 && config.mode === 'bragg_rabi' ? 'text-primary fw-bold' : 'text-muted'">{{ config.scan_dimensions === 1 && config.mode ===
-                                'bragg_rabi' ? 'FWHM Stop' : 'Stop' }}</label><input type="text" class="form-control form-control-sm"
+                                :class="config.scan_dimensions === 1 && ['bragg_rabi', 'bragg_fringe_calibration'].includes(config.mode) ? 'text-primary fw-bold' : 'text-muted'">{{ config.scan_dimensions === 1 && config.mode ===
+                                'bragg_rabi' ? 'FWHM Stop' : (config.mode === 'bragg_fringe_calibration' ? 'T² Stop (µs²)' : 'Stop') }}</label><input type="text" class="form-control form-control-sm"
                                 v-model="config.stop"></div>
                         <div class="col-4"><label class="form-label small mb-1"
-                                :class="config.scan_dimensions === 1 && config.mode === 'bragg_rabi' ? 'text-primary fw-bold' : 'text-muted'">{{ config.scan_dimensions === 1 && config.mode ===
-                                'bragg_rabi' ? 'FWHM Step' : (config.dim1_method === 'step_size' ? 'Step' : 'Points') }}</label><input
+                                :class="config.scan_dimensions === 1 && ['bragg_rabi', 'bragg_fringe_calibration'].includes(config.mode) ? 'text-primary fw-bold' : 'text-muted'">{{ config.scan_dimensions === 1 && config.mode ===
+                                'bragg_rabi' ? 'FWHM Step' : (config.mode === 'bragg_fringe_calibration' && config.dim1_method === 'step_size' ? 'T² Step (µs²)' : (config.dim1_method === 'step_size' ? 'Step' : 'Points')) }}</label><input
                                 type="text" class="form-control form-control-sm" v-model="config.step"></div>
                     </div>
                     <div v-else><textarea class="form-control form-control-sm" v-model="config.custom_list" placeholder="e.g. 1, 5, 10"
@@ -1042,6 +1042,7 @@
                             <option value="rabi">Rabi (Tot-P0/2)</option>
                             <option value="half">Half (P0/2)</option>
                             <option value="link">Link (Custom Formula)</option>
+                            <option value="bragg_fringe_calibration" :disabled="isSyncMode() || isScheduledMode()">Bragg Fringes Calibration</option>
                             <option value="phase_noise" :disabled="isSyncMode()">Phase Noise Analyze</option>
                             <option value="bragg_rabi">Bragg Rabi</option>
                             <option value="lock_in" :disabled="isSyncMode()">Lock-in Measurement</option>
@@ -1119,7 +1120,7 @@
                             Timing mode requires a numeric Total Parameter.
                         </div>
                     </div>
-                    <div v-if="['link', 'phase_noise'].includes(config.mode)" class="mt-1">
+                    <div v-if="['link', 'phase_noise', 'bragg_fringe_calibration'].includes(config.mode)" class="mt-1">
                         <label class="form-label small text-muted mb-2">Python Formulas</label>
                         <div v-for="(formula, index) in config.link_formulas" :key="index"
                             class="input-group input-group-sm mb-2">
@@ -1131,6 +1132,22 @@
                         </div>
                         <button class="btn btn-sm btn-light w-100 text-muted border border-dashed" @click="addFormula">+
                             Add Parameter</button>
+                        <div v-if="config.mode === 'bragg_fringe_calibration'" class="mt-3 pt-3 border-top">
+                            <div class="alert alert-light border py-2 px-3 small mb-3">
+                                P0 is T² in µs². The coarse scan finds fully bracketed mid-fringes from low to high P0; the selected fringe is then refined with a center-interleaved local scan using INTF P1 Fit.
+                            </div>
+                            <div class="row g-2">
+                                <div class="col-6"><label class="form-label small mb-1">Target mid-fringe number</label><input type="number" min="1" step="1" class="form-control form-control-sm" v-model.number="config.bragg_calibration_target_fringe"></div>
+                                <div class="col-6"><label class="form-label small mb-1">Coarse repeats per P0</label><input type="number" min="1" step="1" class="form-control form-control-sm" v-model.number="config.bragg_calibration_coarse_repeats"></div>
+                                <div class="col-4"><label class="form-label small mb-1">Fine half-range</label><div class="input-group input-group-sm"><input type="number" min="0.001" max="1.56" step="0.05" class="form-control" v-model.number="config.bragg_calibration_fine_phase_half_range_rad"><span class="input-group-text">rad</span></div></div>
+                                <div class="col-4"><label class="form-label small mb-1">Fine points</label><input type="number" min="5" max="101" step="2" class="form-control form-control-sm" v-model.number="config.bragg_calibration_fine_points"></div>
+                                <div class="col-4"><label class="form-label small mb-1">Fine repeats</label><input type="number" min="1" step="1" class="form-control form-control-sm" v-model.number="config.bragg_calibration_fine_repeats"></div>
+                                <div class="col-6"><label class="form-label small mb-1">Minimum local contrast</label><input type="number" min="0" step="any" class="form-control form-control-sm" v-model.number="config.bragg_calibration_min_contrast"><div class="form-text">0 uses the residual-noise threshold.</div></div>
+                                <div class="col-6"><label class="form-label small mb-1">Maximum T² uncertainty</label><div class="input-group input-group-sm"><input type="number" min="0" step="any" class="form-control" v-model.number="config.bragg_calibration_max_t2_uncertainty_us2"><span class="input-group-text">µs²</span></div><div class="form-text">0 uses one quarter of the fine range.</div></div>
+                                <div class="col-12"><label class="form-label small mb-1">Calibration name</label><input type="text" class="form-control form-control-sm" v-model="config.bragg_calibration_name" placeholder="Automatically named when empty"></div>
+                                <div class="col-12"><div class="form-check border rounded px-3 py-2 bg-light"><input id="applyBraggCalibration" class="form-check-input ms-0 me-2" type="checkbox" v-model="config.bragg_calibration_apply_active"><label class="form-check-label small fw-bold" for="applyBraggCalibration">After passing quality checks, set this calibration and mid-fringe reference active</label></div></div>
+                            </div>
+                        </div>
                         <div v-if="config.mode === 'link'" class="mt-3 pt-3 border-top">
                             <div class="row g-2 align-items-end">
                                 <div class="col-md-4">
@@ -1445,14 +1462,15 @@
                 <span class="section-label">Execution Control</span>
                 <div class="card p-3 mb-5 border-0 bg-transparent shadow-none ps-0 pe-0">
                     <div class="row g-2 align-items-center mb-3 px-1">
-                        <div v-if="config.mode !== 'phase_noise'" class="col-6"><label class="form-label small text-muted mb-1">{{ isTransferFunctionMode() ? 'Repeats per point' : (config.mode === 'ramsey_interferometer' ? 'Repeats per Δf' : (config.mode === 'ac_stark' ? 'Averages per half-point' : (config.mode === 'lock_in' ? 'ABBA blocks' : 'Averages'))) }}</label><input
+                        <div v-if="!['phase_noise', 'bragg_fringe_calibration'].includes(config.mode)" class="col-6"><label class="form-label small text-muted mb-1">{{ isTransferFunctionMode() ? 'Repeats per point' : (config.mode === 'ramsey_interferometer' ? 'Repeats per Δf' : (config.mode === 'ac_stark' ? 'Averages per half-point' : (config.mode === 'lock_in' ? 'ABBA blocks' : 'Averages'))) }}</label><input
                                 v-if="!['transfer_function', 'transfer_burst_time_scan', 'ramsey_interferometer'].includes(config.mode)" type="number" class="form-control form-control-sm" v-model.number="config.averages"
                                 min="1"><input v-else-if="isTransferFunctionMode()" type="number" class="form-control form-control-sm" v-model.number="config.transfer_repeats" min="2"><input v-else type="number" class="form-control form-control-sm" v-model.number="config.ramsey_repeats" min="1"></div>
-                        <div v-else class="col-6"><label class="form-label small text-muted mb-1">Phase Noise plan</label><div class="form-control form-control-sm bg-light">{{ config.phase_noise_mid_fringe_values.length }} T values × {{ config.phase_noise_repeats }} repeats</div></div>
+                        <div v-else-if="config.mode === 'phase_noise'" class="col-6"><label class="form-label small text-muted mb-1">Phase Noise plan</label><div class="form-control form-control-sm bg-light">{{ config.phase_noise_mid_fringe_values.length }} T values × {{ config.phase_noise_repeats }} repeats</div></div>
+                        <div v-else class="col-6"><label class="form-label small text-muted mb-1">Calibration plan</label><div class="form-control form-control-sm bg-light">Coarse × {{ config.bragg_calibration_coarse_repeats }}, then {{ config.bragg_calibration_fine_points }} fine P0 values × {{ config.bragg_calibration_fine_repeats }}</div></div>
                         <div class="col-6">
                             <div class="d-flex align-items-center gap-3 mt-4 flex-wrap">
                                 <div class="form-check mb-0"><input class="form-check-input" type="checkbox"
-                                        v-model="config.randomize" id="randCheck" :disabled="['ac_stark', 'lock_in', 'transfer_function', 'transfer_burst_time_scan', 'ramsey_interferometer', 'phase_noise'].includes(config.mode)"><label
+                                        v-model="config.randomize" id="randCheck" :disabled="['ac_stark', 'lock_in', 'transfer_function', 'transfer_burst_time_scan', 'ramsey_interferometer', 'phase_noise', 'bragg_fringe_calibration'].includes(config.mode)"><label
                                         class="form-check-label small" for="randCheck">Randomize</label></div>
                                 <div class="form-check mb-0"><input class="form-check-input" type="checkbox"
                                         v-model="config.ext_trigger" id="extTriggerCheck"><label
@@ -1839,7 +1857,16 @@
                         ramsey_delta_step_mhz: 0.1,
                         ramsey_repeats: 1,
                         ramsey_settling_time_s: 5,
-                        phase_noise_mid_fringe_values: [], phase_noise_repeats: 10
+                        phase_noise_mid_fringe_values: [], phase_noise_repeats: 10,
+                        bragg_calibration_target_fringe: 1,
+                        bragg_calibration_coarse_repeats: 2,
+                        bragg_calibration_fine_phase_half_range_rad: 0.6,
+                        bragg_calibration_fine_points: 7,
+                        bragg_calibration_fine_repeats: 5,
+                        bragg_calibration_min_contrast: 0,
+                        bragg_calibration_max_t2_uncertainty_us2: 0,
+                        bragg_calibration_name: '',
+                        bragg_calibration_apply_active: false
                     },
                     isRunning: false, isSimulation: false, statusMessage: "IDLE", currentStep: 0, plotRevision: 0, logs: [], ws: null,
                     lastLoggedScheduleErrorKey: '',
@@ -2007,7 +2034,7 @@
                     }
                 },
                 'config.mode'(mode) {
-                    if (this.runMode === 'sync' && ['lock_in', 'ac_stark', 'ramsey_interferometer'].includes(mode)) {
+                    if (this.runMode === 'sync' && ['lock_in', 'ac_stark', 'ramsey_interferometer', 'bragg_fringe_calibration'].includes(mode)) {
                         this.config.mode = 'standard';
                         return;
                     }
@@ -2019,7 +2046,7 @@
                             return;
                         }
                     }
-                    if (['ac_stark', 'lock_in', 'transfer_function', 'transfer_burst_time_scan', 'ramsey_interferometer'].includes(mode)) {
+                    if (['ac_stark', 'lock_in', 'transfer_function', 'transfer_burst_time_scan', 'ramsey_interferometer', 'bragg_fringe_calibration'].includes(mode)) {
                         this.config.scan_dimensions = 1;
                         this.config.dim2_enabled = false;
                         this.config.dim3_enabled = false;
@@ -2040,6 +2067,20 @@
                             this.config.parameter_source = 'classic';
                             this.config.averages = 1;
                         }
+                        if (mode === 'bragg_fringe_calibration') {
+                            this.runMode = 'live';
+                            this.config.parameter_source = 'classic';
+                            this.config.averages = 1;
+                            this.currentTab = 'intf';
+                            this.showRawData = false;
+                        }
+                    }
+                    if (mode === 'phase_noise') {
+                        this.config.scan_dimensions = 1;
+                        this.config.parameter_source = 'classic';
+                        this.config.randomize = false;
+                        this.fetchPhaseNoiseCalibrations();
+                        this.$nextTick(() => this.renderPhaseNoiseSelectionPlot());
                     }
                     if (!this.isRunning) {
                         this.resetHistory(1);
@@ -2048,7 +2089,7 @@
                 runMode(value) {
                     if (value !== 'live' && this.config.parameter_source === 'markers') this.config.parameter_source = 'classic';
                     if (value === 'sync') {
-                        if (['lock_in', 'ac_stark', 'ramsey_interferometer'].includes(this.config.mode)) this.config.mode = 'standard';
+                        if (['lock_in', 'ac_stark', 'ramsey_interferometer', 'bragg_fringe_calibration'].includes(this.config.mode)) this.config.mode = 'standard';
                         this.fetchSyncConfig();
                         this.$nextTick(() => this.syncViewMode === 'node' ? this.initPlots() : this.renderSyncPlot());
                     }
@@ -2066,15 +2107,6 @@
                         this.fetchSequenceMarkers();
                     } else {
                         this.sequenceMarkerPreview = [];
-                    }
-                },
-                'config.mode'(mode) {
-                    if (mode === 'phase_noise') {
-                        this.config.scan_dimensions = 1;
-                        this.config.parameter_source = 'classic';
-                        this.config.randomize = false;
-                        this.fetchPhaseNoiseCalibrations();
-                        this.$nextTick(() => this.renderPhaseNoiseSelectionPlot());
                     }
                 },
                 sidebarWidth(value) { this.applySidebarWidthCss(value); },
@@ -3550,6 +3582,16 @@ estimateScanStepCount(configObj = this.config) {
             ? configObj.phase_noise_mid_fringe_values.length : 0;
         return midFringeCount * Math.max(2, Math.round(Number(configObj.phase_noise_repeats) || 2));
     }
+    if (String(configObj.mode || '') === 'bragg_fringe_calibration') {
+        const coarsePoints = this.estimateAxisPointCount({
+            scan_type: configObj.dim1_type, method: configObj.dim1_method,
+            start: configObj.start, stop: configObj.stop, step: configObj.step,
+            list: configObj.custom_list
+        });
+        return coarsePoints * Math.max(1, Math.round(Number(configObj.bragg_calibration_coarse_repeats) || 1))
+            + Math.max(5, Math.round(Number(configObj.bragg_calibration_fine_points) || 7))
+            * Math.max(1, Math.round(Number(configObj.bragg_calibration_fine_repeats) || 1));
+    }
     const scanDimensions = this.resolveScanDimensionsFromConfig(configObj);
     const specs = [
         {
@@ -3623,6 +3665,7 @@ getScheduledTaskModeLabel(task) {
         rabi: '1D rabi scan',
         half: '1D half scan',
         link: '1D linked scan',
+        bragg_fringe_calibration: 'Bragg Fringes Calibration',
         phase_noise: 'Phase Noise Analyze',
         bragg_rabi: '1D Bragg Rabi scan',
         lock_in: 'Lock-in Measurement',
@@ -4379,6 +4422,34 @@ finishScheduledRun(finalStatus = 'IDLE') {
                         payload.phase_noise_mid_fringe_values = selected;
                         payload.phase_noise_repeats = repeats;
                         payload.interferometer_phase_calibration_override = JSON.parse(JSON.stringify(this.activePhaseNoiseCalibration));
+                        payload.scan_dimensions = 1;
+                        payload.dim2_enabled = false;
+                        payload.dim3_enabled = false;
+                        payload.averages = 1;
+                        payload.randomize = false;
+                        payload.parameter_source = 'classic';
+                        payload.marker_axes = [];
+                    }
+                    if (payload.mode === 'bragg_fringe_calibration') {
+                        const integerFields = [
+                            ['bragg_calibration_target_fringe', 1],
+                            ['bragg_calibration_coarse_repeats', 1],
+                            ['bragg_calibration_fine_points', 5],
+                            ['bragg_calibration_fine_repeats', 1]
+                        ];
+                        integerFields.forEach(([field, minimum]) => {
+                            payload[field] = Math.round(Number(payload[field]));
+                            if (!Number.isInteger(payload[field]) || payload[field] < minimum) throw new Error(`${field} must be an integer of at least ${minimum}.`);
+                        });
+                        if (payload.bragg_calibration_fine_points > 101 || payload.bragg_calibration_fine_points % 2 === 0) throw new Error('Fine points must be an odd number from 5 to 101.');
+                        payload.bragg_calibration_fine_phase_half_range_rad = Number(payload.bragg_calibration_fine_phase_half_range_rad);
+                        if (!(payload.bragg_calibration_fine_phase_half_range_rad > 0 && payload.bragg_calibration_fine_phase_half_range_rad < Math.PI / 2)) throw new Error('Fine phase half-range must be between 0 and π/2 rad.');
+                        ['bragg_calibration_min_contrast', 'bragg_calibration_max_t2_uncertainty_us2'].forEach((field) => {
+                            payload[field] = Number(payload[field]);
+                            if (!Number.isFinite(payload[field]) || payload[field] < 0) throw new Error(`${field} must be non-negative.`);
+                        });
+                        payload.bragg_calibration_name = String(payload.bragg_calibration_name || '').trim();
+                        payload.bragg_calibration_apply_active = payload.bragg_calibration_apply_active === true;
                         payload.scan_dimensions = 1;
                         payload.dim2_enabled = false;
                         payload.dim3_enabled = false;

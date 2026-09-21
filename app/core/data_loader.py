@@ -70,6 +70,42 @@ class DataLoader:
             rebased.append(item)
         return rebased
 
+    def _rebase_converted_transfer_phases(
+        self, points: List[Dict[str, Any]], settings: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        """Treat a freshly converted phase as raw before applying transfer zeroing.
+
+        Archived transfer points may contain a raw phase calculated with an older
+        calibration.  After an archive reference override, that stored value must
+        not be used to rebase the newly converted phase.
+        """
+        converted = []
+        for point in points:
+            item = dict(point)
+            item["interferometer_phase_raw"] = item.get("interferometer_phase")
+            converted.append(item)
+        return self._apply_transfer_zero_phase_reference(converted, settings)
+
+    @staticmethod
+    def _apply_phase_calibration_to_points(
+        points: List[Dict[str, Any]],
+        calibration: Dict[str, Any],
+        mode: str,
+    ) -> List[Dict[str, Any]]:
+        """Apply an archive calibration, retaining per-shot phase-noise references."""
+        is_phase_noise = str(mode or "").strip().lower() == "phase_noise"
+        converted = []
+        for point in points:
+            point_calibration = calibration
+            if is_phase_noise:
+                reference = interferometer_phase._finite(
+                    point.get("interferometer_phase_reference_t2_us2")
+                )
+                if reference is not None:
+                    point_calibration = phase_noise.calibration_at_mid_fringe(calibration, reference)
+            converted.append(interferometer_phase.apply_phase(point, point_calibration))
+        return converted
+
     def _sync_analysis_copies_dir(self, year: str, month: str, day: str, run_id: str) -> Path:
         return self._get_run_dir(year, month, day, run_id) / "sync_analysis_copies"
 
@@ -1539,15 +1575,11 @@ class DataLoader:
         )
         has_saved_phase = any(str(point.get("interferometer_phase_calibration_id") or "") for point in full_points)
         if isinstance(phase_calibration, dict) and (has_phase_override or not has_phase_snapshot or not has_saved_phase or legacy_snapshot_conversion):
-            is_phase_noise_run = str(config_data.get("mode") or "").strip().lower() == "phase_noise"
-            converted_points = []
-            for point in full_points:
-                point_calibration = phase_calibration
-                reference = point.get("interferometer_phase_reference_t2_us2")
-                if is_phase_noise_run and reference is not None:
-                    point_calibration = phase_noise.calibration_at_mid_fringe(phase_calibration, reference)
-                converted_points.append(interferometer_phase.apply_phase(point, point_calibration))
-            full_points = converted_points
+            full_points = self._apply_phase_calibration_to_points(
+                full_points, phase_calibration, str(config_data.get("mode") or ""),
+            )
+            if str(config_data.get("mode") or "").strip().lower() in {"transfer_function", "transfer_burst_time_scan"}:
+                full_points = self._rebase_converted_transfer_phases(full_points, config_data)
         marker_optimization = self._build_marker_optimization_archive(run_dir, full_points)
         is_marker_optimization = bool(marker_optimization.get("steps")) or (
             run_dir / "marker_optimization_report.json"
@@ -1589,6 +1621,15 @@ class DataLoader:
             if is_phase_noise else []
         )
         sync_manifest = self._apply_sync_phase_reference_overrides(sync_manifest, phase_contexts)
+        bragg_calibration_result = None
+        bragg_calibration_path = run_dir / "bragg_fringe_calibration.json"
+        if bragg_calibration_path.is_file():
+            try:
+                loaded_bragg_result = json.loads(bragg_calibration_path.read_text(encoding="utf-8"))
+                if isinstance(loaded_bragg_result, dict):
+                    bragg_calibration_result = loaded_bragg_result
+            except (OSError, ValueError):
+                bragg_calibration_result = {"status": "unreadable"}
         return {
             "config": config_data,
             "run_entry": self._build_run_entry(root_run_dir),
@@ -1606,6 +1647,7 @@ class DataLoader:
             "lock_in_analysis": lock_in_analysis,
             "transfer_function_summary": transfer_function_summary,
             "phase_noise_summary": phase_noise_summary,
+            "bragg_fringe_calibration": bragg_calibration_result,
             "preview_map": (
                 initial_step.get("preview_map", {})
                 if is_marker_optimization
@@ -1632,6 +1674,22 @@ class DataLoader:
             "archive_phase_reference_contexts": phase_contexts,
             "archive_phase_analysis": self.archive_phase_analysis_metadata(year, month, day, run_id),
         }
+
+    def get_bragg_fringe_calibration_mot(
+        self, year: str, month: str, day: str, run_id: str
+    ) -> Tuple[Path, str]:
+        run_dir = self._get_run_dir(year, month, day, run_id)
+        result_path = run_dir / "bragg_fringe_calibration.json"
+        if not result_path.is_file():
+            raise FileNotFoundError("Bragg fringe calibration result was not found")
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+        filename = Path(str(result.get("generated_mot_filename") or "")).name
+        if not filename:
+            raise FileNotFoundError("This calibration did not generate a validated MOT file")
+        path = run_dir / filename
+        if not path.is_file():
+            raise FileNotFoundError("Generated mid-fringe MOT file was not found")
+        return path, filename
 
 
     def _get_allan_metric_fields(self) -> Dict[str, Dict[str, Dict[str, Tuple[str, ...]]]]:
@@ -1933,7 +1991,11 @@ class DataLoader:
         has_saved_phase = any(str(point.get("interferometer_phase_calibration_id") or "") for point in all_points)
         legacy_snapshot_conversion = isinstance(phase_calibration, dict) and phase_calibration.get("phase_conversion_mode") != "monotonic_half_fringe"
         if isinstance(phase_calibration, dict) and (has_phase_override or normalized_mode == "recalculated" or not has_phase_snapshot or not has_saved_phase or legacy_snapshot_conversion):
-            all_points = [interferometer_phase.apply_phase(point, phase_calibration) for point in all_points]
+            all_points = self._apply_phase_calibration_to_points(
+                all_points, phase_calibration, str(config_data.get("mode") or ""),
+            )
+            if str(config_data.get("mode") or "").strip().lower() in {"transfer_function", "transfer_burst_time_scan"}:
+                all_points = self._rebase_converted_transfer_phases(all_points, config_data)
         filtered_points, available_p0_min, available_p0_max, selected_p0_min, selected_p0_max = self._filter_allan_points_by_p0_range(
             all_points,
             p0_min=p0_min,
