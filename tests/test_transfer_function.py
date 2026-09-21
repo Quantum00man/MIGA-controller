@@ -204,6 +204,7 @@ class TransferFunctionPlanTests(unittest.TestCase):
             "transfer_frequency_start_hz": 100,
             "transfer_frequency_stop_hz": 300,
             "transfer_frequency_step_hz": 100,
+            "transfer_burst_time_frequency_hz": None,
             "transfer_repeats": 3,
             "transfer_settling_time_s": 0,
         }
@@ -219,6 +220,7 @@ class TransferFunctionPlanTests(unittest.TestCase):
             [0.0] * 9 + [90.0] * 9,
         )
         self.assertEqual(config["transfer_frequency_values_hz"], [100.0, 200.0, 300.0])
+        self.assertEqual(config["transfer_burst_time_frequency_hz"], 1000.0)
         self.assertEqual(config["averages"], 1)
         self.assertEqual(config["transfer_settling_time_s"], 5.0)
         self.assertEqual(config["transfer_generator_model"], "TG5012A")

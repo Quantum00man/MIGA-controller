@@ -1261,7 +1261,16 @@ class ExperimentManager:
         start = float(scan_config.get("transfer_frequency_start_hz", 0))
         stop = float(scan_config.get("transfer_frequency_stop_hz", 0))
         step = float(scan_config.get("transfer_frequency_step_hz", 0))
-        fixed_generator_frequency = float(scan_config.get("transfer_burst_time_frequency_hz", 0))
+        raw_fixed_generator_frequency = scan_config.get("transfer_burst_time_frequency_hz", 1000.0)
+        if burst_time_scan:
+            fixed_generator_frequency = float(raw_fixed_generator_frequency)
+        else:
+            try:
+                fixed_generator_frequency = float(raw_fixed_generator_frequency)
+            except (TypeError, ValueError):
+                fixed_generator_frequency = 1000.0
+            if not math.isfinite(fixed_generator_frequency) or fixed_generator_frequency <= 0:
+                fixed_generator_frequency = 1000.0
         if burst_time_scan and (not math.isfinite(fixed_generator_frequency) or fixed_generator_frequency <= 0):
             raise ValueError("Transfer function Burst time scan requires a positive fixed TTI frequency")
         if not burst_time_scan and not all(math.isfinite(value) for value in (start, stop, step)):
@@ -1449,7 +1458,10 @@ class ExperimentManager:
         scan_config["transfer_periodic_zero_phase"] = periodic_zero_phase
         scan_config["transfer_zero_phase_frequency_interval"] = zero_phase_frequency_interval
         scan_config["transfer_frequency_values_hz"] = frequencies
-        scan_config["transfer_burst_time_frequency_hz"] = fixed_generator_frequency if burst_time_scan else None
+        # Keep this schema-required field numeric even when ordinary Transfer
+        # Function mode does not use it. SYNC forwards the normalized config to
+        # each Slave, whose request validation rejects null before startup.
+        scan_config["transfer_burst_time_frequency_hz"] = fixed_generator_frequency
         scan_config["transfer_response_axis"] = "p0" if burst_time_scan else "frequency"
         scan_config["transfer_repeats"] = repeats
         return parameters
