@@ -1139,8 +1139,8 @@
                             <div class="row g-2">
                                 <div class="col-6"><label class="form-label small mb-1">Target mid-fringe number</label><input type="number" min="1" step="1" class="form-control form-control-sm" v-model.number="config.bragg_calibration_target_fringe"></div>
                                 <div class="col-6"><label class="form-label small mb-1">Coarse repeats per P0</label><input type="number" min="1" step="1" class="form-control form-control-sm" v-model.number="config.bragg_calibration_coarse_repeats"></div>
-                                <div class="col-4"><label class="form-label small mb-1">Fine half-range</label><div class="input-group input-group-sm"><input type="number" min="0.001" max="1.56" step="0.05" class="form-control" v-model.number="config.bragg_calibration_fine_phase_half_range_rad"><span class="input-group-text">rad</span></div></div>
-                                <div class="col-4"><label class="form-label small mb-1">Fine points</label><input type="number" min="5" max="101" step="2" class="form-control form-control-sm" v-model.number="config.bragg_calibration_fine_points"></div>
+                                <div class="col-4"><label class="form-label small mb-1">Fine half-range</label><div class="input-group input-group-sm"><input type="number" min="0.001" max="1.56" step="any" class="form-control" v-model.number="config.bragg_calibration_fine_phase_half_range_rad"><span class="input-group-text">rad</span></div></div>
+                                <div class="col-4"><label class="form-label small mb-1">Fine points</label><input type="number" min="5" max="101" step="2" class="form-control form-control-sm" :class="{'is-invalid': !Number.isInteger(Number(config.bragg_calibration_fine_points)) || Number(config.bragg_calibration_fine_points) < 5 || Number(config.bragg_calibration_fine_points) > 101 || Number(config.bragg_calibration_fine_points) % 2 === 0}" v-model.number="config.bragg_calibration_fine_points"><div class="invalid-feedback">Use an odd number from 5 to 101.</div></div>
                                 <div class="col-4"><label class="form-label small mb-1">Fine repeats</label><input type="number" min="1" step="1" class="form-control form-control-sm" v-model.number="config.bragg_calibration_fine_repeats"></div>
                                 <div class="col-6"><label class="form-label small mb-1">Minimum local contrast</label><input type="number" min="0" step="any" class="form-control form-control-sm" v-model.number="config.bragg_calibration_min_contrast"><div class="form-text">0 uses the residual-noise threshold.</div></div>
                                 <div class="col-6"><label class="form-label small mb-1">Maximum T² uncertainty</label><div class="input-group input-group-sm"><input type="number" min="0" step="any" class="form-control" v-model.number="config.bragg_calibration_max_t2_uncertainty_us2"><span class="input-group-text">µs²</span></div><div class="form-text">0 uses one quarter of the fine range.</div></div>
@@ -6341,6 +6341,13 @@ finishScheduledRun(finalStatus = 'IDLE') {
         },
         async startImmediateScan() {
             if (this.isRunning || this.isScheduleActive()) return;
+            let payload;
+            try {
+                payload = this.prepareScanPayload(this.config, this.currentSequenceName);
+            } catch (error) {
+                this.addLog('Start failed: ' + (error?.message || this.formatRequestError(error)));
+                return;
+            }
             try {
                 await this.ensureRealHardwareMode();
             } catch (error) {
@@ -6368,7 +6375,6 @@ finishScheduledRun(finalStatus = 'IDLE') {
                 this.completionStatusSyncTimer = null;
             }
             try {
-                const payload = this.prepareScanPayload(this.config, this.currentSequenceName);
                 this.currentScanDimensions = payload.scan_dimensions;
                 const res = await axios.post('/experiment/start', payload);
                 if (res.data.status === 'success') {
