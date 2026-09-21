@@ -1126,11 +1126,11 @@
                             class="input-group input-group-sm mb-2">
                             <span class="input-group-text bg-light border-end-0">P{{ index + 1 }}</span>
                             <input type="text" class="form-control font-monospace border-start-0"
-                                v-model="config.link_formulas[index]">
-                            <button class="btn btn-outline-danger border-start-0" @click="removeFormula(index)"><i
+                                v-model="config.link_formulas[index]" @keydown.enter.prevent>
+                            <button type="button" class="btn btn-outline-danger border-start-0" @click="removeFormula(index)"><i
                                     class="bi bi-x-lg"></i></button>
                         </div>
-                        <button class="btn btn-sm btn-light w-100 text-muted border border-dashed" @click="addFormula">+
+                        <button type="button" class="btn btn-sm btn-light w-100 text-muted border border-dashed" @click="addFormula">+
                             Add Parameter</button>
                         <div v-if="config.mode === 'bragg_fringe_calibration'" class="mt-3 pt-3 border-top">
                             <div class="alert alert-light border py-2 px-3 small mb-3">
