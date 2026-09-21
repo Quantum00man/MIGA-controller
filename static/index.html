@@ -1042,7 +1042,7 @@
                             <option value="rabi">Rabi (Tot-P0/2)</option>
                             <option value="half">Half (P0/2)</option>
                             <option value="link">Link (Custom Formula)</option>
-                            <option value="bragg_fringe_calibration" :disabled="isSyncMode() || isScheduledMode()">Bragg Fringes Calibration</option>
+                            <option value="bragg_fringe_calibration" :disabled="isScheduledMode()">Bragg Fringes Calibration</option>
                             <option value="phase_noise" :disabled="isSyncMode()">Phase Noise Analyze</option>
                             <option value="bragg_rabi">Bragg Rabi</option>
                             <option value="lock_in" :disabled="isSyncMode()">Lock-in Measurement</option>
@@ -1051,7 +1051,7 @@
                             <option value="transfer_burst_time_scan">Transfer function Burst time scan</option>
                             <option value="ramsey_interferometer" :disabled="isSyncMode() || isScheduledMode()">Ramsey Interferometer</option>
                         </select>
-                        <div v-if="isSyncMode()" class="form-text">SYNC supports Standard, Timing, Rabi, Half, Link, Bragg Rabi and Transfer Function. Only the Master controls TTI.</div>
+                        <div v-if="isSyncMode()" class="form-text">SYNC supports Standard, Timing, Rabi, Half, Link, Bragg Rabi, Bragg Fringes Calibration and Transfer Function. Only the Master changes Bragg parameters; Slave MOT files remain unchanged.</div>
                     </div>
                     <div v-if="config.mode === 'transfer_function'" class="mt-1">
                         <div class="alert alert-light border py-2 px-3 small mb-3">
@@ -1145,7 +1145,8 @@
                                 <div class="col-6"><label class="form-label small mb-1">Minimum local contrast</label><input type="number" min="0" step="any" class="form-control form-control-sm" v-model.number="config.bragg_calibration_min_contrast"><div class="form-text">0 uses the residual-noise threshold.</div></div>
                                 <div class="col-6"><label class="form-label small mb-1">Maximum T² uncertainty</label><div class="input-group input-group-sm"><input type="number" min="0" step="any" class="form-control" v-model.number="config.bragg_calibration_max_t2_uncertainty_us2"><span class="input-group-text">µs²</span></div><div class="form-text">0 uses one quarter of the fine range.</div></div>
                                 <div class="col-12"><label class="form-label small mb-1">Calibration name</label><input type="text" class="form-control form-control-sm" v-model="config.bragg_calibration_name" placeholder="Automatically named when empty"></div>
-                                <div class="col-12"><div class="form-check border rounded px-3 py-2 bg-light"><input id="applyBraggCalibration" class="form-check-input ms-0 me-2" type="checkbox" v-model="config.bragg_calibration_apply_active"><label class="form-check-label small fw-bold" for="applyBraggCalibration">After passing quality checks, set this calibration and mid-fringe reference active</label></div></div>
+                                <div v-if="!isSyncMode()" class="col-12"><div class="form-check border rounded px-3 py-2 bg-light"><input id="applyBraggCalibration" class="form-check-input ms-0 me-2" type="checkbox" v-model="config.bragg_calibration_apply_active"><label class="form-check-label small fw-bold" for="applyBraggCalibration">After passing quality checks, set this calibration and mid-fringe reference active</label></div></div>
+                                <div v-else class="col-12"><div class="alert alert-primary py-2 px-3 small mb-0">Master and Slave use their own INTF P1 Fit calibration and midpoint T². Every node that passes its quality checks is saved and activated; only the Master MOT is updated.</div></div>
                             </div>
                         </div>
                         <div v-if="config.mode === 'link'" class="mt-3 pt-3 border-top">
@@ -2034,7 +2035,7 @@
                     }
                 },
                 'config.mode'(mode) {
-                    if (this.runMode === 'sync' && ['lock_in', 'ac_stark', 'ramsey_interferometer', 'bragg_fringe_calibration'].includes(mode)) {
+                    if (this.runMode === 'sync' && ['lock_in', 'ac_stark', 'ramsey_interferometer'].includes(mode)) {
                         this.config.mode = 'standard';
                         return;
                     }
@@ -2089,7 +2090,7 @@
                 runMode(value) {
                     if (value !== 'live' && this.config.parameter_source === 'markers') this.config.parameter_source = 'classic';
                     if (value === 'sync') {
-                        if (['lock_in', 'ac_stark', 'ramsey_interferometer', 'bragg_fringe_calibration'].includes(this.config.mode)) this.config.mode = 'standard';
+                        if (['lock_in', 'ac_stark', 'ramsey_interferometer'].includes(this.config.mode)) this.config.mode = 'standard';
                         this.fetchSyncConfig();
                         this.$nextTick(() => this.syncViewMode === 'node' ? this.initPlots() : this.renderSyncPlot());
                     }

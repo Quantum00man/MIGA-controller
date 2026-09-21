@@ -1666,11 +1666,13 @@ class ExperimentManager:
     def build_scan_parameter_plan(self, scan_config: Dict[str, Any]) -> List[Any]:
         payload = dict(scan_config or {})
         mode = str(payload.get('mode') or 'standard').strip().lower()
-        supported_modes = {'standard', 'timing', 'rabi', 'half', 'link', 'bragg_rabi', 'transfer_function', 'transfer_burst_time_scan'}
+        supported_modes = {'standard', 'timing', 'rabi', 'half', 'link', 'bragg_rabi', 'transfer_function', 'transfer_burst_time_scan', 'bragg_fringe_calibration'}
         if mode not in supported_modes:
             raise ValueError(
-                "Sync mode supports Standard, Timing, Rabi, Half, Link, Bragg Rabi and Transfer Function scan logic"
+                "Sync mode supports Standard, Timing, Rabi, Half, Link, Bragg Rabi, Bragg Fringes Calibration and Transfer Function scan logic"
             )
+        if mode == 'bragg_fringe_calibration':
+            return self._build_bragg_calibration_execution(scan_config)
         if mode in {'transfer_function', 'transfer_burst_time_scan'}:
             # Transfer Function resolves node settings into the run config so
             # acquisition and archive summaries use the Master's snapshot.
@@ -1781,9 +1783,21 @@ class ExperimentManager:
                 float(p0) - float(coarse["selected_mid_fringe_t2_us2"])
             )
             for repeat in range(1, repeats + 1):
+                shot_index = int(scan_config.get("_bragg_calibration_coarse_shots", 0)) + len(plan)
+                sync_metadata = {}
+                if str(scan_config.get("sync_role") or "") == "master":
+                    sync_metadata = {
+                        "sync_run_id": scan_config.get("sync_run_id"),
+                        "sync_role": "master",
+                        "sync_node_id": scan_config.get("sync_node_id"),
+                        "sync_shot_index": shot_index,
+                        "sync_p0": float(p0),
+                        "sync_parameters": [float(p0)],
+                    }
                 plan.append({
                     "sequence_parameters": parameters,
                     "metadata": {
+                        **sync_metadata,
                         "bragg_calibration_stage": "fine",
                         "bragg_calibration_fine_order": order,
                         "bragg_calibration_phase_offset_rad": phase_offset,
@@ -1792,6 +1806,26 @@ class ExperimentManager:
                     },
                 })
         return plan
+
+    def install_bragg_calibration_fine_plan(self, plan: List[Dict[str, Any]]) -> None:
+        if self._bragg_calibration_fine_plan_queue is None:
+            raise ValueError("Bragg calibration is not waiting for a fine scan plan")
+        self._bragg_calibration_fine_plan_queue.put_nowait(list(plan or []))
+
+    def prepare_external_bragg_calibration_plan(
+        self, scan_config: Dict[str, Any], coarse_shots: int
+    ) -> None:
+        fine_points = int(scan_config.get("bragg_calibration_fine_points", 7))
+        fine_repeats = int(scan_config.get("bragg_calibration_fine_repeats", 5))
+        bragg_fringe_calibration.fine_phase_offsets(
+            float(scan_config.get("bragg_calibration_fine_phase_half_range_rad", 0.6)),
+            fine_points,
+        )
+        scan_config["_bragg_calibration_coarse_shots"] = int(coarse_shots)
+        scan_config["_bragg_calibration_expected_total_shots"] = (
+            int(coarse_shots) + fine_points * fine_repeats
+        )
+        self._bragg_calibration_fine_plan_queue = queue.Queue(maxsize=1)
 
     def start_scan(
         self,
@@ -3177,24 +3211,33 @@ class ExperimentManager:
             "source_mode": "fit",
             "target_fringe_number": int(scan_config.get("bragg_calibration_target_fringe", 1)),
         }
-        parameters = self._link_parameters_at_p0(scan_config, fine["mid_fringe_t2_us2"])
-        sequence_path = self.data_manager.current_run_dir / "sequence.mot"
-        template_content, template_encoding = decode_mot_bytes(sequence_path.read_bytes())
-        mot_payload, mot_filename = build_single_link_export(
-            template_content,
-            template_encoding,
-            str(scan_config.get("sequence_name") or "sequence.mot"),
-            parameters,
-        )
+        is_sync_slave = bool(scan_config.get("_sync_slave"))
+        mot_payload = None
+        mot_filename = ""
+        if not is_sync_slave:
+            parameters = self._link_parameters_at_p0(scan_config, fine["mid_fringe_t2_us2"])
+            sequence_path = self.data_manager.current_run_dir / "sequence.mot"
+            template_content, template_encoding = decode_mot_bytes(sequence_path.read_bytes())
+            mot_payload, mot_filename = build_single_link_export(
+                template_content,
+                template_encoding,
+                str(scan_config.get("sequence_name") or "sequence.mot"),
+                parameters,
+            )
         calibration = self.save_bragg_phase_calibration(
             name, fine["calibration_fit"], source, activate_if_empty=False,
         )
-        apply_active = bool(scan_config.get("bragg_calibration_apply_active", False))
+        apply_active = bool(
+            scan_config.get("bragg_calibration_apply_active", False)
+            or scan_config.get("sync_role") in {"master", "slave"}
+        )
         if apply_active:
             calibration = self.set_active_bragg_phase_calibration(calibration["id"])
         result["saved_calibration"] = calibration
         result["applied_active"] = apply_active
         result["generated_mot_filename"] = mot_filename
+        result["sync_role"] = str(scan_config.get("sync_role") or "")
+        result["sync_node_id"] = str(scan_config.get("sync_node_id") or "")
         self.data_manager.save_bragg_fringe_calibration_result(result, mot_payload, mot_filename)
         return result
 
@@ -3260,21 +3303,26 @@ class ExperimentManager:
                             bragg_calibration_coarse_results,
                             int(scan_config.get("bragg_calibration_target_fringe", 1)),
                         )
-                        fine_plan = self._build_bragg_calibration_fine_plan(
+                        fine_plan = [] if scan_config.get("_sync_slave") else self._build_bragg_calibration_fine_plan(
                             scan_config, bragg_calibration_coarse_fit
                         )
-                        self._bragg_calibration_fine_plan_queue.put(fine_plan)
                         self.publish_data({
                             "stream_type": "bragg_calibration_coarse_fit",
                             "bragg_fringe_calibration": bragg_calibration_coarse_fit,
+                            "bragg_calibration_fine_plan": fine_plan if scan_config.get("sync_role") == "master" else None,
+                            "sync_run_id": scan_config.get("sync_run_id"),
+                            "sync_role": scan_config.get("sync_role"),
                         })
+                        if not scan_config.get("_sync_slave"):
+                            self._bragg_calibration_fine_plan_queue.put(fine_plan)
                     except Exception as exc:
                         self._scan_finalize_error = f"Bragg coarse fringe analysis failed: {exc}"
                         self.data_manager.save_bragg_fringe_calibration_result({
                             "version": 1, "status": "coarse_failed", "error": str(exc),
                             "target_fringe_number": int(scan_config.get("bragg_calibration_target_fringe", 1)),
                         })
-                        self._bragg_calibration_fine_plan_queue.put([])
+                        if not scan_config.get("_sync_slave"):
+                            self._bragg_calibration_fine_plan_queue.put([])
                 if result is not None and metadata.get("transfer_zero_phase_baseline"):
                     block_id = int(metadata.get("transfer_zero_phase_block_id", 0))
                     samples = transfer_zero_phase_samples.setdefault(block_id, [])

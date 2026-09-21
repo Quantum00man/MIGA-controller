@@ -167,7 +167,7 @@ def fine_fit(
         else auto_uncertainty_limit
     )
     checks = {
-        "inside_fine_range": abs(correction_rad) <= float(half_range_rad),
+        "inside_fine_range": float(np.min(x)) <= corrected_t2 <= float(np.max(x)),
         "contrast": amplitude_local >= contrast_limit,
         "finite_uncertainty": t2_uncertainty is not None and math.isfinite(t2_uncertainty),
         "uncertainty": t2_uncertainty is not None and t2_uncertainty <= uncertainty_limit,

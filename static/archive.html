@@ -1818,7 +1818,7 @@
                         <div id="braggFringeCalibrationPlot" style="height:430px" class="mb-3"></div>
                         <div v-if="braggFringeCalibration.fine" class="row g-3 mb-3">
                             <div class="col-md-3"><div class="form-label-small">Coarse midpoint T²</div><div class="fw-bold font-monospace">{{ formatMetricValue(braggFringeCalibration.coarse?.selected_mid_fringe_t2_us2) }} µs²</div></div>
-                            <div class="col-md-3"><div class="form-label-small">Refined midpoint T²</div><div class="fw-bold font-monospace text-primary">{{ formatMetricValue(braggFringeCalibration.fine?.mid_fringe_t2_us2) }} µs²</div></div>
+                            <div class="col-md-3"><div class="form-label-small">{{ Object.keys(braggFringeCalibrationNodes || {}).length > 1 ? 'Shared experimental T² (Master)' : 'Refined midpoint T²' }}</div><div class="fw-bold font-monospace text-primary">{{ formatMetricValue(braggFringeCalibration.fine?.mid_fringe_t2_us2) }} µs²</div></div>
                             <div class="col-md-3"><div class="form-label-small">T² uncertainty</div><div class="fw-bold font-monospace">{{ formatMetricValue(braggFringeCalibration.fine?.t2_uncertainty_us2) }} µs²</div></div>
                             <div class="col-md-3"><div class="form-label-small">Phase correction</div><div class="fw-bold font-monospace">{{ formatMetricValue(braggFringeCalibration.fine?.phase_correction_rad) }} rad</div></div>
                             <div class="col-md-3"><div class="form-label-small">Local offset C</div><div class="fw-bold font-monospace">{{ formatMetricValue(braggFringeCalibration.fine?.local_parameter_values?.C) }}</div></div>
@@ -1828,6 +1828,20 @@
                         </div>
                         <div v-if="braggFringeCalibration.fine?.quality_checks" class="d-flex flex-wrap gap-2 mb-3">
                             <span v-for="(passed, name) in braggFringeCalibration.fine.quality_checks" :key="name" class="badge" :class="passed ? 'bg-success' : 'bg-danger'">{{ name.replaceAll('_', ' ') }}: {{ passed ? 'pass' : 'fail' }}</span>
+                        </div>
+                        <div v-if="Object.keys(braggFringeCalibrationNodes || {}).length > 1" class="table-responsive mb-3">
+                            <table class="table table-sm align-middle mb-0">
+                                <thead><tr><th>Node</th><th>Status</th><th>Own midpoint T²</th><th>Uncertainty</th><th>Calibration</th><th>Active</th></tr></thead>
+                                <tbody><tr v-for="(nodeResult, nodeId) in braggFringeCalibrationNodes" :key="nodeId">
+                                    <td class="fw-bold">{{ nodeId }}</td>
+                                    <td><span class="badge" :class="nodeResult.status === 'passed' ? 'bg-success' : 'bg-danger'">{{ nodeResult.status || 'unknown' }}</span></td>
+                                    <td class="font-monospace">{{ formatMetricValue(nodeResult.fine?.mid_fringe_t2_us2) }} µs²</td>
+                                    <td class="font-monospace">{{ formatMetricValue(nodeResult.fine?.t2_uncertainty_us2) }} µs²</td>
+                                    <td>{{ nodeResult.saved_calibration?.name || 'Not saved' }}</td>
+                                    <td>{{ nodeResult.applied_active ? 'Yes' : 'No' }}</td>
+                                </tr></tbody>
+                            </table>
+                            <div class="form-text">Each node keeps its own fitted midpoint. The shared experimental T² is controlled by the Master MOT.</div>
                         </div>
                         <div v-if="braggFringeCalibration.error" class="alert alert-danger small py-2">{{ braggFringeCalibration.error }}</div>
                         <a v-if="braggFringeCalibrationMotUrl()" class="btn btn-primary btn-sm fw-bold" :href="braggFringeCalibrationMotUrl()"><i class="bi bi-file-earmark-arrow-down me-1"></i>Download refined mid-fringe MOT</a>
@@ -2686,7 +2700,7 @@
                     archivePhaseCalibrationListLoading: false, archivePhaseCalibrationListError: '', archivePhaseCalibrationListSource: '',
                     archivePhaseAnalysis: {},
                     markerOptimization: null, selectedOptimizationStep: null,
-                    braggFringeCalibration: null,
+                    braggFringeCalibration: null, braggFringeCalibrationNodes: {},
                     syncManifest: null,
                     syncArchiveViewMode: 'node',
                     syncArchiveNodeSource: 'master',
@@ -3542,6 +3556,13 @@
                         { x: fineRows.map(row => row.p0_t2_us2), y: fineRows.map(row => row.mean), error_y: { type: 'data', array: fineRows.map(row => row.sem || 0), visible: true }, mode: 'markers', name: 'Fine means', marker: { color: '#0d6efd', size: 9, symbol: 'diamond' } },
                         { x: calibration.fit_x || [], y: calibration.fit_y || [], mode: 'lines', name: 'Refined calibration', line: { color: '#0d6efd', width: 2.8 } },
                     ];
+                    Object.entries(this.braggFringeCalibrationNodes || {}).forEach(([nodeId, nodeResult]) => {
+                        if (nodeId === 'master' || nodeId === 'local') return;
+                        const rows = Array.isArray(nodeResult.fine?.rows) ? nodeResult.fine.rows : [];
+                        traces.push({ x: rows.map(row => row.p0_t2_us2), y: rows.map(row => row.mean), mode: 'markers', name: `${nodeId} fine means`, marker: { size: 8, symbol: 'circle-open' } });
+                        const fit = nodeResult.fine?.calibration_fit || {};
+                        traces.push({ x: fit.fit_x || [], y: fit.fit_y || [], mode: 'lines', name: `${nodeId} refined`, line: { width: 2 } });
+                    });
                     const midpoint = Number(result.fine?.mid_fringe_t2_us2);
                     const shapes = Number.isFinite(midpoint) ? [{ type: 'line', x0: midpoint, x1: midpoint, y0: 0, y1: 1, yref: 'paper', line: { color: '#198754', width: 2 } }] : [];
                     Plotly.react(target, traces, {
@@ -5522,6 +5543,7 @@
                     this.betaOptimization.result = null;
                     this.markerOptimization = null;
                     this.braggFringeCalibration = null;
+                    this.braggFringeCalibrationNodes = {};
                     this.syncManifest = null;
                     this.archivePhaseReferenceContexts = {};
                     this.archivePhaseReferenceNodeId = '';
@@ -5594,6 +5616,8 @@
                             : null;
                         this.braggFringeCalibration = res.data.bragg_fringe_calibration && typeof res.data.bragg_fringe_calibration === 'object'
                             ? res.data.bragg_fringe_calibration : null;
+                        this.braggFringeCalibrationNodes = res.data.bragg_fringe_calibration_nodes && typeof res.data.bragg_fringe_calibration_nodes === 'object'
+                            ? res.data.bragg_fringe_calibration_nodes : {};
                         this.syncManifest = res.data.sync_manifest && typeof res.data.sync_manifest === 'object'
                             ? res.data.sync_manifest : null;
                         if (this.syncManifest) this.showRawData = false;

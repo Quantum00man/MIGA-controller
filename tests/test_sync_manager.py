@@ -76,6 +76,47 @@ class FakeManager:
 
 
 class SyncManagerTests(unittest.TestCase):
+    def test_sync_parameter_plan_accepts_bragg_fringe_calibration(self):
+        manager = ExperimentManager.__new__(ExperimentManager)
+        captured = {}
+
+        def build(config):
+            captured.update(config)
+            config["_bragg_calibration_expected_total_shots"] = 9
+            return [{"sequence_parameters": [1.0], "metadata": {"bragg_calibration_stage": "coarse"}}]
+
+        manager._build_bragg_calibration_execution = build
+        config = {"mode": "bragg_fringe_calibration"}
+        plan = manager.build_scan_parameter_plan(config)
+
+        self.assertEqual(plan[0]["sequence_parameters"], [1.0])
+        self.assertEqual(config["_bragg_calibration_expected_total_shots"], 9)
+        self.assertEqual(captured["mode"], "bragg_fringe_calibration")
+
+    def test_slave_bragg_fine_plan_never_writes_master_parameters(self):
+        with tempfile.TemporaryDirectory() as root:
+            manager = FakeManager(root, role="slave")
+            installed = []
+            manager.install_bragg_calibration_fine_plan = lambda plan: installed.extend(plan)
+            sync = SyncManager(manager)
+            sync._node_active_sync_run_id = "sync_calibration"
+            manager.status.is_running = True
+
+            result = sync.install_node_bragg_fine_plan("sync_calibration", [{
+                "sequence_parameters": [1250.0, 2500.0],
+                "metadata": {
+                    "sync_shot_index": 8,
+                    "sync_p0": 1250.0,
+                    "bragg_calibration_stage": "fine",
+                },
+            }])
+
+            self.assertTrue(result["accepted"])
+            self.assertEqual(installed[0]["sequence_parameters"], [])
+            self.assertEqual(installed[0]["metadata"]["sync_parameters"], [1250.0])
+            self.assertEqual(installed[0]["metadata"]["sync_master_parameters"], [1250.0, 2500.0])
+            self.assertEqual(installed[0]["metadata"]["sync_role"], "slave")
+
     def test_sync_parameter_plan_accepts_link_formula_mode(self):
         manager = ExperimentManager.__new__(ExperimentManager)
         manager._generate_parameters = lambda config: [[1, 2], [2, 4]]

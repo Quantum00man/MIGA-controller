@@ -524,6 +524,21 @@ async def start_sync_node(req: SyncNodeCommandRequest, request: Request):
         raise HTTPException(400, str(exc))
 
 
+@router.post("/sync/node/bragg-fine-plan")
+async def install_sync_node_bragg_fine_plan(payload: Dict[str, Any], request: Request):
+    _authorize_sync_node(request)
+    try:
+        sync_run_id = str(payload.get("sync_run_id") or "")
+        fine_plan = payload.get("fine_plan") or []
+        if not isinstance(fine_plan, list) or not fine_plan:
+            raise ValueError("SYNC Bragg fine plan is empty")
+        return await run_in_threadpool(
+            sync_manager.install_node_bragg_fine_plan, sync_run_id, fine_plan
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
 @router.post("/sync/node/stop")
 async def stop_sync_node(req: SyncNodeCommandRequest, request: Request):
     _authorize_sync_node(request)

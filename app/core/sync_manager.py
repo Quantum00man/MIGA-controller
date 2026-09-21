@@ -379,7 +379,9 @@ class SyncManager:
         plan = prepared.get("shot_plan") or []
         scan_config = dict(prepared.get("scan_config") or {})
         node_name = str(self.manager.get_settings().get("sync_node_name") or "Slave")
-        transfer_mode = str(scan_config.get("mode") or "").strip().lower() in {"transfer_function", "transfer_burst_time_scan"}
+        scan_mode = str(scan_config.get("mode") or "").strip().lower()
+        transfer_mode = scan_mode in {"transfer_function", "transfer_burst_time_scan"}
+        bragg_calibration_mode = scan_mode == "bragg_fringe_calibration"
         local_settings = self.manager.get_settings()
         parameters = []
         for index, raw_parameters in enumerate(plan):
@@ -408,7 +410,7 @@ class SyncManager:
                 },
             })
         scan_config.update({
-            "mode": str(scan_config.get("mode") or "transfer_function") if transfer_mode else "standard",
+            "mode": str(scan_config.get("mode") or "transfer_function") if (transfer_mode or bragg_calibration_mode) else "standard",
             "parameter_source": "classic",
             "marker_axes": [],
             "averages": 1,
@@ -418,9 +420,12 @@ class SyncManager:
             "_sync_slave": True,
             "sync_run_id": sync_run_id,
             "sync_role": "slave",
+            "sync_node_id": node_name,
             "sync_master_node_id": prepared.get("master_node_id"),
             "sync_shot_plan": plan,
         })
+        if bragg_calibration_mode:
+            self.manager.prepare_external_bragg_calibration_plan(scan_config, len(parameters))
         if transfer_mode:
             # The Master owns the only signal generator. The Slave merely runs
             # the aligned fixed sequence and analyzes its response using its own
@@ -536,6 +541,7 @@ class SyncManager:
         # remain empty for Transfer Function, so no Master value is written into
         # a Slave sequence.
         shot_plan = deepcopy(parameters)
+        expected_shots = int(scan_config.get("_bragg_calibration_expected_total_shots", len(shot_plan)))
         sync_run_id = f"sync_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid4().hex[:8]}"
         node_name = str(settings.get("sync_node_name") or "Master")
         delay_ms = max(0.0, float(payload.get("master_delay_ms") or 0.0))
@@ -602,6 +608,7 @@ class SyncManager:
             scan_config.update({
                 "sync_run_id": sync_run_id,
                 "sync_role": "master",
+                "sync_node_id": node_name,
                 "sync_master_delay_ms": delay_ms,
                 "sync_shot_plan": shot_plan,
                 "_transfer_control_generator": True,
@@ -618,7 +625,7 @@ class SyncManager:
                     "status": "starting",
                     "message": "STARTING MASTER",
                     "master_delay_ms": delay_ms,
-                    "expected_shots": len(shot_plan),
+                    "expected_shots": expected_shots,
                     "master_step": 0,
                     "slaves": deepcopy(slave_states),
                     "paired_count": 0,
@@ -692,6 +699,16 @@ class SyncManager:
         return state
 
     def _capture_local_result(self, payload: Dict[str, Any]) -> None:
+        if (
+            payload.get("stream_type") == "bragg_calibration_coarse_fit"
+            and payload.get("sync_role") == "master"
+            and isinstance(payload.get("bragg_calibration_fine_plan"), list)
+        ):
+            self._distribute_bragg_fine_plan(
+                str(payload.get("sync_run_id") or ""),
+                payload["bragg_calibration_fine_plan"],
+            )
+            return
         sync_run_id = str(payload.get("sync_run_id") or "")
         role = str(payload.get("sync_role") or "")
         if not sync_run_id or role not in {"master", "slave"}:
@@ -709,6 +726,49 @@ class SyncManager:
                 self._master_results[shot_index] = deepcopy(payload)
                 self._runtime["master_step"] = shot_index + 1
         self._emit_available_pairs()
+
+    def _distribute_bragg_fine_plan(
+        self, sync_run_id: str, fine_plan: List[Dict[str, Any]]
+    ) -> None:
+        with self._lock:
+            if not sync_run_id or sync_run_id != self._runtime.get("sync_run_id"):
+                raise ValueError("SYNC Bragg fine plan does not match the active run")
+            slaves = deepcopy(self._runtime.get("slaves") or [])
+        for slave in slaves:
+            response = requests.post(
+                f"{slave['base_url']}/sync/node/bragg-fine-plan",
+                json={"sync_run_id": sync_run_id, "fine_plan": fine_plan},
+                headers=self._headers(), timeout=8.0,
+            )
+            response.raise_for_status()
+
+    def install_node_bragg_fine_plan(
+        self, sync_run_id: str, fine_plan: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        with self._lock:
+            if sync_run_id != self._node_active_sync_run_id:
+                raise ValueError("This SYNC calibration is not active on the Slave")
+        if not self.manager.status.is_running:
+            raise ValueError("The Slave is no longer waiting for a SYNC calibration plan")
+        node_name = str(self.manager.get_settings().get("sync_node_name") or "Slave")
+        converted = []
+        for item in fine_plan:
+            metadata = deepcopy((item or {}).get("metadata") or {})
+            p0 = metadata.get("sync_p0")
+            if p0 is None:
+                values = self._plan_values(item)
+                p0 = values[0] if values else None
+            metadata.update({
+                "sync_run_id": sync_run_id,
+                "sync_role": "slave",
+                "sync_node_id": node_name,
+                "sync_p0": p0,
+                "sync_parameters": [p0] if p0 is not None else [],
+                "sync_master_parameters": self._plan_values(item),
+            })
+            converted.append({"sequence_parameters": [], "metadata": metadata})
+        self.manager.install_bragg_calibration_fine_plan(converted)
+        return {"accepted": True, "sync_run_id": sync_run_id, "shot_count": len(converted)}
 
     @staticmethod
     def _compact_result(payload: Dict[str, Any]) -> Dict[str, Any]:

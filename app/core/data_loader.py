@@ -1630,6 +1630,23 @@ class DataLoader:
                     bragg_calibration_result = loaded_bragg_result
             except (OSError, ValueError):
                 bragg_calibration_result = {"status": "unreadable"}
+        bragg_calibration_nodes: Dict[str, Any] = {}
+        if isinstance(bragg_calibration_result, dict):
+            bragg_calibration_nodes["master" if sync_manifest else "local"] = bragg_calibration_result
+        if sync_manifest:
+            for node_id, entry in (sync_manifest.get("archive_nodes") or {}).items():
+                if node_id == "master" or not isinstance(entry, dict):
+                    continue
+                relative = str(entry.get("path") or "").strip()
+                node_path = (run_dir / relative / "bragg_fringe_calibration.json").resolve()
+                if run_dir.resolve() not in node_path.parents or not node_path.is_file():
+                    continue
+                try:
+                    node_result = json.loads(node_path.read_text(encoding="utf-8"))
+                    if isinstance(node_result, dict):
+                        bragg_calibration_nodes[str(node_id)] = node_result
+                except (OSError, ValueError):
+                    bragg_calibration_nodes[str(node_id)] = {"status": "unreadable"}
         return {
             "config": config_data,
             "run_entry": self._build_run_entry(root_run_dir),
@@ -1648,6 +1665,7 @@ class DataLoader:
             "transfer_function_summary": transfer_function_summary,
             "phase_noise_summary": phase_noise_summary,
             "bragg_fringe_calibration": bragg_calibration_result,
+            "bragg_fringe_calibration_nodes": bragg_calibration_nodes,
             "preview_map": (
                 initial_step.get("preview_map", {})
                 if is_marker_optimization
