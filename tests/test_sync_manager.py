@@ -16,10 +16,14 @@ from app.core.sync_manager import SyncManager
 
 
 class FakeResponse:
-    def __init__(self, payload=None, content=b"", headers=None):
+    def __init__(self, payload=None, content=b"", headers=None, status_code=200):
         self.payload = payload or {"ready": True}
         self.content = content
         self.headers = headers or {}
+        self.status_code = status_code
+        self.ok = 200 <= status_code < 400
+        self.reason = "error" if not self.ok else "OK"
+        self.text = json.dumps(self.payload)
 
     def raise_for_status(self):
         return None
@@ -76,6 +80,17 @@ class FakeManager:
 
 
 class SyncManagerTests(unittest.TestCase):
+    def test_slave_http_error_preserves_node_stage_and_detail(self):
+        response = FakeResponse(
+            {"detail": "Transfer scan configuration is invalid"}, status_code=400
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            r"Slave MIGA21 start failed \(HTTP 400\): Transfer scan configuration is invalid",
+        ):
+            SyncManager._require_node_response(response, "MIGA21", "start")
+
     def test_sync_parameter_plan_accepts_bragg_fringe_calibration(self):
         manager = ExperimentManager.__new__(ExperimentManager)
         captured = {}

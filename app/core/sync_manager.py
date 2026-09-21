@@ -313,6 +313,27 @@ class SyncManager:
         token = str(self.manager.get_settings().get("sync_shared_token") or "")
         return {"X-MIGA-Sync-Token": token} if token else {}
 
+    @staticmethod
+    def _require_node_response(response: requests.Response, node_name: str, stage: str) -> Dict[str, Any]:
+        """Preserve a Slave's error body instead of reducing it to a generic 502."""
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = None
+        if response.ok:
+            return payload if isinstance(payload, dict) else {}
+        detail: Any = payload.get("detail") if isinstance(payload, dict) else None
+        if detail is None and isinstance(payload, dict):
+            detail = payload.get("message") or payload
+        if detail is None:
+            detail = str(response.text or "").strip()[:1000]
+        if isinstance(detail, (dict, list)):
+            detail = json.dumps(detail, ensure_ascii=False)
+        explanation = str(detail or response.reason or "Unknown Slave error")
+        raise ValueError(
+            f"Slave {node_name} {stage} failed (HTTP {response.status_code}): {explanation}"
+        )
+
     def health(self) -> Dict[str, Any]:
         return {
             **self.settings_snapshot(),
@@ -577,9 +598,10 @@ class SyncManager:
                 headers=self._headers(),
                 timeout=8.0,
             )
-            response.raise_for_status()
-            if not response.json().get("ready"):
-                raise ValueError(f"Slave {raw_slave.get('name') or node_id} did not become ready")
+            slave_name = str(raw_slave.get("name") or node_id)
+            response_payload = self._require_node_response(response, slave_name, "prepare")
+            if not response_payload.get("ready"):
+                raise ValueError(f"Slave {slave_name} prepare failed: node did not become ready")
             slave_states.append({
                 "node_id": node_id,
                 "name": raw_slave.get("name") or node_id,
@@ -598,7 +620,7 @@ class SyncManager:
                     headers=self._headers(),
                     timeout=8.0,
                 )
-                response.raise_for_status()
+                self._require_node_response(response, str(slave.get("name") or slave["node_id"]), "start")
                 slave["status"] = "running"
                 started_slaves.append(slave)
             if delay_ms:

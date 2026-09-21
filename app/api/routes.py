@@ -6,6 +6,7 @@ import os
 import shutil
 import tempfile
 import time
+import traceback
 from copy import deepcopy
 from pathlib import Path
 from urllib.parse import quote
@@ -414,6 +415,7 @@ async def start_sync_run(req: SyncStartRequest):
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     except Exception as exc:
+        traceback.print_exc()
         raise HTTPException(502, f"Sync start failed: {exc}")
 
 

@@ -6337,7 +6337,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                 this.$nextTick(() => this.renderSyncPlot());
             } catch (error) {
                 this.isRunning = false;
-                this.addLog('SYNC start failed: ' + (error?.message || this.formatRequestError(error)));
+                this.addLog('SYNC start failed: ' + this.formatRequestError(error));
             }
         },
         async startImmediateScan() {
