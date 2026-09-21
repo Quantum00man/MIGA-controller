@@ -153,6 +153,17 @@ class TransferFunctionPlanTests(unittest.TestCase):
         self.assertIn("transfer_function: 'Transfer Function'", index_html)
         self.assertIn('aria-label="SYNC Transfer Function statistic"', index_html)
 
+    def test_settings_offer_rigol_transfer_generator_and_reuse_its_connection(self):
+        settings_html = (Path(__file__).resolve().parents[1] / "static" / "settings.html").read_text(encoding="utf-8")
+        self.assertIn('<option value="DG4162">RIGOL DG4162</option>', settings_html)
+        self.assertIn("transferGeneratorConnectionPayload()", settings_html)
+        self.assertIn("useRigol ? this.s.rigol_host : this.s.tti_host", settings_html)
+
+    def test_phase_transfer_plot_keeps_its_single_panel_x_axis_visible(self):
+        index_html = (Path(__file__).resolve().parents[1] / "static" / "index.html").read_text(encoding="utf-8")
+        self.assertIn("const showXAxis = !isUp || this.currentTab === 'phase';", index_html)
+        self.assertIn("showticklabels: showXAxis, automargin: true", index_html)
+
     def test_burst_time_plan_uses_timing_parameters_at_fixed_tti_frequency(self):
         config = {
             "scan_dimensions": 1,
@@ -406,6 +417,37 @@ class TransferFunctionPlanTests(unittest.TestCase):
             manager._acquisition_loop(parameters, scan_config)
 
         self.assertEqual(client.set_output.call_args_list, [call(True), call(False)])
+        client.close.assert_called_once_with()
+        self.assertIn("measurement failed", manager._scan_finalize_error)
+
+    def test_acquisition_can_control_rigol_frequency_phase_and_output(self):
+        manager = ExperimentManager.__new__(ExperimentManager)
+        manager.settings = {"rigol_host": "192.168.1.40", "rigol_port": 5555, "rigol_timeout_s": 3}
+        manager.stop_flag = False
+        manager.status = SimpleNamespace(message="")
+        manager.data_queue = queue.Queue()
+        manager._scan_finalize_error = None
+        manager._restore_ac_stark_dds = lambda _context: None
+        manager.execute_single_measurement = Mock(side_effect=RuntimeError("measurement failed"))
+        client = Mock()
+        client.connect.return_value = "RIGOL TECHNOLOGIES,DG4162,123,1.0"
+        parameters = [{
+            "sequence_parameters": [],
+            "metadata": {"transfer_frequency_hz": 100.0, "transfer_phase_deg": 90.0},
+        }]
+        scan_config = {
+            "mode": "transfer_function", "scan_dimensions": 1,
+            "transfer_generator_model": "DG4162", "transfer_generator_channel": 2,
+            "transfer_control_output": True, "transfer_settling_time_s": 0,
+        }
+        with patch("app.core.experiment_manager.config.USE_SIMULATION", False), patch(
+            "app.core.experiment_manager.RigolGeneratorClient", return_value=client
+        ):
+            manager._acquisition_loop(parameters, scan_config)
+
+        client.set_frequency.assert_called_once_with(2, 100.0)
+        client.set_phase.assert_called_once_with(2, 90.0)
+        self.assertEqual(client.set_output.call_args_list, [call(2, True), call(2, False)])
         client.close.assert_called_once_with()
         self.assertIn("measurement failed", manager._scan_finalize_error)
 

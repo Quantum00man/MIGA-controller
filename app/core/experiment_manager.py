@@ -2926,25 +2926,54 @@ class ExperimentManager:
         transfer_calibrate_zero_phase = bool(scan_config.get("transfer_calibrate_zero_phase", False))
         transfer_output_enabled = False
 
+        def set_transfer_output(enabled: bool) -> None:
+            if transfer_model == "DG4162":
+                if rigol_client is not None:
+                    rigol_client.set_output(transfer_channel, enabled)
+            elif tti_client is not None:
+                tti_client.set_output(enabled)
+
+        def set_transfer_frequency(frequency_hz: float) -> None:
+            if transfer_model == "DG4162":
+                if rigol_client is not None:
+                    rigol_client.set_frequency(transfer_channel, frequency_hz)
+            elif tti_client is not None:
+                tti_client.set_frequency(frequency_hz)
+
+        def set_transfer_phase(phase_degrees: float) -> None:
+            if transfer_model == "DG4162":
+                if rigol_client is not None:
+                    rigol_client.set_phase(transfer_channel, phase_degrees)
+            elif tti_client is not None:
+                tti_client.set_phase(phase_degrees)
+
         try:
             if transfer_mode and transfer_control_generator and not config.USE_SIMULATION:
-                tti_client = TtiGeneratorClient(TtiConnectionSettings(
-                    host=str(self.settings.get("tti_host") or "").strip(),
-                    port=int(self.settings.get("tti_port", 9221)),
-                    timeout_s=float(self.settings.get("tti_timeout_s", 3.0)),
-                    model=transfer_model,
-                    channel=transfer_channel,
-                ))
-                identity = tti_client.connect()
+                if transfer_model == "DG4162":
+                    rigol_client = RigolGeneratorClient(RigolConnectionSettings(
+                        host=str(self.settings.get("rigol_host") or "").strip(),
+                        port=int(self.settings.get("rigol_port", 5555)),
+                        timeout_s=float(self.settings.get("rigol_timeout_s", 3.0)),
+                    ))
+                    identity = rigol_client.connect()
+                else:
+                    tti_client = TtiGeneratorClient(TtiConnectionSettings(
+                        host=str(self.settings.get("tti_host") or "").strip(),
+                        port=int(self.settings.get("tti_port", 9221)),
+                        timeout_s=float(self.settings.get("tti_timeout_s", 3.0)),
+                        model=transfer_model,
+                        channel=transfer_channel,
+                    ))
+                    identity = tti_client.connect()
                 print(f"[Transfer Function] Connected to {identity}; using CH{transfer_channel}")
                 if transfer_control_output and not transfer_calibrate_zero_phase:
                     self.status.message = f"Enabling {transfer_model} CH{transfer_channel} OUTPUT..."
-                    tti_client.set_output(True)
+                    set_transfer_output(True)
                     transfer_output_enabled = True
                     print(f"[Transfer Function] {transfer_model} CH{transfer_channel} OUTPUT ON")
                 elif transfer_control_output and transfer_calibrate_zero_phase:
                     self.status.message = f"Disabling {transfer_model} CH{transfer_channel} OUTPUT for zero-phase calibration..."
-                    tti_client.set_output(False)
+                    set_transfer_output(False)
                     print(f"[Transfer Function] {transfer_model} CH{transfer_channel} OUTPUT OFF for zero-phase calibration")
             if ramsey_mode and not config.USE_SIMULATION:
                 rigol_client = RigolGeneratorClient(RigolConnectionSettings(
@@ -2983,14 +3012,12 @@ class ExperimentManager:
                     is_zero_baseline = bool(metadata.get("transfer_zero_phase_baseline", False))
                     if transfer_control_output and is_zero_baseline and transfer_output_enabled:
                         self.status.message = f"Disabling {transfer_model} CH{transfer_channel} OUTPUT for zero-phase recalibration..."
-                        if tti_client is not None:
-                            tti_client.set_output(False)
+                        set_transfer_output(False)
                         transfer_output_enabled = False
                         active_transfer_response_value = None
                     if transfer_control_output and not is_zero_baseline and not transfer_output_enabled:
                         self.status.message = f"Enabling {transfer_model} CH{transfer_channel} OUTPUT after zero-phase calibration..."
-                        if tti_client is not None:
-                            tti_client.set_output(True)
+                        set_transfer_output(True)
                         transfer_output_enabled = True
                         active_transfer_frequency = None
                         active_transfer_response_value = None
@@ -3005,21 +3032,19 @@ class ExperimentManager:
                         active_transfer_phase = phase_deg
                         if transfer_burst_time_mode:
                             self.status.message = f"Setting {transfer_model} CH{transfer_channel} phase to {phase_deg:g}°..."
-                            if tti_client is not None:
-                                tti_client.set_phase(phase_deg)
+                            set_transfer_phase(phase_deg)
                         else:
                             active_transfer_frequency = None
                     frequency = float((metadata or {}).get("transfer_generator_frequency_hz", (metadata or {}).get("transfer_frequency_hz")))
                     if active_transfer_frequency is None or frequency != active_transfer_frequency:
                         self.status.message = f"Setting {transfer_model} CH{transfer_channel} to {frequency:g} Hz at {phase_deg:g}°..."
-                        if tti_client is not None:
-                            tti_client.set_frequency(frequency)
-                            if phase_changed and not transfer_burst_time_mode:
-                                tti_client.set_phase(phase_deg)
+                        set_transfer_frequency(frequency)
+                        if phase_changed and not transfer_burst_time_mode:
+                            set_transfer_phase(phase_deg)
                         active_transfer_frequency = frequency
                         settling_time = 0.0 if transfer_burst_time_mode else float(scan_config.get("transfer_settling_time_s", 5.0))
                         if transfer_control_generator and not config.USE_SIMULATION and settling_time > 0:
-                            action = "confirmed" if transfer_model == "TG5012A" else "accepted"
+                            action = "accepted" if transfer_model == "TGF3162" else "confirmed"
                             self.status.message = f"{transfer_model} CH{transfer_channel} {action} {frequency:g} Hz at {phase_deg:g}°; settling {settling_time:g} s..."
                             deadline = time.monotonic() + settling_time
                             while not self.stop_flag and time.monotonic() < deadline:
@@ -3091,10 +3116,10 @@ class ExperimentManager:
             self._scan_finalize_error = f"Acquisition loop failed: {exc}"
             print(f"[Acq Error] {traceback.format_exc()}")
         finally:
-            if tti_client is not None:
+            if transfer_mode and (tti_client is not None or rigol_client is not None):
                 if transfer_control_output and transfer_output_enabled:
                     try:
-                        tti_client.set_output(False)
+                        set_transfer_output(False)
                         print(f"[Transfer Function] {transfer_model} CH{transfer_channel} OUTPUT OFF")
                     except Exception as exc:
                         cleanup_error = (
@@ -3103,7 +3128,8 @@ class ExperimentManager:
                         if not self._scan_finalize_error:
                             self._scan_finalize_error = cleanup_error
                         print(f"[Transfer Function] {cleanup_error}")
-                tti_client.close()
+                if tti_client is not None:
+                    tti_client.close()
             if rigol_client is not None:
                 rigol_client.close()
             restore_error = self._restore_ac_stark_dds(ac_stark_context)

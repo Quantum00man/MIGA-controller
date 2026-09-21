@@ -5463,6 +5463,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     const sourceLabel = this.currentTab === 'phase' ? 'Active calibration' : (noFit ? 'NoFit' : 'Fit');
                     const makePanel = (field, channel, color, isUp) => {
                         if (!field) return { traces: [], layout: { ...this.buildCommonAnalysisLayout() } };
+                        const showXAxis = !isUp || this.currentTab === 'phase';
                         const scale = statistic !== 's2' && this.currentTab === 'phase' && this.phaseUnit === 'mrad' ? 1000 : 1;
                         const phaseAmplitude = this.transferBraggPhaseAmplitudeRad();
                         let traces;
@@ -5560,8 +5561,10 @@ finishScheduledRun(finalStatus = 'IDLE') {
                             traces,
                             layout: {
                                 ...base,
-                                margin: isUp ? { t: 38, b: 8, l: 76, r: 20 } : { t: 10, b: 50, l: 76, r: 20 },
-                                xaxis: { ...base.xaxis, title: isUp ? '' : this.transferResponseAxisLabel(), showticklabels: !isUp },
+                                margin: showXAxis
+                                    ? { t: isUp ? 38 : 10, b: 50, l: 76, r: 20 }
+                                    : { t: 38, b: 8, l: 76, r: 20 },
+                                xaxis: { ...base.xaxis, title: showXAxis ? this.transferResponseAxisLabel() : '', showticklabels: showXAxis, automargin: true },
                                 yaxis: {
                                     ...base.yaxis,
                                     type: this.transferFunctionYAxisScale,

@@ -758,6 +758,7 @@
                             <select id="tti-model" class="form-select" v-model="s.tti_model">
                                 <option value="TG5012A">TG5012A</option>
                                 <option value="TGF3162">TGF3162</option>
+                                <option value="DG4162">RIGOL DG4162</option>
                             </select>
                         </div>
                         <div class="col-md-6">
@@ -796,19 +797,20 @@
                         </div>
                         <div class="col-md-6">
                             <label class="form-label fw-bold" for="tti-host">Instrument IP address</label>
-                            <input id="tti-host" class="form-control font-monospace" v-model.trim="s.tti_host"
+                            <input v-if="s.tti_model !== 'DG4162'" id="tti-host" class="form-control font-monospace" v-model.trim="s.tti_host"
                                 placeholder="192.168.1.100" autocomplete="off">
-                            <div class="form-text">The controller connects directly to the instrument LAN socket.</div>
+                            <input v-else id="tti-host" class="form-control font-monospace" :value="s.rigol_host" readonly>
+                            <div class="form-text">{{ s.tti_model === 'DG4162' ? 'Reuses the IP configured under Ramsey Interferometer.' : 'The controller connects directly to the instrument LAN socket.' }}</div>
                         </div>
                         <div class="col-md-3">
                             <label class="form-label fw-bold" for="tti-port">TCP port</label>
-                            <input id="tti-port" type="number" min="1" max="65535" class="form-control"
-                                v-model.number="s.tti_port">
+                            <input v-if="s.tti_model !== 'DG4162'" id="tti-port" type="number" min="1" max="65535" class="form-control" v-model.number="s.tti_port">
+                            <input v-else id="tti-port" type="number" class="form-control" :value="s.rigol_port" readonly>
                         </div>
                         <div class="col-md-3">
                             <label class="form-label fw-bold" for="tti-timeout">Timeout (s)</label>
-                            <input id="tti-timeout" type="number" min="0.2" max="120" step="0.1" class="form-control"
-                                v-model.number="s.tti_timeout_s">
+                            <input v-if="s.tti_model !== 'DG4162'" id="tti-timeout" type="number" min="0.2" max="120" step="0.1" class="form-control" v-model.number="s.tti_timeout_s">
+                            <input v-else id="tti-timeout" type="number" class="form-control" :value="s.rigol_timeout_s" readonly>
                         </div>
                         <div class="col-12 d-flex align-items-center gap-3 flex-wrap">
                             <button type="button" class="btn btn-outline-primary" @click="testTtiConnection" :disabled="ttiTesting || ttiFrequencyTesting || ttiPhaseTesting || ttiOutputTesting">
@@ -2936,18 +2938,23 @@
                         slave.testing = false;
                     }
                 },
+                transferGeneratorConnectionPayload() {
+                    const model = String(this.s.tti_model || 'TG5012A');
+                    const useRigol = model === 'DG4162';
+                    return {
+                        host: String((useRigol ? this.s.rigol_host : this.s.tti_host) || '').trim(),
+                        port: Number((useRigol ? this.s.rigol_port : this.s.tti_port) || (useRigol ? 5555 : 9221)),
+                        timeout_s: Number((useRigol ? this.s.rigol_timeout_s : this.s.tti_timeout_s) || 3),
+                        model,
+                        channel: Number(this.s.tti_channel || 1)
+                    };
+                },
                 async testTtiConnection() {
                     this.ttiTesting = true;
                     this.ttiTestMessage = '';
                     this.ttiTestError = false;
                     try {
-                        const res = await axios.post('/settings/tti/test', {
-                            host: String(this.s.tti_host || '').trim(),
-                            port: Number(this.s.tti_port || 9221),
-                            timeout_s: Number(this.s.tti_timeout_s || 3),
-                            model: String(this.s.tti_model || 'TG5012A'),
-                            channel: Number(this.s.tti_channel || 1)
-                        });
+                        const res = await axios.post('/settings/tti/test', this.transferGeneratorConnectionPayload());
                         this.ttiTestMessage = `Connected: ${res.data?.data?.identity || this.s.tti_model || 'TTI generator'}`;
                     } catch (error) {
                         this.ttiTestError = true;
@@ -2964,12 +2971,7 @@
                         const frequency = Number(this.ttiTestFrequencyHz);
                         if (!Number.isFinite(frequency)) throw new Error('Enter a finite test frequency.');
                         const res = await axios.post('/settings/tti/test-frequency', {
-                            host: String(this.s.tti_host || '').trim(),
-                            port: Number(this.s.tti_port || 9221),
-                            timeout_s: Number(this.s.tti_timeout_s || 3),
-                            model: String(this.s.tti_model || 'TG5012A'),
-                            channel: Number(this.s.tti_channel || 1),
-                            frequency_hz: frequency
+                            ...this.transferGeneratorConnectionPayload(), frequency_hz: frequency
                         });
                         const confirmed = Number(res.data?.data?.frequency_hz);
                         const model = String(res.data?.data?.model || this.s.tti_model || 'TTI');
@@ -2992,12 +2994,7 @@
                         if (!Number.isFinite(phase)) throw new Error('Enter a finite test phase.');
                         if (phase < -360 || phase > 360) throw new Error('Test phase must be between -360 and 360 degrees.');
                         const res = await axios.post('/settings/tti/test-phase', {
-                            host: String(this.s.tti_host || '').trim(),
-                            port: Number(this.s.tti_port || 9221),
-                            timeout_s: Number(this.s.tti_timeout_s || 3),
-                            model: String(this.s.tti_model || 'TG5012A'),
-                            channel: Number(this.s.tti_channel || 1),
-                            phase_degrees: phase
+                            ...this.transferGeneratorConnectionPayload(), phase_degrees: phase
                         });
                         const confirmed = Number(res.data?.data?.phase_degrees);
                         const model = String(res.data?.data?.model || this.s.tti_model || 'TTI');
@@ -3018,12 +3015,7 @@
                     this.ttiOutputError = false;
                     try {
                         const res = await axios.post('/settings/tti/test-output', {
-                            host: String(this.s.tti_host || '').trim(),
-                            port: Number(this.s.tti_port || 9221),
-                            timeout_s: Number(this.s.tti_timeout_s || 3),
-                            model: String(this.s.tti_model || 'TG5012A'),
-                            channel: Number(this.s.tti_channel || 1),
-                            enabled: this.ttiOutputTarget
+                            ...this.transferGeneratorConnectionPayload(), enabled: this.ttiOutputTarget
                         });
                         const model = String(res.data?.data?.model || this.s.tti_model || 'TTI');
                         const channel = Number(res.data?.data?.channel || this.s.tti_channel || 1);
@@ -3373,7 +3365,7 @@
                     });
                     normalized.update_repo_url = String(normalized.update_repo_url || '').trim();
                     normalized.tti_host = String(normalized.tti_host || '').trim();
-                    normalized.tti_model = ['TG5012A', 'TGF3162'].includes(String(normalized.tti_model || '').toUpperCase())
+                    normalized.tti_model = ['TG5012A', 'TGF3162', 'DG4162'].includes(String(normalized.tti_model || '').toUpperCase())
                         ? String(normalized.tti_model).toUpperCase() : 'TG5012A';
                     normalized.tti_channel = Number(normalized.tti_channel) === 2 ? 2 : 1;
                     const transferFrequencyModulationMhz = Number(normalized.transfer_frequency_modulation_mhz ?? 1);

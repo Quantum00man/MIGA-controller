@@ -454,8 +454,8 @@ class SyncManager:
             scan_config.update({
                 "_transfer_control_generator": False,
                 "transfer_settling_time_s": 0.0,
-                "transfer_generator_model": str(local_settings.get("tti_model") or "TG5012A").strip().upper(),
-                "transfer_generator_channel": int(local_settings.get("tti_channel", 1)),
+                "transfer_generator_model": str(scan_config.get("transfer_generator_model") or "TG5012A").strip().upper(),
+                "transfer_generator_channel": int(scan_config.get("transfer_generator_channel", 1)),
                 "transfer_frequency_modulation_mhz": float(local_settings.get("transfer_frequency_modulation_mhz", 1.0)),
                 "transfer_atom_mirror_distance_m": float(local_settings.get("transfer_atom_mirror_distance_m", 2.23)),
                 "transfer_phase_noise_sigma_mrad": float(local_settings.get("transfer_phase_noise_sigma_mrad", 100.0)),

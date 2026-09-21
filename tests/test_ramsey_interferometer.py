@@ -73,6 +73,20 @@ class RigolGeneratorTests(unittest.TestCase):
             ":OUTPut2:STATe?\n",
         ])
 
+    def test_phase_control_is_channel_specific_and_verified(self):
+        fake = FakeSocket([
+            "RIGOL TECHNOLOGIES,DG4162,DG4E000000000,00.01",
+            "90.000",
+        ])
+        with patch("app.drivers.rigol_generator.socket.create_connection", return_value=fake):
+            with RigolGeneratorClient(RigolConnectionSettings("192.168.1.40")) as client:
+                self.assertEqual(client.set_phase(2, 90), 90.0)
+        self.assertEqual(fake.sent, [
+            "*IDN?\n",
+            ":SOURce2:PHASe 90\n",
+            ":SOURce2:PHASe?\n",
+        ])
+
     def test_power_lookup_interpolates_and_clamps_endpoints(self):
         table = [
             {"frequency_mhz": 100, "power_dbm": -4},

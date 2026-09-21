@@ -68,9 +68,11 @@ from app.drivers.rigol_generator import (
     RigolConnectionSettings,
     RigolGeneratorError,
     interpolate_power_dbm,
+    set_rigol_test_frequency,
     set_rigol_test_frequency_power,
     set_rigol_test_frequency_power_pair,
     set_rigol_test_output,
+    set_rigol_test_phase,
     test_rigol_connection,
 )
 from app.models.schemas import (
@@ -1309,39 +1311,41 @@ async def update_all_settings(settings: SystemSettings):
 @router.post("/settings/tti/test", response_model=ExperimentResponse)
 async def test_tti_generator(settings: TtiConnectionTestRequest):
     try:
-        identity = await run_in_threadpool(
-            test_tti_connection,
-            TtiConnectionSettings(
-                host=settings.host,
-                port=settings.port,
-                timeout_s=settings.timeout_s,
-                model=settings.model,
-                channel=settings.channel,
-            ),
-        )
+        if settings.model == "DG4162":
+            identity = await run_in_threadpool(
+                test_rigol_connection,
+                RigolConnectionSettings(settings.host, settings.port, settings.timeout_s),
+            )
+        else:
+            identity = await run_in_threadpool(
+                test_tti_connection,
+                TtiConnectionSettings(settings.host, settings.port, settings.timeout_s, settings.model, settings.channel),
+            )
         return ExperimentResponse(
             status="success",
             message=f"{settings.model} connection verified",
             data={"identity": identity, "model": settings.model, "channel": settings.channel},
         )
-    except TtiGeneratorError as exc:
+    except (TtiGeneratorError, RigolGeneratorError) as exc:
         raise HTTPException(502, str(exc))
 
 
 @router.post("/settings/tti/test-frequency", response_model=ExperimentResponse)
 async def test_tti_generator_frequency(settings: TtiFrequencyTestRequest):
     try:
-        identity = await run_in_threadpool(
-            set_tti_test_frequency,
-            TtiConnectionSettings(
-                host=settings.host,
-                port=settings.port,
-                timeout_s=settings.timeout_s,
-                model=settings.model,
-                channel=settings.channel,
-            ),
-            settings.frequency_hz,
-        )
+        if settings.model == "DG4162":
+            identity = await run_in_threadpool(
+                set_rigol_test_frequency,
+                RigolConnectionSettings(settings.host, settings.port, settings.timeout_s),
+                settings.channel,
+                settings.frequency_hz,
+            )
+        else:
+            identity = await run_in_threadpool(
+                set_tti_test_frequency,
+                TtiConnectionSettings(settings.host, settings.port, settings.timeout_s, settings.model, settings.channel),
+                settings.frequency_hz,
+            )
         return ExperimentResponse(
             status="success",
             message=f"{settings.model} CH{settings.channel} test frequency accepted",
@@ -1352,24 +1356,26 @@ async def test_tti_generator_frequency(settings: TtiFrequencyTestRequest):
                 "frequency_hz": settings.frequency_hz,
             },
         )
-    except TtiGeneratorError as exc:
+    except (TtiGeneratorError, RigolGeneratorError) as exc:
         raise HTTPException(502, str(exc))
 
 
 @router.post("/settings/tti/test-phase", response_model=ExperimentResponse)
 async def test_tti_generator_phase(settings: TtiPhaseTestRequest):
     try:
-        identity = await run_in_threadpool(
-            set_tti_test_phase,
-            TtiConnectionSettings(
-                host=settings.host,
-                port=settings.port,
-                timeout_s=settings.timeout_s,
-                model=settings.model,
-                channel=settings.channel,
-            ),
-            settings.phase_degrees,
-        )
+        if settings.model == "DG4162":
+            identity = await run_in_threadpool(
+                set_rigol_test_phase,
+                RigolConnectionSettings(settings.host, settings.port, settings.timeout_s),
+                settings.channel,
+                settings.phase_degrees,
+            )
+        else:
+            identity = await run_in_threadpool(
+                set_tti_test_phase,
+                TtiConnectionSettings(settings.host, settings.port, settings.timeout_s, settings.model, settings.channel),
+                settings.phase_degrees,
+            )
         return ExperimentResponse(
             status="success",
             message=f"{settings.model} CH{settings.channel} test phase accepted",
@@ -1380,24 +1386,26 @@ async def test_tti_generator_phase(settings: TtiPhaseTestRequest):
                 "phase_degrees": settings.phase_degrees,
             },
         )
-    except TtiGeneratorError as exc:
+    except (TtiGeneratorError, RigolGeneratorError) as exc:
         raise HTTPException(502, str(exc))
 
 
 @router.post("/settings/tti/test-output", response_model=ExperimentResponse)
 async def test_tti_generator_output(settings: TtiOutputTestRequest):
     try:
-        identity = await run_in_threadpool(
-            set_tti_test_output,
-            TtiConnectionSettings(
-                host=settings.host,
-                port=settings.port,
-                timeout_s=settings.timeout_s,
-                model=settings.model,
-                channel=settings.channel,
-            ),
-            settings.enabled,
-        )
+        if settings.model == "DG4162":
+            identity = await run_in_threadpool(
+                set_rigol_test_output,
+                RigolConnectionSettings(settings.host, settings.port, settings.timeout_s),
+                settings.channel,
+                settings.enabled,
+            )
+        else:
+            identity = await run_in_threadpool(
+                set_tti_test_output,
+                TtiConnectionSettings(settings.host, settings.port, settings.timeout_s, settings.model, settings.channel),
+                settings.enabled,
+            )
         output_state = "ON" if settings.enabled else "OFF"
         return ExperimentResponse(
             status="success",
@@ -1409,7 +1417,7 @@ async def test_tti_generator_output(settings: TtiOutputTestRequest):
                 "output_enabled": settings.enabled,
             },
         )
-    except TtiGeneratorError as exc:
+    except (TtiGeneratorError, RigolGeneratorError) as exc:
         raise HTTPException(502, str(exc))
 
 

@@ -181,6 +181,27 @@ class RigolGeneratorClient:
     def set_frequency_pair(self, ch1_hz: float, ch2_hz: float) -> Tuple[float, float]:
         return self.set_frequency(1, ch1_hz), self.set_frequency(2, ch2_hz)
 
+    def set_phase(self, channel: int, phase_degrees: float) -> float:
+        channel = int(channel)
+        if channel not in (1, 2):
+            raise RigolGeneratorError("RIGOL channel must be 1 or 2")
+        try:
+            value = float(phase_degrees)
+        except (TypeError, ValueError) as exc:
+            raise RigolGeneratorError("RIGOL phase must be numeric") from exc
+        if not math.isfinite(value) or value < -360.0 or value > 360.0:
+            raise RigolGeneratorError("RIGOL phase must be finite and between -360 and 360 degrees")
+        self.write(f":SOURce{channel}:PHASe {value:.12g}")
+        try:
+            actual = float(self.query(f":SOURce{channel}:PHASe?"))
+        except (ValueError, RigolGeneratorError) as exc:
+            raise RigolGeneratorError(f"DG4162 CH{channel} phase command failed: {exc}") from exc
+        if not math.isfinite(actual) or abs(actual - value) > 1e-3:
+            raise RigolGeneratorError(
+                f"DG4162 CH{channel} phase verification failed: requested {value:g} degrees, received {actual:g} degrees"
+            )
+        return actual
+
     def set_power_dbm(self, channel: int, power_dbm: float) -> float:
         channel = int(channel)
         if channel not in (1, 2):
@@ -278,4 +299,12 @@ def set_rigol_test_frequency_power_pair(
 def set_rigol_test_output(settings: RigolConnectionSettings, channel: int, enabled: bool) -> str:
     with RigolGeneratorClient(settings) as client:
         client.set_output(channel, enabled)
+        return client.identity
+
+
+def set_rigol_test_phase(
+    settings: RigolConnectionSettings, channel: int, phase_degrees: float
+) -> str:
+    with RigolGeneratorClient(settings) as client:
+        client.set_phase(channel, phase_degrees)
         return client.identity

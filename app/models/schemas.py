@@ -625,8 +625,8 @@ class SystemSettings(BaseModel):
     @validator("tti_model")
     def validate_tti_model(cls, value):
         normalized = str(value or "").strip().upper()
-        if normalized not in {"TG5012A", "TGF3162"}:
-            raise ValueError("TTI model must be TG5012A or TGF3162")
+        if normalized not in {"TG5012A", "TGF3162", "DG4162"}:
+            raise ValueError("Transfer Function generator must be TG5012A, TGF3162 or DG4162")
         return normalized
 
     @validator("sync_role")
@@ -659,8 +659,8 @@ class TtiConnectionTestRequest(BaseModel):
     @validator("model")
     def validate_model(cls, value):
         normalized = str(value or "").strip().upper()
-        if normalized not in {"TG5012A", "TGF3162"}:
-            raise ValueError("TTI model must be TG5012A or TGF3162")
+        if normalized not in {"TG5012A", "TGF3162", "DG4162"}:
+            raise ValueError("Transfer Function generator must be TG5012A, TGF3162 or DG4162")
         return normalized
 
 
