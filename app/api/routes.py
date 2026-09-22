@@ -141,6 +141,20 @@ import config
 
 
 router = APIRouter()
+MANUAL_PDF_PATH = Path(__file__).resolve().parents[2] / "docs" / "manual" / "miga_controller_manual.pdf"
+
+
+@router.get("/manual/download")
+async def download_manual():
+    if not MANUAL_PDF_PATH.is_file():
+        raise HTTPException(status_code=404, detail="MIGA Controller manual is not available")
+    return FileResponse(
+        path=MANUAL_PDF_PATH,
+        media_type="application/pdf",
+        filename="MIGA_Controller_Manual.pdf",
+    )
+
+
 manager = ExperimentManager()
 optimization_manager = OptimizationManager(manager)
 marker_optimization_manager = MarkerOptimizationManager(manager)
