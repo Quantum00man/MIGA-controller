@@ -847,11 +847,11 @@
                             </div>
                         </div>
                         <div class="col-12 mt-4 pt-3 border-top">
-                            <label class="form-label fw-bold" for="tti-test-phase">Test {{ s.tti_channel === 2 ? 'CH2' : 'CH1' }} phase</label>
+                            <label class="form-label fw-bold" for="tti-test-phase">Test {{ s.tti_channel === 2 ? 'CH2' : 'CH1' }} {{ s.tti_model === 'DG4162' ? 'burst start phase' : 'phase' }}</label>
                             <div class="row g-2 align-items-center">
                                 <div class="col-md-6">
                                     <div class="input-group">
-                                        <input id="tti-test-phase" type="number" min="-360" max="360" step="0.1"
+                                        <input id="tti-test-phase" type="number" :min="s.tti_model === 'DG4162' ? 0 : -360" max="360" step="0.1"
                                             class="form-control" v-model.number="ttiTestPhaseDeg">
                                         <span class="input-group-text">degrees</span>
                                     </div>
@@ -860,11 +860,11 @@
                                     <button type="button" class="btn btn-outline-warning" @click="setTtiTestPhase"
                                         :disabled="ttiTesting || ttiFrequencyTesting || ttiPhaseTesting || ttiOutputTesting">
                                         <span v-if="ttiPhaseTesting" class="spinner-border spinner-border-sm me-2"></span>
-                                        {{ ttiPhaseTesting ? 'Setting phase...' : 'Set Test Phase' }}
+                                        {{ ttiPhaseTesting ? 'Setting phase...' : (s.tti_model === 'DG4162' ? 'Set Test Burst Start Phase' : 'Set Test Phase') }}
                                     </button>
                                 </div>
                                 <div class="col-12">
-                                    <div class="form-text">This immediately changes the selected channel phase and does not restore its previous value.</div>
+                                    <div class="form-text">This immediately changes the selected channel {{ s.tti_model === 'DG4162' ? 'Burst Start Phase without changing Burst/Gate/trigger settings' : 'phase' }} and does not restore its previous value.</div>
                                     <div v-if="ttiPhaseMessage" class="small mt-2" :class="ttiPhaseError ? 'text-danger' : 'text-success'">
                                         {{ ttiPhaseMessage }}
                                     </div>
@@ -2992,7 +2992,10 @@
                     try {
                         const phase = Number(this.ttiTestPhaseDeg);
                         if (!Number.isFinite(phase)) throw new Error('Enter a finite test phase.');
-                        if (phase < -360 || phase > 360) throw new Error('Test phase must be between -360 and 360 degrees.');
+                        const minimumPhase = this.s.tti_model === 'DG4162' ? 0 : -360;
+                        if (phase < minimumPhase || phase > 360) {
+                            throw new Error(`Test phase must be between ${minimumPhase} and 360 degrees.`);
+                        }
                         const res = await axios.post('/settings/tti/test-phase', {
                             ...this.transferGeneratorConnectionPayload(), phase_degrees: phase
                         });

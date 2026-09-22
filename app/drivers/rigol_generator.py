@@ -182,6 +182,7 @@ class RigolGeneratorClient:
         return self.set_frequency(1, ch1_hz), self.set_frequency(2, ch2_hz)
 
     def set_phase(self, channel: int, phase_degrees: float) -> float:
+        """Set the gated-burst start phase used by Transfer Function scans."""
         channel = int(channel)
         if channel not in (1, 2):
             raise RigolGeneratorError("RIGOL channel must be 1 or 2")
@@ -189,16 +190,21 @@ class RigolGeneratorClient:
             value = float(phase_degrees)
         except (TypeError, ValueError) as exc:
             raise RigolGeneratorError("RIGOL phase must be numeric") from exc
-        if not math.isfinite(value) or value < -360.0 or value > 360.0:
-            raise RigolGeneratorError("RIGOL phase must be finite and between -360 and 360 degrees")
-        self.write(f":SOURce{channel}:PHASe {value:.12g}")
+        if not math.isfinite(value) or value < 0.0 or value > 360.0:
+            raise RigolGeneratorError(
+                "RIGOL burst start phase must be finite and between 0 and 360 degrees"
+            )
+        self.write(f":SOURce{channel}:BURSt:PHASe {value:.12g}")
         try:
-            actual = float(self.query(f":SOURce{channel}:PHASe?"))
+            actual = float(self.query(f":SOURce{channel}:BURSt:PHASe?"))
         except (ValueError, RigolGeneratorError) as exc:
-            raise RigolGeneratorError(f"DG4162 CH{channel} phase command failed: {exc}") from exc
+            raise RigolGeneratorError(
+                f"DG4162 CH{channel} burst start phase command failed: {exc}"
+            ) from exc
         if not math.isfinite(actual) or abs(actual - value) > 1e-3:
             raise RigolGeneratorError(
-                f"DG4162 CH{channel} phase verification failed: requested {value:g} degrees, received {actual:g} degrees"
+                f"DG4162 CH{channel} burst start phase verification failed: "
+                f"requested {value:g} degrees, received {actual:g} degrees"
             )
         return actual
 
