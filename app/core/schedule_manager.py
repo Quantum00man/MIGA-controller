@@ -282,6 +282,7 @@ class ScheduleManager:
                 sync_payload = SyncStartRequest(
                     scan_config=config_payload,
                     master_delay_ms=raw_sync.get("master_delay_ms", 100),
+                    independent_p0_enabled=raw_sync.get("independent_p0_enabled", False),
                     slaves=raw_sync.get("slaves") or [],
                 ).dict()
                 if not sync_payload["slaves"]:
@@ -294,6 +295,7 @@ class ScheduleManager:
                         raise ValueError(f"Task {index + 1} has no sequence for Sync slave {slave.get('name') or slave.get('node_id')}")
                 normalized_task["sync"] = {
                     "master_delay_ms": sync_payload["master_delay_ms"],
+                    "independent_p0_enabled": sync_payload["independent_p0_enabled"],
                     "slaves": sync_payload["slaves"],
                 }
             normalized.append(normalized_task)

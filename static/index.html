@@ -767,6 +767,13 @@
                         <label class="form-label small text-muted">Master delay after Slave start (ms)</label>
                         <input type="number" class="form-control form-control-sm" v-model.number="syncMasterDelayMs" min="0" max="60000" step="10">
                     </div>
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" id="syncIndependentP0"
+                            v-model="syncIndependentP0Enabled" @change="syncIndependentP0Changed"
+                            :disabled="isRunning || isScheduleActive() || config.mode !== 'standard' || Number(config.scan_dimensions) !== 1 || config.parameter_source !== 'classic'">
+                        <label class="form-check-label small fw-bold" for="syncIndependentP0">Independent Master / Slave P0</label>
+                        <div class="form-text">Optional. Standard 1D only; both nodes use the shared averages and must contain the same number of P0 points.</div>
+                    </div>
                     <div v-if="syncConfig.role !== 'master'" class="alert alert-warning small py-2">Set this controller to Master in Settings → SYNC.</div>
                     <div v-for="slave in syncSlaves" :key="slave.id" class="border rounded p-2 mb-2 bg-light">
                         <div class="d-flex justify-content-between align-items-center mb-2">
@@ -779,6 +786,21 @@
                         </div>
                         <input type="file" :ref="`syncSlaveFile_${slave.id}`" style="display:none" accept=".mot" @change="selectSyncSlaveSequence($event, slave)">
                         <div class="form-text font-monospace">{{ slave.base_url }}</div>
+                        <div v-if="syncIndependentP0Enabled" class="border-top mt-2 pt-2">
+                            <div class="small fw-bold text-primary mb-2">Slave P0 scan</div>
+                            <div class="row g-2">
+                                <div class="col-6"><label class="form-label small mb-1">Source</label><select class="form-select form-select-sm" v-model="slave.p0_scan_config.dim1_type"><option value="range">Range</option><option value="list">List</option></select></div>
+                                <div class="col-6"><label class="form-label small mb-1">Type</label><select class="form-select form-select-sm" v-model="slave.p0_scan_config.param_type"><option value="float">Float</option><option value="int">Int</option></select></div>
+                                <template v-if="slave.p0_scan_config.dim1_type === 'range'">
+                                    <div class="col-6"><label class="form-label small mb-1">Method</label><select class="form-select form-select-sm" v-model="slave.p0_scan_config.dim1_method"><option value="step_size">Step</option><option value="n_points">Count</option></select></div>
+                                    <div class="col-6"><label class="form-label small mb-1">Step / Count</label><input type="text" class="form-control form-control-sm" v-model="slave.p0_scan_config.step"></div>
+                                    <div class="col-6"><label class="form-label small mb-1">Start</label><input type="text" class="form-control form-control-sm" v-model="slave.p0_scan_config.start"></div>
+                                    <div class="col-6"><label class="form-label small mb-1">Stop</label><input type="text" class="form-control form-control-sm" v-model="slave.p0_scan_config.stop"></div>
+                                </template>
+                                <div v-else class="col-12"><label class="form-label small mb-1">P0 list</label><input type="text" class="form-control form-control-sm" v-model="slave.p0_scan_config.custom_list" placeholder="1, 2, 3"></div>
+                            </div>
+                            <div class="form-text">Averages: {{ config.averages }} (shared with Master).</div>
+                        </div>
                     </div>
                     <div class="form-check form-switch mt-3 pt-2 border-top">
                         <input class="form-check-input" type="checkbox" role="switch" id="syncScheduleEnabled"
@@ -1477,7 +1499,7 @@
                         <div class="col-6">
                             <div class="d-flex align-items-center gap-3 mt-4 flex-wrap">
                                 <div class="form-check mb-0"><input class="form-check-input" type="checkbox"
-                                        v-model="config.randomize" id="randCheck" :disabled="['ac_stark', 'lock_in', 'transfer_function', 'transfer_burst_time_scan', 'ramsey_interferometer', 'phase_noise', 'bragg_fringe_calibration'].includes(config.mode)"><label
+                                        v-model="config.randomize" id="randCheck" :disabled="syncIndependentP0Enabled || ['ac_stark', 'lock_in', 'transfer_function', 'transfer_burst_time_scan', 'ramsey_interferometer', 'phase_noise', 'bragg_fringe_calibration'].includes(config.mode)"><label
                                         class="form-check-label small" for="randCheck">Randomize</label></div>
                                 <div class="form-check mb-0"><input class="form-check-input" type="checkbox"
                                         v-model="config.ext_trigger" id="extTriggerCheck"><label
@@ -1579,7 +1601,7 @@
                     <div class="analysis-header-top">
                         <div class="analysis-header-title"><i class="bi bi-bounding-box-circles fs-5 me-2"></i><span>SYNC Analysis</span></div>
                         <div class="analysis-header-actions d-flex flex-wrap gap-2 align-items-center">
-                            <select v-if="!isBraggRabiSync()" class="form-select form-select-sm" style="width:auto" v-model="syncViewMode" @change="handleSyncViewModeChange">
+                            <select v-if="!isBraggRabiSync() && !syncIndependentP0Enabled" class="form-select form-select-sm" style="width:auto" v-model="syncViewMode" @change="handleSyncViewModeChange">
                                 <option value="node">Node Data</option>
                                 <option value="lissajous">Differential</option>
                             </select>
@@ -1927,6 +1949,8 @@
                     syncConfig: { role: 'standalone', node_name: 'Local controller', slaves: [] },
                     syncSlaves: [],
                     syncMasterDelayMs: 100,
+                    syncIndependentP0Enabled: false,
+                    syncSavedP0Configs: {},
                     syncRuntime: { active: false, status: 'idle', slaves: [], paired_count: 0 },
                     syncNodeResults: { master: [] },
                     syncHistoryMaps: { master: {} },
@@ -2034,6 +2058,7 @@
                 useList2(val) { this.config.dim2_type = val ? 'list' : 'range'; this.saveState(); },
                 useList3(val) { this.config.dim3_type = val ? 'list' : 'range'; this.saveState(); },
                 'config.scan_dimensions'() {
+                    if (Number(this.config.scan_dimensions) !== 1) this.syncIndependentP0Enabled = false;
                     if (!this.isRunning) {
                         this.currentScanDimensions = this.getConfiguredScanDimensions();
                         this.plotRevision++;
@@ -2041,6 +2066,7 @@
                     }
                 },
                 'config.mode'(mode) {
+                    if (mode !== 'standard') this.syncIndependentP0Enabled = false;
                     if (this.runMode === 'sync' && ['lock_in', 'ac_stark', 'ramsey_interferometer'].includes(mode)) {
                         this.config.mode = 'standard';
                         return;
@@ -2108,6 +2134,7 @@
                     this.requestPlotResize();
                 },
                 'config.parameter_source'(source) {
+                    if (source !== 'classic') this.syncIndependentP0Enabled = false;
                     if (source === 'markers') {
                         if (this.runMode !== 'live') this.runMode = 'live';
                         this.config.mode = 'standard';
@@ -2328,6 +2355,8 @@
                             sequence_content: previous.get(String(item.id))?.sequence_content || '',
                             sequence_content_base64: previous.get(String(item.id))?.sequence_content_base64 || '',
                             runtime_status: previous.get(String(item.id))?.runtime_status || 'configured',
+                            p0_scan_config: previous.get(String(item.id))?.p0_scan_config || this.syncSavedP0Configs[String(item.id)] || this.makeSlaveP0Config(),
+                            p0_placeholder_confirmed: previous.get(String(item.id))?.p0_placeholder_confirmed || false,
                         }));
                         if (!this.syncAxisY.source && this.syncSlaves.length) this.syncAxisY.source = this.syncSlaves[0].id;
                     } catch (error) {
@@ -2351,7 +2380,39 @@
                     }
                     slave.sequence_content = '';
                     slave.sequence_content_base64 = btoa(binary);
+                    slave.p0_placeholder_confirmed = false;
                     this.addLog(`SYNC ${slave.name} sequence selected: ${file.name}`);
+                },
+                makeSlaveP0Config(source = this.config) {
+                    return {
+                        mode: 'standard', scan_dimensions: 1, parameter_source: 'classic', randomize: false,
+                        dim1_type: source.dim1_type || 'range', param_type: source.param_type || 'float',
+                        dim1_method: source.dim1_method || 'step_size', start: source.start ?? 0,
+                        stop: source.stop ?? 10, step: source.step ?? 1, custom_list: source.custom_list || '',
+                    };
+                },
+                syncIndependentP0Changed() {
+                    if (!this.syncIndependentP0Enabled) return;
+                    this.config.randomize = false;
+                    this.syncViewMode = 'node';
+                    this.syncSlaves.forEach(slave => {
+                        if (!slave.p0_scan_config) slave.p0_scan_config = this.makeSlaveP0Config();
+                    });
+                },
+                syncSlaveSequenceHasP0(slave) {
+                    try {
+                        const content = slave.sequence_content || (slave.sequence_content_base64 ? atob(slave.sequence_content_base64) : '');
+                        return content.includes('<PARAMETER0>');
+                    } catch (_) { return false; }
+                },
+                confirmIndependentP0Placeholders(slaves = this.syncSlaves) {
+                    if (!this.syncIndependentP0Enabled) return true;
+                    for (const slave of slaves) {
+                        if (this.syncSlaveSequenceHasP0(slave)) continue;
+                        if (!window.confirm(`${slave.name} MOT does not contain <PARAMETER0>. Its sequence will remain fixed while shots continue. Continue?`)) return false;
+                        slave.p0_placeholder_confirmed = true;
+                    }
+                    return true;
                 },
                 syncSlaveStatusClass(slave) {
                     const status = String(slave.runtime_status || '').toLowerCase();
@@ -2894,6 +2955,8 @@
                         sidebarWidth: this.sidebarWidth,
                         runMode: this.runMode,
                         syncScheduleEnabled: this.syncScheduleEnabled,
+                        syncIndependentP0Enabled: this.syncIndependentP0Enabled,
+                        syncP0Configs: Object.fromEntries(this.syncSlaves.map(slave => [String(slave.id), this.cloneConfig(slave.p0_scan_config || {})])),
                         scheduleSettings: this.scheduleSettings,
                         scheduledTasks: this.scheduledTasks,
                         showRawData: this.showRawData,
@@ -2937,6 +3000,8 @@
                                 this.runMode = state.runMode;
                             }
                             this.syncScheduleEnabled = Boolean(state.syncScheduleEnabled);
+                            this.syncIndependentP0Enabled = Boolean(state.syncIndependentP0Enabled);
+                            this.syncSavedP0Configs = state.syncP0Configs && typeof state.syncP0Configs === 'object' ? state.syncP0Configs : {};
                             if (state.scheduleSettings && typeof state.scheduleSettings === 'object') {
                                 this.scheduleSettings = {
                                     ...this.scheduleSettings,
@@ -3100,6 +3165,8 @@
                                 sequence_content: '',
                                 sequence_content_base64: archived.sequence_content_base64,
                                 runtime_status: 'preset loaded',
+                                p0_scan_config: archived.p0_scan_config || this.makeSlaveP0Config(),
+                                p0_placeholder_confirmed: Boolean(archived.p0_placeholder_confirmed),
                             };
                         });
                     }
@@ -3122,6 +3189,7 @@
                     if (restoredSyncSlaves) {
                         this.syncSlaves = restoredSyncSlaves;
                         this.syncMasterDelayMs = Math.max(0, Number(payload.sync_preset.master_delay_ms) || 0);
+                        this.syncIndependentP0Enabled = Boolean(payload.sync_preset.independent_p0_enabled);
                     }
                     this.loadedPresetInfo = {
                         ...this.normalizeRunEntry({
@@ -3871,8 +3939,12 @@ captureCurrentSyncSetupForTask() {
     if (missing) {
         throw new Error(`Select a .mot file for ${missing.name}.`);
     }
+    if (!this.confirmIndependentP0Placeholders(this.syncSlaves)) {
+        throw new Error('Independent P0 confirmation was cancelled.');
+    }
     return {
         master_delay_ms: Number(this.syncMasterDelayMs) || 0,
+        independent_p0_enabled: this.syncIndependentP0Enabled,
         slaves: this.syncSlaves.map(slave => ({
             node_id: slave.id,
             name: slave.name,
@@ -3880,6 +3952,8 @@ captureCurrentSyncSetupForTask() {
             sequence_name: slave.sequence_name,
             sequence_content: slave.sequence_content || '',
             sequence_content_base64: slave.sequence_content_base64 || '',
+            p0_scan_config: this.cloneConfig(slave.p0_scan_config || this.makeSlaveP0Config()),
+            p0_placeholder_confirmed: Boolean(slave.p0_placeholder_confirmed),
             enabled: true,
         })),
     };
@@ -3971,6 +4045,7 @@ loadScheduledTaskIntoEditor(taskId) {
         this.runMode = 'sync';
         this.syncScheduleEnabled = true;
         this.syncMasterDelayMs = Number(task.sync?.master_delay_ms) || 0;
+        this.syncIndependentP0Enabled = Boolean(task.sync?.independent_p0_enabled);
         this.syncSlaves = (task.sync?.slaves || []).map(slave => ({
             ...this.cloneConfig(slave),
             id: slave.node_id,
@@ -5862,7 +5937,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     this.renderSyncPlot();
                 },
                 handleSyncViewModeChange() {
-                    if (this.isBraggRabiSync()) this.syncViewMode = 'node';
+                    if (this.isBraggRabiSync() || this.syncIndependentP0Enabled) this.syncViewMode = 'node';
                     if (this.syncReplayPlaying) this.toggleSyncReplay();
                     this.$nextTick(() => {
                         if (this.syncViewMode === 'node') this.initPlots();
@@ -6363,6 +6438,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                 if (!this.syncSlaves.length) throw new Error('No enabled Slave is configured.');
                 const missing = this.syncSlaves.find(slave => !String(slave.sequence_content_base64 || slave.sequence_content || '').trim());
                 if (missing) throw new Error(`Select a .mot file for ${missing.name}.`);
+                if (!this.confirmIndependentP0Placeholders(this.syncSlaves)) return;
                 const uploadSuccess = await this.uploadSequenceFile();
                 if (!uploadSuccess) throw new Error('Master sequence upload failed.');
 
@@ -6380,6 +6456,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                 const res = await axios.post('/sync/start', {
                     scan_config: scanConfig,
                     master_delay_ms: Number(this.syncMasterDelayMs) || 0,
+                    independent_p0_enabled: this.syncIndependentP0Enabled,
                     slaves: this.syncSlaves.map(slave => ({
                         node_id: slave.id,
                         name: slave.name,
@@ -6387,6 +6464,8 @@ finishScheduledRun(finalStatus = 'IDLE') {
                         sequence_name: slave.sequence_name,
                         sequence_content: slave.sequence_content,
                         sequence_content_base64: slave.sequence_content_base64,
+                        p0_scan_config: this.cloneConfig(slave.p0_scan_config || this.makeSlaveP0Config()),
+                        p0_placeholder_confirmed: Boolean(slave.p0_placeholder_confirmed),
                         enabled: true,
                     })),
                 });

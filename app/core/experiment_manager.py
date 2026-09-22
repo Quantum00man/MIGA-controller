@@ -473,6 +473,8 @@ class ExperimentManager:
                 "name": configured.get("name") or historical_nodes[historical_id].get("name") or current_id,
                 "sequence_name": str(node_config.get("sequence_name") or sequence_path.name),
                 "sequence_content_base64": base64.b64encode(sequence_path.read_bytes()).decode("ascii"),
+                "p0_scan_config": deepcopy(historical_nodes[historical_id].get("p0_scan_config")),
+                "p0_placeholder_confirmed": bool(historical_nodes[historical_id].get("p0_placeholder_confirmed")),
             })
         if missing_sequences:
             raise ValueError(
@@ -482,6 +484,7 @@ class ExperimentManager:
         return {
             "sync_run_id": str(runtime.get("sync_run_id") or ""),
             "master_delay_ms": max(0.0, float(runtime.get("master_delay_ms") or 0.0)),
+            "independent_p0_enabled": bool(runtime.get("independent_p0_enabled")),
             "slaves": restored_slaves,
         }
 

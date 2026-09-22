@@ -1157,10 +1157,26 @@ a shared token; a slave may also restrict the allowed master IP. The \ui{Test} a
 checks reachability before a run.
 
 \section{Prepare, start and pair}
-The master generates the complete scan once and serializes it as a shot plan. Each slave
+By default, the master generates the complete scan once and serializes it as a shared
+shot plan. Each slave
 receives the run ID, master/slave IDs, scan configuration, shot plan and sequence content
 (text or base64 for binary-safe transfer). Every slave must report ready before any start
 command is sent. Slaves start first; the master begins after the configured delay.
+
+For a one-dimensional Standard scan using Classic Placeholders, the optional
+\ui{Independent Master / Slave P0} switch gives the Slave a complete local $P_0$
+definition: Range or List, Step or Count, and Float or Int. Master and Slave share the
+same averages value and must define exactly the same number of $P_0$ points, so their
+expanded shot counts and logical shot indices remain identical. Randomization is disabled
+in this mode. At shot $i$, the Master writes its own $P_{0,i}$ and the Slave writes its
+own $P_{0,i}$; pairing continues to use the logical shot index rather than parameter
+equality. The option is off by default, preserving the fixed-sequence Slave behaviour.
+
+If the selected Slave MOT does not contain \code{<PARAMETER0>}, the console requires an
+explicit confirmation. The acknowledged run may proceed, but the Slave sequence remains
+fixed. A scheduled task stores this acknowledgement together with both $P_0$
+configurations, so it does not pause later for browser interaction. Previous-run presets
+also restore the option and the Slave scan definition.
 
 \begin{figure}[htbp]
 \centering
@@ -1253,7 +1269,9 @@ bidirectional; failed transfers can be retried from the archive interface.
   startup controls and require a working TTI connection only on the Master.
   \item Set master delay according to the physical trigger arrangement.
   \item Start and confirm that all nodes enter ready/running states.
-  \item Monitor paired count, per-node progress and differential plots.
+  \item Monitor paired count and per-node progress. Differential plots are available for
+  shared-$P_0$ runs; Independent-$P_0$ runs use Node Data because each node has a distinct
+  horizontal coordinate.
   \item After completion, open the master archive, select every node and verify archive
   replication status. Retry incomplete transfers.
 \end{procedure}

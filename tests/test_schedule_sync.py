@@ -104,6 +104,23 @@ def test_start_accepts_sync_task_and_redacts_sequence_content():
     assert "sequence_snapshot" not in status["tasks"][0]
 
 
+def test_start_preserves_independent_p0_sync_configuration():
+    scheduler = make_scheduler()
+    task = sync_task()
+    task["sync"]["independent_p0_enabled"] = True
+    task["sync"]["slaves"][0].update({
+        "p0_scan_config": {"mode": "standard", "start": 10, "stop": 20, "step": 5},
+        "p0_placeholder_confirmed": True,
+    })
+
+    scheduler.start({"timingMode": "sequential", "tasks": [task]})
+
+    stored_sync = scheduler._state["tasks"][0]["sync"]
+    assert stored_sync["independent_p0_enabled"] is True
+    assert stored_sync["slaves"][0]["p0_scan_config"]["start"] == 10
+    assert stored_sync["slaves"][0]["p0_placeholder_confirmed"] is True
+
+
 def test_start_rebases_persisted_sync_slave_id_using_current_url():
     scheduler = make_scheduler()
     scheduler.manager.settings["sync_slaves"] = [{

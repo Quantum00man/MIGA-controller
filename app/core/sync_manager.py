@@ -373,6 +373,9 @@ class SyncManager:
         plan = payload.get("shot_plan") or []
         if not isinstance(plan, list) or not plan:
             raise ValueError("Sync shot plan is empty")
+        master_plan = payload.get("master_shot_plan") or plan
+        if not isinstance(master_plan, list) or len(master_plan) != len(plan):
+            raise ValueError("Master and Slave Sync shot plans must have the same length")
 
         run_dir = Path(config.BASE_DIR) / "temp" / "sync" / sync_run_id
         run_dir.mkdir(parents=True, exist_ok=True)
@@ -398,6 +401,8 @@ class SyncManager:
         if not prepared:
             raise ValueError("Sync run was not prepared on this slave")
         plan = prepared.get("shot_plan") or []
+        master_plan = prepared.get("master_shot_plan") or plan
+        independent_p0 = bool(prepared.get("independent_p0_enabled"))
         scan_config = dict(prepared.get("scan_config") or {})
         node_name = str(self.manager.get_settings().get("sync_node_name") or "Slave")
         scan_mode = str(scan_config.get("mode") or "").strip().lower()
@@ -414,8 +419,9 @@ class SyncManager:
                 shot_parameters = list(raw_parameters) if isinstance(raw_parameters, list) else [raw_parameters]
                 shot_metadata = {}
             display_parameters = shot_metadata.get("display_parameters") or shot_parameters
+            master_parameters = self._plan_values(master_plan[index]) if index < len(master_plan) else []
             parameters.append({
-                "sequence_parameters": [],
+                "sequence_parameters": shot_parameters if independent_p0 else [],
                 "metadata": {
                     **shot_metadata,
                     "sync_run_id": sync_run_id,
@@ -423,11 +429,11 @@ class SyncManager:
                     "sync_node_id": node_name,
                     "sync_shot_index": index,
                     "sync_p0": display_parameters[0] if display_parameters else None,
-                    # Slave analysis is tagged with the shared P0 only. The
-                    # remaining Master parameters are retained for audit but
-                    # are never written into the Slave sequence.
+                    # In legacy SYNC the Slave sequence remains fixed and P0 is
+                    # the shared Master label. Independent-P0 STANDARD scans
+                    # instead write this node's local P0 into its own sequence.
                     "sync_parameters": list(display_parameters[:1]),
-                    "sync_master_parameters": shot_parameters,
+                    "sync_master_parameters": master_parameters,
                 },
             })
         scan_config.update({
@@ -444,6 +450,7 @@ class SyncManager:
             "sync_node_id": node_name,
             "sync_master_node_id": prepared.get("master_node_id"),
             "sync_shot_plan": plan,
+            "sync_independent_p0": independent_p0,
         })
         if bragg_calibration_mode:
             self.manager.prepare_external_bragg_calibration_plan(scan_config, len(parameters))
@@ -555,6 +562,17 @@ class SyncManager:
         if not slaves:
             raise ValueError("At least one enabled Sync slave is required")
         scan_config = dict(payload.get("scan_config") or {})
+        independent_p0 = bool(payload.get("independent_p0_enabled"))
+        if independent_p0:
+            if str(scan_config.get("mode") or "standard").strip().lower() != "standard":
+                raise ValueError("Independent P0 is only available for Standard scans")
+            scan_dimensions = int(scan_config.get("scan_dimensions") or (3 if scan_config.get("dim3_enabled") else (2 if scan_config.get("dim2_enabled") else 1)))
+            if scan_dimensions != 1:
+                raise ValueError("Independent P0 is only available for one-dimensional scans")
+            if str(scan_config.get("parameter_source") or "classic").strip().lower() != "classic":
+                raise ValueError("Independent P0 requires Classic Placeholders")
+            if scan_config.get("randomize"):
+                raise ValueError("Randomize is not available with Independent P0")
         parameters = self.manager.build_scan_parameter_plan(scan_config)
         if not parameters:
             raise ValueError("Sync scan contains no shots")
@@ -580,6 +598,37 @@ class SyncManager:
             seen_node_ids.add(node_id)
             seen_urls.add(base_url)
             slave_scan_config = deepcopy(scan_config)
+            slave_plan = shot_plan
+            if independent_p0:
+                configured_slave_scan = raw_slave.get("p0_scan_config")
+                if not isinstance(configured_slave_scan, dict):
+                    raise ValueError(f"Slave {raw_slave.get('name') or node_id} has no Independent P0 configuration")
+                for key in ("dim1_type", "param_type", "dim1_method", "start", "stop", "step", "custom_list"):
+                    slave_scan_config[key] = configured_slave_scan.get(key, slave_scan_config.get(key))
+                slave_scan_config.update({
+                    "mode": "standard", "scan_dimensions": 1,
+                    "dim2_enabled": False, "dim3_enabled": False,
+                    "parameter_source": "classic", "marker_axes": [],
+                    "averages": int(scan_config.get("averages", 1)), "randomize": False,
+                })
+                slave_plan = self.manager.build_scan_parameter_plan(slave_scan_config)
+                if len(slave_plan) != len(shot_plan):
+                    raise ValueError(
+                        f"Slave {raw_slave.get('name') or node_id} P0 point count does not match the Master"
+                    )
+
+                encoded_content = str(raw_slave.get("sequence_content_base64") or "").strip()
+                try:
+                    slave_content = (
+                        base64.b64decode(encoded_content, validate=True).decode("utf-8", errors="replace")
+                        if encoded_content else str(raw_slave.get("sequence_content") or "")
+                    )
+                except (ValueError, binascii.Error) as exc:
+                    raise ValueError(f"Slave {raw_slave.get('name') or node_id} sequence encoding is invalid") from exc
+                if "<PARAMETER0>" not in slave_content and not raw_slave.get("p0_placeholder_confirmed"):
+                    raise ValueError(
+                        f"Slave {raw_slave.get('name') or node_id} sequence has no <PARAMETER0>; confirmation is required"
+                    )
             if isinstance(raw_slave.get("phase_calibration"), dict):
                 slave_scan_config["interferometer_phase_calibration_override"] = deepcopy(raw_slave["phase_calibration"])
             prepare_payload = {
@@ -587,7 +636,10 @@ class SyncManager:
                 "master_node_id": node_name,
                 "slave_node_id": node_id,
                 "scan_config": slave_scan_config,
-                "shot_plan": shot_plan,
+                "shot_plan": slave_plan,
+                "master_shot_plan": shot_plan,
+                "independent_p0_enabled": independent_p0,
+                "p0_placeholder_confirmed": bool(raw_slave.get("p0_placeholder_confirmed")),
                 "sequence_name": raw_slave.get("sequence_name") or "slave.mot",
                 "sequence_content": raw_slave.get("sequence_content") or "",
                 "sequence_content_base64": raw_slave.get("sequence_content_base64") or "",
@@ -609,6 +661,8 @@ class SyncManager:
                 "status": "ready",
                 "current_step": 0,
                 "cursor": 0,
+                "p0_scan_config": deepcopy(raw_slave.get("p0_scan_config")) if independent_p0 else None,
+                "p0_placeholder_confirmed": bool(raw_slave.get("p0_placeholder_confirmed")),
             })
 
         started_slaves = []
@@ -633,6 +687,7 @@ class SyncManager:
                 "sync_node_id": node_name,
                 "sync_master_delay_ms": delay_ms,
                 "sync_shot_plan": shot_plan,
+                "sync_independent_p0": independent_p0,
                 "_transfer_control_generator": True,
             })
             # Install the runtime before start_scan launches its worker. A fast
@@ -648,6 +703,7 @@ class SyncManager:
                     "message": "STARTING MASTER",
                     "master_delay_ms": delay_ms,
                     "expected_shots": expected_shots,
+                    "independent_p0_enabled": independent_p0,
                     "master_step": 0,
                     "slaves": deepcopy(slave_states),
                     "paired_count": 0,

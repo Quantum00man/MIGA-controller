@@ -742,12 +742,15 @@ class SyncSlaveRunConfig(BaseModel):
     sequence_content: str = Field("")
     sequence_content_base64: str = Field("")
     phase_calibration: Optional[Dict[str, Any]] = Field(None)
+    p0_scan_config: Optional[ScanConfig] = Field(None)
+    p0_placeholder_confirmed: bool = Field(False)
     enabled: bool = Field(True)
 
 
 class SyncStartRequest(BaseModel):
     scan_config: ScanConfig
     master_delay_ms: float = Field(100.0, ge=0.0, le=60000.0)
+    independent_p0_enabled: bool = Field(False)
     slaves: List[SyncSlaveRunConfig] = Field(default_factory=list)
 
 
@@ -759,6 +762,9 @@ class SyncNodePrepareRequest(BaseModel):
     # Standard SYNC plans are lists of sequence parameters. Specialized scan
     # modes may additionally carry per-shot metadata (frequency, phase, repeat).
     shot_plan: List[Any] = Field(default_factory=list)
+    master_shot_plan: List[Any] = Field(default_factory=list)
+    independent_p0_enabled: bool = Field(False)
+    p0_placeholder_confirmed: bool = Field(False)
     sequence_name: str = Field("slave.mot")
     sequence_content: str = Field("")
     sequence_content_base64: str = Field("")

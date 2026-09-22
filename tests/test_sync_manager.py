@@ -256,6 +256,68 @@ class SyncManagerTests(unittest.TestCase):
             self.assertEqual([item["sequence_parameters"] for item in parameters], [[], []])
             self.assertEqual([item["metadata"]["sync_p0"] for item in parameters], [10, 20])
 
+    def test_independent_p0_sends_and_executes_slave_plan(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = FakeManager(tmp)
+            manager.build_scan_parameter_plan = lambda config: (
+                [[10], [20]] if float(config.get("start", 0)) == 10 else [[1], [2]]
+            )
+            sync = SyncManager(manager)
+            calls = []
+
+            def post(url, **kwargs):
+                calls.append((url, kwargs.get("json")))
+                return FakeResponse()
+
+            payload = {
+                "independent_p0_enabled": True,
+                "scan_config": {
+                    "mode": "standard", "scan_dimensions": 1, "parameter_source": "classic",
+                    "start": 1, "stop": 2, "step": 1, "averages": 1, "randomize": False,
+                },
+                "slaves": [{
+                    "node_id": "slave_b", "name": "Node B", "base_url": "http://slave",
+                    "sequence_name": "slave.mot", "sequence_content": "P0=<PARAMETER0>\n",
+                    "p0_scan_config": {"start": 10, "stop": 20, "step": 10},
+                }],
+            }
+            with patch("app.core.sync_manager.requests.post", side_effect=post), patch.object(sync, "_monitor_master"):
+                sync.start_master(payload)
+
+            prepare = next(body for url, body in calls if url.endswith("/prepare"))
+            self.assertEqual(prepare["master_shot_plan"], [[1], [2]])
+            self.assertEqual(prepare["shot_plan"], [[10], [20]])
+            self.assertTrue(prepare["independent_p0_enabled"])
+
+            slave_manager = FakeManager(tmp, role="slave")
+            slave_sync = SyncManager(slave_manager)
+            with patch("app.core.sync_manager.config.BASE_DIR", Path(tmp)):
+                slave_sync.prepare_node({
+                    **prepare, "sync_run_id": "sync_independent",
+                    "sequence_content": "P0=<PARAMETER0>\n",
+                })
+            slave_sync.start_node("sync_independent")
+            slave_parameters = slave_manager.started[0][1]
+            self.assertEqual([item["sequence_parameters"] for item in slave_parameters], [[10], [20]])
+            self.assertEqual([item["metadata"]["sync_p0"] for item in slave_parameters], [10, 20])
+            self.assertEqual([item["metadata"]["sync_master_parameters"] for item in slave_parameters], [[1], [2]])
+
+    def test_independent_p0_requires_confirmation_when_slave_placeholder_is_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = FakeManager(tmp)
+            manager.build_scan_parameter_plan = lambda config: [[1]]
+            sync = SyncManager(manager)
+            payload = {
+                "independent_p0_enabled": True,
+                "scan_config": {"mode": "standard", "scan_dimensions": 1, "parameter_source": "classic"},
+                "slaves": [{
+                    "node_id": "slave_b", "name": "Node B", "base_url": "http://slave",
+                    "sequence_content": "fixed sequence\n", "p0_scan_config": {"start": 10},
+                }],
+            }
+            with self.assertRaisesRegex(ValueError, "confirmation is required"):
+                sync.start_master(payload)
+
     def test_transfer_function_slave_uses_master_plan_but_local_normalization_without_tti_control(self):
         with tempfile.TemporaryDirectory() as tmp:
             manager = FakeManager(tmp, role="slave")

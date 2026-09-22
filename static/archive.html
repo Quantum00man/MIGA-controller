@@ -1859,7 +1859,7 @@
                                 <button v-if="canSyncArchive()" type="button" class="btn btn-sm btn-outline-warning" :disabled="syncArchiveRetrying" @click="retrySyncArchive">
                                     {{ syncArchiveRetrying ? 'Syncing…' : (isLegacySyncArchive() ? 'Sync Historical Archive' : 'Retry Sync') }}
                                 </button>
-                                <select v-if="!isBraggRabiArchive()" class="form-select form-select-sm" style="width:auto" v-model="syncArchiveViewMode" @change="handleSyncArchiveViewChange">
+                                <select v-if="!isBraggRabiArchive() && !syncArchiveIndependentP0()" class="form-select form-select-sm" style="width:auto" v-model="syncArchiveViewMode" @change="handleSyncArchiveViewChange">
                                     <option value="node">Node Data</option>
                                     <option value="differential">{{ isTransferFunctionArchive() ? 'Differential Transfer Function' : 'Differential Replay' }}</option>
                                 </select>
@@ -3528,6 +3528,9 @@
                 },
                 isBraggRabiArchive() {
                     return String(this.loadedConfig?.mode || "").trim().toLowerCase() === "bragg_rabi";
+                },
+                syncArchiveIndependentP0() {
+                    return Boolean(this.syncManifest?.runtime?.independent_p0_enabled);
                 },
                 isBraggRabiArchiveComparison() {
                     return this.isBraggRabiArchive() && ['prob', 'intf'].includes(this.syncArchiveTab);
@@ -5621,6 +5624,7 @@
                         this.syncManifest = res.data.sync_manifest && typeof res.data.sync_manifest === 'object'
                             ? res.data.sync_manifest : null;
                         if (this.syncManifest) this.showRawData = false;
+                        if (this.syncArchiveIndependentP0()) this.syncArchiveViewMode = 'node';
                         this.syncDifferentialFits = Array.isArray(res.data.sync_differential_fits)
                             ? res.data.sync_differential_fits : [];
                         this.syncDifferentialFitSelectedId = this.syncDifferentialFits.length
@@ -7243,7 +7247,7 @@
                     });
                 },
                 handleSyncArchiveViewChange() {
-                    if (this.isBraggRabiArchive()) this.syncArchiveViewMode = 'node';
+                    if (this.isBraggRabiArchive() || this.syncArchiveIndependentP0()) this.syncArchiveViewMode = 'node';
                     if (this.syncArchiveReplayPlaying) this.toggleSyncArchiveReplay();
                     this.$nextTick(() => {
                         if (this.syncArchiveViewMode === 'node') {
