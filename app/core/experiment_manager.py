@@ -43,6 +43,20 @@ from app.drivers.rigol_generator import (
     interpolate_power_dbm,
 )
 
+
+def transfer_recovery_wait_seconds(frequency_hz: float, shot_duration_sec: float) -> int:
+    """Whole-second guard time needed for a gated carrier to finish one period."""
+    try:
+        frequency = float(frequency_hz)
+        shot_duration = float(shot_duration_sec)
+    except (TypeError, ValueError):
+        return 0
+    if not math.isfinite(frequency) or frequency <= 0:
+        return 0
+    if not math.isfinite(shot_duration) or shot_duration < 0:
+        return 0
+    return int(math.ceil(max(0.0, (1.0 / frequency) - shot_duration)))
+
 class ExperimentManager:
     _instance = None
 
@@ -2925,6 +2939,7 @@ class ExperimentManager:
         transfer_control_generator = bool(scan_config.get("_transfer_control_generator", True))
         transfer_calibrate_zero_phase = bool(scan_config.get("transfer_calibrate_zero_phase", False))
         transfer_output_enabled = False
+        pending_transfer_recovery: Optional[Tuple[float, float]] = None
 
         def set_transfer_output(enabled: bool) -> None:
             if transfer_model == "DG4162":
@@ -3001,6 +3016,24 @@ class ExperimentManager:
             for idx, param_set in enumerate(execution_items()):
                 if self.stop_flag:
                     break
+                if pending_transfer_recovery is not None:
+                    recovery_frequency, previous_shot_duration = pending_transfer_recovery
+                    pending_transfer_recovery = None
+                    recovery_wait = transfer_recovery_wait_seconds(
+                        recovery_frequency, previous_shot_duration
+                    )
+                    if recovery_wait > 0:
+                        self.status.message = (
+                            f"{transfer_model} low-frequency recovery | "
+                            f"{recovery_frequency:g} Hz | shot {previous_shot_duration:.3f} s | "
+                            f"waiting {recovery_wait:d} s..."
+                        )
+                        print(f"[Transfer Function] {self.status.message}")
+                        deadline = time.monotonic() + recovery_wait
+                        while not self.stop_flag and time.monotonic() < deadline:
+                            time.sleep(min(0.1, max(0.0, deadline - time.monotonic())))
+                        if self.stop_flag:
+                            break
                 metadata: Optional[Dict[str, Any]] = None
                 sequence_parameters = param_set
                 if isinstance(param_set, dict) and 'sequence_parameters' in param_set:
@@ -3110,6 +3143,22 @@ class ExperimentManager:
                 # or browser rendering latency skewing the estimate.
                 job['shot_duration_sec'] = time.monotonic() - shot_started_at
                 self.data_queue.put(job)
+                if (
+                    transfer_mode
+                    and transfer_control_generator
+                    and not config.USE_SIMULATION
+                    and not bool((metadata or {}).get("transfer_zero_phase_baseline", False))
+                ):
+                    recovery_frequency = float(
+                        (metadata or {}).get(
+                            "transfer_generator_frequency_hz",
+                            (metadata or {}).get("transfer_frequency_hz"),
+                        )
+                    )
+                    pending_transfer_recovery = (
+                        recovery_frequency,
+                        float(job['shot_duration_sec']),
+                    )
                 if config.USE_SIMULATION:
                     time.sleep(0.1)
         except Exception as exc:

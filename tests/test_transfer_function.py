@@ -13,7 +13,7 @@ from app.analysis.transfer_function import (
     build_differential_transfer_function_summary,
     build_transfer_function_summary,
 )
-from app.core.experiment_manager import ExperimentManager
+from app.core.experiment_manager import ExperimentManager, transfer_recovery_wait_seconds
 from app.core.data_manager import DataManager, RESULTS_CSV_HEADER
 from app.core.data_loader import DataLoader
 from app.drivers.tti_generator import (
@@ -132,6 +132,12 @@ class TtiGeneratorClientTests(unittest.TestCase):
 
 
 class TransferFunctionPlanTests(unittest.TestCase):
+    def test_low_frequency_recovery_wait_rounds_extra_time_up(self):
+        self.assertEqual(transfer_recovery_wait_seconds(0.2, 2.6), 3)
+        self.assertEqual(transfer_recovery_wait_seconds(0.38, 2.6), 1)
+        self.assertEqual(transfer_recovery_wait_seconds(1.0, 2.6), 0)
+        self.assertEqual(transfer_recovery_wait_seconds(0, 2.6), 0)
+
     def test_frontend_does_not_treat_null_frequency_as_transfer_function_point(self):
         index_html = (
             Path(__file__).resolve().parents[1] / "static" / "index.html"
@@ -152,6 +158,8 @@ class TransferFunctionPlanTests(unittest.TestCase):
         self.assertIn("isTransferFunctionMode(mode = this.config.mode)", index_html)
         self.assertIn("transfer_function: 'Transfer Function'", index_html)
         self.assertIn('aria-label="SYNC Transfer Function statistic"', index_html)
+        self.assertIn("getTransferRecoveryEstimateSeconds", index_html)
+        self.assertIn("low-frequency recovery", index_html)
 
     def test_settings_offer_rigol_transfer_generator_and_reuse_its_connection(self):
         settings_html = (Path(__file__).resolve().parents[1] / "static" / "settings.html").read_text(encoding="utf-8")
@@ -450,6 +458,41 @@ class TransferFunctionPlanTests(unittest.TestCase):
         self.assertEqual(client.set_output.call_args_list, [call(2, True), call(2, False)])
         client.close.assert_called_once_with()
         self.assertIn("measurement failed", manager._scan_finalize_error)
+
+    def test_acquisition_checks_recovery_only_between_transfer_shots(self):
+        manager = ExperimentManager.__new__(ExperimentManager)
+        manager.settings = {"tti_host": "192.168.1.8", "tti_port": 9221, "tti_timeout_s": 3}
+        manager.stop_flag = False
+        manager.status = SimpleNamespace(message="")
+        manager.data_queue = queue.Queue()
+        manager._scan_finalize_error = None
+        manager._restore_ac_stark_dds = lambda _context: None
+        manager.execute_single_measurement = Mock(return_value={})
+        client = Mock()
+        client.connect.return_value = "TTi,TG5012A,1234,1.00"
+        parameters = [{
+            "sequence_parameters": [],
+            "metadata": {
+                "transfer_frequency_hz": 0.2,
+                "transfer_phase_deg": 0.0,
+                "transfer_repeat": repeat,
+            },
+        } for repeat in (1, 2)]
+        scan_config = {
+            "mode": "transfer_function", "scan_dimensions": 1,
+            "transfer_generator_model": "TG5012A", "transfer_generator_channel": 1,
+            "transfer_control_output": False, "transfer_settling_time_s": 0,
+        }
+        with patch("app.core.experiment_manager.config.USE_SIMULATION", False), patch(
+            "app.core.experiment_manager.TtiGeneratorClient", return_value=client
+        ), patch(
+            "app.core.experiment_manager.transfer_recovery_wait_seconds", return_value=0
+        ) as recovery:
+            manager._acquisition_loop(parameters, scan_config)
+
+        recovery.assert_called_once()
+        self.assertEqual(recovery.call_args.args[0], 0.2)
+        self.assertEqual(manager.execute_single_measurement.call_count, 2)
 
 
 class TransferFunctionStatisticsTests(unittest.TestCase):

@@ -3423,6 +3423,48 @@ getLiveEstimatedShotCount() {
         return 0;
     }
 },
+getTransferRecoveryWaitSeconds(frequencyHz, shotDurationSec = this.getSinglePointDurationSec()) {
+    const frequency = Number(frequencyHz);
+    const shotDuration = Number(shotDurationSec);
+    if (!Number.isFinite(frequency) || frequency <= 0 || !Number.isFinite(shotDuration) || shotDuration < 0) return 0;
+    return Math.ceil(Math.max(0, (1 / frequency) - shotDuration));
+},
+getTransferRecoveryEstimateSeconds(configObj = this.config, shotDurationSec = this.getSinglePointDurationSec()) {
+    if (!this.isTransferFunctionMode(configObj?.mode)) return 0;
+    const repeats = Math.max(2, Math.round(Number(configObj.transfer_repeats) || 2));
+    const phaseCount = Array.isArray(configObj.transfer_phase_degrees) && configObj.transfer_phase_degrees.length
+        ? configObj.transfer_phase_degrees.length : 2;
+    const burst = this.isTransferBurstTimeScan(configObj.mode);
+    if (burst) {
+        const responsePoints = this.estimateAxisPointCount({
+            scan_type: configObj.dim1_type, method: configObj.dim1_method,
+            start: configObj.start, stop: configObj.stop, step: configObj.step,
+            list: configObj.custom_list
+        });
+        const wait = this.getTransferRecoveryWaitSeconds(configObj.transfer_burst_time_frequency_hz, shotDurationSec);
+        return wait * Math.max(0, responsePoints * repeats * phaseCount - 1);
+    }
+
+    const count = this.estimateAxisPointCount({
+        scan_type: 'range', method: 'step_size',
+        start: configObj.transfer_frequency_start_hz,
+        stop: configObj.transfer_frequency_stop_hz,
+        step: configObj.transfer_frequency_step_hz,
+        list: ''
+    });
+    const start = Number(configObj.transfer_frequency_start_hz);
+    const stop = Number(configObj.transfer_frequency_stop_hz);
+    const step = Math.abs(Number(configObj.transfer_frequency_step_hz));
+    if (!count || !Number.isFinite(start) || !Number.isFinite(stop) || !Number.isFinite(step) || step <= 0) return 0;
+    const direction = stop >= start ? 1 : -1;
+    const frequencies = Array.from({ length: count }, (_, index) => start + direction * step * index);
+    const shotsPerFrequency = repeats * phaseCount;
+    let total = frequencies.reduce((sum, frequency) => (
+        sum + shotsPerFrequency * this.getTransferRecoveryWaitSeconds(frequency, shotDurationSec)
+    ), 0);
+    total -= this.getTransferRecoveryWaitSeconds(frequencies[frequencies.length - 1], shotDurationSec);
+    return Math.max(0, total);
+},
 getLiveEstimatedDurationSeconds() {
     const shots = this.getLiveEstimatedShotCount();
     if (shots <= 0) return 0;
@@ -3430,6 +3472,7 @@ getLiveEstimatedDurationSeconds() {
     if (this.isTransferFunctionMode()) {
         const repeats = Math.max(2, Math.round(Number(this.config.transfer_repeats) || 2));
         seconds += Math.ceil(shots / repeats) * 5;
+        seconds += this.getTransferRecoveryEstimateSeconds(this.config);
     }
     if (this.config.mode === 'ramsey_interferometer') {
         const repeats = Math.max(1, Math.round(Number(this.config.ramsey_repeats) || 1));
@@ -3441,7 +3484,12 @@ getLiveRemainingSeconds() {
     if (!this.isRunning) return this.getLiveEstimatedDurationSeconds();
     const totalShots = this.getLiveEstimatedShotCount();
     const currentStep = Math.max(0, Number(this.currentStep) || 0);
-    return Math.max(0, totalShots - currentStep) * this.getSinglePointDurationSec();
+    const remainingShots = Math.max(0, totalShots - currentStep);
+    let seconds = remainingShots * this.getSinglePointDurationSec();
+    if (this.isTransferFunctionMode() && totalShots > 0) {
+        seconds += this.getTransferRecoveryEstimateSeconds(this.config) * (remainingShots / totalShots);
+    }
+    return seconds;
 },
 getLiveHeaderLabel() {
     return this.isRunning ? 'Current scan' : 'Estimated run';
@@ -3460,7 +3508,8 @@ getLiveEstimateSummary() {
     if (this.isTransferFunctionMode()) {
         const repeats = Math.max(2, Math.round(Number(this.config.transfer_repeats) || 2));
         const points = Math.ceil(shots / repeats);
-        return `${shots} shots at ${points} ${this.isTransferBurstTimeScan() ? 'P0 points' : 'frequencies'} | ${this.formatDuration(this.getLiveEstimatedDurationSeconds())} incl. 5 s settling/point`;
+        const recovery = this.getTransferRecoveryEstimateSeconds(this.config);
+        return `${shots} shots at ${points} ${this.isTransferBurstTimeScan() ? 'P0 points' : 'frequencies'} | ${this.formatDuration(this.getLiveEstimatedDurationSeconds())} incl. 5 s settling/point${recovery > 0 ? ` + ${this.formatDuration(recovery)} low-frequency recovery` : ''}`;
     }
     if (this.config.mode === 'ramsey_interferometer') {
         const repeats = Math.max(1, Math.round(Number(this.config.ramsey_repeats) || 1));
@@ -3646,6 +3695,7 @@ refreshScheduledTaskEstimates() {
             if (this.isTransferFunctionMode(task.config?.mode)) {
                 const repeats = Math.max(2, Math.round(Number(task.config.transfer_repeats) || 2));
                 task.estimated_duration_sec += Math.ceil(points / repeats) * 5;
+                task.estimated_duration_sec += this.getTransferRecoveryEstimateSeconds(task.config);
             }
             task.validation_error = '';
         } catch (error) {
