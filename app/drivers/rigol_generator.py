@@ -124,21 +124,24 @@ class RigolGeneratorClient:
         sock = self._require_socket()
         deadline = time.monotonic() + float(self.settings.timeout_s)
         try:
-            while b"\n" not in self._buffer:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise TimeoutError("reply deadline exceeded")
-                sock.settimeout(remaining)
-                block = sock.recv(4096)
-                if not block:
-                    raise OSError("peer disconnected")
-                self._buffer.extend(block)
-                if len(self._buffer) > 16384:
-                    raise OSError("reply exceeded text limit")
-            line, _, remainder = self._buffer.partition(b"\n")
-            self._buffer = bytearray(remainder)
-            sock.settimeout(float(self.settings.timeout_s))
-            return line.decode("ascii").strip()
+            while True:
+                while b"\n" not in self._buffer:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise TimeoutError("reply deadline exceeded")
+                    sock.settimeout(remaining)
+                    block = sock.recv(4096)
+                    if not block:
+                        raise OSError("peer disconnected")
+                    self._buffer.extend(block)
+                    if len(self._buffer) > 16384:
+                        raise OSError("reply exceeded text limit")
+                line, _, remainder = self._buffer.partition(b"\n")
+                self._buffer = bytearray(remainder)
+                response = line.decode("ascii").strip()
+                if response:
+                    sock.settimeout(float(self.settings.timeout_s))
+                    return response
         except (OSError, UnicodeError, TimeoutError) as exc:
             self.close()
             raise RigolGeneratorError(f"DG4162 reply failed: {exc}") from exc

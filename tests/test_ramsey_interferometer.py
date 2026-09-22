@@ -53,6 +53,20 @@ class RigolGeneratorTests(unittest.TestCase):
             ":SOURce2:FREQuency:FIXed?\n",
         ])
 
+    def test_persistent_connection_skips_blank_reply_lines(self):
+        fake = FakeSocket([
+            "RIGOL TECHNOLOGIES,DG4162,DG4E000000000,00.01\r\n",
+            "0.2",
+        ])
+        with patch("app.drivers.rigol_generator.socket.create_connection", return_value=fake):
+            with RigolGeneratorClient(RigolConnectionSettings("192.168.1.40")) as client:
+                self.assertEqual(client.set_frequency(2, 0.2), 0.2)
+        self.assertEqual(fake.sent, [
+            "*IDN?\n",
+            ":SOURce2:FREQuency:FIXed 0.2\n",
+            ":SOURce2:FREQuency:FIXed?\n",
+        ])
+
     def test_wrong_instrument_is_rejected(self):
         fake = FakeSocket(["RIGOL TECHNOLOGIES,DG1022,123,1.0"])
         with patch("app.drivers.rigol_generator.socket.create_connection", return_value=fake):
