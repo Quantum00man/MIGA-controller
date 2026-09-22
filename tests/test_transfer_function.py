@@ -638,6 +638,15 @@ class TransferFunctionStatisticsTests(unittest.TestCase):
         self.assertIn('symmetric_converging', index_html)
         self.assertIn('<option value="random">Random</option>', index_html)
         self.assertIn('v-model="config.transfer_control_output"', index_html)
+        self.assertIn('Control FM output during scan', index_html)
+        self.assertNotIn('Control TTI OUTPUT during scan', index_html)
+
+        manual_tex = (
+            Path(__file__).resolve().parents[1] / "docs" / "manual" / "manual.tex"
+        ).read_text(encoding="utf-8")
+        self.assertIn("Automatic low-frequency recovery interval", manual_tex)
+        self.assertIn("eq:transfer-low-frequency-recovery", manual_tex)
+        self.assertIn("Control FM output during scan", manual_tex)
 
         settings_html = (
             Path(__file__).resolve().parents[1] / "static" / "settings.html"

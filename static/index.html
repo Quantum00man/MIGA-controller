@@ -1518,7 +1518,7 @@
                                 <div class="form-check border rounded px-3 py-2 w-100 bg-white">
                                     <input id="transferControlOutput" class="form-check-input ms-0 me-2" type="checkbox"
                                         v-model="config.transfer_control_output">
-                                    <label class="form-check-label small fw-bold" for="transferControlOutput">Control TTI OUTPUT during scan</label>
+                                    <label class="form-check-label small fw-bold" for="transferControlOutput">Control FM output during scan</label>
                                 </div>
                             </div>
                             <div class="col-12">
@@ -4422,7 +4422,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                             throw new Error('Transfer Function zero-phase calibration requires at least 2 repeats.');
                         }
                         if (payload.transfer_calibrate_zero_phase && !payload.transfer_control_output) {
-                            throw new Error('Enable TTI OUTPUT control to use zero-phase calibration.');
+                            throw new Error('Enable FM output control to use zero-phase calibration.');
                         }
                         payload.transfer_periodic_zero_phase = payload.transfer_periodic_zero_phase === true;
                         payload.transfer_zero_phase_frequency_interval = Math.round(Number(payload.transfer_zero_phase_frequency_interval));

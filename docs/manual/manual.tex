@@ -82,7 +82,7 @@
 \newcommand{\ui}[1]{\textbf{#1}}
 \newcommand{\pathcode}[1]{\nolinkurl{#1}}
 \newcommand{\branchname}{\texttt{marker-optimization}}
-\newcommand{\commitid}{\texttt{5dd5503}}
+\newcommand{\commitid}{\texttt{0884e01}}
 \newcommand{\warningtext}[1]{\par\medskip\noindent
   \fcolorbox{MigaRed}{MigaRed!5}{\parbox{0.93\linewidth}{\textbf{Caution.} #1}}\par\medskip}
 \newcommand{\notetext}[1]{\par\medskip\noindent
@@ -870,7 +870,8 @@ Fit and NoFit metric receives block values plus mean, sample standard deviation 
 \section{Bragg transfer-function scan}
 \subsection{Purpose and physical normalization}
 Transfer Function measures the response of the atom-interferometer phase to a sinusoidal
-frequency modulation applied through a selected channel of an Aim-TTi TG5012A or TGF3162.
+frequency modulation applied through a selected channel of an Aim-TTi TG5012A or TGF3162,
+or a RIGOL DG4162.
 The value entered in \ui{Settings $>$ Transfer Function} is the calibrated, actual optical
 frequency-modulation amplitude at \SI{780}{\nano\meter}, denoted by $\Delta\nu_{780}$; it
 is not the modulation of the \SI{1560}{\nano\meter} fundamental and not merely the voltage
@@ -936,16 +937,16 @@ uploaded \code{.mot} sequence is executed unchanged, so it requires no
 \code{PARAMETER} placeholder.
 
 \ui{Transfer function Burst time scan} is the fixed-carrier companion mode. Enter one
-TTI frequency and scan P0 using the Timing relation \code{[P0, Total-P0]}. The generator
+generator frequency and scan P0 using the Timing relation \code{[P0, Total-P0]}. The generator
 frequency is programmed once at the start of the run; the selected \ang{0}/\ang{90}
 quadratures, repeats, OUTPUT control and zero-phase calibration are otherwise identical
 to Transfer Function. Its live and archive response plots use P0 as the horizontal axis.
-The mode supports SYNC (the Master controls the TTI) but is not available in the scheduled
+The mode supports SYNC (the Master controls the selected generator) but is not available in the scheduled
 queue.
 Set \ui{Allan phase-noise $\sigma$ at current average} in
 \ui{Settings $>$ Transfer Function}; its default is \SI{100}{\milli\radian}.
 Optionally enable \ui{Calibrate zero phase with OUTPUT OFF before scan}. This requires
-\ui{Control TTI OUTPUT during scan}; the controller forces OUTPUT OFF, acquires 50 shots
+\ui{Control FM output during scan}; the controller forces OUTPUT OFF, acquires 50 shots
 by default at the first selected frequency and phase, and uses the mean valid calibrated
 interferometer phase as this run's zero. It then enables OUTPUT and records subsequent
 transfer-function phases as $\Delta\Phi=\Phi-\Phi_{\mathrm{zero}}$. The zero is run-local:
@@ -974,7 +975,9 @@ The Settings tab contains three independent commissioning actions:
   \item \ui{Test Connection} opens the configured socket and verifies that \code{*IDN?}
   contains the selected model name.
   \item \ui{Set Test Frequency} immediately changes the selected channel carrier frequency.
-  \item \ui{Set Test Phase} immediately sets a phase from \ang{-360} to \ang{360}.
+  \item \ui{Set Test Phase} immediately sets a phase from \ang{-360} to \ang{360} on
+  Aim-TTi generators. For DG4162 it writes and verifies the gated-burst Start Phase in
+  the range \ang{0} to \ang{360}, without changing Burst, Gate or trigger settings.
 \end{itemize}
 Each test uses a short-lived TCP connection. Frequency and phase tests do not restore the
 previous instrument value; verify the physical output before using either action.
@@ -989,20 +992,46 @@ the entire \ang{90} sweep:
   \underbrace{(90^\circ,f_1)^{\times r},\ldots,(90^\circ,f_N)^{\times r}}_{
     \text{second complete sweep}}.
 \end{equation}
-This ordering is deliberately preserved in the archive metadata. Interleaving the two
-phases at every frequency can reduce sensitivity to slow drift, but that ordering is an
-experimental recommendation and is not implemented by this revision.
+This ordering is deliberately preserved in the archive metadata. The optional
+frequency-interleaved ordering instead completes both phases at each frequency before
+moving to the next frequency, which can reduce sensitivity to slow drift.
 
-The controller opens one raw-LAN socket, normally on TCP port 9221, and retains it for the
-complete scan. At the start of a phase sweep it first returns to $f_1$, then sends the
-phase command. For each subsequent frequency it sends only the new frequency. The command
-forms are \code{CHN n;FREQ value} and \code{CHN n;PHASE value}. TG5012A appends
-\code{;*OPC?} and requires a reply of \code{1}; TGF3162 treats a completed socket write as
-acceptance because its firmware may not answer \code{*OPC?} reliably. After every frequency
-change the controller waits five seconds before acquiring the first repeat. Any connection,
-identity, command or confirmation failure aborts the run. The socket is closed in all exit
-paths, but carrier frequency and phase are not restored. Waveform, amplitude and output
-state are never changed by this workflow.
+The controller opens one raw-LAN socket and retains it for the complete scan. Aim-TTi
+generators normally use TCP port 9221; DG4162 reuses the RIGOL connection configured for
+the Ramsey scan, normally on port 5555. At a new phase or frequency the selected channel
+is programmed before acquisition. TG5012A requires command confirmation, TGF3162 treats a
+completed socket write as acceptance because its firmware may not answer \code{*OPC?}
+reliably, and DG4162 queries back frequency, gated-burst Start Phase and OUTPUT state.
+After every frequency change the controller waits five seconds before acquiring the first
+repeat. Any connection, identity, command or confirmation failure aborts the run. The
+socket is closed in all exit paths; carrier frequency and phase are not restored. Waveform
+and amplitude are never changed. OUTPUT changes only when \ui{Control FM output during
+scan} is enabled.
+
+\subsection{Automatic low-frequency recovery interval}
+In gated operation, a generator may require the remainder of the current modulation period
+after a shot before it returns to its configured initial phase. This becomes relevant when
+the modulation period $T_f=1/f$ exceeds the measured shot duration. After every completed
+non-baseline Transfer Function shot, the controller records the actual launch-cycle duration
+$t_{\mathrm{shot}}$ and calculates the additional guard time
+\begin{equation}
+  \boxed{t_{\mathrm{wait}}(f)=
+  \left\lceil\max\!\left(0,\frac{1}{f}-t_{\mathrm{shot}}\right)\right\rceil\ \si{\second}.}
+  \label{eq:transfer-low-frequency-recovery}
+\end{equation}
+The ceiling is taken in whole seconds and deliberately supplies a conservative margin. For
+example, at $f=\SI{0.2}{\hertz}$ with $t_{\mathrm{shot}}=\SI{2.6}{\second}$, the raw deficit
+is \SI{2.4}{\second} and the controller waits \SI{3}{\second}. At \SI{1}{\hertz} with the
+same shot duration, the expression is zero and no recovery delay is added.
+
+The wait is inserted immediately before the next generator setting or shot, so the final
+shot of a run never incurs an unnecessary delay. It applies to TG5012A, TGF3162 and DG4162
+in both ordinary Transfer Function and fixed-frequency Burst-time scans. Run-local
+zero-phase baseline shots do not create a recovery wait. In SYNC operation only the Master
+waits; all nodes therefore retain their existing synchronization without duplicating the
+delay. The wait is interruptible by Stop. Live and scheduled duration estimates use the
+same equation with the controller's dynamically learned mean shot duration, while execution
+always uses the duration measured for the immediately preceding shot.
 
 \begin{figure}[htbp]
 \centering
@@ -1011,10 +1040,12 @@ state are never changed by this workflow.
   \node[block,right=of connect] (phase) {Program point\\FREQ; PHASE only\\at new phase};
   \node[block,right=of phase] (settle) {Wait \SI{5}{\second}\\at new frequency};
   \node[analysis,below=of settle] (shots) {Acquire $r$ shots\\save every result};
-  \node[block,left=of shots] (nextf) {Next frequency\\or next phase};
-  \node[store,left=of nextf] (close) {Summarize\\close socket};
+  \node[block,left=of shots] (recover) {If another shot:\\low-$f$ recovery};
+  \node[block,left=of recover] (nextf) {Next frequency\\or next phase};
+  \node[store,below=of nextf] (close) {Summarize\\close socket};
   \draw[flow] (connect)--(phase); \draw[flow] (phase)--(settle);
-  \draw[flow] (settle)--(shots); \draw[flow] (shots)--(nextf);
+  \draw[flow] (settle)--(shots); \draw[flow] (shots)--(recover);
+  \draw[flow] (recover)--(nextf);
   \draw[feedback] (nextf) to[bend left=28] (phase);
   \draw[flow] (nextf)--(close);
 \end{tikzpicture}
@@ -1166,7 +1197,7 @@ differential paired results and replay completed points.
 Transfer Function is available in both the regular scheduled queue and scheduled SYNC
 queue. In SYNC mode, the Master defines the common frequency
 grid, selected \ang{0}/\ang{90} generator phases, scan order and repeat count, and is the
-only node that connects to or changes the TTI generator. Slaves start through the normal
+only node that connects to or changes the selected FM generator. Slaves start through the normal
 SYNC prepare/start sequence, execute their fixed local sequence without a generator
 settling delay. For each Slave, every matched shot is normalized using that node's own
 atom--mirror distance before subtraction. With
@@ -1190,7 +1221,7 @@ square without claiming a complete two-quadrature magnitude. The sync manifest r
 counts, standard deviations, standard errors, squared magnitude and magnitude.
 
 The SYNC differential view additionally shows the path-difference-normalized phase
-response, using the Master's calibrated actual SI{780}{\nano\meter} modulation amplitude:
+response, using the Master's calibrated actual \SI{780}{\nano\meter} modulation amplitude:
 \begin{equation}
  R_{\Delta L}(f)=\left|\frac{\Delta\Phi(f)}
  {2\delta k(L_{\mathrm{Master}}-L_{\mathrm{Slave}})}\right|^2,
