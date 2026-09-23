@@ -365,27 +365,95 @@ class DataLoader:
         return self._load_config_data(self._resolve_archive_node_dir(root_run_dir, node_id))
 
     def _resolve_archive_node_dir(self, run_dir: Path, node_id: Optional[str] = None) -> Path:
+        return self._resolve_archive_node_identity(run_dir, node_id)[0]
+
+    def _resolve_archive_node_identity(
+        self, run_dir: Path, node_id: Optional[str] = None
+    ) -> Tuple[Path, Dict[str, Any]]:
+        """Resolve a SYNC node and describe what was actually selected.
+
+        Old runs did not always have ``archive_nodes``.  They keep the historical
+        root-is-master behaviour, while current replicated runs use the manifest's
+        explicit path/local metadata.
+        """
         requested = str(node_id or "").strip()
-        if not requested:
-            return run_dir
         manifest_path = run_dir / "sync_manifest.json"
         try:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             manifest = {}
-        entry = (manifest.get("archive_nodes") or {}).get(requested)
+        archive_nodes = manifest.get("archive_nodes") or {}
+        root_config = self._load_config_data(run_dir)
+        root_snapshot = root_config.get("_system_settings_snapshot") or {}
+        root_role = str(root_config.get("sync_role") or root_snapshot.get("sync_role") or "").strip().lower()
+        root_node_id = str(root_config.get("sync_node_id") or root_snapshot.get("sync_node_id") or "").strip()
+        runtime_slaves = (manifest.get("runtime") or {}).get("slaves") or []
+        legacy_slave_id = next((
+            str(item.get("node_id") or "") for item in runtime_slaves
+            if root_node_id and root_node_id in {str(item.get("node_id") or ""), str(item.get("name") or "")}
+        ), root_node_id)
+        local_nodes = [
+            str(key) for key, value in archive_nodes.items()
+            if isinstance(value, dict) and value.get("local") is True
+        ]
+        resolved = requested
+        if not resolved:
+            resolved = local_nodes[0] if len(local_nodes) == 1 else (
+                legacy_slave_id if not archive_nodes and root_role == "slave" and legacy_slave_id else "master"
+            )
+        entry = archive_nodes.get(resolved)
+        legacy = not bool(archive_nodes)
         if not isinstance(entry, dict):
-            if requested == "master":
-                return run_dir
-            raise FileNotFoundError(f"Replicated archive for node {requested} was not found")
+            legacy_replica = run_dir / "sync_nodes" / resolved
+            resolved_is_local_slave = (
+                legacy and root_role == "slave" and resolved != "master"
+                and resolved in {legacy_slave_id, root_node_id}
+            )
+            if resolved == "master" and root_role != "slave":
+                entry = {"path": ".", "role": "master", "local": True}
+                legacy = True
+            elif resolved_is_local_slave:
+                entry = {"path": ".", "role": "slave", "local": True}
+            elif legacy and legacy_replica.is_dir():
+                entry = {
+                    "path": f"sync_nodes/{resolved}",
+                    "role": "master" if resolved == "master" else "slave",
+                    "local": False,
+                }
+            else:
+                raise FileNotFoundError(f"Replicated archive for node {resolved} was not found")
         relative = str(entry.get("path") or ".")
         target = (run_dir / relative).resolve()
         root = run_dir.resolve()
         if target != root and root not in target.parents:
             raise ValueError("Invalid replicated archive path")
         if not target.is_dir():
-            raise FileNotFoundError(f"Replicated archive for node {requested} was not found")
-        return target
+            raise FileNotFoundError(f"Replicated archive for node {resolved} was not found")
+
+        config = self._load_config_data(target)
+        snapshot = config.get("_system_settings_snapshot") or {}
+        actual_role = str(config.get("sync_role") or snapshot.get("sync_role") or entry.get("role") or "").strip().lower()
+        actual_node_id = str(config.get("sync_node_id") or snapshot.get("sync_node_id") or "").strip()
+        warnings: List[str] = []
+        if len(local_nodes) > 1:
+            warnings.append("SYNC manifest contains more than one local archive node")
+        if actual_role and resolved == "master" and actual_role != "master":
+            warnings.append(f"Selected Master archive identifies itself as role {actual_role}")
+        if actual_role == "master" and resolved != "master":
+            warnings.append(f"Selected node {resolved} identifies itself as Master")
+        if not (target / "results.csv").is_file():
+            warnings.append("Selected archive has no results.csv")
+        identity = {
+            "requested_node": requested,
+            "resolved_node": resolved,
+            "relative_path": "." if target == root else str(target.relative_to(root)),
+            "role": actual_role or str(entry.get("role") or ("master" if resolved == "master" else "slave")),
+            "recorded_node_id": actual_node_id,
+            "local": entry.get("local") is True,
+            "legacy_layout": legacy,
+            "warnings": warnings,
+        }
+        return target, identity
 
     def _load_config_data(self, run_dir: Path) -> Dict[str, Any]:
         config_path = run_dir / "config.json"
@@ -1547,7 +1615,7 @@ class DataLoader:
         analysis_copy_override: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         root_run_dir = self._get_run_dir(year, month, day, run_id)
-        run_dir = self._resolve_archive_node_dir(root_run_dir, node_id)
+        run_dir, archive_node_identity = self._resolve_archive_node_identity(root_run_dir, node_id)
         config_data = self._load_config_data(run_dir)
         scan_dimensions = self._resolve_scan_dimensions(config_data)
         full_points = self._read_results_csv(run_dir, max_points=None)
@@ -1674,6 +1742,7 @@ class DataLoader:
             "total_points": len(full_points),
             "marker_optimization": marker_optimization if is_marker_optimization else None,
             "sync_manifest": sync_manifest,
+            "archive_node_data": full_points if sync_manifest else [],
             "sync_differential_fits": self.load_sync_differential_fits(year, month, day, run_id) if sync_manifest else [],
             "sync_phase_calibration_optimizations": (
                 self.load_sync_phase_calibration_optimizations(year, month, day, run_id)
@@ -1684,7 +1753,8 @@ class DataLoader:
             ) if sync_manifest else {},
             "sync_analysis_copies": self.load_sync_analysis_copies(year, month, day, run_id) if sync_manifest else [],
             "selected_sync_analysis_copy": analysis_copy,
-            "selected_sync_node": str(node_id or ""),
+            "selected_sync_node": archive_node_identity["resolved_node"] if sync_manifest else "",
+            "archive_node_identity": archive_node_identity if sync_manifest else None,
             "interferometer_phase_calibration": phase_calibration,
             "interferometer_phase_original_calibration": phase_context.get("original_calibration"),
             "interferometer_phase_calibration_provenance": phase_provenance,

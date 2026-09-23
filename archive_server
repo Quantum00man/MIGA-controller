@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PYTHON_BIN="${MIGA_ARCHIVE_PYTHON:-$ROOT_DIR/.venv/bin/python}"
+HOST="${MIGA_ARCHIVE_HOST:-127.0.0.1}"
+PORT="${MIGA_ARCHIVE_PORT:-8000}"
+CONFIG_PATH="${MIGA_ARCHIVE_CONFIG:-$HOME/.config/miga-archive/config.json}"
+
+if [ ! -x "$PYTHON_BIN" ]; then
+  PYTHON_BIN="$(command -v python3)"
+fi
+
+case "${1:-start}" in
+  start)
+    cd "$ROOT_DIR"
+    export MIGA_ARCHIVE_CONFIG="$CONFIG_PATH"
+    exec "$PYTHON_BIN" -m uvicorn archive_main:app --host "$HOST" --port "$PORT"
+    ;;
+  check)
+    "$PYTHON_BIN" - "$ROOT_DIR" "$CONFIG_PATH" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+config_path = Path(sys.argv[2]).expanduser()
+problems = []
+for required in (root / "archive_main.py", root / "static" / "archive-setup.html"):
+    if not required.is_file():
+        problems.append(f"missing {required}")
+try:
+    import fastapi  # noqa: F401
+    import uvicorn  # noqa: F401
+except ImportError as exc:
+    problems.append(str(exc))
+if config_path.is_file():
+    try:
+        payload = json.loads(config_path.read_text(encoding="utf-8"))
+        archive_root = Path(payload.get("archive_root", ""))
+        if not archive_root.is_dir():
+            problems.append(f"archive root unavailable: {archive_root}")
+    except Exception as exc:
+        problems.append(f"invalid configuration: {exc}")
+print("Archive Server check: " + ("FAILED" if problems else "OK"))
+for problem in problems:
+    print(f"- {problem}")
+raise SystemExit(1 if problems else 0)
+PY
+    ;;
+  *)
+    echo "Usage: ./archive_server [start|check]" >&2
+    exit 2
+    ;;
+esac

@@ -86,6 +86,23 @@ Useful terminal commands:
 ./start_controller.sh --stop             # stop the background server
 ```
 
+### Archive Server preview
+
+The hardware-free Archive Server entry point can be started independently:
+
+```bash
+./archive_server check
+MIGA_ARCHIVE_HOST=127.0.0.1 MIGA_ARCHIVE_PORT=8000 ./archive_server start
+```
+
+Open <http://127.0.0.1:8000/setup> to inspect and initialize an existing NAS mount, then
+register Master and Slave source hosts. AFP/GVFS paths are accepted for interactive testing
+but reported as non-persistent; use an OS-managed NFS or SMB mount for unattended service.
+
+The controller's Data Archive page also provides a read-only Storage Audit. Audit reports
+are saved as JSON and HTML under `Data_log/audit_reports/`; run directories are never
+modified by the scan.
+
 The default listener is `0.0.0.0:8000`. It can be changed with environment variables:
 
 ```bash

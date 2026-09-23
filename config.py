@@ -8,7 +8,9 @@ USE_SIMULATION = IS_WINDOWS
 
 # --- Base Paths ---
 BASE_DIR = Path(__file__).resolve().parent
-DATA_BASE_DIR = BASE_DIR / "Data_log"
+# Controllers keep the historical default. Archive-only deployments can point
+# an instance at a mounted, device-specific archive without editing source.
+DATA_BASE_DIR = Path(os.environ.get("MIGA_DATA_BASE_DIR", str(BASE_DIR / "Data_log"))).expanduser()
 
 # Persistent Settings File
 SETTINGS_FILE_PATH = BASE_DIR / "user_settings.json"

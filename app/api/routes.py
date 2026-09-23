@@ -24,6 +24,7 @@ from app.analysis.transfer_function import optimize_slave_normalization_scale
 from app.core.experiment_manager import ExperimentManager
 from app.core.data_loader import DataLoader
 from app.core.archive_collection_store import ArchiveCollectionStore
+from app.core.archive_audit import ArchiveAuditService
 from app.core.archive_labplot import build_archive_project
 from app.core.data_manager import DataManager
 from app.core.bragg_export import build_bragg_zip_export, build_single_bragg_export, read_sequence_template
@@ -162,6 +163,7 @@ marker_document_store = SequenceMarkerDocumentStore(config.SEQUENCE_MARKER_DOCUM
 from app.core.schedule_manager import ScheduleManager
 data_loader = DataLoader()
 archive_collection_store = ArchiveCollectionStore(config.DATA_BASE_DIR)
+archive_audit_service = ArchiveAuditService(config.DATA_BASE_DIR, archive_collection_store)
 sync_manager = SyncManager(manager)
 schedule_manager = ScheduleManager(manager, sync_manager)
 
@@ -1662,6 +1664,41 @@ async def get_latest_archive_run():
         raise HTTPException(404, str(exc))
 
 
+@router.post("/archive/audit/jobs")
+async def start_archive_audit():
+    return archive_audit_service.start()
+
+
+@router.get("/archive/audit/jobs/{job_id}")
+async def get_archive_audit_job(job_id: str):
+    try:
+        return archive_audit_service.status(job_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+
+
+@router.get("/archive/audit/reports")
+async def list_archive_audit_reports():
+    return {"reports": await run_in_threadpool(archive_audit_service.list_reports)}
+
+
+@router.get("/archive/audit/reports/{report_id}.{format_name}")
+async def download_archive_audit_report(report_id: str, format_name: str):
+    if format_name not in {"json", "html"}:
+        raise HTTPException(400, "Archive audit report format must be json or html")
+    try:
+        path = archive_audit_service.report_path(report_id, format_name)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    return FileResponse(
+        path=path,
+        media_type="text/html" if format_name == "html" else "application/json",
+        filename=path.name,
+    )
+
+
 @router.get("/archive/collections")
 async def get_archive_collections():
     return archive_collection_store.snapshot()
@@ -1765,7 +1802,7 @@ async def load_archived_run(
         current_phase_calibration=manager.get_active_bragg_phase_calibration(),
         analysis_copy_id=analysis_copy_id or None,
     )
-    except FileNotFoundError: raise HTTPException(404, "Run not found")
+    except FileNotFoundError as exc: raise HTTPException(404, str(exc) or "Run not found")
     except ValueError as exc: raise HTTPException(400, str(exc))
     except Exception as e: raise HTTPException(500, str(e))
 
