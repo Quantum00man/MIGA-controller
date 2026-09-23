@@ -8,6 +8,8 @@ class ExperimentStatus:
     current_step: int = 0
     total_steps: int = 0
     message: str = "IDLE"
+    is_paused: bool = False
+    pause_reason: str = ""
 
 @dataclass
 class ScanResult:
@@ -42,6 +44,15 @@ class ScanResult:
     transfer_zero_phase_baseline: bool = False
     transfer_zero_phase_block_id: Optional[int] = None
     transfer_zero_phase_repeat: Optional[int] = None
+    power_meter_power_w: Optional[float] = None
+    power_meter_measured_at: str = ""
+    power_meter_wavelength_nm: Optional[float] = None
+    power_meter_serial_number: str = ""
+    power_meter_reference_w: Optional[float] = None
+    power_meter_deviation_percent: Optional[float] = None
+    power_meter_valid: Optional[bool] = None
+    power_meter_invalid_reason: str = ""
+    transfer_frequency_attempt: int = 1
 
     # Ramsey Interferometer provenance. The displayed parameter is delta f in MHz.
     ramsey_delta_f_mhz: Optional[float] = None

@@ -2532,6 +2532,9 @@
                                 :style="{display: showTotalPlot() ? 'block' : 'none', height: getAnalysisPlotHeight('total')}">
                             </div>
                         </div>
+                        <div v-if="isTransferFunctionArchive() && loadedPoints.some(point => Number.isFinite(Number(point.power_meter_power_w)))" class="border-top">
+                            <div class="px-3 pt-3 fw-bold">PM100A power by shot</div><div id="archivePowerMeterPlot" style="height:320px"></div>
+                        </div>
                     </div>
                 </div>
 
@@ -9984,6 +9987,7 @@
                     Plotly.react('resultsPlotTotal', [], { ...base, title: '' }, { responsive: true, displaylogo: false });
                 },
                 renderMainPlot() {
+                    this.$nextTick(() => this.renderArchivePowerMeterPlot());
                     if (this.isPhaseNoiseArchive()) {
                         this.renderPhaseNoiseArchivePlot();
                         return;
@@ -10016,6 +10020,23 @@
                         this.syncSliceState(rows);
                         return this.render3DPlot(rows, metric);
                     }
+                },
+                renderArchivePowerMeterPlot() {
+                    const element = document.getElementById('archivePowerMeterPlot');
+                    if (!element || typeof Plotly === 'undefined') return;
+                    const rows = (this.loadedPoints || []).filter(row => Number.isFinite(Number(row.power_meter_power_w)));
+                    const makeTrace = (items, name, color, symbol) => ({
+                        x: items.map(row => Number(row.step)), y: items.map(row => Number(row.power_meter_power_w)),
+                        customdata: items.map(row => [row.transfer_frequency_hz, row.transfer_phase_deg, row.transfer_repeat, row.power_meter_deviation_percent]),
+                        type: 'scatter', mode: 'lines+markers', name, line: { color, width: 1.8 }, marker: { color, size: 7, symbol },
+                        hovertemplate: 'Shot %{x}<br>Power=%{y:.6g} W<br>f=%{customdata[0]:.8g} Hz<br>phase=%{customdata[1]:.4g}°<br>repeat=%{customdata[2]}<br>change=%{customdata[3]:.4g}%<extra></extra>'
+                    });
+                    const valid = rows.filter(row => row.power_meter_invalid_reason !== 'threshold_exceeded');
+                    const invalid = rows.filter(row => row.power_meter_invalid_reason === 'threshold_exceeded');
+                    Plotly.react(element, [makeTrace(valid, 'Valid', '#1565c0', 'circle'), makeTrace(invalid, 'Invalid', '#c62828', 'x')], {
+                        margin: { t: 25, b: 52, l: 76, r: 20 }, xaxis: { title: 'Shot index' }, yaxis: { title: 'Optical power (W)' },
+                        legend: { orientation: 'h', x: 1, xanchor: 'right', y: 1.12 }, paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)'
+                    }, { responsive: true, displaylogo: false });
                 },
             }
         }).mount('#app');

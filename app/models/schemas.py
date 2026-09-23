@@ -112,6 +112,11 @@ class ScanConfig(BaseModel):
     transfer_zero_phase_repeats: int = Field(50, ge=2, le=100000)
     transfer_periodic_zero_phase: bool = Field(False)
     transfer_zero_phase_frequency_interval: int = Field(10, ge=1, le=10000)
+    transfer_power_monitor_enabled: bool = Field(False)
+    transfer_power_threshold_percent: float = Field(0.0, ge=0.0, le=10000.0)
+    transfer_recovery_config: Optional[Dict[str, Any]] = Field(None)
+    transfer_recovery_sequence_name: str = Field("")
+    transfer_recovery_sequence_content_base64: str = Field("")
     ramsey_delta_start_mhz: float = Field(0.0, ge=0.0)
     ramsey_delta_stop_mhz: float = Field(1.0, ge=0.0)
     ramsey_delta_step_mhz: float = Field(0.1, gt=0.0)
@@ -598,6 +603,9 @@ class SystemSettings(BaseModel):
     rigol_host: str = Field("")
     rigol_port: int = Field(5555, ge=1, le=65535)
     rigol_timeout_s: float = Field(3.0, ge=0.2, le=120.0)
+    power_meter_url: str = Field("")
+    power_meter_password: str = Field("")
+    power_meter_timeout_s: float = Field(5.0, ge=0.2, le=120.0)
     ramsey_center_frequency_mhz: float = Field(110.0, gt=0.0, le=160.0)
     ramsey_frequency_power_table: List[RamseyFrequencyPowerPoint] = Field(
         default_factory=default_ramsey_frequency_power_table

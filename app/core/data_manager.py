@@ -2,6 +2,7 @@ import os
 import csv
 import json
 import shutil
+import math
 import numpy as np
 from pathlib import Path
 from datetime import datetime
@@ -35,6 +36,9 @@ RESULTS_CSV_HEADER = [
     "Ramsey_Delta_F_MHz", "Ramsey_Repeat", "Ramsey_Center_Frequency_MHz",
     "Ramsey_CH1_Frequency_MHz", "Ramsey_CH2_Frequency_MHz",
     "Ramsey_CH1_Power_dBm", "Ramsey_CH2_Power_dBm",
+    "Power_Meter_W", "Power_Meter_Measured_At", "Power_Meter_Wavelength_nm",
+    "Power_Meter_Serial", "Power_Meter_Reference_W", "Power_Meter_Deviation_Percent",
+    "Power_Meter_Valid", "Power_Meter_Invalid_Reason", "Transfer_Frequency_Attempt",
 ]
 
 
@@ -189,6 +193,49 @@ class DataManager:
             writer.writeheader()
             writer.writerows(summary_rows)
 
+    def save_power_monitor_events(self, events: List[Dict[str, Any]]) -> None:
+        if not self.current_run_dir:
+            return
+        with open(self.current_run_dir / "power_monitor_events.json", "w", encoding="utf-8") as handle:
+            json.dump(events, handle, ensure_ascii=False, indent=2)
+
+    def invalidate_transfer_attempt(self, frequency_hz: float, attempt: int, reason: str) -> None:
+        if not self.waveforms_dir:
+            return
+        for path in self.waveforms_dir.glob("step_*.npz"):
+            try:
+                with np.load(path, allow_pickle=True) as archive:
+                    values = {key: archive[key] for key in archive.files}
+                stored_frequency = float(values.get("transfer_frequency_hz", np.nan))
+                stored_attempt = int(values.get("transfer_frequency_attempt", 1))
+                if math.isclose(stored_frequency, float(frequency_hz), rel_tol=0.0, abs_tol=1e-9) and stored_attempt == int(attempt):
+                    values["power_meter_valid"] = 0
+                    values["power_meter_invalid_reason"] = str(reason)
+                    np.savez_compressed(path, **values)
+            except (OSError, ValueError, TypeError):
+                continue
+        if self.csv_file and self.csv_file.is_file():
+            if self.csv_handle:
+                self.csv_handle.flush()
+                self.csv_handle.close()
+            with open(self.csv_file, newline="", encoding="utf-8") as handle:
+                rows = list(csv.DictReader(handle))
+            for row in rows:
+                try:
+                    matches = math.isclose(float(row.get("TTI_Frequency_Hz") or "nan"), float(frequency_hz), rel_tol=0.0, abs_tol=1e-9)
+                    same_attempt = int(row.get("Transfer_Frequency_Attempt") or 1) == int(attempt)
+                except (TypeError, ValueError):
+                    matches = same_attempt = False
+                if matches and same_attempt:
+                    row["Power_Meter_Valid"] = "0"
+                    row["Power_Meter_Invalid_Reason"] = str(reason)
+            with open(self.csv_file, "w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(handle, fieldnames=RESULTS_CSV_HEADER)
+                writer.writeheader()
+                writer.writerows(rows)
+            self.csv_handle = open(self.csv_file, "a", newline="", encoding="utf-8")
+            self.csv_writer = csv.writer(self.csv_handle)
+
     def save_phase_noise_summary(self, summary_rows: List[Dict[str, Any]]) -> None:
         if not self.current_run_dir:
             return
@@ -279,6 +326,15 @@ class DataManager:
             ramsey_ch2_frequency_mhz=result.ramsey_ch2_frequency_mhz if result.ramsey_ch2_frequency_mhz is not None else np.nan,
             ramsey_ch1_power_dbm=result.ramsey_ch1_power_dbm if result.ramsey_ch1_power_dbm is not None else np.nan,
             ramsey_ch2_power_dbm=result.ramsey_ch2_power_dbm if result.ramsey_ch2_power_dbm is not None else np.nan,
+            power_meter_power_w=result.power_meter_power_w if result.power_meter_power_w is not None else np.nan,
+            power_meter_measured_at=result.power_meter_measured_at or "",
+            power_meter_wavelength_nm=result.power_meter_wavelength_nm if result.power_meter_wavelength_nm is not None else np.nan,
+            power_meter_serial_number=result.power_meter_serial_number or "",
+            power_meter_reference_w=result.power_meter_reference_w if result.power_meter_reference_w is not None else np.nan,
+            power_meter_deviation_percent=result.power_meter_deviation_percent if result.power_meter_deviation_percent is not None else np.nan,
+            power_meter_valid=(1 if result.power_meter_valid else 0) if result.power_meter_valid is not None else -1,
+            power_meter_invalid_reason=result.power_meter_invalid_reason or "",
+            transfer_frequency_attempt=result.transfer_frequency_attempt,
         )
 
     def _write_csv_row(self, result: ScanResult, step_index: int):
@@ -334,6 +390,11 @@ class DataManager:
             f(result.ramsey_ch2_frequency_mhz, 9),
             f(result.ramsey_ch1_power_dbm, 6),
             f(result.ramsey_ch2_power_dbm, 6),
+            f(result.power_meter_power_w, 12), result.power_meter_measured_at or "",
+            f(result.power_meter_wavelength_nm, 6), result.power_meter_serial_number or "",
+            f(result.power_meter_reference_w, 12), f(result.power_meter_deviation_percent, 6),
+            (1 if result.power_meter_valid else 0) if result.power_meter_valid is not None else "",
+            result.power_meter_invalid_reason or "", result.transfer_frequency_attempt,
         ]
         self.csv_writer.writerow(row)
         self.csv_handle.flush()

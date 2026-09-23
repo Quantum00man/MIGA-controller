@@ -497,6 +497,45 @@ class SyncManager:
         result = self.manager.stop_scan()
         return {**result, "sync_run_id": sync_run_id}
 
+    def pause_node(self, sync_run_id: str) -> Dict[str, Any]:
+        with self._lock:
+            if sync_run_id != self._node_active_sync_run_id:
+                raise ValueError("This Sync run is not active on the slave")
+        return {**self.manager.pause_scan("sync_master"), "sync_run_id": sync_run_id}
+
+    def resume_node(self, sync_run_id: str, retry_frequency_hz: Any = None, invalid_attempt: int = 1) -> Dict[str, Any]:
+        with self._lock:
+            if sync_run_id != self._node_active_sync_run_id:
+                raise ValueError("This Sync run is not active on the slave")
+        if retry_frequency_hz is not None:
+            self.manager._power_retry_frequency_hz = float(retry_frequency_hz)
+            self.manager._power_monitor_events.append({
+                "type": "threshold_exceeded", "frequency_hz": float(retry_frequency_hz),
+                "attempt": int(invalid_attempt or 1), "source": "sync_master",
+            })
+            self.manager.data_manager.save_power_monitor_events(self.manager._power_monitor_events)
+        return {**self.manager.resume_scan(), "sync_run_id": sync_run_id}
+
+    def _broadcast_pause_state(self, paused: bool, retry_frequency_hz: Any = None, invalid_attempt: int = 1) -> None:
+        with self._lock:
+            runtime = deepcopy(self._runtime)
+        path = "pause" if paused else "resume"
+        for slave in runtime.get("slaves") or []:
+            try:
+                requests.post(f"{slave['base_url']}/sync/node/{path}", json={"sync_run_id": runtime.get("sync_run_id"), "retry_frequency_hz": retry_frequency_hz, "invalid_attempt": invalid_attempt}, headers=self._headers(), timeout=3.0).raise_for_status()
+            except Exception as exc:
+                print(f"[SYNC] Failed to {path} {slave.get('name')}: {exc}")
+
+    def pause_master(self) -> Dict[str, Any]:
+        self._broadcast_pause_state(True)
+        self.manager.pause_scan("sync_manual")
+        return self.status()
+
+    def resume_master(self) -> Dict[str, Any]:
+        self._broadcast_pause_state(False)
+        self.manager.resume_scan()
+        return self.status()
+
     def node_status(self, sync_run_id: str, after: int = 0) -> Dict[str, Any]:
         with self._lock:
             if sync_run_id != self._node_active_sync_run_id:
@@ -777,6 +816,9 @@ class SyncManager:
         return state
 
     def _capture_local_result(self, payload: Dict[str, Any]) -> None:
+        if payload.get("stream_type") == "power_recovery_completed" and payload.get("sync_role") == "master":
+            threading.Thread(target=self._broadcast_pause_state, args=(False, payload.get("retry_frequency_hz"), payload.get("invalid_attempt", 1)), daemon=True).start()
+            return
         if (
             payload.get("stream_type") == "bragg_calibration_coarse_fit"
             and payload.get("sync_role") == "master"
@@ -796,6 +838,8 @@ class SyncManager:
                 self._node_result_sequence += 1
                 self._node_results.append((self._node_result_sequence, deepcopy(payload)))
             return
+        if payload.get("power_meter_invalid_reason") == "threshold_exceeded":
+            threading.Thread(target=self._broadcast_pause_state, args=(True,), daemon=True).start()
         with self._lock:
             if sync_run_id != self._runtime.get("sync_run_id"):
                 return

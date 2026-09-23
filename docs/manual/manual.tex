@@ -2093,6 +2093,22 @@ calibration, exports and settings.\\
   \item Software limits supplement rather than replace independent hardware interlocks.
 \end{itemize}
 
+\section{Transfer Function power monitoring and recovery}
+Transfer Function scans can optionally read the Thorlabs PM100A through the authenticated
+Hardware Controller after every normal shot. Zero-phase baseline shots are excluded. The
+first successful reading establishes the run-local reference; a threshold of zero records
+and plots power without pausing. A positive threshold pauses at the shot boundary when the
+relative change exceeds the configured percentage. The complete frequency attempt,
+including both phase quadratures, is retained for audit but excluded from summaries.
+
+Before enabling automatic recovery, select a dedicated Bragg Fringes Calibration MOT and
+verify the calibration parameters. On confirmation, the controller creates a separate,
+searchable calibration run, applies its generated target-fringe MOT, resets the power
+reference and repeats the complete interrupted frequency. Live and Archive views show the
+shot series; CSV, NPZ and LabPlot exports retain the power and validity provenance. Manual
+Pause/Resume is available between shots for every non-scheduled scan; SYNC broadcasts the
+state to all participating nodes.
+
 \backmatter
 \chapter*{Revision note}
 \addcontentsline{toc}{chapter}{Revision note}

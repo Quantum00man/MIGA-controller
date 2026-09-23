@@ -11,6 +11,7 @@ import shutil
 from copy import deepcopy
 import shlex
 import subprocess
+import tempfile
 import numpy as np
 from pathlib import Path
 from itertools import product
@@ -42,6 +43,7 @@ from app.drivers.rigol_generator import (
     RigolGeneratorClient,
     interpolate_power_dbm,
 )
+from app.drivers.power_meter import PowerMeterClient, PowerMeterError
 
 
 def transfer_recovery_wait_seconds(frequency_hz: float, shot_duration_sec: float) -> int:
@@ -81,6 +83,14 @@ class ExperimentManager:
 
         self.status = ExperimentStatus()
         self.stop_flag = False
+        self.pause_event = threading.Event()
+        self.pause_event.set()
+        self._pause_lock = threading.Lock()
+        self._power_meter_reference_w: Optional[float] = None
+        self._power_monitor_events: List[Dict[str, Any]] = []
+        self._power_retry_frequency_hz: Optional[float] = None
+        self._power_recovery_action = ""
+        self._power_recovery_event = threading.Event()
         
         self.data_queue = queue.Queue()
         self.acq_thread: Optional[threading.Thread] = None
@@ -1906,7 +1916,12 @@ class ExperimentManager:
             return {'status': 'error', 'message': str(exc)}
 
         self.stop_flag = False
+        self.pause_event.set()
         self._scan_finalize_error = None
+        self._power_monitor_events = []
+        self._power_retry_frequency_hz = None
+        self._power_recovery_action = ""
+        self._power_recovery_event.clear()
         total_steps = int(scan_config.get("_bragg_calibration_expected_total_shots", len(parameters)))
         self.status = ExperimentStatus(is_running=True, total_steps=total_steps, message='Starting...')
 
@@ -1969,8 +1984,111 @@ class ExperimentManager:
             return {'status': 'warning', 'message': 'No experiment running'}
 
         self.stop_flag = True
+        self.pause_event.set()
         self.status.message = 'Stopping...'
         return {'status': 'success', 'message': 'Stop signal sent'}
+
+    def pause_scan(self, reason: str = "manual") -> Dict[str, str]:
+        if self.get_active_mode() != 'scan' or not self.status.is_running:
+            return {'status': 'warning', 'message': 'No pausable experiment is running'}
+        with self._pause_lock:
+            self.pause_event.clear()
+            self.status.is_paused = True
+            self.status.pause_reason = str(reason or "manual")
+            self.status.message = 'Paused between shots'
+        return {'status': 'success', 'message': self.status.message}
+
+    def resume_scan(self) -> Dict[str, str]:
+        if self.get_active_mode() != 'scan' or not self.status.is_running:
+            return {'status': 'warning', 'message': 'No paused experiment is running'}
+        if self.status.pause_reason == 'power_threshold':
+            return {'status': 'warning', 'message': 'Power-threshold pause requires Bragg recalibration or stop'}
+        with self._pause_lock:
+            reset_power_reference = self.status.pause_reason == 'power_threshold'
+            self.status.is_paused = False
+            self.status.pause_reason = ''
+            self.status.message = 'Resuming...'
+            self.pause_event.set()
+            if reset_power_reference:
+                self._power_meter_reference_w = None
+        return {'status': 'success', 'message': 'Resume signal sent'}
+
+    def request_power_recovery(self, action: str) -> Dict[str, str]:
+        normalized = str(action or '').strip().lower()
+        if normalized not in {'recalibrate', 'hold', 'stop'}:
+            return {'status': 'error', 'message': 'Unknown power recovery action'}
+        if not self.status.is_running or self.status.pause_reason != 'power_threshold':
+            return {'status': 'warning', 'message': 'No power-threshold pause is active'}
+        if normalized == 'stop':
+            return self.stop_scan()
+        self._power_recovery_action = normalized
+        self._power_recovery_event.set()
+        return {'status': 'success', 'message': 'Recovery action accepted'}
+
+    def test_power_meter(self) -> Dict[str, Any]:
+        client = PowerMeterClient(self.settings.get('power_meter_url', ''), self.settings.get('power_meter_password', ''), self.settings.get('power_meter_timeout_s', 5.0))
+        client.login()
+        return client.read()
+
+    def _run_power_recovery_calibration(self, transfer_config: Dict[str, Any]) -> Dict[str, Any]:
+        encoded = str(transfer_config.get('transfer_recovery_sequence_content_base64') or '')
+        if not encoded:
+            raise ValueError('No prepared Bragg calibration MOT is configured')
+        calibration_config = deepcopy(transfer_config)
+        calibration_config.update({
+            'mode': 'bragg_fringe_calibration', 'scan_dimensions': 1,
+            'bragg_calibration_apply_active': True,
+            '_power_recovery_parent_run_id': self.data_manager.current_run_id_str,
+        })
+        recovery_manager = DataManager()
+        original_manager = self.data_manager
+        temporary_path = None
+        try:
+            with tempfile.NamedTemporaryFile(prefix='miga_power_recovery_', suffix='.mot', delete=False) as handle:
+                handle.write(base64.b64decode(encoded))
+                temporary_path = Path(handle.name)
+            calibration_config['_template_path_override'] = str(temporary_path)
+            calibration_config['sequence_name'] = str(transfer_config.get('transfer_recovery_sequence_name') or temporary_path.name)
+            plan = self._build_bragg_calibration_execution(calibration_config)
+            fit_config = self.build_fit_config(calibration_config)
+            recovery_manager.phase_calibration_snapshot = self.get_active_bragg_phase_calibration()
+            recovery_manager.init_run(calibration_config)
+            coarse_results: List[ScanResult] = []
+            fine_results: List[ScanResult] = []
+            for index, item in enumerate(plan):
+                metadata = (item.get('metadata') or {}) if isinstance(item, dict) else {}
+                params = item.get('sequence_parameters') if isinstance(item, dict) else item
+                job = self.execute_single_measurement(params, calibration_config, idx=index, total_steps=len(plan), scan_dimensions=1, metadata=metadata)
+                result, payload = self.process_measurement_job(job, fit_config, data_manager=recovery_manager, save_step_index=index + 1, stream_type='power_recovery_calibration', execution_config=calibration_config)
+                self.publish_data(payload)
+                if result is not None:
+                    coarse_results.append(result)
+            coarse = bragg_fringe_calibration.coarse_fit(coarse_results, int(calibration_config.get('bragg_calibration_target_fringe', 1)))
+            fine_plan = self._build_bragg_calibration_fine_plan(calibration_config, coarse)
+            offset = len(plan)
+            for position, item in enumerate(fine_plan):
+                metadata = item.get('metadata') or {}
+                job = self.execute_single_measurement(item.get('sequence_parameters'), calibration_config, idx=offset + position, total_steps=offset + len(fine_plan), scan_dimensions=1, metadata=metadata)
+                result, payload = self.process_measurement_job(job, fit_config, data_manager=recovery_manager, save_step_index=offset + position + 1, stream_type='power_recovery_calibration', execution_config=calibration_config)
+                self.publish_data(payload)
+                if result is not None:
+                    fine_results.append(result)
+            self.data_manager = recovery_manager
+            result = self._finalize_bragg_fringe_calibration(calibration_config, coarse, fine_results)
+            if result.get('status') != 'passed':
+                raise ValueError('Bragg fringe recovery calibration did not pass quality checks')
+            generated = str(result.get('generated_mot_filename') or '')
+            generated_path = recovery_manager.current_run_dir / generated
+            if not generated or not generated_path.is_file():
+                raise ValueError('Recovery calibration did not generate a target-fringe MOT')
+            target = Path(config.SEQUENCE_TEMPLATE_PATH_WIN if config.USE_SIMULATION else config.SEQUENCE_TEMPLATE_PATH_LINUX)
+            shutil.copy2(generated_path, target)
+            return {'run_id': recovery_manager.current_run_id_str, 'result': result}
+        finally:
+            recovery_manager.close_run()
+            self.data_manager = original_manager
+            if temporary_path is not None:
+                temporary_path.unlink(missing_ok=True)
 
     def _resolve_scan_dimensions(self, config: Dict[str, Any]) -> int:
         legacy_dims = 1
@@ -2827,6 +2945,15 @@ class ExperimentManager:
                 transfer_zero_phase_baseline=bool(metadata.get('transfer_zero_phase_baseline', False)),
                 transfer_zero_phase_block_id=metadata.get('transfer_zero_phase_block_id'),
                 transfer_zero_phase_repeat=metadata.get('transfer_zero_phase_repeat'),
+                power_meter_power_w=metadata.get('power_meter_power_w'),
+                power_meter_measured_at=metadata.get('power_meter_measured_at', ''),
+                power_meter_wavelength_nm=metadata.get('power_meter_wavelength_nm'),
+                power_meter_serial_number=metadata.get('power_meter_serial_number', ''),
+                power_meter_reference_w=metadata.get('power_meter_reference_w'),
+                power_meter_deviation_percent=metadata.get('power_meter_deviation_percent'),
+                power_meter_valid=metadata.get('power_meter_valid'),
+                power_meter_invalid_reason=metadata.get('power_meter_invalid_reason', ''),
+                transfer_frequency_attempt=int(metadata.get('transfer_frequency_attempt', 1)),
                 ramsey_delta_f_mhz=metadata.get('ramsey_delta_f_mhz'),
                 ramsey_repeat=metadata.get('ramsey_repeat'),
                 ramsey_center_frequency_mhz=metadata.get('ramsey_center_frequency_mhz'),
@@ -2943,6 +3070,16 @@ class ExperimentManager:
         transfer_calibrate_zero_phase = bool(scan_config.get("transfer_calibrate_zero_phase", False))
         transfer_output_enabled = False
         pending_transfer_recovery: Optional[Tuple[float, float]] = None
+        power_monitor_enabled = bool(
+            str(scan_config.get("mode") or "").strip().lower() == "transfer_function"
+            and scan_config.get("transfer_power_monitor_enabled", False)
+            and not scan_config.get("_sync_slave", False)
+        )
+        power_threshold_percent = max(0.0, float(scan_config.get("transfer_power_threshold_percent", 0.0) or 0.0))
+        power_meter_client: Optional[PowerMeterClient] = None
+        self._power_meter_reference_w = None
+        if power_monitor_enabled and not config.USE_SIMULATION:
+            power_meter_client = PowerMeterClient(self.settings.get('power_meter_url', ''), self.settings.get('power_meter_password', ''), self.settings.get('power_meter_timeout_s', 5.0))
 
         def set_transfer_output(enabled: bool) -> None:
             if transfer_model == "DG4162":
@@ -3002,6 +3139,37 @@ class ExperimentManager:
                 identity = rigol_client.connect()
                 print(f"[Ramsey Interferometer] Connected to {identity}")
             def execution_items():
+                if transfer_mode:
+                    original = list(parameter_list)
+                    pending = list(original)
+                    cursor = 0
+                    while cursor < len(pending):
+                        item = pending[cursor]
+                        cursor += 1
+                        yield item
+                        retry_frequency = self._power_retry_frequency_hz
+                        if retry_frequency is not None:
+                            self._power_retry_frequency_hz = None
+                            retry = []
+                            for source in original:
+                                source_metadata = source.get("metadata") or {} if isinstance(source, dict) else {}
+                                if source_metadata.get("transfer_zero_phase_baseline"):
+                                    continue
+                                try:
+                                    matches = float(source_metadata.get("transfer_frequency_hz")) == float(retry_frequency)
+                                except (TypeError, ValueError):
+                                    matches = False
+                                if matches:
+                                    copied = deepcopy(source)
+                                    copied_metadata = copied.setdefault("metadata", {})
+                                    previous_attempts = [
+                                        int(event.get("attempt", 1)) for event in self._power_monitor_events
+                                        if float(event.get("frequency_hz", float("nan"))) == float(retry_frequency)
+                                    ]
+                                    copied_metadata["transfer_frequency_attempt"] = max(previous_attempts or [1]) + 1
+                                    retry.append(copied)
+                            pending[cursor:cursor] = retry
+                    return
                 yield from parameter_list
                 if str(scan_config.get("mode") or "").strip().lower() != "bragg_fringe_calibration":
                     return
@@ -3017,6 +3185,10 @@ class ExperimentManager:
                     yield from fine_plan
 
             for idx, param_set in enumerate(execution_items()):
+                if self.stop_flag:
+                    break
+                while not self.stop_flag and not self.pause_event.wait(timeout=0.25):
+                    pass
                 if self.stop_flag:
                     break
                 if pending_transfer_recovery is not None:
@@ -3145,7 +3317,91 @@ class ExperimentManager:
                 # the UI can learn a reusable sequence duration without network
                 # or browser rendering latency skewing the estimate.
                 job['shot_duration_sec'] = time.monotonic() - shot_started_at
+                power_threshold_exceeded = False
+                if power_meter_client is not None and not bool((metadata or {}).get("transfer_zero_phase_baseline", False)):
+                    try:
+                        reading = power_meter_client.read()
+                        power_w = float(reading["power_w"])
+                        if self._power_meter_reference_w is None and power_w > 0:
+                            self._power_meter_reference_w = power_w
+                        reference_w = self._power_meter_reference_w
+                        deviation = abs(power_w - reference_w) / reference_w * 100.0 if reference_w else None
+                        exceeded = bool(power_threshold_percent > 0 and deviation is not None and deviation > power_threshold_percent)
+                        power_threshold_exceeded = exceeded
+                        metadata.update({
+                            "power_meter_power_w": power_w, "power_meter_measured_at": str(reading.get("measured_at") or ""),
+                            "power_meter_wavelength_nm": reading.get("wavelength_nm"), "power_meter_serial_number": str(reading.get("serial_number") or ""),
+                            "power_meter_reference_w": reference_w, "power_meter_deviation_percent": deviation,
+                            "power_meter_valid": not exceeded, "power_meter_invalid_reason": "threshold_exceeded" if exceeded else "",
+                        })
+                        job["metadata"] = metadata
+                        if exceeded:
+                            frequency_hz = float(metadata.get("transfer_frequency_hz"))
+                            attempt = int(metadata.get("transfer_frequency_attempt", 1))
+                            self._power_retry_frequency_hz = frequency_hz
+                            self._power_monitor_events.append({
+                                "type": "threshold_exceeded", "frequency_hz": frequency_hz,
+                                "attempt": attempt, "power_w": power_w, "reference_w": reference_w,
+                                "deviation_percent": deviation, "threshold_percent": power_threshold_percent,
+                                "measured_at": metadata.get("power_meter_measured_at"),
+                            })
+                            self.data_manager.save_power_monitor_events(self._power_monitor_events)
+                            self.pause_scan("power_threshold")
+                            self.status.message = f"Power changed by {deviation:.3f}% (limit {power_threshold_percent:g}%). Bragg fringe recalibration is required."
+                    except PowerMeterError as exc:
+                        metadata.update({"power_meter_valid": False, "power_meter_invalid_reason": "read_failed", "power_meter_error": str(exc)})
+                        job["metadata"] = metadata
                 self.data_queue.put(job)
+                if power_threshold_exceeded:
+                    while not self.stop_flag:
+                        self._power_recovery_event.wait(timeout=0.25)
+                        if not self._power_recovery_event.is_set():
+                            continue
+                        action = self._power_recovery_action
+                        self._power_recovery_action = ''
+                        self._power_recovery_event.clear()
+                        if action == 'hold':
+                            continue
+                        if action == 'recalibrate':
+                            try:
+                                self.status.message = 'Running automatic Bragg fringe recovery calibration...'
+                                if transfer_control_output and transfer_output_enabled:
+                                    set_transfer_output(False)
+                                    transfer_output_enabled = False
+                                recovery = self._run_power_recovery_calibration(scan_config)
+                                recovered_calibration = recovery.get('result', {}).get('saved_calibration')
+                                if isinstance(recovered_calibration, dict):
+                                    self.data_manager.phase_calibration_snapshot = deepcopy(recovered_calibration)
+                                    scan_config['_interferometer_phase_calibration_snapshot'] = deepcopy(recovered_calibration)
+                                self._power_monitor_events.append({
+                                    'type': 'recalibration_completed', 'calibration_run_id': recovery['run_id'],
+                                    'parent_run_id': self.data_manager.current_run_id_str,
+                                })
+                                self.data_manager.save_power_monitor_events(self._power_monitor_events)
+                                self._power_meter_reference_w = None
+                                active_transfer_frequency = None
+                                active_transfer_phase = None
+                                active_transfer_response_value = None
+                                if transfer_control_output:
+                                    set_transfer_output(True)
+                                    transfer_output_enabled = True
+                                self.publish_data({
+                                    'stream_type': 'power_recovery_completed', 'calibration_run_id': recovery['run_id'],
+                                    'sync_run_id': scan_config.get('sync_run_id'), 'sync_role': scan_config.get('sync_role'),
+                                    'retry_frequency_hz': self._power_retry_frequency_hz,
+                                    'invalid_attempt': max((int(event.get('attempt', 1)) for event in self._power_monitor_events if event.get('type') == 'threshold_exceeded'), default=1),
+                                })
+                                with self._pause_lock:
+                                    self.status.is_paused = False
+                                    self.status.pause_reason = ''
+                                    self.status.message = f"Recovery calibration {recovery['run_id']} passed; rescanning frequency"
+                                    self.pause_event.set()
+                                break
+                            except Exception as exc:
+                                self.status.message = f'Bragg recovery calibration failed: {exc}'
+                                self._power_monitor_events.append({'type': 'recalibration_failed', 'error': str(exc)})
+                                self.data_manager.save_power_monitor_events(self._power_monitor_events)
+                                self.publish_data({'stream_type': 'power_recovery_failed', 'message': str(exc)})
                 if (
                     transfer_mode
                     and transfer_control_generator
@@ -3435,12 +3691,21 @@ class ExperimentManager:
                     ac_stark_results.append(result)
                 if result is not None and result.lock_in_block_index is not None:
                     lock_in_results.append(result)
-                if result is not None and result.transfer_frequency_hz is not None and not metadata.get("transfer_zero_phase_baseline"):
+                if (
+                    result is not None and result.transfer_frequency_hz is not None
+                    and not metadata.get("transfer_zero_phase_baseline")
+                    and result.power_meter_invalid_reason != "threshold_exceeded"
+                ):
                     transfer_function_results.append(result)
                 if result is not None and (scan_config or {}).get('mode') == 'phase_noise':
                     phase_noise_results.append(result)
                 self.publish_data(payload)
         finally:
+            for event in self._power_monitor_events:
+                if event.get("type") == "threshold_exceeded":
+                    self.data_manager.invalidate_transfer_attempt(
+                        float(event["frequency_hz"]), int(event.get("attempt", 1)), "threshold_exceeded"
+                    )
             if ac_stark_results:
                 try:
                     self.data_manager.save_ac_stark_summary(
@@ -3461,6 +3726,15 @@ class ExperimentManager:
                     print(f"[Lock-in] {self._scan_finalize_error}")
             if scan_config and scan_config.get('mode') in {'transfer_function', 'transfer_burst_time_scan'}:
                 try:
+                    invalid_attempts = {
+                        (float(event["frequency_hz"]), int(event["attempt"]))
+                        for event in self._power_monitor_events
+                        if event.get("type") == "threshold_exceeded"
+                    }
+                    transfer_function_results = [
+                        result for result in transfer_function_results
+                        if (float(result.transfer_frequency_hz), int(result.transfer_frequency_attempt)) not in invalid_attempts
+                    ]
                     self.data_manager.save_transfer_function_summary(
                         build_transfer_function_summary(
                             transfer_function_results,

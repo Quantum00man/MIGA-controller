@@ -443,6 +443,35 @@ def _phase_noise_worksheets(
     return worksheets
 
 
+def _power_meter_worksheet(points: Sequence[Dict[str, Any]]) -> Optional[Worksheet]:
+    valid = []
+    invalid = []
+    grouped: Dict[float, List[float]] = defaultdict(list)
+    for point in points:
+        power = _finite(point.get("power_meter_power_w"))
+        shot = _finite(point.get("step"))
+        if power is None or shot is None:
+            continue
+        target = invalid if str(point.get("power_meter_invalid_reason") or "") else valid
+        target.append((shot, power))
+        frequency = _finite(point.get("transfer_frequency_hz"))
+        if frequency is not None and target is valid:
+            grouped[frequency].append(power)
+    curves = []
+    if valid:
+        curves.append(Curve("Valid shots", [item[0] for item in valid], [item[1] for item in valid], COLORS[0]))
+    if invalid:
+        curves.append(Curve("Invalid shots", [item[0] for item in invalid], [item[1] for item in invalid], COLORS[1], line=False, symbols=True))
+    plots = [Plot("PM100A power by shot", "Shot index", "Optical power (W)", curves)] if curves else []
+    if grouped:
+        frequencies = sorted(grouped)
+        plots.append(Plot(
+            "Mean PM100A power by frequency", "TTI carrier frequency (Hz)", "Mean optical power (W)",
+            [Curve("Frequency mean", frequencies, [sum(grouped[item]) / len(grouped[item]) for item in frequencies], COLORS[2])],
+        ))
+    return Worksheet("PM100A Power", plots) if plots else None
+
+
 def _pair_records(manifest: Dict[str, Any], slave_id: str) -> List[Dict[str, Any]]:
     return [
         row for row in (manifest.get("pairs") or [])
@@ -560,6 +589,9 @@ def build_archive_project(
         burst_time_scan = str(config_data.get("mode") or "").strip().lower() == "transfer_burst_time_scan"
         x_label = "P0" if burst_time_scan else "TTI carrier frequency (Hz)"
         worksheets = _transfer_function_worksheets(selected, source, summary, x_label=x_label)
+        power_worksheet = _power_meter_worksheet(loaded_root.get("data") or [])
+        if power_worksheet:
+            worksheets.append(power_worksheet)
         project_name = f"MIGA Transfer Function {day} {run_id}"
         normalization = summary[0] if summary else {}
         modulation_mhz = _finite(normalization.get("frequency_modulation_mhz"))

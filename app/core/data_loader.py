@@ -30,7 +30,11 @@ class DataLoader:
 
     def _transfer_response_points(self, points: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Return formal transfer shots, retaining calibration shots in raw archive data."""
-        return [point for point in points if not self._is_transfer_zero_phase_baseline(point)]
+        return [
+            point for point in points
+            if not self._is_transfer_zero_phase_baseline(point)
+            and str(point.get("power_meter_invalid_reason") or "") != "threshold_exceeded"
+        ]
 
     def _apply_transfer_zero_phase_reference(
         self, points: List[Dict[str, Any]], settings: Dict[str, Any]
@@ -1190,6 +1194,15 @@ class DataLoader:
             "transfer_zero_phase_baseline": str(row.get("Transfer_Zero_Phase_Baseline") or "").strip().lower() in {"1", "true", "yes"},
             "transfer_zero_phase_block_id": self._parse_int(row.get("Transfer_Zero_Phase_Block"), -1),
             "transfer_zero_phase_repeat": self._parse_int(row.get("Transfer_Zero_Phase_Repeat"), -1),
+            "power_meter_power_w": self._parse_float(row.get("Power_Meter_W")),
+            "power_meter_measured_at": str(row.get("Power_Meter_Measured_At") or ""),
+            "power_meter_wavelength_nm": self._parse_float(row.get("Power_Meter_Wavelength_nm")),
+            "power_meter_serial_number": str(row.get("Power_Meter_Serial") or ""),
+            "power_meter_reference_w": self._parse_float(row.get("Power_Meter_Reference_W")),
+            "power_meter_deviation_percent": self._parse_float(row.get("Power_Meter_Deviation_Percent")),
+            "power_meter_valid": str(row.get("Power_Meter_Valid") or "").strip().lower() in {"1", "true", "yes"},
+            "power_meter_invalid_reason": str(row.get("Power_Meter_Invalid_Reason") or ""),
+            "transfer_frequency_attempt": self._parse_int(row.get("Transfer_Frequency_Attempt"), 1),
             "ramsey_delta_f_mhz": self._parse_float(row.get("Ramsey_Delta_F_MHz")),
             "ramsey_repeat": self._parse_int(row.get("Ramsey_Repeat"), -1),
             "ramsey_center_frequency_mhz": self._parse_float(row.get("Ramsey_Center_Frequency_MHz")),
@@ -1619,6 +1632,25 @@ class DataLoader:
         config_data = self._load_config_data(run_dir)
         scan_dimensions = self._resolve_scan_dimensions(config_data)
         full_points = self._read_results_csv(run_dir, max_points=None)
+        events_path = run_dir / "power_monitor_events.json"
+        power_monitor_events: List[Dict[str, Any]] = []
+        if events_path.is_file():
+            try:
+                loaded_events = json.loads(events_path.read_text(encoding="utf-8"))
+                power_monitor_events = loaded_events if isinstance(loaded_events, list) else []
+            except (OSError, ValueError):
+                power_monitor_events = []
+        invalid_attempts = {
+            (float(event.get("frequency_hz")), int(event.get("attempt", 1)))
+            for event in power_monitor_events
+            if isinstance(event, dict) and event.get("type") == "threshold_exceeded"
+        }
+        for point in full_points:
+            frequency = point.get("transfer_frequency_hz")
+            attempt = int(point.get("transfer_frequency_attempt") or 1)
+            if frequency is not None and (float(frequency), attempt) in invalid_attempts:
+                point["power_meter_valid"] = False
+                point["power_meter_invalid_reason"] = "threshold_exceeded"
         sync_manifest = self._load_sync_manifest_payload(root_run_dir)
         phase_node_key, phase_context, phase_contexts = self._archive_phase_reference_context(
             year, month, day, run_id, node_id, current_phase_calibration
@@ -1734,6 +1766,7 @@ class DataLoader:
             "phase_noise_summary": phase_noise_summary,
             "bragg_fringe_calibration": bragg_calibration_result,
             "bragg_fringe_calibration_nodes": bragg_calibration_nodes,
+            "power_monitor_events": power_monitor_events,
             "preview_map": (
                 initial_step.get("preview_map", {})
                 if is_marker_optimization

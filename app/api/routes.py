@@ -336,6 +336,31 @@ async def stop_experiment():
     result = manager.stop_scan()
     return ExperimentResponse(status=result["status"], message=result["message"])
 
+@router.post("/experiment/pause", response_model=ExperimentResponse)
+async def pause_experiment():
+    result = manager.pause_scan()
+    return ExperimentResponse(status=result["status"], message=result["message"])
+
+@router.post("/experiment/resume", response_model=ExperimentResponse)
+async def resume_experiment():
+    result = manager.resume_scan()
+    return ExperimentResponse(status=result["status"], message=result["message"])
+
+@router.post("/experiment/power-recovery/{action}", response_model=ExperimentResponse)
+async def power_recovery_action(action: str):
+    result = manager.request_power_recovery(action)
+    if result["status"] == "error":
+        raise HTTPException(400, result["message"])
+    return ExperimentResponse(status=result["status"], message=result["message"])
+
+@router.get("/experiment/power-meter/test", response_model=ExperimentResponse)
+async def test_power_meter():
+    try:
+        reading = await run_in_threadpool(manager.test_power_meter)
+        return ExperimentResponse(status="success", message="Power meter reading succeeded", data=reading)
+    except Exception as exc:
+        raise HTTPException(502, str(exc))
+
 
 def _authorize_sync_node(request: Request) -> None:
     try:
@@ -444,6 +469,16 @@ async def stop_sync_run():
         return ExperimentResponse(status="success", message="Sync stop requested", data=data)
     except ValueError as exc:
         raise HTTPException(400, str(exc))
+
+@router.post("/sync/pause", response_model=ExperimentResponse)
+async def pause_sync_run():
+    data = await run_in_threadpool(sync_manager.pause_master)
+    return ExperimentResponse(status="success", message="Sync pause requested", data=data)
+
+@router.post("/sync/resume", response_model=ExperimentResponse)
+async def resume_sync_run():
+    data = await run_in_threadpool(sync_manager.resume_master)
+    return ExperimentResponse(status="success", message="Sync resume requested", data=data)
 
 
 @router.get("/sync/status", response_model=ExperimentResponse)
@@ -566,6 +601,21 @@ async def stop_sync_node(req: SyncNodeCommandRequest, request: Request):
         return await run_in_threadpool(sync_manager.stop_node, req.sync_run_id)
     except ValueError as exc:
         raise HTTPException(400, str(exc))
+
+@router.post("/sync/node/pause")
+async def pause_sync_node(req: SyncNodeCommandRequest, request: Request):
+    _authorize_sync_node(request)
+    return await run_in_threadpool(sync_manager.pause_node, req.sync_run_id)
+
+@router.post("/sync/node/resume")
+async def resume_sync_node(payload: Dict[str, Any], request: Request):
+    _authorize_sync_node(request)
+    return await run_in_threadpool(
+        sync_manager.resume_node,
+        str(payload.get("sync_run_id") or ""),
+        payload.get("retry_frequency_hz"),
+        int(payload.get("invalid_attempt") or 1),
+    )
 
 
 @router.get("/sync/node/status/{sync_run_id}")
@@ -811,6 +861,8 @@ async def get_status():
         data={
             "is_running": s.is_running,
             "current_step": s.current_step,
+            "is_paused": s.is_paused,
+            "pause_reason": s.pause_reason,
             "run_id": run_label # <--- This is what index.html needs
         }
     )

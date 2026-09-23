@@ -1118,6 +1118,11 @@
                             </div>
                         </div>
                         <div class="form-text mt-2">The phase scan order is selected under Execution Control. Statistics are updated after every shot.</div>
+                        <div class="card border-warning mt-3"><div class="card-body py-2 px-3">
+                            <div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="transferPowerMonitor" v-model="config.transfer_power_monitor_enabled"><label class="form-check-label fw-bold" for="transferPowerMonitor">Automatic power monitoring and fringe recovery</label></div>
+                            <div v-if="config.transfer_power_monitor_enabled" class="mt-2"><label class="form-label small mb-1">Allowed power change from baseline</label><div class="input-group input-group-sm"><input type="number" min="0" step="any" class="form-control" v-model.number="config.transfer_power_threshold_percent"><span class="input-group-text">%</span></div><div class="form-text">One PM100A reading is taken after each normal shot. 0 records power without automatic pause.</div></div>
+                            <div v-if="config.transfer_power_monitor_enabled && Number(config.transfer_power_threshold_percent) > 0" class="mt-2"><label class="form-label small mb-1">Prepared Bragg calibration MOT</label><input type="file" class="form-control form-control-sm" accept=".mot" @change="selectTransferRecoveryMot"><div class="form-text">{{ config.transfer_recovery_sequence_name || 'Required for automatic recovery. Calibration parameters below are retained when switching scan modes.' }}</div></div>
+                        </div>
                     </div>
                     <div v-if="config.mode === 'transfer_burst_time_scan'" class="mt-1">
                         <div class="alert alert-light border py-2 px-3 small mb-3">
@@ -1584,6 +1589,7 @@
                     <div class="d-grid gap-2">
                         <button class="btn btn-success py-2 fs-6 fw-bold shadow-sm" @click="startScan"
                             :disabled="isStartDisabled()"><i class="bi bi-play-fill me-1 fs-5"></i> {{ isScheduledMode() ? 'START SCHEDULE' : (isSyncMode() ? 'START SYNC' : 'START EXPERIMENT') }}</button>
+                        <button v-if="!isScheduledMode()" class="btn btn-warning py-2 fs-6 fw-bold shadow-sm" @click="togglePause" :disabled="!isRunning"><i class="bi me-1" :class="isPaused ? 'bi-play-fill' : 'bi-pause-fill'"></i>{{ isPaused ? 'RESUME' : 'PAUSE' }}</button>
                         <button class="btn btn-danger py-2 fs-6 fw-bold shadow-sm" @click="stopScan"
                             :disabled="isStopDisabled()"><i class="bi bi-stop-fill me-1 fs-5"></i> {{ isScheduledMode() ? 'STOP SCHEDULE' : (isSyncMode() ? 'STOP SYNC' : 'STOP') }}</button>
                     </div>
@@ -1794,6 +1800,11 @@
                 </div>
             </div>
 
+            <div v-if="config.mode === 'transfer_function' && config.transfer_power_monitor_enabled" class="card mb-4 border-0 shadow-sm">
+                <div class="card-header bg-white fw-bold"><i class="bi bi-lightning-charge me-2 text-warning"></i>PM100A power after each shot</div>
+                <div id="powerMeterPlot" style="height:320px"></div>
+            </div>
+
             <div class="row g-4">
                 <div class="col-lg-7">
                     <div class="card h-100 border-0 shadow-sm" :class="{'maximized': maximizedView === 'scope'}">
@@ -1881,6 +1892,10 @@
                         transfer_zero_phase_repeats: 50,
                         transfer_periodic_zero_phase: false,
                         transfer_zero_phase_frequency_interval: 10,
+                        transfer_power_monitor_enabled: false,
+                        transfer_power_threshold_percent: 0,
+                        transfer_recovery_sequence_name: '',
+                        transfer_recovery_sequence_content_base64: '',
                         ramsey_delta_start_mhz: 0,
                         ramsey_delta_stop_mhz: 1,
                         ramsey_delta_step_mhz: 0.1,
@@ -1897,7 +1912,8 @@
                         bragg_calibration_name: '',
                         bragg_calibration_apply_active: false
                     },
-                    isRunning: false, isSimulation: false, statusMessage: "IDLE", currentStep: 0, plotRevision: 0, logs: [], ws: null,
+                    isRunning: false, isPaused: false, isSimulation: false, statusMessage: "IDLE", currentStep: 0, plotRevision: 0, logs: [], ws: null,
+                    powerMeterHistory: [], powerThresholdPrompted: false,
                     lastLoggedScheduleErrorKey: '',
                     progressPercent: 0,
                     braggExportFwhm: 50,
@@ -2329,6 +2345,7 @@
                         const serverMessage = String(res.data.message || '').trim();
                         this.currentRunId = d.run_id || "Loading...";
                         this.isRunning = Boolean(d.is_running);
+                        this.isPaused = Boolean(d.is_paused);
                         if (!this.isRunning && !this.isScheduleActive()) {
                             const isFailure = /failed|error/i.test(serverMessage);
                             this.statusMessage = isFailure ? serverMessage : "IDLE";
@@ -5484,6 +5501,11 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     if (data.transfer_zero_phase_baseline === true || data.transfer_zero_phase_baseline === 1 || data.transfer_zero_phase_baseline === '1') return;
                     const frequency = Number(data.transfer_frequency_hz);
                     if (!Number.isFinite(frequency)) return;
+                    if (data.power_meter_invalid_reason === 'threshold_exceeded') {
+                        delete this.transferFunctionHistoryMap[frequency.toPrecision(15)];
+                        this.renderTransferFunctionPlot();
+                        return;
+                    }
                     const modulationMhz = Number(data.transfer_frequency_modulation_mhz);
                     if (Number.isFinite(modulationMhz) && modulationMhz > 0) {
                         this.transferFrequencyModulationMhz = modulationMhz;
@@ -5746,6 +5768,24 @@ finishScheduledRun(finalStatus = 'IDLE') {
                         this.syncSliceState(points);
                         this.render3DPlot(points, metric);
                     }
+                },
+                renderPowerMeterPlot() {
+                    const element = document.getElementById('powerMeterPlot');
+                    if (!element || typeof Plotly === 'undefined') return;
+                    const rows = this.powerMeterHistory || [];
+                    const valid = rows.filter(row => row.valid);
+                    const invalid = rows.filter(row => !row.valid);
+                    const trace = (items, name, color, symbol) => ({
+                        x: items.map(row => row.shot), y: items.map(row => row.power),
+                        customdata: items.map(row => [row.frequency, row.phase, row.repeat, row.deviation]),
+                        type: 'scatter', mode: 'lines+markers', name,
+                        line: { color, width: 1.8 }, marker: { color, size: 7, symbol },
+                        hovertemplate: 'Shot %{x}<br>Power=%{y:.6g} W<br>f=%{customdata[0]:.8g} Hz<br>phase=%{customdata[1]:.4g}°<br>repeat=%{customdata[2]}<br>change=%{customdata[3]:.4g}%<extra></extra>'
+                    });
+                    Plotly.react(element, [trace(valid, 'Valid', '#1565c0', 'circle'), trace(invalid, 'Invalid', '#c62828', 'x')], {
+                        margin: { t: 25, b: 52, l: 76, r: 20 }, xaxis: { title: 'Shot index' }, yaxis: { title: 'Optical power (W)' },
+                        legend: { orientation: 'h', x: 1, xanchor: 'right', y: 1.12 }, paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)'
+                    }, { responsive: true, displaylogo: false });
                 },
                 connectWebSocket() {
                     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -6273,11 +6313,44 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     }, 500);
                 },
                 handleData(data) {
+                    if (data?.stream_type === 'power_recovery_completed') {
+                        this.powerThresholdPrompted = false;
+                        this.isPaused = false;
+                        this.addLog(`Bragg recovery calibration ${data.calibration_run_id} passed; rescanning the complete frequency.`);
+                        return;
+                    }
+                    if (data?.stream_type === 'power_recovery_failed') {
+                        this.powerThresholdPrompted = false;
+                        this.isPaused = true;
+                        window.alert(`Bragg recovery calibration failed: ${data.message}. The Transfer Function remains paused.`);
+                        return;
+                    }
                     if (data?.stream_type === 'sync_pair') {
                         this.handleSyncPair(data);
                         return;
                     }
                     if (data?.stream_type && data.stream_type !== 'scan_point') return;
+                    if (this.hasFiniteNumericValue(data?.power_meter_power_w)) {
+                        this.powerMeterHistory.push({
+                            shot: Number(data.current_step || this.powerMeterHistory.length + 1),
+                            power: Number(data.power_meter_power_w), frequency: Number(data.transfer_frequency_hz),
+                            phase: Number(data.transfer_phase_deg), repeat: Number(data.transfer_repeat),
+                            valid: data.power_meter_valid !== false, deviation: Number(data.power_meter_deviation_percent)
+                        });
+                        this.$nextTick(() => this.renderPowerMeterPlot());
+                    }
+                    if (data?.power_meter_invalid_reason === 'threshold_exceeded' && !this.powerThresholdPrompted) {
+                        this.powerThresholdPrompted = true;
+                        this.isPaused = true;
+                        const message = `Power changed by ${Number(data.power_meter_deviation_percent).toFixed(3)}%. The current frequency attempt is invalid.\n\nStart the prepared Bragg Fringes Calibration now?`;
+                        if (window.confirm(message)) {
+                            axios.post('/experiment/power-recovery/recalibrate').catch(error => this.addLog('Recovery request failed: ' + this.formatRequestError(error)));
+                        } else if (window.confirm('Keep the scan paused? Select Cancel to stop the scan.')) {
+                            axios.post('/experiment/power-recovery/hold');
+                        } else {
+                            axios.post('/experiment/power-recovery/stop');
+                        }
+                    }
                     if (this.isSyncMode() && data?.sync_run_id) {
                         const source = this.handleSyncNodeData(data);
                         if (source === 'master') this.recordShotDuration(data);
@@ -6453,6 +6526,17 @@ finishScheduledRun(finalStatus = 'IDLE') {
                 this.syncReplayPlaying = false;
                 this.resetHistory();
                 const scanConfig = this.prepareScanPayload(this.config, this.currentSequenceName);
+                if (scanConfig.mode === 'transfer_function' && scanConfig.transfer_power_monitor_enabled) {
+                    if (Number(scanConfig.transfer_power_threshold_percent) > 0 && !String(scanConfig.transfer_recovery_sequence_content_base64 || '')) {
+                        throw new Error('Select a prepared Bragg calibration .mot file for automatic recovery.');
+                    }
+                    try {
+                        const test = await axios.get('/experiment/power-meter/test');
+                        this.addLog(`Power meter ready: ${Number(test.data?.data?.power_w).toPrecision(6)} W`);
+                    } catch (error) {
+                        if (!window.confirm(`Power meter test failed: ${this.formatRequestError(error)}\n\nContinue SYNC and retry after every Master shot?`)) return;
+                    }
+                }
                 const res = await axios.post('/sync/start', {
                     scan_config: scanConfig,
                     master_delay_ms: Number(this.syncMasterDelayMs) || 0,
@@ -6487,11 +6571,24 @@ finishScheduledRun(finalStatus = 'IDLE') {
                 this.addLog('Start failed: ' + (error?.message || this.formatRequestError(error)));
                 return;
             }
+            if (payload.mode === 'transfer_function' && payload.transfer_power_monitor_enabled && Number(payload.transfer_power_threshold_percent) > 0 && !String(payload.transfer_recovery_sequence_content_base64 || '')) {
+                this.addLog('Start failed: select a prepared Bragg calibration .mot file for automatic recovery.');
+                return;
+            }
             try {
                 await this.ensureRealHardwareMode();
             } catch (error) {
                 this.addLog('REAL HW mode setup failed: ' + this.formatRequestError(error));
                 return;
+            }
+            if (payload.mode === 'transfer_function' && payload.transfer_power_monitor_enabled) {
+                try {
+                    const test = await axios.get('/experiment/power-meter/test');
+                    this.addLog(`Power meter ready: ${Number(test.data?.data?.power_w).toPrecision(6)} W`);
+                } catch (error) {
+                    if (!window.confirm(`Power meter test failed: ${this.formatRequestError(error)}\n\nContinue and retry after every shot?`)) return;
+                    this.addLog('Power meter unavailable at start; continuing and retrying after each shot.');
+                }
             }
             const uploadSuccess = await this.uploadSequenceFile();
             if (!uploadSuccess) {
@@ -6614,6 +6711,28 @@ finishScheduledRun(finalStatus = 'IDLE') {
                 this.statusMessage = 'STOPPED';
             }
         },
+        async togglePause() {
+            if (!this.isRunning || this.isScheduledMode()) return;
+            try {
+                const endpoint = this.isPaused ? '/experiment/resume' : '/experiment/pause';
+                const effectiveEndpoint = this.isSyncMode() ? (this.isPaused ? '/sync/resume' : '/sync/pause') : endpoint;
+                const res = await axios.post(effectiveEndpoint);
+                this.isPaused = !this.isPaused;
+                this.statusMessage = res.data?.message || (this.isPaused ? 'PAUSED' : 'RUNNING');
+            } catch (error) {
+                this.addLog('Pause/resume failed: ' + this.formatRequestError(error));
+            }
+        },
+        async selectTransferRecoveryMot(event) {
+            const file = event?.target?.files?.[0];
+            if (!file) return;
+            const bytes = new Uint8Array(await file.arrayBuffer());
+            let binary = '';
+            const chunk = 0x8000;
+            for (let index = 0; index < bytes.length; index += chunk) binary += String.fromCharCode(...bytes.subarray(index, index + chunk));
+            this.config.transfer_recovery_sequence_name = file.name;
+            this.config.transfer_recovery_sequence_content_base64 = btoa(binary);
+        },
         resetHistory(scanDimensions = null) {
             const targetDimensions = Number(scanDimensions);
             this.currentScanDimensions = Number.isFinite(targetDimensions)
@@ -6627,6 +6746,8 @@ finishScheduledRun(finalStatus = 'IDLE') {
             this.transferAtomMirrorDistanceM = 2.23;
             this.transferPhaseNoiseSigmaMrad = 100;
             this.transferPhaseDegrees = [];
+            this.powerMeterHistory = [];
+            this.powerThresholdPrompted = false;
             this.initPlots();
         }
     }
