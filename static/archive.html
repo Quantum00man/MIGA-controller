@@ -996,12 +996,21 @@
                             </button>
                             <div v-if="shareLinkMessage" class="small mt-1"
                                 :class="shareLinkError ? 'text-danger' : 'text-success'">{{ shareLinkMessage }}</div>
-                            <button v-if="!isMarkerOptimizationArchive()" class="btn btn-outline-secondary btn-sm w-100 mt-2" @click="exportLoadedSequence"
+                            <div v-if="syncManifest && !isMarkerOptimizationArchive()" class="d-grid gap-1 mt-2">
+                                <div class="small fw-bold text-muted">Export SYNC Sequences</div>
+                                <button v-for="node in syncArchiveSequenceNodes()" :key="`sequence-${node.id}`"
+                                    class="btn btn-outline-secondary btn-sm w-100" @click="exportLoadedSequence(node.id)"
+                                    :disabled="isExportingSequence">
+                                    <span v-if="isExportingSequence" class="spinner-border spinner-border-sm me-1"></span>
+                                    <i v-else class="bi bi-download me-1"></i>{{ node.label }} .mot
+                                </button>
+                            </div>
+                            <button v-else-if="!isMarkerOptimizationArchive()" class="btn btn-outline-secondary btn-sm w-100 mt-2" @click="exportLoadedSequence()"
                                 :disabled="isExportingSequence || !loadedRunEntry?.has_sequence_file">
                                 <span v-if="isExportingSequence" class="spinner-border spinner-border-sm me-1"></span>
                                 <i v-else class="bi bi-download me-1"></i>{{ isExportingSequence ? 'Exporting...' : 'Export Sequence' }}
                             </button>
-                            <div class="small text-muted mt-2" style="font-size: 0.72em;" v-if="!isMarkerOptimizationArchive() && loadedRunEntry && !loadedRunEntry.has_sequence_file">
+                            <div class="small text-muted mt-2" style="font-size: 0.72em;" v-if="!syncManifest && !isMarkerOptimizationArchive() && loadedRunEntry && !loadedRunEntry.has_sequence_file">
                                 No archived sequence file saved for this run.
                             </div>
                         </div>
@@ -5194,20 +5203,22 @@
                         return fallback;
                     }
                 },
-                async exportLoadedSequence() {
+                async exportLoadedSequence(nodeId = '') {
                     const ref = this.loadedRunRef;
-                    if (!ref?.run_id || !this.loadedRunEntry?.has_sequence_file) return;
+                    const requestedNode = typeof nodeId === 'string' ? nodeId : '';
+                    if (!ref?.run_id || (!this.syncManifest && !this.loadedRunEntry?.has_sequence_file)) return;
                     this.isExportingSequence = true;
                     this.errorMsg = '';
                     try {
-                        const sequenceQuery = this.loadedSyncNode ? `?node_id=${encodeURIComponent(this.loadedSyncNode)}` : '';
+                        const sequenceQuery = requestedNode ? `?node_id=${encodeURIComponent(requestedNode)}` : '';
                         const res = await axios.get(`/archive/sequence/${ref.year}/${ref.month}/${ref.day}/${ref.run_id}${sequenceQuery}`, {
                             responseType: 'blob'
                         });
                         const blob = res.data instanceof Blob ? res.data : new Blob([res.data], { type: 'text/plain;charset=utf-8;' });
                         const headerName = this.getFilenameFromDisposition(res.headers?.['content-disposition']);
                         const fallbackSequence = String(this.loadedRunEntry?.sequence_name || 'sequence').replace(/\.mot$/i, '');
-                        const fallbackName = `${this.sanitizeFilenamePart(ref.run_id || 'run', 'run')}_${this.sanitizeFilenamePart(fallbackSequence, 'sequence')}.mot`;
+                        const nodePart = requestedNode ? `_${this.sanitizeFilenamePart(this.syncArchiveNodeLabel(requestedNode), requestedNode)}` : '';
+                        const fallbackName = `${this.sanitizeFilenamePart(ref.run_id || 'run', 'run')}${nodePart}_${this.sanitizeFilenamePart(fallbackSequence, 'sequence')}.mot`;
                         const suggestedName = headerName || fallbackName;
                         await this.downloadBlobContent(blob, suggestedName, {
                             description: 'Sequence File',
@@ -6678,6 +6689,13 @@
                         ...savedSlaves,
                         ...pairs.map(pair => String(pair.slave_node_id || '')).filter(Boolean),
                     ])];
+                },
+                syncArchiveSequenceNodes() {
+                    const archived = Object.keys(this.syncManifest?.archive_nodes || {});
+                    const ids = archived.length
+                        ? ['master', ...archived.filter(id => id !== 'master')]
+                        : ['master', ...this.syncArchiveSlaveOptions()];
+                    return [...new Set(ids)].map(id => ({ id, label: this.syncArchiveNodeLabel(id) }));
                 },
                 async handleSyncArchiveNodeSourceChange() {
                     const source = this.syncArchiveNodeSource || 'master';

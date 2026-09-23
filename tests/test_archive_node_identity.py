@@ -18,6 +18,7 @@ def _write_run(path: Path, role: str, node_id: str, value: float) -> None:
         writer = csv.DictWriter(handle, fieldnames=["Step", "Parameter_P0", "Atom_UP"])
         writer.writeheader()
         writer.writerow({"Step": 0, "Parameter_P0": 1, "Atom_UP": value})
+    (path / "sequence.mot").write_text(f"{role}:{node_id}\n", encoding="utf-8")
 
 
 def test_master_layout_returns_resolved_node_identity_and_selected_data():
@@ -46,6 +47,10 @@ def test_master_layout_returns_resolved_node_identity_and_selected_data():
         assert slave["archive_node_identity"]["resolved_node"] == "slave-a"
         assert slave["archive_node_identity"]["relative_path"] == "sync_nodes/slave-a"
         assert slave["data"][0]["atom_number_up"] == 21
+        master_mot, _ = loader.get_archived_sequence_file("2026", "09", "23", "run01", node_id="master")
+        slave_mot, _ = loader.get_archived_sequence_file("2026", "09", "23", "run01", node_id="slave-a")
+        assert master_mot.read_text(encoding="utf-8") == "master:MIGA22\n"
+        assert slave_mot.read_text(encoding="utf-8") == "slave:slave-a\n"
 
 
 def test_slave_layout_defaults_to_local_slave_and_can_resolve_replicated_master():
@@ -122,3 +127,6 @@ def test_archive_ui_uses_loaded_points_and_rolls_back_failed_node_switch():
     assert "return this.loadedSyncNodeData;" in html
     assert "const loaded = await this.loadRun(source);" in html
     assert "await this.loadRun(previous);" in html
+    assert "exportLoadedSequence(node.id)" in html
+    assert "syncArchiveSequenceNodes()" in html
+    assert "requestedNode ? `?node_id=${encodeURIComponent(requestedNode)}`" in html
