@@ -117,6 +117,7 @@ class ScanConfig(BaseModel):
     transfer_recovery_config: Optional[Dict[str, Any]] = Field(None)
     transfer_recovery_sequence_name: str = Field("")
     transfer_recovery_sequence_content_base64: str = Field("")
+    transfer_recovery_source_run: Optional[Dict[str, str]] = Field(None)
     ramsey_delta_start_mhz: float = Field(0.0, ge=0.0)
     ramsey_delta_stop_mhz: float = Field(1.0, ge=0.0)
     ramsey_delta_step_mhz: float = Field(0.1, gt=0.0)

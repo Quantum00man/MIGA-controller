@@ -1119,9 +1119,15 @@
                         </div>
                         <div class="form-text mt-2">The phase scan order is selected under Execution Control. Statistics are updated after every shot.</div>
                         <div class="card border-warning mt-3"><div class="card-body py-2 px-3">
-                            <div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="transferPowerMonitor" v-model="config.transfer_power_monitor_enabled"><label class="form-check-label fw-bold" for="transferPowerMonitor">Automatic power monitoring and fringe recovery</label></div>
+                            <div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="transferPowerMonitor" v-model="config.transfer_power_monitor_enabled" @change="config.transfer_power_monitor_enabled && fetchRecoveryCalibrationRuns()"><label class="form-check-label fw-bold" for="transferPowerMonitor">Automatic power monitoring and fringe recovery</label></div>
                             <div v-if="config.transfer_power_monitor_enabled" class="mt-2"><label class="form-label small mb-1">Allowed power change from baseline</label><div class="input-group input-group-sm"><input type="number" min="0" step="any" class="form-control" v-model.number="config.transfer_power_threshold_percent"><span class="input-group-text">%</span></div><div class="form-text">One PM100A reading is taken after each normal shot. 0 records power without automatic pause.</div></div>
-                            <div v-if="config.transfer_power_monitor_enabled && Number(config.transfer_power_threshold_percent) > 0" class="mt-2"><label class="form-label small mb-1">Prepared Bragg calibration MOT</label><input type="file" class="form-control form-control-sm" accept=".mot" @change="selectTransferRecoveryMot"><div class="form-text">{{ config.transfer_recovery_sequence_name || 'Required for automatic recovery. Calibration parameters below are retained when switching scan modes.' }}</div></div>
+                            <div v-if="config.transfer_power_monitor_enabled && Number(config.transfer_power_threshold_percent) > 0" class="mt-2">
+                                <label class="form-label small mb-1">Recovery calibration source</label>
+                                <div class="input-group input-group-sm mb-2"><select class="form-select" v-model="selectedRecoveryCalibration" :disabled="recoveryCalibrationLoading"><option value="">Select a previous Bragg Fringes Calibration run</option><option v-for="run in recoveryCalibrationRuns" :key="recoveryCalibrationKey(run)" :value="recoveryCalibrationKey(run)" :disabled="!run.has_sequence_file">{{ run.year }}-{{ run.month }}-{{ run.day }} · {{ run.run_id }} · fringe {{ run.target_fringe_number }} · {{ run.status }}{{ run.run_label ? ` · ${run.run_label}` : '' }}</option></select><button type="button" class="btn btn-outline-primary" @click="loadSelectedRecoveryCalibration" :disabled="!selectedRecoveryCalibration || recoveryCalibrationLoading">{{ recoveryCalibrationLoading ? 'Loading…' : 'Load run' }}</button></div>
+                                <div class="small text-muted text-center mb-2">or upload a prepared MOT and use the calibration parameters currently shown in this form</div>
+                                <input type="file" class="form-control form-control-sm" accept=".mot" @change="selectTransferRecoveryMot">
+                                <div class="form-text" :class="config.transfer_recovery_sequence_content_base64 ? 'text-success' : 'text-danger'">{{ recoveryCalibrationSourceLabel() }}</div>
+                            </div>
                         </div>
                         </div>
                     </div>
@@ -1897,6 +1903,7 @@
                         transfer_power_threshold_percent: 0,
                         transfer_recovery_sequence_name: '',
                         transfer_recovery_sequence_content_base64: '',
+                        transfer_recovery_source_run: null,
                         ramsey_delta_start_mhz: 0,
                         ramsey_delta_stop_mhz: 1,
                         ramsey_delta_step_mhz: 0.1,
@@ -1915,6 +1922,7 @@
                     },
                     isRunning: false, isPaused: false, isSimulation: false, statusMessage: "IDLE", currentStep: 0, plotRevision: 0, logs: [], ws: null,
                     powerMeterHistory: [], powerThresholdPrompted: false,
+                    recoveryCalibrationRuns: [], selectedRecoveryCalibration: '', recoveryCalibrationLoading: false,
                     lastLoggedScheduleErrorKey: '',
                     progressPercent: 0,
                     braggExportFwhm: 50,
@@ -6733,6 +6741,47 @@ finishScheduledRun(finalStatus = 'IDLE') {
             for (let index = 0; index < bytes.length; index += chunk) binary += String.fromCharCode(...bytes.subarray(index, index + chunk));
             this.config.transfer_recovery_sequence_name = file.name;
             this.config.transfer_recovery_sequence_content_base64 = btoa(binary);
+            this.config.transfer_recovery_source_run = null;
+            this.selectedRecoveryCalibration = '';
+        },
+        recoveryCalibrationKey(run) {
+            return [run.year, run.month, run.day, run.run_id].join('/');
+        },
+        recoveryCalibrationSourceLabel() {
+            const source = this.config.transfer_recovery_source_run;
+            if (source?.run_id) return `Loaded ${source.year}-${source.month}-${source.day}/${source.run_id}: ${this.config.transfer_recovery_sequence_name}`;
+            if (this.config.transfer_recovery_sequence_name) return `Uploaded file: ${this.config.transfer_recovery_sequence_name}`;
+            return 'A recovery calibration run or prepared MOT is required.';
+        },
+        async fetchRecoveryCalibrationRuns() {
+            if (this.recoveryCalibrationLoading) return;
+            this.recoveryCalibrationLoading = true;
+            try {
+                const res = await axios.get('/experiment/transfer-recovery/calibrations');
+                this.recoveryCalibrationRuns = Array.isArray(res.data?.data?.runs) ? res.data.data.runs : [];
+            } catch (error) {
+                this.addLog('Failed to load Bragg calibration runs: ' + this.formatRequestError(error));
+            } finally {
+                this.recoveryCalibrationLoading = false;
+            }
+        },
+        async loadSelectedRecoveryCalibration() {
+            const parts = String(this.selectedRecoveryCalibration || '').split('/');
+            if (parts.length !== 4) return;
+            this.recoveryCalibrationLoading = true;
+            try {
+                const res = await axios.get(`/experiment/transfer-recovery/calibrations/${parts.map(encodeURIComponent).join('/')}`);
+                const payload = res.data?.data || {};
+                Object.assign(this.config, payload.calibration_config || {});
+                this.config.transfer_recovery_sequence_name = payload.sequence_name || 'sequence.mot';
+                this.config.transfer_recovery_sequence_content_base64 = payload.sequence_content_base64 || '';
+                this.config.transfer_recovery_source_run = payload.source_run || null;
+                this.addLog(`Loaded automatic recovery calibration from ${parts.join('/')}.`);
+            } catch (error) {
+                this.addLog('Failed to load recovery calibration: ' + this.formatRequestError(error));
+            } finally {
+                this.recoveryCalibrationLoading = false;
+            }
         },
         resetHistory(scanDimensions = null) {
             const targetDimensions = Number(scanDimensions);

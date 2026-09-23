@@ -2723,6 +2723,68 @@ class ExperimentManager:
             payload.update(extra_payload)
         return payload
 
+    def list_bragg_recovery_runs(self) -> List[Dict[str, Any]]:
+        records: List[Dict[str, Any]] = []
+        base = Path(config.DATA_BASE_DIR)
+        if not base.is_dir():
+            return records
+        for config_path in sorted(base.glob("[0-9][0-9][0-9][0-9]/[0-9][0-9]/[0-9][0-9]/run*/config.json"), reverse=True):
+            try:
+                stored = json.loads(config_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if str(stored.get("mode") or "").strip().lower() != "bragg_fringe_calibration":
+                continue
+            run_dir = config_path.parent
+            sequence_path = run_dir / "sequence.mot"
+            result_path = run_dir / "bragg_fringe_calibration.json"
+            result = {}
+            if result_path.is_file():
+                try:
+                    result = json.loads(result_path.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    result = {}
+            parts = run_dir.parts
+            records.append({
+                "year": parts[-4], "month": parts[-3], "day": parts[-2], "run_id": run_dir.name,
+                "run_label": str(stored.get("run_label") or ""),
+                "sequence_name": str(stored.get("sequence_name") or sequence_path.name),
+                "target_fringe_number": int(stored.get("bragg_calibration_target_fringe", 1)),
+                "status": str(result.get("status") or "unknown"),
+                "has_sequence_file": sequence_path.is_file(),
+            })
+        return records
+
+    def load_bragg_recovery_run(self, year: str, month: str, day: str, run_id: str) -> Dict[str, Any]:
+        if not (len(year) == 4 and len(month) == 2 and len(day) == 2 and year.isdigit() and month.isdigit() and day.isdigit()):
+            raise ValueError("Invalid archive date")
+        if not str(run_id).startswith("run") or Path(run_id).name != run_id:
+            raise ValueError("Invalid archive run ID")
+        run_dir = Path(config.DATA_BASE_DIR) / year / month / day / run_id
+        stored = self._load_run_preset_config(run_dir)
+        if str(stored.get("mode") or "").strip().lower() != "bragg_fringe_calibration":
+            raise ValueError("Selected run is not a Bragg Fringes Calibration run")
+        sequence_path = run_dir / "sequence.mot"
+        if not sequence_path.is_file():
+            raise FileNotFoundError("Selected calibration run has no archived sequence.mot")
+        calibration_keys = (
+            "parameter_source", "marker_axes", "dim1_type", "param_type", "dim1_method",
+            "start", "stop", "step", "custom_list", "link_formulas", "fit_center_up",
+            "fit_width_up", "fit_center_dw", "fit_width_dw", "ext_trigger",
+            "bragg_calibration_target_fringe", "bragg_calibration_coarse_repeats",
+            "bragg_calibration_fine_phase_half_range_rad", "bragg_calibration_fine_points",
+            "bragg_calibration_fine_repeats", "bragg_calibration_min_contrast",
+            "bragg_calibration_max_t2_uncertainty_us2", "bragg_calibration_name",
+        )
+        selected_config = {key: deepcopy(stored.get(key)) for key in calibration_keys if key in stored}
+        source = {"year": year, "month": month, "day": day, "run_id": run_id}
+        return {
+            "source_run": source,
+            "sequence_name": str(stored.get("sequence_name") or sequence_path.name),
+            "sequence_content_base64": base64.b64encode(sequence_path.read_bytes()).decode("ascii"),
+            "calibration_config": selected_config,
+        }
+
     def process_measurement_job(
         self,
         job: Dict[str, Any],

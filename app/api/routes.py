@@ -1351,6 +1351,21 @@ async def load_run_preset(req: ArchiveRunReference):
     except Exception as exc:
         raise HTTPException(500, str(exc))
 
+@router.get("/experiment/transfer-recovery/calibrations", response_model=ExperimentResponse)
+async def list_transfer_recovery_calibrations():
+    records = await run_in_threadpool(manager.list_bragg_recovery_runs)
+    return ExperimentResponse(status="success", message="Bragg calibration runs loaded", data={"runs": records})
+
+@router.get("/experiment/transfer-recovery/calibrations/{year}/{month}/{day}/{run_id}", response_model=ExperimentResponse)
+async def load_transfer_recovery_calibration(year: str, month: str, day: str, run_id: str):
+    try:
+        data = await run_in_threadpool(manager.load_bragg_recovery_run, year, month, day, run_id)
+        return ExperimentResponse(status="success", message="Bragg recovery preset loaded", data=data)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
 # --- 2. System Config ---
 class SystemMode(BaseModel): simulation: bool
 

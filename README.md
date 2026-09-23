@@ -2,7 +2,7 @@
 
 MIGA Controller is a browser-based control, data-acquisition and analysis application for cold-atom experiments. It combines sequence generation, hardware triggering, live waveform analysis, marker-based scans, Bayesian optimization, synchronized acquisition and archive re-analysis.
 
-Transfer Function scans can optionally read a Thorlabs PM100A from the authenticated Hardware-controller after every normal shot. The first successful reading is the power baseline. A non-zero relative-change threshold pauses between shots, invalidates the complete 0°/90° frequency attempt, runs the prepared Bragg Fringes Calibration as a separately archived recovery run, applies its generated target-fringe MOT, resets the baseline and rescans that frequency. Zero-phase baseline shots are never sampled. All non-scheduled scans also support manual shot-boundary Pause/Resume.
+Transfer Function scans can optionally read a Thorlabs PM100A from the authenticated Hardware-controller after every normal shot. The first successful reading is the power baseline. A non-zero relative-change threshold pauses between shots, invalidates the complete 0°/90° frequency attempt, runs the prepared Bragg Fringes Calibration as a separately archived recovery run, applies its generated target-fringe MOT, resets the baseline and rescans that frequency. The recovery MOT and complete calibration parameter set can be loaded directly from a previous Bragg Fringes Calibration archive run or supplied manually. Zero-phase baseline shots are never sampled. All non-scheduled scans also support manual shot-boundary Pause/Resume.
 
 The backend is built with Python and FastAPI. The browser interface uses Vue 3 and Plotly.js.
 

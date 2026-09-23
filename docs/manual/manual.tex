@@ -2101,8 +2101,10 @@ and plots power without pausing. A positive threshold pauses at the shot boundar
 relative change exceeds the configured percentage. The complete frequency attempt,
 including both phase quadratures, is retained for audit but excluded from summaries.
 
-Before enabling automatic recovery, select a dedicated Bragg Fringes Calibration MOT and
-verify the calibration parameters. On confirmation, the controller creates a separate,
+Before enabling automatic recovery, either select a previous Bragg Fringes Calibration run
+from Archive or upload a dedicated calibration MOT. Selecting a run restores its archived
+MOT together with the scan range, formulas, fit windows, target fringe, repeat counts and
+quality limits. On confirmation, the controller creates a separate,
 searchable calibration run, applies its generated target-fringe MOT, resets the power
 reference and repeats the complete interrupted frequency. Live and Archive views show the
 shot series; CSV, NPZ and LabPlot exports retain the power and validity provenance. Manual
