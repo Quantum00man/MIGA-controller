@@ -3051,6 +3051,19 @@ class ExperimentManager:
         scan_config: Dict[str, Any],
         ac_stark_context: Optional[Dict[str, Any]] = None,
     ):
+        if not hasattr(self, 'pause_event'):
+            self.pause_event = threading.Event()
+            self.pause_event.set()
+        if not hasattr(self, '_pause_lock'):
+            self._pause_lock = threading.Lock()
+        if not hasattr(self, '_power_monitor_events'):
+            self._power_monitor_events = []
+        if not hasattr(self, '_power_retry_frequency_hz'):
+            self._power_retry_frequency_hz = None
+        if not hasattr(self, '_power_recovery_event'):
+            self._power_recovery_event = threading.Event()
+        if not hasattr(self, '_power_recovery_action'):
+            self._power_recovery_action = ''
         print(f"--- Acquisition Started: {len(parameter_list)} points ---")
         total_steps = int(scan_config.get("_bragg_calibration_expected_total_shots", len(parameter_list)))
         scan_dimensions = self._resolve_scan_dimensions(scan_config)

@@ -1123,6 +1123,7 @@
                             <div v-if="config.transfer_power_monitor_enabled" class="mt-2"><label class="form-label small mb-1">Allowed power change from baseline</label><div class="input-group input-group-sm"><input type="number" min="0" step="any" class="form-control" v-model.number="config.transfer_power_threshold_percent"><span class="input-group-text">%</span></div><div class="form-text">One PM100A reading is taken after each normal shot. 0 records power without automatic pause.</div></div>
                             <div v-if="config.transfer_power_monitor_enabled && Number(config.transfer_power_threshold_percent) > 0" class="mt-2"><label class="form-label small mb-1">Prepared Bragg calibration MOT</label><input type="file" class="form-control form-control-sm" accept=".mot" @change="selectTransferRecoveryMot"><div class="form-text">{{ config.transfer_recovery_sequence_name || 'Required for automatic recovery. Calibration parameters below are retained when switching scan modes.' }}</div></div>
                         </div>
+                        </div>
                     </div>
                     <div v-if="config.mode === 'transfer_burst_time_scan'" class="mt-1">
                         <div class="alert alert-light border py-2 px-3 small mb-3">
