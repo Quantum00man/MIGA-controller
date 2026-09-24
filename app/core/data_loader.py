@@ -13,7 +13,7 @@ import numpy as np
 from app.analysis.allan_uncertainty import ONE_SIGMA_CONFIDENCE, chi_square_errors, white_noise_edf
 from scipy.optimize import differential_evolution
 
-from app.analysis import fitting, physics, interferometer_phase, phase_noise
+from app.analysis import fitting, physics, interferometer_phase, phase_noise, interferometer_alpha
 from app.analysis.transfer_function import build_transfer_function_summary
 from app.analysis.lock_in import build_lock_in_analysis
 import config
@@ -33,8 +33,41 @@ class DataLoader:
         return [
             point for point in points
             if not self._is_transfer_zero_phase_baseline(point)
+            and point.get("intf_alpha_calibration_block_id") is None
             and str(point.get("power_meter_invalid_reason") or "") != "threshold_exceeded"
         ]
+
+    def _apply_intf_alpha_history(
+        self, points: List[Dict[str, Any]], events: List[Dict[str, Any]],
+        config_data: Dict[str, Any], phase_calibration: Optional[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        settings = config_data.get("_system_settings_snapshot") or {}
+        beta = settings.get("intf_beta", 0.07636)
+        gamma = settings.get("intf_gamma", 0.25)
+        zero = config_data.get("_transfer_zero_phase_rad")
+        for point in points:
+            if point.get("intf_alpha_calibration_block_id") is not None:
+                continue
+            interpolation = interferometer_alpha.interpolate_alpha(point.get("timestamp"), events)
+            if interpolation is None:
+                continue
+            alpha = float(interpolation["value"])
+            point["intf_alpha_applied"] = alpha
+            point["intf_alpha_left_calibration_id"] = interpolation["left_id"]
+            point["intf_alpha_right_calibration_id"] = interpolation["right_id"]
+            point["intf_alpha_extrapolated"] = interpolation["extrapolated"]
+            point["intf_n1"], point["intf_n2"], point["intf_p1"], point["intf_p2"] = physics.calculate_interferometer_output(
+                point.get("atom_number_dw"), point.get("atom_number_up"), alpha, beta, gamma
+            )
+            point["intf_n1_nofit"], point["intf_n2_nofit"], point["intf_p1_nofit"], point["intf_p2_nofit"] = physics.calculate_interferometer_output(
+                point.get("atom_number_dw_nofit"), point.get("atom_number_up_nofit"), alpha, beta, gamma
+            )
+            phase_result = interferometer_phase.calculate_phase(point, phase_calibration)
+            point.update(phase_result)
+            point["interferometer_phase_raw"] = phase_result.get("interferometer_phase")
+            if phase_result.get("interferometer_phase_valid") and zero is not None:
+                point["interferometer_phase"] = float(phase_result["interferometer_phase"]) - float(zero)
+        return points
 
     def _apply_transfer_zero_phase_reference(
         self, points: List[Dict[str, Any]], settings: Dict[str, Any]
@@ -1202,6 +1235,9 @@ class DataLoader:
             "power_meter_deviation_percent": self._parse_float(row.get("Power_Meter_Deviation_Percent")),
             "power_meter_valid": str(row.get("Power_Meter_Valid") or "").strip().lower() in {"1", "true", "yes"},
             "power_meter_invalid_reason": str(row.get("Power_Meter_Invalid_Reason") or ""),
+            "intf_alpha_applied": self._parse_float(row.get("I_Alpha_Applied")),
+            "intf_alpha_calibration_block_id": self._parse_int(row.get("I_Alpha_Calibration_Block"), None),
+            "intf_alpha_calibration_shot": self._parse_int(row.get("I_Alpha_Calibration_Shot"), None),
             "transfer_frequency_attempt": self._parse_int(row.get("Transfer_Frequency_Attempt"), 1),
             "ramsey_delta_f_mhz": self._parse_float(row.get("Ramsey_Delta_F_MHz")),
             "ramsey_repeat": self._parse_int(row.get("Ramsey_Repeat"), -1),
@@ -1640,6 +1676,14 @@ class DataLoader:
                 power_monitor_events = loaded_events if isinstance(loaded_events, list) else []
             except (OSError, ValueError):
                 power_monitor_events = []
+        intf_alpha_path = run_dir / "intf_alpha_calibrations.json"
+        intf_alpha_calibrations: List[Dict[str, Any]] = []
+        if intf_alpha_path.is_file():
+            try:
+                loaded_alpha = json.loads(intf_alpha_path.read_text(encoding="utf-8"))
+                intf_alpha_calibrations = loaded_alpha if isinstance(loaded_alpha, list) else []
+            except (OSError, ValueError):
+                intf_alpha_calibrations = []
         invalid_attempts = {
             (float(event.get("frequency_hz")), int(event.get("attempt", 1)))
             for event in power_monitor_events
@@ -1680,6 +1724,10 @@ class DataLoader:
             )
             if str(config_data.get("mode") or "").strip().lower() in {"transfer_function", "transfer_burst_time_scan"}:
                 full_points = self._rebase_converted_transfer_phases(full_points, config_data)
+        if config_data.get("intf_alpha_calibration_enabled") and intf_alpha_calibrations:
+            full_points = self._apply_intf_alpha_history(
+                full_points, intf_alpha_calibrations, config_data, phase_calibration
+            )
         marker_optimization = self._build_marker_optimization_archive(run_dir, full_points)
         is_marker_optimization = bool(marker_optimization.get("steps")) or (
             run_dir / "marker_optimization_report.json"
@@ -1767,6 +1815,7 @@ class DataLoader:
             "bragg_fringe_calibration": bragg_calibration_result,
             "bragg_fringe_calibration_nodes": bragg_calibration_nodes,
             "power_monitor_events": power_monitor_events,
+            "intf_alpha_calibrations": intf_alpha_calibrations,
             "preview_map": (
                 initial_step.get("preview_map", {})
                 if is_marker_optimization

@@ -51,6 +51,8 @@ SYNC_RESULT_FIELDS = (
     "transfer_repeat", "transfer_repeats", "transfer_phase_deg", "transfer_phase_index",
     "transfer_zero_phase_baseline", "transfer_zero_phase_block_id", "transfer_zero_phase_repeat",
     "transfer_phase_count", "transfer_phase_degrees", "transfer_phase_scan_mode",
+    "intf_alpha_calibration_boundary", "intf_alpha_calibration", "intf_alpha_calibration_block_id",
+    "intf_alpha_calibration_shot", "intf_alpha_calibration_shots",
     "transfer_frequency_modulation_mhz", "transfer_atom_mirror_distance_m",
     "transfer_phase_noise_sigma_mrad", "transfer_generator_model",
     "transfer_generator_channel",

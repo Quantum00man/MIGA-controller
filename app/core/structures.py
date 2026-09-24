@@ -53,6 +53,9 @@ class ScanResult:
     power_meter_valid: Optional[bool] = None
     power_meter_invalid_reason: str = ""
     transfer_frequency_attempt: int = 1
+    intf_alpha_applied: Optional[float] = None
+    intf_alpha_calibration_block_id: Optional[int] = None
+    intf_alpha_calibration_shot: Optional[int] = None
 
     # Ramsey Interferometer provenance. The displayed parameter is delta f in MHz.
     ramsey_delta_f_mhz: Optional[float] = None

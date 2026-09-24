@@ -1118,6 +1118,14 @@
                             </div>
                         </div>
                         <div class="form-text mt-2">The phase scan order is selected under Execution Control. Statistics are updated after every shot.</div>
+                        <div class="card border-info mt-3"><div class="card-body py-2 px-3">
+                            <div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="intfAlphaCalibration" v-model="config.intf_alpha_calibration_enabled"><label class="form-check-label fw-bold" for="intfAlphaCalibration">Periodic I_alpha calibration</label></div>
+                            <div v-if="config.intf_alpha_calibration_enabled" class="row g-2 mt-1">
+                                <div class="col-6"><label class="form-label small mb-1">Interval</label><div class="input-group input-group-sm"><input type="number" min="0.01" max="1440" step="any" class="form-control" v-model.number="config.intf_alpha_calibration_interval_minutes"><span class="input-group-text">min</span></div></div>
+                                <div class="col-6"><label class="form-label small mb-1">Shots per block</label><input type="number" min="2" max="1000" step="1" class="form-control form-control-sm" v-model.number="config.intf_alpha_calibration_shots"></div>
+                                <div class="col-12"><label class="form-label small mb-1">Calibration MOT</label><input type="file" class="form-control form-control-sm" accept=".mot" @change="selectIntfAlphaCalibrationMot"><div class="form-text" :class="config.intf_alpha_calibration_sequence_content_base64 ? 'text-success' : 'text-danger'">{{ config.intf_alpha_calibration_sequence_name || 'A calibration MOT is required.' }}</div></div>
+                            </div>
+                        </div></div>
                         <div class="card border-warning mt-3"><div class="card-body py-2 px-3">
                             <div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="transferPowerMonitor" v-model="config.transfer_power_monitor_enabled" @change="config.transfer_power_monitor_enabled && fetchRecoveryCalibrationRuns()"><label class="form-check-label fw-bold" for="transferPowerMonitor">Automatic power monitoring and fringe recovery</label></div>
                             <div v-if="config.transfer_power_monitor_enabled" class="mt-2"><label class="form-label small mb-1">Allowed power change from baseline</label><div class="input-group input-group-sm"><input type="number" min="0" step="any" class="form-control" v-model.number="config.transfer_power_threshold_percent"><span class="input-group-text">%</span></div><div class="form-text">One PM100A reading is taken after each normal shot. 0 records power without automatic pause.</div></div>
@@ -1188,6 +1196,10 @@
                                 <div v-if="!isSyncMode()" class="col-12"><div class="form-check border rounded px-3 py-2 bg-light"><input id="applyBraggCalibration" class="form-check-input ms-0 me-2" type="checkbox" v-model="config.bragg_calibration_apply_active"><label class="form-check-label small fw-bold" for="applyBraggCalibration">After passing quality checks, set this calibration and mid-fringe reference active</label></div></div>
                                 <div v-else class="col-12"><div class="alert alert-primary py-2 px-3 small mb-0">Master and Slave use their own INTF P1 Fit calibration and midpoint T². Every node that passes its quality checks is saved and activated; only the Master MOT is updated.</div></div>
                             </div>
+                            <div class="card border-info mt-3"><div class="card-body py-2 px-3">
+                                <div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="braggIntfAlphaCalibration" v-model="config.intf_alpha_calibration_enabled"><label class="form-check-label fw-bold" for="braggIntfAlphaCalibration">Periodic I_alpha calibration</label></div>
+                                <div v-if="config.intf_alpha_calibration_enabled" class="row g-2 mt-1"><div class="col-6"><label class="form-label small mb-1">Interval (min)</label><input type="number" min="0.01" max="1440" step="any" class="form-control form-control-sm" v-model.number="config.intf_alpha_calibration_interval_minutes"></div><div class="col-6"><label class="form-label small mb-1">Shots per block</label><input type="number" min="2" max="1000" step="1" class="form-control form-control-sm" v-model.number="config.intf_alpha_calibration_shots"></div><div class="col-12"><input type="file" class="form-control form-control-sm" accept=".mot" @change="selectIntfAlphaCalibrationMot"><div class="form-text">{{ config.intf_alpha_calibration_sequence_name || 'A calibration MOT is required.' }}</div></div></div>
+                            </div></div>
                         </div>
                         <div v-if="config.mode === 'link'" class="mt-3 pt-3 border-top">
                             <div class="row g-2 align-items-end">
@@ -1811,6 +1823,10 @@
                 <div class="card-header bg-white fw-bold"><i class="bi bi-lightning-charge me-2 text-warning"></i>PM100A power after each shot</div>
                 <div id="powerMeterPlot" style="height:320px"></div>
             </div>
+            <div v-if="['transfer_function','bragg_fringe_calibration'].includes(config.mode) && config.intf_alpha_calibration_enabled" class="card mb-4 border-0 shadow-sm">
+                <div class="card-header bg-white fw-bold">Interferometer I_alpha calibration</div>
+                <div id="intfAlphaPlot" style="height:320px"></div>
+            </div>
 
             <div class="row g-4">
                 <div class="col-lg-7">
@@ -1904,6 +1920,11 @@
                         transfer_recovery_sequence_name: '',
                         transfer_recovery_sequence_content_base64: '',
                         transfer_recovery_source_run: null,
+                        intf_alpha_calibration_enabled: false,
+                        intf_alpha_calibration_interval_minutes: 2,
+                        intf_alpha_calibration_shots: 10,
+                        intf_alpha_calibration_sequence_name: '',
+                        intf_alpha_calibration_sequence_content_base64: '',
                         ramsey_delta_start_mhz: 0,
                         ramsey_delta_stop_mhz: 1,
                         ramsey_delta_step_mhz: 0.1,
@@ -1921,7 +1942,7 @@
                         bragg_calibration_apply_active: false
                     },
                     isRunning: false, isPaused: false, isSimulation: false, statusMessage: "IDLE", currentStep: 0, plotRevision: 0, logs: [], ws: null,
-                    powerMeterHistory: [], powerThresholdPrompted: false,
+                    powerMeterHistory: [], powerThresholdPrompted: false, intfAlphaHistory: [],
                     recoveryCalibrationRuns: [], selectedRecoveryCalibration: '', recoveryCalibrationLoading: false,
                     lastLoggedScheduleErrorKey: '',
                     progressPercent: 0,
@@ -5796,6 +5817,26 @@ finishScheduledRun(finalStatus = 'IDLE') {
                         legend: { orientation: 'h', x: 1, xanchor: 'right', y: 1.12 }, paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)'
                     }, { responsive: true, displaylogo: false });
                 },
+                renderIntfAlphaPlot() {
+                    const element = document.getElementById('intfAlphaPlot');
+                    if (!element || typeof Plotly === 'undefined') return;
+                    const rows = this.intfAlphaHistory || [];
+                    const accepted = rows.filter(row => row.accepted);
+                    const rejected = rows.filter(row => !row.accepted);
+                    const makeTrace = (items, name, color, symbol) => ({
+                        x: items.map(row => new Date(Number(row.time) * 1000)),
+                        y: items.map(row => row.alpha),
+                        error_y: { type: 'data', array: items.map(row => row.error || 0), visible: true },
+                        customdata: items.map(row => [row.valid, row.requested, row.reason || '']),
+                        type: 'scatter', mode: 'lines+markers', name,
+                        line: { color, width: 1.8 }, marker: { color, size: 8, symbol },
+                        hovertemplate: 'Time=%{x}<br>I_alpha=%{y:.7f}<br>valid=%{customdata[0]}/%{customdata[1]}<br>%{customdata[2]}<extra></extra>'
+                    });
+                    Plotly.react(element, [makeTrace(accepted, 'Accepted', '#00897b', 'circle'), makeTrace(rejected, 'Rejected', '#c62828', 'x')], {
+                        margin: { t: 25, b: 52, l: 76, r: 20 }, xaxis: { title: 'Time' }, yaxis: { title: 'I_alpha', range: [0, 1] },
+                        legend: { orientation: 'h', x: 1, xanchor: 'right', y: 1.12 }, paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)'
+                    }, { responsive: true, displaylogo: false });
+                },
                 connectWebSocket() {
                     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
                     const wsUrl = `${protocol}//${window.location.host}/ws`;
@@ -6322,6 +6363,16 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     }, 500);
                 },
                 handleData(data) {
+                    if (data?.stream_type === 'intf_alpha_calibration') {
+                        this.intfAlphaHistory.push({
+                            time: Number(data.representative_time || Date.now() / 1000),
+                            alpha: Number(data.intf_alpha), error: Number(data.intf_alpha_sem || 0),
+                            accepted: data.accepted === true, valid: Number(data.valid_shots || 0),
+                            requested: Number(data.requested_shots || 0), reason: data.rejection_reason || ''
+                        });
+                        this.$nextTick(() => this.renderIntfAlphaPlot());
+                        return;
+                    }
                     if (data?.stream_type === 'power_recovery_completed') {
                         this.powerThresholdPrompted = false;
                         this.isPaused = false;
@@ -6535,6 +6586,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                 this.syncReplayPlaying = false;
                 this.resetHistory();
                 const scanConfig = this.prepareScanPayload(this.config, this.currentSequenceName);
+                if (scanConfig.intf_alpha_calibration_enabled && !String(scanConfig.intf_alpha_calibration_sequence_content_base64 || '')) throw new Error('Select the I_alpha calibration .mot file.');
                 if (scanConfig.mode === 'transfer_function' && scanConfig.transfer_power_monitor_enabled) {
                     if (Number(scanConfig.transfer_power_threshold_percent) > 0 && !String(scanConfig.transfer_recovery_sequence_content_base64 || '')) {
                         throw new Error('Select a prepared Bragg calibration .mot file for automatic recovery.');
@@ -6582,6 +6634,10 @@ finishScheduledRun(finalStatus = 'IDLE') {
             }
             if (payload.mode === 'transfer_function' && payload.transfer_power_monitor_enabled && Number(payload.transfer_power_threshold_percent) > 0 && !String(payload.transfer_recovery_sequence_content_base64 || '')) {
                 this.addLog('Start failed: select a prepared Bragg calibration .mot file for automatic recovery.');
+                return;
+            }
+            if (payload.intf_alpha_calibration_enabled && !String(payload.intf_alpha_calibration_sequence_content_base64 || '')) {
+                this.addLog('Start failed: select the I_alpha calibration .mot file.');
                 return;
             }
             try {
@@ -6744,6 +6800,16 @@ finishScheduledRun(finalStatus = 'IDLE') {
             this.config.transfer_recovery_source_run = null;
             this.selectedRecoveryCalibration = '';
         },
+        async selectIntfAlphaCalibrationMot(event) {
+            const file = event?.target?.files?.[0];
+            if (!file) return;
+            const bytes = new Uint8Array(await file.arrayBuffer());
+            let binary = '';
+            const chunk = 0x8000;
+            for (let index = 0; index < bytes.length; index += chunk) binary += String.fromCharCode(...bytes.subarray(index, index + chunk));
+            this.config.intf_alpha_calibration_sequence_name = file.name;
+            this.config.intf_alpha_calibration_sequence_content_base64 = btoa(binary);
+        },
         recoveryCalibrationKey(run) {
             return [run.year, run.month, run.day, run.run_id].join('/');
         },
@@ -6797,6 +6863,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
             this.transferPhaseNoiseSigmaMrad = 100;
             this.transferPhaseDegrees = [];
             this.powerMeterHistory = [];
+            this.intfAlphaHistory = [];
             this.powerThresholdPrompted = false;
             this.initPlots();
         }

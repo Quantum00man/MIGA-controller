@@ -39,6 +39,7 @@ RESULTS_CSV_HEADER = [
     "Power_Meter_W", "Power_Meter_Measured_At", "Power_Meter_Wavelength_nm",
     "Power_Meter_Serial", "Power_Meter_Reference_W", "Power_Meter_Deviation_Percent",
     "Power_Meter_Valid", "Power_Meter_Invalid_Reason", "Transfer_Frequency_Attempt",
+    "I_Alpha_Applied", "I_Alpha_Calibration_Block", "I_Alpha_Calibration_Shot",
 ]
 
 
@@ -199,6 +200,12 @@ class DataManager:
         with open(self.current_run_dir / "power_monitor_events.json", "w", encoding="utf-8") as handle:
             json.dump(events, handle, ensure_ascii=False, indent=2)
 
+    def save_intf_alpha_calibrations(self, events: List[Dict[str, Any]]) -> None:
+        if not self.current_run_dir:
+            return
+        with open(self.current_run_dir / "intf_alpha_calibrations.json", "w", encoding="utf-8") as handle:
+            json.dump(events, handle, ensure_ascii=False, indent=2)
+
     def invalidate_transfer_attempt(self, frequency_hz: float, attempt: int, reason: str) -> None:
         if not self.waveforms_dir:
             return
@@ -334,6 +341,9 @@ class DataManager:
             power_meter_deviation_percent=result.power_meter_deviation_percent if result.power_meter_deviation_percent is not None else np.nan,
             power_meter_valid=(1 if result.power_meter_valid else 0) if result.power_meter_valid is not None else -1,
             power_meter_invalid_reason=result.power_meter_invalid_reason or "",
+            intf_alpha_applied=result.intf_alpha_applied if result.intf_alpha_applied is not None else np.nan,
+            intf_alpha_calibration_block_id=result.intf_alpha_calibration_block_id if result.intf_alpha_calibration_block_id is not None else -1,
+            intf_alpha_calibration_shot=result.intf_alpha_calibration_shot if result.intf_alpha_calibration_shot is not None else -1,
             transfer_frequency_attempt=result.transfer_frequency_attempt,
         )
 
@@ -395,6 +405,9 @@ class DataManager:
             f(result.power_meter_reference_w, 12), f(result.power_meter_deviation_percent, 6),
             (1 if result.power_meter_valid else 0) if result.power_meter_valid is not None else "",
             result.power_meter_invalid_reason or "", result.transfer_frequency_attempt,
+            f(result.intf_alpha_applied, 10),
+            result.intf_alpha_calibration_block_id if result.intf_alpha_calibration_block_id is not None else "",
+            result.intf_alpha_calibration_shot if result.intf_alpha_calibration_shot is not None else "",
         ]
         self.csv_writer.writerow(row)
         self.csv_handle.flush()

@@ -561,6 +561,34 @@ $\gamma_I$. Let $n_1=N_{F=1}$ and $n_2=N_{F=2}$. Then
 If $D$ or the corrected total is numerically zero, the software returns unavailable or
 zero probabilities rather than dividing by a small number.
 
+\subsection{Time-resolved $I_\alpha$ calibration}
+Transfer Function and Bragg Fringes Calibration runs can periodically execute a dedicated
+MOT sequence to track slow drift of the Raman labelling efficiency $I_\alpha$.  The
+calibration uses the fitted UP/$F=2$ transition probability, expressed by the controller
+as a percentage,
+\begin{equation}
+  I_\alpha=\frac{P_{\mathrm{UP},F=2}/100}{1-I_\Gamma}.
+\end{equation}
+The result must lie in $[0,1]$.  A calibration block contains ten shots by default, with
+the block size and time interval exposed in the run configuration.  Its representative
+time is the mean timestamp of its valid shots; the archived uncertainty is the standard
+error propagated through the equation above.
+
+An initial block is always acquired.  Periodic blocks are inserted at safe phase-block
+boundaries after the requested elapsed time, and a normally completed run acquires a final
+block.  An emergency stop does not execute the final block.  One failed block is retained
+as a rejected calibration event while the previous online estimate remains active; two
+consecutive failures pause the scan.  Returning from the calibration MOT requires no
+additional settling delay.
+
+The live page plots accepted and rejected $I_\alpha$ blocks with uncertainty bars.  At the
+end of the scan, accepted calibration points are linearly interpolated in physical time
+and each science shot is recalculated with its time-local $I_\alpha$.  Values outside the
+accepted time span use the nearest endpoint and are marked as extrapolated.  Master and
+Slave nodes acquire, archive and interpolate independent calibration histories.  The
+Archive page preserves the raw calibration points, uncertainties, validity decisions and
+the piecewise-linear history used for final analysis.
+
 \section{Arrival time and temperature}
 For launch velocity $v_0$, target height $z$ and gravitational acceleration $g$,
 \begin{equation}

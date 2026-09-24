@@ -22,7 +22,7 @@ import config
 from app.drivers.hardware import SequenceEditor, ExperimentDriver, RedPitayaDriver
 from app.drivers import dds_table
 from app.drivers.vcd_parser import VCDParser
-from app.analysis import fitting, physics, interferometer_phase, phase_noise, bragg_fringe_calibration
+from app.analysis import fitting, physics, interferometer_phase, phase_noise, bragg_fringe_calibration, interferometer_alpha
 from app.analysis.lock_in import build_lock_in_analysis
 from app.analysis.transfer_function import build_transfer_function_summary
 from app.models.schemas import ScanConfig, default_ramsey_frequency_power_table
@@ -102,6 +102,9 @@ class ExperimentManager:
         self._scan_finalize_error: Optional[str] = None
         self._active_phase_calibration_for_run: Optional[Dict[str, Any]] = None
         self._bragg_calibration_fine_plan_queue: Optional[queue.Queue] = None
+        self._intf_alpha_events: List[Dict[str, Any]] = []
+        self._online_intf_alpha: Optional[float] = None
+        self._intf_alpha_consecutive_failures = 0
 
     def _default_tmot_args(self) -> str:
         return config.TMOT_EXTRA_ARGS_WIN if config.IS_WINDOWS else config.TMOT_EXTRA_ARGS_LINUX
@@ -1491,6 +1494,21 @@ class ExperimentManager:
         scan_config["transfer_burst_time_frequency_hz"] = fixed_generator_frequency
         scan_config["transfer_response_axis"] = "p0" if burst_time_scan else "frequency"
         scan_config["transfer_repeats"] = repeats
+        if scan_config.get("intf_alpha_calibration_enabled"):
+            if not str(scan_config.get("intf_alpha_calibration_sequence_content_base64") or ""):
+                raise ValueError("Periodic I_alpha calibration requires a calibration MOT")
+            with_boundaries: List[Dict[str, Any]] = [{"sequence_parameters": [], "metadata": {"intf_alpha_calibration_boundary": "start"}}]
+            for index, item in enumerate(parameters):
+                with_boundaries.append(item)
+                current_metadata = item.get("metadata") or {}
+                next_metadata = parameters[index + 1].get("metadata") if index + 1 < len(parameters) else None
+                if not current_metadata.get("transfer_zero_phase_baseline") and (
+                    next_metadata is None
+                    or next_metadata.get("transfer_phase_deg") != current_metadata.get("transfer_phase_deg")
+                ):
+                    with_boundaries.append({"sequence_parameters": [], "metadata": {"intf_alpha_calibration_boundary": "periodic"}})
+            with_boundaries.append({"sequence_parameters": [], "metadata": {"intf_alpha_calibration_boundary": "end"}})
+            parameters = with_boundaries
         return parameters
 
     def _build_ramsey_interferometer_execution(self, scan_config: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -1881,6 +1899,11 @@ class ExperimentManager:
         self.refresh_runtime_settings_from_disk()
         ac_stark_context: Optional[Dict[str, Any]] = None
         try:
+            if scan_config.get("intf_alpha_calibration_enabled"):
+                if str(scan_config.get("mode") or "").strip().lower() not in {"transfer_function", "bragg_fringe_calibration"}:
+                    raise ValueError("I_alpha calibration is supported only for Transfer Function and Bragg Fringes Calibration")
+                if not str(scan_config.get("intf_alpha_calibration_sequence_content_base64") or ""):
+                    raise ValueError("I_alpha calibration requires a calibration MOT")
             if parameters_override is not None:
                 parameters = list(parameters_override)
             elif scan_config.get('mode') == 'ac_stark':
@@ -1922,6 +1945,9 @@ class ExperimentManager:
         self._power_retry_frequency_hz = None
         self._power_recovery_action = ""
         self._power_recovery_event.clear()
+        self._intf_alpha_events = []
+        self._online_intf_alpha = float(self.settings.get("intf_alpha", 0.35))
+        self._intf_alpha_consecutive_failures = 0
         total_steps = int(scan_config.get("_bragg_calibration_expected_total_shots", len(parameters)))
         self.status = ExperimentStatus(is_running=True, total_steps=total_steps, message='Starting...')
 
@@ -2797,7 +2823,7 @@ class ExperimentManager:
         execution_config: Optional[Dict[str, Any]] = None,
     ) -> Tuple[Optional[ScanResult], Dict[str, Any]]:
         execution_config = execution_config or {}
-        settings = self.settings
+        settings = dict(self.settings)
         storage_step = 1
         selected_fit_model = fitting.get_fit_model_by_key(
             fit_config.get('models'),
@@ -2808,6 +2834,8 @@ class ExperimentManager:
         total = int(job.get('total', 1) or 1)
         params = job.get('params') or []
         metadata = job.get('metadata') or {}
+        if not metadata.get("intf_alpha_calibration") and self._online_intf_alpha is not None:
+            settings["intf_alpha"] = float(self._online_intf_alpha)
         scan_dimensions = int(job.get('scan_dimensions', 1) or 1)
         if isinstance(metadata.get('sync_parameters'), list):
             display_params = metadata['sync_parameters']
@@ -3016,6 +3044,9 @@ class ExperimentManager:
                 power_meter_valid=metadata.get('power_meter_valid'),
                 power_meter_invalid_reason=metadata.get('power_meter_invalid_reason', ''),
                 transfer_frequency_attempt=int(metadata.get('transfer_frequency_attempt', 1)),
+                intf_alpha_applied=(None if metadata.get("intf_alpha_calibration") else float(settings.get("intf_alpha", 0.35))),
+                intf_alpha_calibration_block_id=metadata.get("intf_alpha_calibration_block_id"),
+                intf_alpha_calibration_shot=metadata.get("intf_alpha_calibration_shot"),
                 ramsey_delta_f_mhz=metadata.get('ramsey_delta_f_mhz'),
                 ramsey_repeat=metadata.get('ramsey_repeat'),
                 ramsey_center_frequency_mhz=metadata.get('ramsey_center_frequency_mhz'),
@@ -3153,6 +3184,17 @@ class ExperimentManager:
         power_threshold_percent = max(0.0, float(scan_config.get("transfer_power_threshold_percent", 0.0) or 0.0))
         power_meter_client: Optional[PowerMeterClient] = None
         self._power_meter_reference_w = None
+        alpha_calibration_enabled = bool(scan_config.get("intf_alpha_calibration_enabled", False))
+        alpha_calibration_path: Optional[Path] = None
+        alpha_last_started: Optional[float] = None
+        alpha_block_id = 0
+        if alpha_calibration_enabled:
+            encoded_alpha_mot = str(scan_config.get("intf_alpha_calibration_sequence_content_base64") or "")
+            if not encoded_alpha_mot:
+                raise ValueError("I_alpha calibration is enabled without a calibration MOT")
+            with tempfile.NamedTemporaryFile(prefix="miga_intf_alpha_", suffix=".mot", delete=False) as handle:
+                handle.write(base64.b64decode(encoded_alpha_mot))
+                alpha_calibration_path = Path(handle.name)
         if power_monitor_enabled and not config.USE_SIMULATION:
             power_meter_client = PowerMeterClient(self.settings.get('power_meter_url', ''), self.settings.get('power_meter_password', ''), self.settings.get('power_meter_timeout_s', 5.0))
 
@@ -3214,6 +3256,37 @@ class ExperimentManager:
                 identity = rigol_client.connect()
                 print(f"[Ramsey Interferometer] Connected to {identity}")
             def execution_items():
+                nonlocal alpha_last_started, alpha_block_id
+                def expand_boundary(item):
+                    nonlocal alpha_last_started, alpha_block_id
+                    metadata = item.get("metadata") or {}
+                    boundary = str(metadata.get("intf_alpha_calibration_boundary") or "")
+                    if not boundary or not alpha_calibration_enabled:
+                        yield item
+                        return
+                    now = time.monotonic()
+                    interval = float(scan_config.get("intf_alpha_calibration_interval_minutes", 2.0)) * 60.0
+                    due = boundary in {"start", "end"} or alpha_last_started is None or now - alpha_last_started >= interval
+                    if not due or (boundary == "end" and self.stop_flag):
+                        return
+                    alpha_last_started = now
+                    alpha_block_id += 1
+                    shots = int(scan_config.get("intf_alpha_calibration_shots", 10))
+                    for shot in range(1, shots + 1):
+                        calibration_config = dict(scan_config)
+                        calibration_config["_template_path_override"] = str(alpha_calibration_path)
+                        calibration_config["sequence_name"] = str(scan_config.get("intf_alpha_calibration_sequence_name") or alpha_calibration_path.name)
+                        yield {
+                            "sequence_parameters": [],
+                            "metadata": {
+                                "intf_alpha_calibration": True,
+                                "intf_alpha_calibration_block_id": alpha_block_id,
+                                "intf_alpha_calibration_shot": shot,
+                                "intf_alpha_calibration_shots": shots,
+                                "intf_alpha_calibration_boundary": boundary,
+                            },
+                            "execution_config": calibration_config,
+                        }
                 if transfer_mode:
                     original = list(parameter_list)
                     pending = list(original)
@@ -3221,7 +3294,7 @@ class ExperimentManager:
                     while cursor < len(pending):
                         item = pending[cursor]
                         cursor += 1
-                        yield item
+                        yield from expand_boundary(item)
                         retry_frequency = self._power_retry_frequency_hz
                         if retry_frequency is not None:
                             self._power_retry_frequency_hz = None
@@ -3245,6 +3318,8 @@ class ExperimentManager:
                                     retry.append(copied)
                             pending[cursor:cursor] = retry
                     return
+                if alpha_calibration_enabled and str(scan_config.get("mode") or "").strip().lower() == "bragg_fringe_calibration":
+                    yield from expand_boundary({"sequence_parameters": [], "metadata": {"intf_alpha_calibration_boundary": "start"}})
                 yield from parameter_list
                 if str(scan_config.get("mode") or "").strip().lower() != "bragg_fringe_calibration":
                     return
@@ -3257,7 +3332,11 @@ class ExperimentManager:
                         continue
                 if fine_plan:
                     self.status.message = "Coarse fit passed. Starting local mid-fringe scan..."
+                    if alpha_calibration_enabled:
+                        yield from expand_boundary({"sequence_parameters": [], "metadata": {"intf_alpha_calibration_boundary": "periodic"}})
                     yield from fine_plan
+                if alpha_calibration_enabled:
+                    yield from expand_boundary({"sequence_parameters": [], "metadata": {"intf_alpha_calibration_boundary": "end"}})
 
             for idx, param_set in enumerate(execution_items()):
                 if self.stop_flag:
@@ -3289,7 +3368,18 @@ class ExperimentManager:
                 if isinstance(param_set, dict) and 'sequence_parameters' in param_set:
                     sequence_parameters = param_set['sequence_parameters']
                     metadata = param_set.get('metadata') or {}
-                if transfer_mode:
+                shot_execution_config = param_set.get("execution_config", scan_config) if isinstance(param_set, dict) else scan_config
+                if transfer_mode and metadata.get("intf_alpha_calibration"):
+                    if transfer_control_output and transfer_output_enabled:
+                        set_transfer_output(False)
+                        transfer_output_enabled = False
+                    active_transfer_frequency = None
+                    active_transfer_phase = None
+                    active_transfer_response_value = None
+                if transfer_mode and not metadata.get("intf_alpha_calibration"):
+                    if transfer_control_output and not transfer_output_enabled:
+                        set_transfer_output(True)
+                        transfer_output_enabled = True
                     metadata["transfer_generator_model"] = transfer_model
                     metadata["transfer_generator_channel"] = transfer_channel
                     is_zero_baseline = bool(metadata.get("transfer_zero_phase_baseline", False))
@@ -3381,7 +3471,7 @@ class ExperimentManager:
                 shot_started_at = time.monotonic()
                 job = self.execute_single_measurement(
                     sequence_parameters,
-                    scan_config,
+                    shot_execution_config,
                     idx=idx,
                     total_steps=total_steps,
                     scan_dimensions=scan_dimensions,
@@ -3393,7 +3483,7 @@ class ExperimentManager:
                 # or browser rendering latency skewing the estimate.
                 job['shot_duration_sec'] = time.monotonic() - shot_started_at
                 power_threshold_exceeded = False
-                if power_meter_client is not None and not bool((metadata or {}).get("transfer_zero_phase_baseline", False)):
+                if power_meter_client is not None and not bool((metadata or {}).get("transfer_zero_phase_baseline", False)) and not bool((metadata or {}).get("intf_alpha_calibration", False)):
                     try:
                         reading = power_meter_client.read()
                         power_w = float(reading["power_w"])
@@ -3482,6 +3572,7 @@ class ExperimentManager:
                     and transfer_control_generator
                     and not config.USE_SIMULATION
                     and not bool((metadata or {}).get("transfer_zero_phase_baseline", False))
+                    and not bool((metadata or {}).get("intf_alpha_calibration", False))
                 ):
                     recovery_frequency = float(
                         (metadata or {}).get(
@@ -3515,11 +3606,42 @@ class ExperimentManager:
                     tti_client.close()
             if rigol_client is not None:
                 rigol_client.close()
+            if alpha_calibration_path is not None:
+                alpha_calibration_path.unlink(missing_ok=True)
             restore_error = self._restore_ac_stark_dds(ac_stark_context)
             if restore_error:
                 self._scan_finalize_error = restore_error
             self.data_queue.put(None)
             print("--- Acquisition Finished ---")
+
+    def _apply_final_intf_alpha_calibration(
+        self, results: List[ScanResult], scan_config: Dict[str, Any]
+    ) -> List[ScanResult]:
+        if not scan_config.get("intf_alpha_calibration_enabled"):
+            return results
+        phase_calibration = self.data_manager.phase_calibration_snapshot
+        for result in results:
+            interpolation = interferometer_alpha.interpolate_alpha(result.timestamp, self._intf_alpha_events)
+            if interpolation is None:
+                continue
+            alpha = float(interpolation["value"])
+            result.intf_alpha_applied = alpha
+            result.intf_n1, result.intf_n2, result.intf_p1, result.intf_p2 = physics.calculate_interferometer_output(
+                result.atom_number_dw, result.atom_number_up, alpha,
+                self.settings.get("intf_beta", 0.07636), self.settings.get("intf_gamma", 0.25),
+            )
+            result.intf_n1_nofit, result.intf_n2_nofit, result.intf_p1_nofit, result.intf_p2_nofit = physics.calculate_interferometer_output(
+                result.atom_number_dw_nofit, result.atom_number_up_nofit, alpha,
+                self.settings.get("intf_beta", 0.07636), self.settings.get("intf_gamma", 0.25),
+            )
+            phase_result = interferometer_phase.calculate_phase(asdict(result), phase_calibration)
+            for key, value in phase_result.items():
+                if hasattr(result, key):
+                    setattr(result, key, value)
+            result.interferometer_phase_raw = phase_result.get("interferometer_phase")
+            if result.interferometer_phase_valid and scan_config.get("_transfer_zero_phase_rad") is not None:
+                result.interferometer_phase = float(result.interferometer_phase) - float(scan_config["_transfer_zero_phase_rad"])
+        return results
 
     def _build_ac_stark_summary(self, results: List[ScanResult]) -> List[Dict[str, Any]]:
         metrics = (
@@ -3594,6 +3716,7 @@ class ExperimentManager:
         coarse: Dict[str, Any],
         fine_results: List[ScanResult],
     ) -> Dict[str, Any]:
+        fine_results = self._apply_final_intf_alpha_calibration(fine_results, scan_config)
         fine = bragg_fringe_calibration.fine_fit(
             fine_results,
             coarse,
@@ -3680,6 +3803,7 @@ class ExperimentManager:
         bragg_calibration_coarse_fit: Optional[Dict[str, Any]] = None
         bragg_calibration_plan_sent = False
         bragg_calibration_coarse_processed = 0
+        intf_alpha_blocks: Dict[int, Dict[str, List[float]]] = {}
 
         try:
             while True:
@@ -3703,6 +3827,37 @@ class ExperimentManager:
                     execution_config=scan_config,
                 )
                 metadata = job.get("metadata") or {}
+                if metadata.get("intf_alpha_calibration"):
+                    block_id = int(metadata.get("intf_alpha_calibration_block_id", 0))
+                    block = intf_alpha_blocks.setdefault(block_id, {"probabilities": [], "timestamps": []})
+                    if result is not None and result.transition_probability_up is not None:
+                        block["probabilities"].append(float(result.transition_probability_up))
+                        block["timestamps"].append(float(result.timestamp))
+                    if int(metadata.get("intf_alpha_calibration_shot", 0)) == int(metadata.get("intf_alpha_calibration_shots", 0)):
+                        event = interferometer_alpha.summarize_block(
+                            block["probabilities"], block["timestamps"],
+                            self.settings.get("intf_gamma", 0.25),
+                            f"alpha-{block_id:04d}", int(metadata.get("intf_alpha_calibration_shots", 10)),
+                        )
+                        event.update({
+                            "block_id": block_id,
+                            "created_at": time.time(),
+                            "boundary": metadata.get("intf_alpha_calibration_boundary"),
+                            "sequence_name": (scan_config or {}).get("intf_alpha_calibration_sequence_name", ""),
+                        })
+                        self._intf_alpha_events.append(event)
+                        self.data_manager.save_intf_alpha_calibrations(self._intf_alpha_events)
+                        if event.get("accepted"):
+                            self._online_intf_alpha = float(event["intf_alpha"])
+                            self._intf_alpha_consecutive_failures = 0
+                        else:
+                            self._intf_alpha_consecutive_failures += 1
+                            if self._intf_alpha_consecutive_failures >= 2:
+                                self.pause_scan("intf_alpha_calibration_failed")
+                                self.status.message = "Two consecutive I_alpha calibration blocks failed; scan paused."
+                        self.publish_data({"stream_type": "intf_alpha_calibration", **event})
+                    self.publish_data(payload)
+                    continue
                 if metadata.get("bragg_calibration_stage") == "coarse":
                     bragg_calibration_coarse_processed += 1
                 if result is not None and metadata.get("bragg_calibration_stage"):
@@ -3810,6 +3965,9 @@ class ExperimentManager:
                         result for result in transfer_function_results
                         if (float(result.transfer_frequency_hz), int(result.transfer_frequency_attempt)) not in invalid_attempts
                     ]
+                    transfer_function_results = self._apply_final_intf_alpha_calibration(
+                        transfer_function_results, scan_config
+                    )
                     self.data_manager.save_transfer_function_summary(
                         build_transfer_function_summary(
                             transfer_function_results,

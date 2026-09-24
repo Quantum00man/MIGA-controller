@@ -2544,6 +2544,9 @@
                         <div v-if="isTransferFunctionArchive() && loadedPoints.some(point => Number.isFinite(Number(point.power_meter_power_w)))" class="border-top">
                             <div class="px-3 pt-3 fw-bold">PM100A power by shot</div><div id="archivePowerMeterPlot" style="height:320px"></div>
                         </div>
+                        <div v-if="intfAlphaCalibrations.length" class="border-top">
+                            <div class="px-3 pt-3 fw-bold">Interferometer I_alpha calibration</div><div id="archiveIntfAlphaPlot" style="height:320px"></div>
+                        </div>
                     </div>
                 </div>
 
@@ -2752,6 +2755,7 @@
                     currentWaveforms: [],
                     selectedAllanWindow: null,
                     loadedPoints: [], currentCalculatedPoints: [], originalSettings: {}, loadedConfig: {}, currentScanDimensions: 1,
+                    intfAlphaCalibrations: [],
                     archivePhaseCalibration: null, archivePhaseCalibrationProvenance: 'unavailable',
                     archivePhaseReferenceContexts: {}, archivePhaseReferenceNodeId: '', archivePhaseReferenceDraft: {},
                     archivePhaseReferenceBusy: false, archivePhaseReferenceMessage: '', archivePhaseReferenceError: false,
@@ -5739,6 +5743,7 @@
 
                         const snap = res.data.config?.['_system_settings_snapshot'] || {};
                         this.loadedConfig = res.data.config || {};
+                        this.intfAlphaCalibrations = Array.isArray(res.data.intf_alpha_calibrations) ? res.data.intf_alpha_calibrations : [];
                         this.archivePhaseCalibration = res.data.interferometer_phase_calibration || null;
                         this.archivePhaseCalibrationProvenance = String(res.data.interferometer_phase_calibration_provenance || 'unavailable');
                         this.archivePhaseReferenceContexts = res.data.archive_phase_reference_contexts && typeof res.data.archive_phase_reference_contexts === 'object'
@@ -10006,6 +10011,7 @@
                 },
                 renderMainPlot() {
                     this.$nextTick(() => this.renderArchivePowerMeterPlot());
+                    this.$nextTick(() => this.renderArchiveIntfAlphaPlot());
                     if (this.isPhaseNoiseArchive()) {
                         this.renderPhaseNoiseArchivePlot();
                         return;
@@ -10053,6 +10059,25 @@
                     const invalid = rows.filter(row => row.power_meter_invalid_reason === 'threshold_exceeded');
                     Plotly.react(element, [makeTrace(valid, 'Valid', '#1565c0', 'circle'), makeTrace(invalid, 'Invalid', '#c62828', 'x')], {
                         margin: { t: 25, b: 52, l: 76, r: 20 }, xaxis: { title: 'Shot index' }, yaxis: { title: 'Optical power (W)' },
+                        legend: { orientation: 'h', x: 1, xanchor: 'right', y: 1.12 }, paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)'
+                    }, { responsive: true, displaylogo: false });
+                },
+                renderArchiveIntfAlphaPlot() {
+                    const element = document.getElementById('archiveIntfAlphaPlot');
+                    if (!element || typeof Plotly === 'undefined') return;
+                    const rows = this.intfAlphaCalibrations || [];
+                    const accepted = rows.filter(row => row.accepted === true && Number.isFinite(Number(row.intf_alpha)));
+                    const rejected = rows.filter(row => row.accepted !== true);
+                    const trace = (items, name, color, symbol) => ({
+                        x: items.map(row => new Date(Number(row.representative_time || 0) * 1000)),
+                        y: items.map(row => Number(row.intf_alpha)),
+                        error_y: { type: 'data', array: items.map(row => Number(row.intf_alpha_sem || 0)), visible: true },
+                        customdata: items.map(row => [row.valid_shots, row.requested_shots, row.boundary, row.rejection_reason || '']),
+                        type: 'scatter', mode: 'lines+markers', name, line: { color, width: 1.8 }, marker: { color, size: 8, symbol },
+                        hovertemplate: 'Time=%{x}<br>I_alpha=%{y:.7f}<br>valid=%{customdata[0]}/%{customdata[1]}<br>boundary=%{customdata[2]}<br>%{customdata[3]}<extra></extra>'
+                    });
+                    Plotly.react(element, [trace(accepted, 'Accepted / linear interpolation', '#00897b', 'circle'), trace(rejected, 'Rejected', '#c62828', 'x')], {
+                        margin: { t: 25, b: 52, l: 76, r: 20 }, xaxis: { title: 'Time' }, yaxis: { title: 'I_alpha', range: [0, 1] },
                         legend: { orientation: 'h', x: 1, xanchor: 'right', y: 1.12 }, paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)'
                     }, { responsive: true, displaylogo: false });
                 },
