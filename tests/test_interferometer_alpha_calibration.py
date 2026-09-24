@@ -70,7 +70,7 @@ class InterferometerAlphaPlanTests(unittest.TestCase):
         self.manager.settings["intf_alpha_calibration_sequence_content_base64"] = "YQ=="
         plan = self.manager._build_transfer_function_execution(config)
         boundaries = [item["metadata"].get("intf_alpha_calibration_boundary") for item in plan if item["metadata"].get("intf_alpha_calibration_boundary")]
-        self.assertEqual(boundaries, ["start", "periodic", "periodic", "end"])
+        self.assertEqual(boundaries, ["start", "periodic", "periodic", "periodic", "end"])
 
 
 if __name__ == "__main__":

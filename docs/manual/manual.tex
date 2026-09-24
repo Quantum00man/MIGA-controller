@@ -580,8 +580,8 @@ interval and block size, but never distributes this MOT payload.  Master and eac
 therefore upload and persist their own file on their own Settings page, and each node
 executes only its local sequence.
 
-An initial block is always acquired.  Periodic blocks are inserted at safe phase-block
-boundaries after the requested elapsed time, and a normally completed run acquires a final
+An initial block is always acquired.  Periodic blocks are inserted after the requested
+elapsed time at the next completed frequency--phase repeat block, and a normally completed run acquires a final
 block.  An emergency stop does not execute the final block.  One failed block is retained
 as a rejected calibration event while the previous online estimate remains active; two
 consecutive failures pause the scan.  Returning from the calibration MOT requires no

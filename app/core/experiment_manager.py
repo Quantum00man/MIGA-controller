@@ -1504,9 +1504,18 @@ class ExperimentManager:
                 with_boundaries.append(item)
                 current_metadata = item.get("metadata") or {}
                 next_metadata = parameters[index + 1].get("metadata") if index + 1 < len(parameters) else None
-                if not current_metadata.get("transfer_zero_phase_baseline") and (
-                    next_metadata is None
-                    or next_metadata.get("transfer_phase_deg") != current_metadata.get("transfer_phase_deg")
+                current_block = (
+                    current_metadata.get("transfer_frequency_hz"),
+                    current_metadata.get("transfer_phase_deg"),
+                )
+                next_block = (
+                    next_metadata.get("transfer_frequency_hz"),
+                    next_metadata.get("transfer_phase_deg"),
+                ) if next_metadata is not None else current_block
+                if (
+                    next_metadata is not None
+                    and not current_metadata.get("transfer_zero_phase_baseline")
+                    and current_block != next_block
                 ):
                     with_boundaries.append({"sequence_parameters": [], "metadata": {"intf_alpha_calibration_boundary": "periodic"}})
             with_boundaries.append({"sequence_parameters": [], "metadata": {"intf_alpha_calibration_boundary": "end"}})
