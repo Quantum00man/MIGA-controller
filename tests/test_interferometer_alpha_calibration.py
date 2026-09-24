@@ -6,10 +6,18 @@ from app.analysis.interferometer_alpha import (
     summarize_block,
 )
 from app.core.experiment_manager import ExperimentManager
+from app.core.data_loader import DataLoader
 from app.models.schemas import ScanConfig
 
 
 class InterferometerAlphaAnalysisTests(unittest.TestCase):
+    def test_archive_science_points_exclude_calibration_shots(self):
+        points = [
+            {"step": 1, "parameter": 0.0, "intf_alpha_calibration_block_id": 1},
+            {"step": 11, "parameter": 100.0, "intf_alpha_calibration_block_id": None},
+        ]
+        self.assertEqual(DataLoader._science_points(points), [points[1]])
+
     def test_probability_percent_is_converted_to_unit_alpha(self):
         self.assertAlmostEqual(alpha_from_probability_percent(30.0, 0.25), 0.4)
 

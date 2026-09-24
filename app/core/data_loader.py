@@ -37,6 +37,14 @@ class DataLoader:
             and str(point.get("power_meter_invalid_reason") or "") != "threshold_exceeded"
         ]
 
+    @staticmethod
+    def _science_points(points: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Exclude dedicated I_alpha calibration shots from normal archive analysis."""
+        return [
+            point for point in points
+            if point.get("intf_alpha_calibration_block_id") is None
+        ]
+
     def _apply_intf_alpha_history(
         self, points: List[Dict[str, Any]], events: List[Dict[str, Any]],
         config_data: Dict[str, Any], phase_calibration: Optional[Dict[str, Any]],
@@ -1728,7 +1736,8 @@ class DataLoader:
             full_points = self._apply_intf_alpha_history(
                 full_points, intf_alpha_calibrations, config_data, phase_calibration
             )
-        marker_optimization = self._build_marker_optimization_archive(run_dir, full_points)
+        science_points = self._science_points(full_points)
+        marker_optimization = self._build_marker_optimization_archive(run_dir, science_points)
         is_marker_optimization = bool(marker_optimization.get("steps")) or (
             run_dir / "marker_optimization_report.json"
         ).is_file()
@@ -1739,15 +1748,15 @@ class DataLoader:
         sampled_points = (
             initial_step.get("data", [])
             if is_marker_optimization
-            else self._sample_sequence(full_points, MAX_DISPLAY_POINTS)
+            else self._sample_sequence(science_points, MAX_DISPLAY_POINTS)
         )
         is_lock_in = str(config_data.get("mode") or "").strip().lower() == "lock_in"
         expected_lock_in_blocks = self._parse_int(config_data.get("averages"), 0) if is_lock_in else 0
-        lock_in_analysis = build_lock_in_analysis(full_points, expected_blocks=expected_lock_in_blocks) if is_lock_in else {}
+        lock_in_analysis = build_lock_in_analysis(science_points, expected_blocks=expected_lock_in_blocks) if is_lock_in else {}
         is_transfer_function = str(config_data.get("mode") or "").strip().lower() in {"transfer_function", "transfer_burst_time_scan"}
         transfer_function_summary = (
             build_transfer_function_summary(
-                self._transfer_response_points(full_points),
+                self._transfer_response_points(science_points),
                 config_data.get("transfer_frequency_modulation_mhz"),
                 config_data.get("transfer_phase_degrees"),
                 config_data.get("transfer_atom_mirror_distance_m", 2.23),
@@ -1760,7 +1769,7 @@ class DataLoader:
         settings_snapshot = config_data.get("_system_settings_snapshot") or {}
         phase_noise_summary = (
             phase_noise.build_phase_noise_summary(
-                full_points,
+                science_points,
                 phase_calibration,
                 settings_snapshot.get("std_p_interferometer", 1.1),
                 settings_snapshot.get("laser_frequency_phase_noise_mrad", 100.0),
@@ -1804,11 +1813,11 @@ class DataLoader:
                 initial_step.get("stats", [])
                 if is_marker_optimization
                 else self._build_stats_array(
-                    self._transfer_response_points(full_points) if is_transfer_function else full_points,
+                    self._transfer_response_points(science_points) if is_transfer_function else science_points,
                     scan_dimensions=scan_dimensions,
                 )
             ),
-            "ac_stark_summary": self._build_ac_stark_summary(full_points),
+            "ac_stark_summary": self._build_ac_stark_summary(science_points),
             "lock_in_analysis": lock_in_analysis,
             "transfer_function_summary": transfer_function_summary,
             "phase_noise_summary": phase_noise_summary,
@@ -1819,12 +1828,12 @@ class DataLoader:
             "preview_map": (
                 initial_step.get("preview_map", {})
                 if is_marker_optimization
-                else self._build_preview_map(full_points, scan_dimensions=scan_dimensions)
+                else self._build_preview_map(science_points, scan_dimensions=scan_dimensions)
             ),
-            "total_points": len(full_points),
+            "total_points": len(science_points),
             "marker_optimization": marker_optimization if is_marker_optimization else None,
             "sync_manifest": sync_manifest,
-            "archive_node_data": full_points if sync_manifest else [],
+            "archive_node_data": science_points if sync_manifest else [],
             "sync_differential_fits": self.load_sync_differential_fits(year, month, day, run_id) if sync_manifest else [],
             "sync_phase_calibration_optimizations": (
                 self.load_sync_phase_calibration_optimizations(year, month, day, run_id)
@@ -2089,7 +2098,7 @@ class DataLoader:
     ) -> List[Dict[str, Any]]:
         mode = str(display_mode or "saved").strip().lower()
         if mode != "recalculated":
-            return self._read_results_csv(run_dir, max_points=None)
+            return self._science_points(self._read_results_csv(run_dir, max_points=None))
 
         original_settings = (
             config_data.get("_system_settings_snapshot")
@@ -2097,7 +2106,7 @@ class DataLoader:
             or {}
         )
         settings = self._normalize_archive_settings(new_settings or {}, fallback=original_settings)
-        points = self._read_results_csv(run_dir, max_points=None)
+        points = self._science_points(self._read_results_csv(run_dir, max_points=None))
         recalculated_points: List[Dict[str, Any]] = []
         for point in points:
             waveform = self._load_waveform_arrays(run_dir, int(point["step"]))
@@ -3122,7 +3131,7 @@ class DataLoader:
         )
         if isinstance(phase_context.get("effective_calibration"), dict):
             settings["_interferometer_phase_calibration"] = phase_context["effective_calibration"]
-        points = self._read_results_csv(run_dir, max_points=None)
+        points = self._science_points(self._read_results_csv(run_dir, max_points=None))
 
         recalculated_points: List[Dict[str, Any]] = []
         for point in points:
