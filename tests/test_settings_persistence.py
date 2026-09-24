@@ -6,9 +6,24 @@ from unittest.mock import patch
 
 from app.api.routes import _default_index_ui_state, _save_index_ui_state_record
 from app.core.experiment_manager import ExperimentManager
+from app.models.schemas import SystemSettings
 
 
 class AtomicSettingsPersistenceTests(unittest.TestCase):
+    def test_system_settings_preserve_local_intf_alpha_calibration_mot(self):
+        manager = ExperimentManager()
+        payload = SystemSettings(**{
+            key: value for key, value in manager.get_settings().items()
+            if key in SystemSettings.model_fields
+        }).model_dump()
+        payload["intf_alpha_calibration_sequence_name"] = "local-alpha.mot"
+        payload["intf_alpha_calibration_sequence_content_base64"] = "YWxwaGE="
+
+        validated = SystemSettings(**payload).model_dump()
+
+        self.assertEqual(validated["intf_alpha_calibration_sequence_name"], "local-alpha.mot")
+        self.assertEqual(validated["intf_alpha_calibration_sequence_content_base64"], "YWxwaGE=")
+
     def test_system_settings_replace_a_read_only_existing_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "user_settings.json"

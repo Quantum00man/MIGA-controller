@@ -579,6 +579,8 @@ class SystemSettings(BaseModel):
     intf_alpha: float = 0.35
     intf_beta: float = 0.07636
     intf_gamma: float = 0.25
+    intf_alpha_calibration_sequence_name: str = Field("")
+    intf_alpha_calibration_sequence_content_base64: str = Field("")
     atom_area_method: str = Field("legacy")
     atom_area_baseline_points: int = Field(2)
     fit_model_key: str = Field("gaussian")
