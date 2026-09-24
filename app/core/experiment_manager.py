@@ -1818,6 +1818,17 @@ class ExperimentManager:
                         "bragg_calibration_total_repeats": repeats,
                     },
                 })
+        coarse_shots = len(plan)
+        if scan_config.get("intf_alpha_calibration_enabled"):
+            bounded_plan: List[Dict[str, Any]] = []
+            for index, item in enumerate(plan):
+                bounded_plan.append(item)
+                current_p0 = (item.get("sequence_parameters") or [None])[0]
+                next_p0 = ((plan[index + 1].get("sequence_parameters") or [None])[0]
+                           if index + 1 < len(plan) else current_p0)
+                if index + 1 < len(plan) and next_p0 != current_p0:
+                    bounded_plan.append({"sequence_parameters": [], "metadata": {"intf_alpha_calibration_boundary": "periodic"}})
+            plan = bounded_plan
         fine_points = int(scan_config.get("bragg_calibration_fine_points", 7))
         fine_repeats = int(scan_config.get("bragg_calibration_fine_repeats", 5))
         bragg_fringe_calibration.fine_phase_offsets(
@@ -1829,8 +1840,8 @@ class ExperimentManager:
         scan_config["averages"] = 1
         scan_config["randomize"] = False
         scan_config["parameter_source"] = "classic"
-        scan_config["_bragg_calibration_coarse_shots"] = len(plan)
-        scan_config["_bragg_calibration_expected_total_shots"] = len(plan) + fine_points * fine_repeats
+        scan_config["_bragg_calibration_coarse_shots"] = coarse_shots
+        scan_config["_bragg_calibration_expected_total_shots"] = coarse_shots + fine_points * fine_repeats
         self._bragg_calibration_fine_plan_queue = queue.Queue(maxsize=1)
         return plan
 
@@ -1873,6 +1884,16 @@ class ExperimentManager:
                         "bragg_calibration_total_repeats": repeats,
                     },
                 })
+        if scan_config.get("intf_alpha_calibration_enabled"):
+            bounded_plan: List[Dict[str, Any]] = []
+            for index, item in enumerate(plan):
+                bounded_plan.append(item)
+                current_order = (item.get("metadata") or {}).get("bragg_calibration_fine_order")
+                next_order = ((plan[index + 1].get("metadata") or {}).get("bragg_calibration_fine_order")
+                              if index + 1 < len(plan) else current_order)
+                if index + 1 < len(plan) and next_order != current_order:
+                    bounded_plan.append({"sequence_parameters": [], "metadata": {"intf_alpha_calibration_boundary": "periodic"}})
+            plan = bounded_plan
         return plan
 
     def install_bragg_calibration_fine_plan(self, plan: List[Dict[str, Any]]) -> None:
@@ -3333,7 +3354,8 @@ class ExperimentManager:
                     return
                 if alpha_calibration_enabled and str(scan_config.get("mode") or "").strip().lower() == "bragg_fringe_calibration":
                     yield from expand_boundary({"sequence_parameters": [], "metadata": {"intf_alpha_calibration_boundary": "start"}})
-                yield from parameter_list
+                for item in parameter_list:
+                    yield from expand_boundary(item)
                 if str(scan_config.get("mode") or "").strip().lower() != "bragg_fringe_calibration":
                     return
                 self.status.message = "Coarse fringe acquired. Waiting for coarse fit..."
@@ -3347,7 +3369,8 @@ class ExperimentManager:
                     self.status.message = "Coarse fit passed. Starting local mid-fringe scan..."
                     if alpha_calibration_enabled:
                         yield from expand_boundary({"sequence_parameters": [], "metadata": {"intf_alpha_calibration_boundary": "periodic"}})
-                    yield from fine_plan
+                    for item in fine_plan:
+                        yield from expand_boundary(item)
                 if alpha_calibration_enabled:
                     yield from expand_boundary({"sequence_parameters": [], "metadata": {"intf_alpha_calibration_boundary": "end"}})
 

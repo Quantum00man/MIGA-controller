@@ -72,6 +72,26 @@ class InterferometerAlphaPlanTests(unittest.TestCase):
         boundaries = [item["metadata"].get("intf_alpha_calibration_boundary") for item in plan if item["metadata"].get("intf_alpha_calibration_boundary")]
         self.assertEqual(boundaries, ["start", "periodic", "periodic", "periodic", "end"])
 
+    def test_bragg_coarse_plan_checks_interval_after_each_p0_block(self):
+        config = {
+            "mode": "bragg_fringe_calibration", "scan_dimensions": 1,
+            "parameter_source": "classic", "dim1_type": "list",
+            "custom_list": "10,20,30,40", "param_type": "float",
+            "bragg_calibration_coarse_repeats": 2,
+            "bragg_calibration_fine_points": 7,
+            "bragg_calibration_fine_repeats": 2,
+            "intf_alpha_calibration_enabled": True,
+        }
+        plan = self.manager._build_bragg_calibration_execution(config)
+        boundaries = [
+            item for item in plan
+            if (item.get("metadata") or {}).get("intf_alpha_calibration_boundary") == "periodic"
+        ]
+        coarse = [item for item in plan if (item.get("metadata") or {}).get("bragg_calibration_stage") == "coarse"]
+        self.assertEqual(len(coarse), 8)
+        self.assertEqual(len(boundaries), 3)
+        self.assertEqual(config["_bragg_calibration_coarse_shots"], 8)
+
 
 if __name__ == "__main__":
     unittest.main()

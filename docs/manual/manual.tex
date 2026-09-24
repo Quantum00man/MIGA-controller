@@ -587,6 +587,10 @@ as a rejected calibration event while the previous online estimate remains activ
 consecutive failures pause the scan.  Returning from the calibration MOT requires no
 additional settling delay.
 
+During Bragg Fringes Calibration, the equivalent safe boundary is the end of all repeats
+for one coarse or fine $P0$ value.  The elapsed-time threshold is checked at every such
+boundary, rather than only between the complete coarse and fine stages.
+
 The live page plots accepted and rejected $I_\alpha$ blocks with uncertainty bars.  At the
 end of the scan, accepted calibration points are linearly interpolated in physical time
 and each science shot is recalculated with its time-local $I_\alpha$.  Values outside the
