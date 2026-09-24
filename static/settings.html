@@ -1117,6 +1117,15 @@
                                             Used for calculating N1, N2, and P_N1. Formula: N1 = [β*n_f1 - (1-β+γ)*n_f2] / [(β-α)*(1+γ)]
                                         </div>
                                     </div>
+                                    <div class="col-12 mt-2 pt-2 border-top">
+                                        <label class="form-label small fw-bold text-muted">Local I_alpha Calibration MOT</label>
+                                        <input type="file" class="form-control form-control-sm" accept=".mot" @change="selectIntfAlphaCalibrationMot">
+                                        <div class="form-text" :class="s.intf_alpha_calibration_sequence_content_base64 ? 'text-success' : 'text-muted'">
+                                            {{ s.intf_alpha_calibration_sequence_name || 'No local calibration MOT configured.' }}
+                                            This file stays on this controller; SYNC Master and Slave use their own Settings copy.
+                                        </div>
+                                        <button v-if="s.intf_alpha_calibration_sequence_content_base64" type="button" class="btn btn-sm btn-outline-danger mt-2" @click="clearIntfAlphaCalibrationMot">Remove calibration MOT</button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -3141,6 +3150,21 @@
                         this.isError = true; this.msg = "Error: " + (e.response?.data?.detail || e.message);
                     } finally { this.saving = false; }
                 },
+                async selectIntfAlphaCalibrationMot(event) {
+                    const file = event?.target?.files?.[0];
+                    if (!file) return;
+                    const bytes = new Uint8Array(await file.arrayBuffer());
+                    let binary = '';
+                    const chunk = 0x8000;
+                    for (let index = 0; index < bytes.length; index += chunk) binary += String.fromCharCode(...bytes.subarray(index, index + chunk));
+                    this.s.intf_alpha_calibration_sequence_name = file.name;
+                    this.s.intf_alpha_calibration_sequence_content_base64 = btoa(binary);
+                    event.target.value = '';
+                },
+                clearIntfAlphaCalibrationMot() {
+                    this.s.intf_alpha_calibration_sequence_name = '';
+                    this.s.intf_alpha_calibration_sequence_content_base64 = '';
+                },
                 onHardwareChange() {
                     if (this.s.hardware_platform === 'daq') {
                         this.s.rp_ip_red = '127.0.0.1:8001';
@@ -3353,6 +3377,8 @@
                     normalized.atom_area_method = normalized.atom_area_method === 'edge_line' ? 'edge_line' : 'legacy';
                     const baselinePoints = Number.parseInt(normalized.atom_area_baseline_points ?? 2, 10);
                     normalized.atom_area_baseline_points = Number.isFinite(baselinePoints) && baselinePoints > 0 ? baselinePoints : 2;
+                    normalized.intf_alpha_calibration_sequence_name = String(normalized.intf_alpha_calibration_sequence_name || '');
+                    normalized.intf_alpha_calibration_sequence_content_base64 = String(normalized.intf_alpha_calibration_sequence_content_base64 || '');
                     normalized.fit_models = this.normalizeFitModels(normalized.fit_models);
                     if (!normalized.fit_models.find(model => model.key === normalized.fit_model_key)) {
                         normalized.fit_model_key = normalized.fit_models[0].key;

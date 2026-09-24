@@ -1123,7 +1123,7 @@
                             <div v-if="config.intf_alpha_calibration_enabled" class="row g-2 mt-1">
                                 <div class="col-6"><label class="form-label small mb-1">Interval</label><div class="input-group input-group-sm"><input type="number" min="0.01" max="1440" step="any" class="form-control" v-model.number="config.intf_alpha_calibration_interval_minutes"><span class="input-group-text">min</span></div></div>
                                 <div class="col-6"><label class="form-label small mb-1">Shots per block</label><input type="number" min="2" max="1000" step="1" class="form-control form-control-sm" v-model.number="config.intf_alpha_calibration_shots"></div>
-                                <div class="col-12"><label class="form-label small mb-1">Calibration MOT</label><input type="file" class="form-control form-control-sm" accept=".mot" @change="selectIntfAlphaCalibrationMot"><div class="form-text" :class="config.intf_alpha_calibration_sequence_content_base64 ? 'text-success' : 'text-danger'">{{ config.intf_alpha_calibration_sequence_name || 'A calibration MOT is required.' }}</div></div>
+                                <div class="col-12"><div class="form-text">This controller uses the local calibration MOT configured in Settings → Interferometer Parameters. Every SYNC node uses its own local file.</div></div>
                             </div>
                         </div></div>
                         <div class="card border-warning mt-3"><div class="card-body py-2 px-3">
@@ -1198,7 +1198,7 @@
                             </div>
                             <div class="card border-info mt-3"><div class="card-body py-2 px-3">
                                 <div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="braggIntfAlphaCalibration" v-model="config.intf_alpha_calibration_enabled"><label class="form-check-label fw-bold" for="braggIntfAlphaCalibration">Periodic I_alpha calibration</label></div>
-                                <div v-if="config.intf_alpha_calibration_enabled" class="row g-2 mt-1"><div class="col-6"><label class="form-label small mb-1">Interval (min)</label><input type="number" min="0.01" max="1440" step="any" class="form-control form-control-sm" v-model.number="config.intf_alpha_calibration_interval_minutes"></div><div class="col-6"><label class="form-label small mb-1">Shots per block</label><input type="number" min="2" max="1000" step="1" class="form-control form-control-sm" v-model.number="config.intf_alpha_calibration_shots"></div><div class="col-12"><input type="file" class="form-control form-control-sm" accept=".mot" @change="selectIntfAlphaCalibrationMot"><div class="form-text">{{ config.intf_alpha_calibration_sequence_name || 'A calibration MOT is required.' }}</div></div></div>
+                                <div v-if="config.intf_alpha_calibration_enabled" class="row g-2 mt-1"><div class="col-6"><label class="form-label small mb-1">Interval (min)</label><input type="number" min="0.01" max="1440" step="any" class="form-control form-control-sm" v-model.number="config.intf_alpha_calibration_interval_minutes"></div><div class="col-6"><label class="form-label small mb-1">Shots per block</label><input type="number" min="2" max="1000" step="1" class="form-control form-control-sm" v-model.number="config.intf_alpha_calibration_shots"></div><div class="col-12"><div class="form-text">Uses this controller's local calibration MOT from Settings → Interferometer Parameters.</div></div></div>
                             </div></div>
                         </div>
                         <div v-if="config.mode === 'link'" class="mt-3 pt-3 border-top">
@@ -4258,6 +4258,8 @@ getTotalRemainingSeconds() {
 },
 prepareScanPayload(sourceConfig = this.config, sequenceNameOverride = null) {
     const payload = this.cloneConfig(sourceConfig);
+    delete payload.intf_alpha_calibration_sequence_name;
+    delete payload.intf_alpha_calibration_sequence_content_base64;
     payload.scan_dimensions = this.resolveScanDimensionsFromConfig(payload);
     payload.dim2_enabled = payload.scan_dimensions >= 2;
     payload.dim3_enabled = payload.scan_dimensions >= 3;
@@ -6586,7 +6588,6 @@ finishScheduledRun(finalStatus = 'IDLE') {
                 this.syncReplayPlaying = false;
                 this.resetHistory();
                 const scanConfig = this.prepareScanPayload(this.config, this.currentSequenceName);
-                if (scanConfig.intf_alpha_calibration_enabled && !String(scanConfig.intf_alpha_calibration_sequence_content_base64 || '')) throw new Error('Select the I_alpha calibration .mot file.');
                 if (scanConfig.mode === 'transfer_function' && scanConfig.transfer_power_monitor_enabled) {
                     if (Number(scanConfig.transfer_power_threshold_percent) > 0 && !String(scanConfig.transfer_recovery_sequence_content_base64 || '')) {
                         throw new Error('Select a prepared Bragg calibration .mot file for automatic recovery.');
@@ -6634,10 +6635,6 @@ finishScheduledRun(finalStatus = 'IDLE') {
             }
             if (payload.mode === 'transfer_function' && payload.transfer_power_monitor_enabled && Number(payload.transfer_power_threshold_percent) > 0 && !String(payload.transfer_recovery_sequence_content_base64 || '')) {
                 this.addLog('Start failed: select a prepared Bragg calibration .mot file for automatic recovery.');
-                return;
-            }
-            if (payload.intf_alpha_calibration_enabled && !String(payload.intf_alpha_calibration_sequence_content_base64 || '')) {
-                this.addLog('Start failed: select the I_alpha calibration .mot file.');
                 return;
             }
             try {

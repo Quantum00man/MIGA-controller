@@ -651,6 +651,8 @@ class ExperimentManager:
             "intf_alpha": 0.35,
             "intf_beta": 0.07636,
             "intf_gamma": 0.25,
+            "intf_alpha_calibration_sequence_name": "",
+            "intf_alpha_calibration_sequence_content_base64": "",
             # ----------------------------------------
             
             # 合并 config.py 中的默认分析参数
@@ -1495,8 +1497,8 @@ class ExperimentManager:
         scan_config["transfer_response_axis"] = "p0" if burst_time_scan else "frequency"
         scan_config["transfer_repeats"] = repeats
         if scan_config.get("intf_alpha_calibration_enabled"):
-            if not str(scan_config.get("intf_alpha_calibration_sequence_content_base64") or ""):
-                raise ValueError("Periodic I_alpha calibration requires a calibration MOT")
+            if not str(self.settings.get("intf_alpha_calibration_sequence_content_base64") or ""):
+                raise ValueError("Periodic I_alpha calibration requires a local calibration MOT in Settings")
             with_boundaries: List[Dict[str, Any]] = [{"sequence_parameters": [], "metadata": {"intf_alpha_calibration_boundary": "start"}}]
             for index, item in enumerate(parameters):
                 with_boundaries.append(item)
@@ -1902,8 +1904,8 @@ class ExperimentManager:
             if scan_config.get("intf_alpha_calibration_enabled"):
                 if str(scan_config.get("mode") or "").strip().lower() not in {"transfer_function", "bragg_fringe_calibration"}:
                     raise ValueError("I_alpha calibration is supported only for Transfer Function and Bragg Fringes Calibration")
-                if not str(scan_config.get("intf_alpha_calibration_sequence_content_base64") or ""):
-                    raise ValueError("I_alpha calibration requires a calibration MOT")
+                if not str(self.settings.get("intf_alpha_calibration_sequence_content_base64") or ""):
+                    raise ValueError("I_alpha calibration requires a local calibration MOT in Settings")
             if parameters_override is not None:
                 parameters = list(parameters_override)
             elif scan_config.get('mode') == 'ac_stark':
@@ -1958,7 +1960,9 @@ class ExperimentManager:
                 if isinstance(requested_phase_calibration, dict)
                 else self.get_active_bragg_phase_calibration()
             )
-            scan_config['_system_settings_snapshot'] = self.settings
+            settings_snapshot = deepcopy(self.settings)
+            settings_snapshot.pop("intf_alpha_calibration_sequence_content_base64", None)
+            scan_config['_system_settings_snapshot'] = settings_snapshot
             scan_config['_interferometer_phase_calibration_snapshot'] = self._active_phase_calibration_for_run
             self.data_manager.init_run(scan_config)
             if ac_stark_context:
@@ -3189,7 +3193,7 @@ class ExperimentManager:
         alpha_last_started: Optional[float] = None
         alpha_block_id = 0
         if alpha_calibration_enabled:
-            encoded_alpha_mot = str(scan_config.get("intf_alpha_calibration_sequence_content_base64") or "")
+            encoded_alpha_mot = str(self.settings.get("intf_alpha_calibration_sequence_content_base64") or "")
             if not encoded_alpha_mot:
                 raise ValueError("I_alpha calibration is enabled without a calibration MOT")
             with tempfile.NamedTemporaryFile(prefix="miga_intf_alpha_", suffix=".mot", delete=False) as handle:
@@ -3275,7 +3279,7 @@ class ExperimentManager:
                     for shot in range(1, shots + 1):
                         calibration_config = dict(scan_config)
                         calibration_config["_template_path_override"] = str(alpha_calibration_path)
-                        calibration_config["sequence_name"] = str(scan_config.get("intf_alpha_calibration_sequence_name") or alpha_calibration_path.name)
+                        calibration_config["sequence_name"] = str(self.settings.get("intf_alpha_calibration_sequence_name") or alpha_calibration_path.name)
                         yield {
                             "sequence_parameters": [],
                             "metadata": {
@@ -3843,7 +3847,7 @@ class ExperimentManager:
                             "block_id": block_id,
                             "created_at": time.time(),
                             "boundary": metadata.get("intf_alpha_calibration_boundary"),
-                            "sequence_name": (scan_config or {}).get("intf_alpha_calibration_sequence_name", ""),
+                            "sequence_name": self.settings.get("intf_alpha_calibration_sequence_name", ""),
                         })
                         self._intf_alpha_events.append(event)
                         self.data_manager.save_intf_alpha_calibrations(self._intf_alpha_events)

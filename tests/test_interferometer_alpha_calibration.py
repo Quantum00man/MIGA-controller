@@ -46,6 +46,11 @@ class InterferometerAlphaPlanTests(unittest.TestCase):
         self.assertFalse(config.intf_alpha_calibration_enabled)
         self.assertEqual(config.intf_alpha_calibration_shots, 10)
 
+    def test_local_settings_own_the_calibration_mot(self):
+        self.manager.settings["intf_alpha_calibration_sequence_name"] = "slave-alpha.mot"
+        self.manager.settings["intf_alpha_calibration_sequence_content_base64"] = "c2xhdmU="
+        self.assertEqual(self.manager.settings["intf_alpha_calibration_sequence_name"], "slave-alpha.mot")
+
     def test_transfer_plan_adds_start_phase_boundaries_and_end(self):
         config = {
             "mode": "transfer_function", "scan_dimensions": 1, "parameter_source": "classic",
@@ -53,8 +58,8 @@ class InterferometerAlphaPlanTests(unittest.TestCase):
             "transfer_frequency_stop_hz": 200, "transfer_frequency_step_hz": 100,
             "transfer_repeats": 2, "transfer_phase_degrees": [0, 90],
             "intf_alpha_calibration_enabled": True,
-            "intf_alpha_calibration_sequence_content_base64": "YQ==",
         }
+        self.manager.settings["intf_alpha_calibration_sequence_content_base64"] = "YQ=="
         plan = self.manager._build_transfer_function_execution(config)
         boundaries = [item["metadata"].get("intf_alpha_calibration_boundary") for item in plan if item["metadata"].get("intf_alpha_calibration_boundary")]
         self.assertEqual(boundaries, ["start", "periodic", "periodic", "end"])

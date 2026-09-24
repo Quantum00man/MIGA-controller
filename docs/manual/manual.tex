@@ -574,6 +574,12 @@ the block size and time interval exposed in the run configuration.  Its represen
 time is the mean timestamp of its valid shots; the archived uncertainty is the standard
 error propagated through the equation above.
 
+The calibration MOT is a controller-local resource configured under
+\ui{Settings $\rightarrow$ Interferometer Parameters}.  SYNC distributes the enable flag,
+interval and block size, but never distributes this MOT payload.  Master and each Slave
+therefore upload and persist their own file on their own Settings page, and each node
+executes only its local sequence.
+
 An initial block is always acquired.  Periodic blocks are inserted at safe phase-block
 boundaries after the requested elapsed time, and a normally completed run acquires a final
 block.  An emergency stop does not execute the final block.  One failed block is retained
