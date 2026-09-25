@@ -622,7 +622,7 @@ class MarkerOptimizationManager:
             }
             job = self.experiment_manager.execute_single_measurement(
                 [value], execution_config, idx=global_shot, total_steps=total_shots,
-                scan_dimensions=1, metadata=metadata,
+                scan_dimensions=1, metadata=metadata, data_manager=data_manager,
             )
             result, shot_payload = self.experiment_manager.process_measurement_job(
                 job,
@@ -1014,6 +1014,8 @@ class MarkerOptimizationManager:
             error_message = str(exc)
             print(f"[Marker Optimization Error] {traceback.format_exc()}")
         finally:
+            if hasattr(data_manager, "log_event"):
+                data_manager.log_event("marker_optimization.finished", level="ERROR" if phase == "failed" else "INFO", message=error_message or f"Marker optimization {phase}", status=phase)
             data_manager.close_run()
             ended_at = int(time.time() * 1000)
             self._set_status(

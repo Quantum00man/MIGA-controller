@@ -287,6 +287,7 @@ class OptimizationManager:
                 total_steps=total_shots,
                 scan_dimensions=1,
                 metadata=metadata,
+                data_manager=data_manager,
             )
             result, payload = self.experiment_manager.process_measurement_job(
                 job,
@@ -664,6 +665,9 @@ class OptimizationManager:
                 })
             self._emit({'stream_type': 'optimization_complete', 'status': self.get_status()})
         finally:
+            final_phase = str(self.get_status().get('phase') or 'closed')
+            if hasattr(data_manager, "log_event"):
+                data_manager.log_event("optimization.finished", message=str(self.get_status().get('message') or final_phase), status=final_phase)
             data_manager.close_run()
             self.experiment_manager.release_run_slot('optimization')
             self._thread = None

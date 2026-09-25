@@ -1010,6 +1010,24 @@
                                 <span v-if="isExportingSequence" class="spinner-border spinner-border-sm me-1"></span>
                                 <i v-else class="bi bi-download me-1"></i>{{ isExportingSequence ? 'Exporting...' : 'Export Sequence' }}
                             </button>
+                            <div v-if="syncManifest" class="d-grid gap-1 mt-2">
+                                <div class="small fw-bold text-muted">Export Run Logs</div>
+                                <button v-for="node in syncArchiveSequenceNodes()" :key="`run-log-${node.id}`"
+                                    class="btn btn-outline-secondary btn-sm w-100" @click="exportLoadedRunLog(node.id)"
+                                    :disabled="isExportingRunLog">
+                                    <i class="bi bi-download me-1"></i>{{ node.label }} log
+                                </button>
+                                <button class="btn btn-outline-dark btn-sm w-100" @click="exportLoadedRunLog('', true)"
+                                    :disabled="isExportingRunLog">
+                                    <span v-if="isExportingRunLog" class="spinner-border spinner-border-sm me-1"></span>
+                                    <i v-else class="bi bi-download me-1"></i>Merged run log
+                                </button>
+                            </div>
+                            <button v-else class="btn btn-outline-dark btn-sm w-100 mt-2" @click="exportLoadedRunLog()"
+                                :disabled="isExportingRunLog || !loadedRunEntry?.has_run_log">
+                                <span v-if="isExportingRunLog" class="spinner-border spinner-border-sm me-1"></span>
+                                <i v-else class="bi bi-download me-1"></i>{{ isExportingRunLog ? 'Exporting...' : 'Download Run Log' }}
+                            </button>
                             <div class="small text-muted mt-2" style="font-size: 0.72em;" v-if="!syncManifest && !isMarkerOptimizationArchive() && loadedRunEntry && !loadedRunEntry.has_sequence_file">
                                 No archived sequence file saved for this run.
                             </div>
@@ -2761,7 +2779,7 @@
                     collectionDialog: { type: '', mode: '', name: '', parent_id: 0, folder_id: null, favorite_id: null, alias: '', note: '', preview_metric: 'prob', preview_step: null, source_ref: '', reference: null, saving: false, error: '' },
                     collectionBatchDialog: { action: '', folder_id: null, error: '' },
                     isLoading: false, isLoadingAllan: false, isLoadingWaveforms: false, isSaving: false,
-                    loadedRunId: '', loadedRunEntry: null, loadedRunRef: null, isExportingSequence: false, errorMsg: '', dataCount: 0, selectedPointKey: '', selectedPointKeys: [], selectedPointLabel: '', selectedCount: 0,
+                    loadedRunId: '', loadedRunEntry: null, loadedRunRef: null, isExportingSequence: false, isExportingRunLog: false, errorMsg: '', dataCount: 0, selectedPointKey: '', selectedPointKeys: [], selectedPointLabel: '', selectedCount: 0,
                     shareLinkMessage: '', shareLinkError: false,
                     labPlotExport: { open: false, metrics: [], source: 'fit', includeFits: true, includeDifferential: true, busy: false, error: '' },
                     currentWaveforms: [],
@@ -5251,6 +5269,30 @@
                         this.isExportingSequence = false;
                     }
                 },
+                async exportLoadedRunLog(nodeId = '', merged = false) {
+                    const ref = this.loadedRunRef;
+                    if (!ref?.run_id) return;
+                    this.isExportingRunLog = true;
+                    this.errorMsg = '';
+                    try {
+                        const suffix = merged ? '/merged' : '';
+                        const nodeQuery = nodeId && !merged ? `?node_id=${encodeURIComponent(nodeId)}` : '';
+                        const res = await axios.get(`/archive/run-log/${ref.year}/${ref.month}/${ref.day}/${ref.run_id}${suffix}${nodeQuery}`, { responseType: 'blob' });
+                        const blob = res.data instanceof Blob ? res.data : new Blob([res.data], { type: 'application/x-ndjson;charset=utf-8;' });
+                        const headerName = this.getFilenameFromDisposition(res.headers?.['content-disposition']);
+                        const nodePart = merged ? '_merged' : (nodeId ? `_${this.sanitizeFilenamePart(this.syncArchiveNodeLabel(nodeId), nodeId)}` : '');
+                        await this.downloadBlobContent(blob, headerName || `${this.sanitizeFilenamePart(ref.run_id || 'run', 'run')}${nodePart}_run.log`, {
+                            description: 'Run Log', mimeType: 'application/x-ndjson', extension: '.log',
+                        });
+                    } catch (e) {
+                        const detail = e.response?.data instanceof Blob
+                            ? await this.getBlobErrorDetail(e.response.data, e.message || 'Unknown error')
+                            : (e.response?.data?.detail || e.message || 'Unknown error');
+                        this.errorMsg = 'Run log export failed: ' + detail;
+                    } finally {
+                        this.isExportingRunLog = false;
+                    }
+                },
                 getWaveformChannelSamples(waveform, channel) {
                     const timeAxis = Array.isArray(waveform?.time_axis) ? waveform.time_axis : [];
                     const rawSeries = Array.isArray(waveform?.[`raw_${channel}`]) ? waveform[`raw_${channel}`] : [];
@@ -5583,7 +5625,7 @@
                 getDays() { return (this.selectedYear && this.selectedMonth) ? Object.keys(this.archiveTree[this.selectedYear][this.selectedMonth] || {}).sort() : []; },
                 normalizeRunEntry(entry) {
                     if (typeof entry === 'string') {
-                        return { id: entry, run_id: entry, run_label: '', display_name: entry, summary: '', sequence_name: '', has_sequence_file: false, mode: 'standard', has_marker_optimization: false, has_sync: false };
+                        return { id: entry, run_id: entry, run_label: '', display_name: entry, summary: '', sequence_name: '', has_sequence_file: false, has_run_log: false, mode: 'standard', has_marker_optimization: false, has_sync: false };
                     }
                     const runId = String(entry?.id || entry?.run_id || '').trim();
                     const runLabel = String(entry?.run_label || '').trim();
@@ -5595,6 +5637,7 @@
                         summary: String(entry?.summary || '').trim(),
                         sequence_name: String(entry?.sequence_name || '').trim(),
                         has_sequence_file: Boolean(entry?.has_sequence_file),
+                        has_run_log: Boolean(entry?.has_run_log),
                         mode: String(entry?.mode || 'standard').trim().toLowerCase(),
                         has_marker_optimization: Boolean(entry?.has_marker_optimization),
                         has_sync: Boolean(entry?.has_sync),

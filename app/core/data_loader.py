@@ -331,6 +331,7 @@ class DataLoader:
             "summary": self._get_run_summary(config_data),
             "sequence_name": str(config_data.get("sequence_name") or "").strip(),
             "has_sequence_file": sequence_path.exists(),
+            "has_run_log": (run_dir / "run.log").is_file(),
             "scan_dimensions": scan_dimensions,
             "randomize": bool(config_data.get("randomize", False)),
             "mode": str(config_data.get("mode") or "standard").strip().lower() or "standard",
@@ -361,6 +362,43 @@ class DataLoader:
             raise FileNotFoundError(f"Sequence file not found for run {run_id}")
         config_data = self._load_config_data(run_dir)
         return sequence_path, self._get_sequence_download_name(run_id, config_data)
+
+    def get_archived_run_log(
+        self, year: str, month: str, day: str, run_id: str, node_id: Optional[str] = None
+    ) -> Tuple[Path, str]:
+        root_run_dir = self._get_run_dir(year, month, day, run_id)
+        run_dir = self._resolve_archive_node_dir(root_run_dir, node_id)
+        log_path = run_dir / "run.log"
+        if not log_path.is_file():
+            raise FileNotFoundError(f"Run log not found for run {run_id}")
+        node_suffix = f"_{str(node_id).strip()}" if node_id else ""
+        return log_path, f"{run_id}{node_suffix}_run.log"
+
+    def build_merged_sync_run_log(self, year: str, month: str, day: str, run_id: str) -> Tuple[bytes, str]:
+        root = self._get_run_dir(year, month, day, run_id)
+        sources = [("master", root / "run.log")]
+        sync_root = root / "sync_nodes"
+        if sync_root.is_dir():
+            sources.extend((path.name, path / "run.log") for path in sorted(sync_root.iterdir()) if path.is_dir())
+        events: List[Dict[str, Any]] = []
+        for node_id, path in sources:
+            if not path.is_file():
+                continue
+            for line_number, raw_line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), start=1):
+                if not raw_line.strip():
+                    continue
+                try:
+                    record = json.loads(raw_line)
+                except ValueError:
+                    record = {"timestamp_unix_ms": 0, "level": "INFO", "event": "legacy.line", "message": raw_line}
+                record["source_node"] = node_id
+                record["source_line"] = line_number
+                events.append(record)
+        if not events:
+            raise FileNotFoundError(f"Run logs not found for run {run_id}")
+        events.sort(key=lambda item: (int(item.get("timestamp_unix_ms") or 0), str(item.get("source_node") or ""), int(item.get("source_line") or 0)))
+        payload = "".join(json.dumps(item, ensure_ascii=False) + "\n" for item in events).encode("utf-8")
+        return payload, f"{run_id}_merged_run.log"
 
     def get_archive_tree(self) -> Dict[str, Any]:
         """Build the legacy full tree using only canonical archive directories."""

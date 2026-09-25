@@ -2010,6 +2010,31 @@ async def download_archived_sequence(year: str, month: str, day: str, run_id: st
         raise HTTPException(500, str(exc))
 
 
+@router.get("/archive/run-log/{year}/{month}/{day}/{run_id}")
+async def download_archived_run_log(year: str, month: str, day: str, run_id: str, node_id: str = ""):
+    try:
+        log_path, download_name = data_loader.get_archived_run_log(year, month, day, run_id, node_id=node_id or None)
+        return FileResponse(path=log_path, media_type="application/x-ndjson", filename=download_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@router.get("/archive/run-log/{year}/{month}/{day}/{run_id}/merged")
+async def download_merged_sync_run_log(year: str, month: str, day: str, run_id: str):
+    try:
+        payload, download_name = data_loader.build_merged_sync_run_log(year, month, day, run_id)
+        return Response(
+            content=payload, media_type="application/x-ndjson",
+            headers={"Content-Disposition": f'attachment; filename="{download_name}"'},
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
 @router.get("/archive/bragg-fringe-calibration/{year}/{month}/{day}/{run_id}/mot")
 async def download_bragg_fringe_calibration_mot(year: str, month: str, day: str, run_id: str):
     try:

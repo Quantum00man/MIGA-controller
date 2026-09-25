@@ -95,6 +95,14 @@ class SyncManager:
             "archive_replication": {"status": "idle", "nodes": {}},
         }
 
+    def _log_run_event(self, event: str, level: str = "INFO", message: str = "", **fields: Any) -> None:
+        try:
+            logger = getattr(self.manager.data_manager, "log_event", None)
+            if logger:
+                logger(event, level=level, message=message, **fields)
+        except Exception as exc:
+            print(f"[SYNC Log] {exc}")
+
     @staticmethod
     def _safe_node_id(value: Any) -> str:
         normalized = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value or "").strip()).strip("._")
@@ -485,6 +493,7 @@ class SyncManager:
             if sync_run_id in self._prepared:
                 self._prepared[sync_run_id]["run_id"] = self.manager.data_manager.current_run_id_str
                 self._prepared[sync_run_id]["run_dir"] = str(self.manager.data_manager.current_run_dir)
+        self._log_run_event("sync.node.started", message="Slave run started", sync_run_id=sync_run_id, node_id=node_name, shot_count=len(parameters))
         return {
             **result,
             "sync_run_id": sync_run_id,
@@ -980,6 +989,25 @@ class SyncManager:
                     )
                     response.raise_for_status()
                     node_state = response.json()
+                    status_step = int(node_state.get("current_step") or 0)
+                    status_message = str(node_state.get("message") or "")
+                    status_running = bool(node_state.get("is_running"))
+                    now_monotonic = time.monotonic()
+                    if (
+                        status_step != int(slave.get("current_step") or 0)
+                        or status_message != str(slave.get("last_status_message") or "")
+                        or status_running != bool(slave.get("last_status_running", True))
+                        or now_monotonic - float(slave.get("last_status_logged_at") or 0.0) >= 5.0
+                    ):
+                        self._log_run_event(
+                            "sync.node.status", sync_run_id=sync_run_id, node_id=slave.get("node_id"),
+                            node_name=slave.get("name"), current_step=status_step,
+                            total_steps=int(node_state.get("total_steps") or 0), is_running=status_running,
+                            status_message=status_message, latest_sequence=int(node_state.get("latest_sequence") or 0),
+                        )
+                        slave["last_status_message"] = status_message
+                        slave["last_status_running"] = status_running
+                        slave["last_status_logged_at"] = now_monotonic
                     for item in node_state.get("results") or []:
                         remote_payload = item.get("payload") or {}
                         remote_payload.update({
@@ -1008,6 +1036,10 @@ class SyncManager:
                         "unreachable" if failures >= SYNC_STATUS_MAX_CONSECUTIVE_FAILURES else "retrying"
                     )
                     slave["error"] = f"Status poll {failures}/{SYNC_STATUS_MAX_CONSECUTIVE_FAILURES}: {exc}"
+                    self._log_run_event(
+                        "sync.node.status_failed", level="ERROR", message=str(exc), sync_run_id=sync_run_id,
+                        node_id=slave.get("node_id"), node_name=slave.get("name"), consecutive_failures=failures,
+                    )
                     if failures >= SYNC_STATUS_MAX_CONSECUTIVE_FAILURES:
                         failed_reason = (
                             f"Slave {slave['name']} disconnected after {failures} consecutive status failures: {exc}"
@@ -1037,6 +1069,11 @@ class SyncManager:
             self._runtime["message"] = failed_reason or ("SYNC STOPPED" if was_stopped else "SYNC DONE")
             self._runtime["finished_at_ms"] = int(time.time() * 1000)
         self._write_archive_snapshot()
+        self._log_run_event(
+            "sync.run.finished", level="ERROR" if failed_reason else "INFO",
+            message=failed_reason or ("SYNC STOPPED" if was_stopped else "SYNC DONE"),
+            sync_run_id=sync_run_id, status="error" if failed_reason else ("stopped" if was_stopped else "done"),
+        )
         if not failed_reason and not was_stopped:
             self._replicate_archives()
 

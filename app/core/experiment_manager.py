@@ -2014,7 +2014,8 @@ class ExperimentManager:
                     print("[AC Stark] Generated DDS scan table written and verified.")
         except Exception as exc:
             restore_error = self._restore_ac_stark_dds(ac_stark_context)
-            self.data_manager.close_run()
+            self.data_manager.log_event("run.preparation.failed", level="ERROR", message=str(exc), traceback=traceback.format_exc(), restore_error=restore_error or "")
+            self.data_manager.close_run(status="error", message=str(exc))
             self.status = ExperimentStatus(message=restore_error or 'IDLE')
             self.release_run_slot('scan')
             message = f'AC Stark preparation failed: {exc}' if ac_stark_context else f'Data Init Failed: {exc}'
@@ -2048,6 +2049,9 @@ class ExperimentManager:
         self.stop_flag = True
         self.pause_event.set()
         self.status.message = 'Stopping...'
+        logger = getattr(getattr(self, "data_manager", None), "log_event", None)
+        if logger:
+            logger("run.stop_requested", message=self.status.message)
         return {'status': 'success', 'message': 'Stop signal sent'}
 
     def pause_scan(self, reason: str = "manual") -> Dict[str, str]:
@@ -2058,6 +2062,9 @@ class ExperimentManager:
             self.status.is_paused = True
             self.status.pause_reason = str(reason or "manual")
             self.status.message = 'Paused between shots'
+            logger = getattr(getattr(self, "data_manager", None), "log_event", None)
+            if logger:
+                logger("run.paused", message=self.status.message, reason=self.status.pause_reason)
         return {'status': 'success', 'message': self.status.message}
 
     def resume_scan(self) -> Dict[str, str]:
@@ -2070,6 +2077,9 @@ class ExperimentManager:
             self.status.is_paused = False
             self.status.pause_reason = ''
             self.status.message = 'Resuming...'
+            logger = getattr(getattr(self, "data_manager", None), "log_event", None)
+            if logger:
+                logger("run.resumed", message=self.status.message)
             self.pause_event.set()
             if reset_power_reference:
                 self._power_meter_reference_w = None
@@ -2677,13 +2687,28 @@ class ExperimentManager:
         total_steps: int,
         scan_dimensions: int,
         metadata: Optional[Dict[str, Any]] = None,
+        data_manager: Optional[DataManager] = None,
     ) -> Dict[str, Any]:
+        run_data_manager = data_manager or self.data_manager
         params_to_write = self._normalize_parameter_list(param_set)
         actual_params_to_write = self._prepare_sequence_parameters(params_to_write, execution_config)
         metadata = dict(metadata or {})
+        log_context = {
+            "step": int(idx) + 1,
+            "total_steps": int(total_steps),
+            "parameters": params_to_write,
+            "actual_parameters": actual_params_to_write,
+            "sync_run_id": metadata.get("sync_run_id") or execution_config.get("sync_run_id") or "",
+            "sync_role": metadata.get("sync_role") or execution_config.get("sync_role") or "",
+            "sync_node_id": metadata.get("sync_node_id") or execution_config.get("sync_node_id") or "",
+            "sync_shot_index": metadata.get("sync_shot_index"),
+        }
 
         try:
+            run_data_manager.log_event("shot.started", message="Shot execution started", **log_context)
             template_path = execution_config.get('_template_path_override') or (config.SEQUENCE_TEMPLATE_PATH_WIN if config.USE_SIMULATION else self.settings['template_path'])
+            stage_started = time.monotonic()
+            run_data_manager.log_event("sequence.render.started", template_path=template_path, **log_context)
             self.seq_editor.generate_sequence(
                 template_path,
                 config.SEQUENCE_OUTPUT_PATH,
@@ -2695,9 +2720,23 @@ class ExperimentManager:
                     self.settings, execution_config.get('sequence_name') or 'sequence.mot'
                 ),
             )
+            run_data_manager.log_event("sequence.render.completed", duration_ms=round((time.monotonic() - stage_started) * 1000, 3), **log_context)
 
             cmot_bin = config.CMOT_BINARY_PATH_WIN if config.USE_SIMULATION else self.settings['cmot_path']
-            self.driver.compile_vcd(config.SEQUENCE_OUTPUT_PATH, config.VCD_OUTPUT_PATH, binary_path=cmot_bin)
+            stage_started = time.monotonic()
+            run_data_manager.log_event("sequence.compile.started", binary=cmot_bin, **log_context)
+            compile_success = self.driver.compile_vcd(config.SEQUENCE_OUTPUT_PATH, config.VCD_OUTPUT_PATH, binary_path=cmot_bin)
+            compile_result = getattr(self.driver, "last_compile_result", None) or {}
+            run_data_manager.log_event(
+                "sequence.compile.completed" if compile_success else "sequence.compile.failed",
+                level="INFO" if compile_success else "ERROR",
+                duration_ms=round((time.monotonic() - stage_started) * 1000, 3),
+                command=compile_result.get("command"), stdout=compile_result.get("stdout", ""),
+                stderr=compile_result.get("stderr", ""), returncode=compile_result.get("returncode"),
+                **log_context,
+            )
+            if not compile_success:
+                raise RuntimeError("Sequence compilation failed")
 
             if config.USE_SIMULATION:
                 start_delay = 0.78
@@ -2712,10 +2751,21 @@ class ExperimentManager:
             ext_trigger_enabled = bool(execution_config.get('ext_trigger', False))
             tmot_args = '' if config.USE_SIMULATION else ('-e' if ext_trigger_enabled else '')
             print(f"[TMOT] Effective settings: path={tmot_bin!r}, ext_trigger={ext_trigger_enabled}, args={tmot_args!r}")
+            stage_started = time.monotonic()
+            run_data_manager.log_event("sequence.execute.started", binary=tmot_bin, arguments=tmot_args, **log_context)
             success = self.driver.run_sequence(
                 config.SEQUENCE_OUTPUT_PATH,
                 binary_path=tmot_bin,
                 extra_args=tmot_args,
+            )
+            command_result = getattr(self.driver, "last_command_result", None) or {}
+            run_data_manager.log_event(
+                "sequence.execute.completed" if success else "sequence.execute.failed",
+                level="INFO" if success else "ERROR",
+                duration_ms=round((time.monotonic() - stage_started) * 1000, 3),
+                command=command_result.get("command"), stdout=command_result.get("stdout", ""),
+                stderr=command_result.get("stderr", ""), returncode=command_result.get("returncode"),
+                **log_context,
             )
             if not success:
                 return {
@@ -2731,8 +2781,11 @@ class ExperimentManager:
                     'error': 'Sequence execution failed',
                 }
 
+            stage_started = time.monotonic()
+            run_data_manager.log_event("acquisition.started", channels=["ch1", "ch2"], **log_context)
             _, volt_up_raw = self.rp_driver_red.acquire_channel('ch1')
             _, volt_dw_raw = self.rp_driver_red.acquire_channel('ch2')
+            run_data_manager.log_event("acquisition.completed", duration_ms=round((time.monotonic() - stage_started) * 1000, 3), samples_up=len(volt_up_raw), samples_down=len(volt_dw_raw), **log_context)
             return {
                 'idx': idx,
                 'total': total_steps,
@@ -2745,6 +2798,7 @@ class ExperimentManager:
                 'metadata': metadata,
             }
         except Exception as exc:
+            run_data_manager.log_event("shot.failed", level="ERROR", message=str(exc), traceback=traceback.format_exc(), **log_context)
             print(f"[Acq Error] Step {idx + 1}: {traceback.format_exc()}")
             return {
                 'idx': idx,
@@ -2885,9 +2939,11 @@ class ExperimentManager:
         volt_dw_raw = job.get('volt_dw') or []
 
         if job.get('error'):
+            data_manager.log_event("shot.processing.failed", level="ERROR", message=str(job['error']), step=idx + 1, parameters=display_params)
             return None, self._build_error_payload(job, str(job['error']), stream_type=stream_type, extra_payload=extra_payload)
 
         if not volt_up_raw or not volt_dw_raw:
+            data_manager.log_event("shot.processing.failed", level="ERROR", message="No Data", step=idx + 1, parameters=display_params)
             return None, self._build_error_payload(job, 'No Data', stream_type=stream_type, extra_payload=extra_payload)
 
         try:
@@ -2909,6 +2965,7 @@ class ExperimentManager:
             if max_amp_up > voltage_limit or max_amp_dw > voltage_limit:
                 msg = f"Signal Amplitude > {voltage_limit}V (UP={max_amp_up:.2f}V, DW={max_amp_dw:.2f}V)"
                 print(f"[Filter] Rejected (Step {idx + 1}): {msg}")
+                data_manager.log_event("shot.processing.failed", level="ERROR", message=msg, step=idx + 1, parameters=display_params)
                 return None, self._build_error_payload(job, msg, stream_type=stream_type, extra_payload=extra_payload)
 
             gain_up = float(settings.get('gain_up', 1.0)) or 1.0
@@ -3168,8 +3225,10 @@ class ExperimentManager:
             frontend_data.update(job.get('metadata') or {})
             if extra_payload:
                 frontend_data.update(extra_payload)
+            data_manager.log_event("shot.processing.completed", step=idx + 1, total_steps=total, parameters=display_params)
             return result, frontend_data
-        except Exception:
+        except Exception as exc:
+            data_manager.log_event("shot.processing.failed", level="ERROR", message=str(exc), traceback=traceback.format_exc(), step=idx + 1, parameters=display_params)
             print(f"Processing Error step {idx + 1}: {traceback.format_exc()}")
             return None, self._build_error_payload(job, 'Processing error', stream_type=stream_type, extra_payload=extra_payload)
 
@@ -3626,6 +3685,7 @@ class ExperimentManager:
                     time.sleep(0.1)
         except Exception as exc:
             self._scan_finalize_error = f"Acquisition loop failed: {exc}"
+            self.data_manager.log_event("acquisition.loop.failed", level="ERROR", message=str(exc), traceback=traceback.format_exc())
             print(f"[Acq Error] {traceback.format_exc()}")
         finally:
             if transfer_mode and (tti_client is not None or rigol_client is not None):
@@ -4081,7 +4141,11 @@ class ExperimentManager:
                     "error": self._scan_finalize_error,
                     "coarse": bragg_calibration_coarse_fit,
                 })
-            self.data_manager.close_run()
+            final_message = self._scan_finalize_error or ('Stopped' if self.stop_flag else 'Done')
+            self.data_manager.close_run(
+                status="error" if self._scan_finalize_error else ("stopped" if self.stop_flag else "completed"),
+                message=final_message,
+            )
             self.status.is_running = False
             if self._scan_finalize_error:
                 self.status.message = self._scan_finalize_error

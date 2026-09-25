@@ -3,9 +3,11 @@ import csv
 import json
 import shutil
 import math
+import threading
+import traceback
 import numpy as np
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 
 import config
@@ -53,6 +55,42 @@ class DataManager:
         self.phase_calibration_snapshot = None
         # [NEW] Track Current Run ID for display
         self.current_run_id_str = "run00"
+        self.run_log_file: Optional[Path] = None
+        self._run_log_lock = threading.Lock()
+
+    @staticmethod
+    def _log_value(value: Any) -> Any:
+        if isinstance(value, Path):
+            return str(value)
+        if isinstance(value, BaseException):
+            return {"type": type(value).__name__, "message": str(value)}
+        try:
+            json.dumps(value, allow_nan=False)
+            return value
+        except (TypeError, ValueError):
+            return repr(value)
+
+    def log_event(self, event: str, level: str = "INFO", message: str = "", **fields: Any) -> None:
+        """Append one durable JSON-lines event. Logging must never interrupt a run."""
+        path = self.run_log_file
+        if path is None:
+            return
+        record = {
+            "timestamp": datetime.now(timezone.utc).astimezone().isoformat(timespec="milliseconds"),
+            "timestamp_unix_ms": int(datetime.now(timezone.utc).timestamp() * 1000),
+            "level": str(level or "INFO").upper(),
+            "event": str(event),
+            "message": str(message or ""),
+            "run_id": self.current_run_id_str,
+            **{key: self._log_value(value) for key, value in fields.items()},
+        }
+        try:
+            with self._run_log_lock:
+                with open(path, "a", encoding="utf-8") as handle:
+                    handle.write(json.dumps(record, ensure_ascii=False, allow_nan=False) + "\n")
+                    handle.flush()
+        except Exception:
+            print(f"[Run Log] Failed to write {event}: {traceback.format_exc()}")
     def _get_next_id(self, base_dir: Path) -> int:
         if not base_dir.exists(): return 0
         max_id = -1
@@ -104,6 +142,17 @@ class DataManager:
         # Ensure directory exists
         if not self.current_run_dir.exists():
             os.makedirs(self.current_run_dir, exist_ok=True)
+        self.run_log_file = self.current_run_dir / "run.log"
+        self.log_event(
+            "run.initialized",
+            message="Run archive initialized",
+            mode=scan_config.get("mode") or "standard",
+            run_label=scan_config.get("run_label") or "",
+            sequence_name=scan_config.get("sequence_name") or "",
+            sync_run_id=scan_config.get("sync_run_id") or "",
+            sync_role=scan_config.get("sync_role") or "",
+            sync_node_id=scan_config.get("sync_node_id") or "",
+        )
             
         # ... (Rest remains unchanged: waveforms, config.json, etc.) ...
         self.waveforms_dir = self.current_run_dir / "waveforms"
@@ -412,7 +461,8 @@ class DataManager:
         self.csv_writer.writerow(row)
         self.csv_handle.flush()
 
-    def close_run(self):
+    def close_run(self, status: str = "closed", message: str = ""):
+        self.log_event("run.closed", message=message or status, status=status)
         if self.csv_handle:
             self.csv_handle.close()
             self.csv_handle = None

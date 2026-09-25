@@ -86,7 +86,9 @@ class SequenceEditor:
         return output_path
 
 class ExperimentDriver:
-    def __init__(self): pass
+    def __init__(self):
+        self.last_command_result = {}
+        self.last_compile_result = {}
 
     @staticmethod
     def _build_command(binary_path: str, sequence_file_path: str, extra_args: str = "") -> List[str]:
@@ -111,6 +113,7 @@ class ExperimentDriver:
 
     def run_sequence(self, sequence_file_path: str, binary_path: str = None, extra_args: str = "") -> bool:
         if config.USE_SIMULATION:
+            self.last_command_result = {"command": ["simulation"], "stdout": "", "stderr": "", "returncode": 0}
             print(f"[SIMULATION] Executing sequence: {sequence_file_path}")
             try: requests.post(f"http://{config.RP_IP_MOCK}:{config.RP_PORT_MOCK}/trigger", timeout=1)
             except: pass
@@ -127,9 +130,17 @@ class ExperimentDriver:
             try:
                 command = self._build_command(binary, sequence_file_path, extra_args=extra_args)
                 print(f"[TMOT] Running command: {' '.join(shlex.quote(part) for part in command)}")
-                subprocess.run(command, check=True, capture_output=True, text=True)
+                completed = subprocess.run(command, check=True, capture_output=True, text=True)
+                self.last_command_result = {
+                    "command": command, "stdout": completed.stdout or "",
+                    "stderr": completed.stderr or "", "returncode": completed.returncode,
+                }
                 return True
             except subprocess.CalledProcessError as e:
+                self.last_command_result = {
+                    "command": list(e.cmd), "stdout": e.stdout or "",
+                    "stderr": e.stderr or "", "returncode": e.returncode,
+                }
                 cmd_str = " ".join(shlex.quote(part) for part in e.cmd)
                 print(f"Hardware Execution Error: command failed: {cmd_str}")
                 if e.stderr:
@@ -138,16 +149,24 @@ class ExperimentDriver:
                     print(e.stdout.strip())
                 return False
             except Exception as e:
+                self.last_command_result = {"command": [], "stdout": "", "stderr": str(e), "returncode": None}
                 print(f"Hardware Execution Error: {e}")
                 return False
 
     def compile_vcd(self, sequence_file_path: str, output_vcd_path: str, binary_path: str = None) -> bool:
-        if config.USE_SIMULATION: return True
+        if config.USE_SIMULATION:
+            self.last_compile_result = {"command": ["simulation"], "stdout": "", "stderr": "", "returncode": 0}
+            return True
         else:
             binary = binary_path if binary_path else config.CMOT_BINARY_PATH_LINUX
             try:
                 # 1. Run CMOT
-                subprocess.run([binary, "-f", sequence_file_path], check=True, capture_output=True, text=True)
+                command = [binary, "-f", sequence_file_path]
+                completed = subprocess.run(command, check=True, capture_output=True, text=True)
+                self.last_compile_result = {
+                    "command": command, "stdout": completed.stdout or "",
+                    "stderr": completed.stderr or "", "returncode": completed.returncode,
+                }
                 
                 # 2. Locate the generated VCD file
                 # cmot usually outputs to CWD (./seq.vcd) ignoring input path (temp/seq.mot)
@@ -177,6 +196,13 @@ class ExperimentDriver:
                     return False
 
             except Exception as e:
+                if isinstance(e, subprocess.CalledProcessError):
+                    self.last_compile_result = {
+                        "command": list(e.cmd), "stdout": e.stdout or "", "stderr": e.stderr or "",
+                        "returncode": e.returncode,
+                    }
+                else:
+                    self.last_compile_result = {"command": [], "stdout": "", "stderr": str(e), "returncode": None}
                 print(f"VCD Compilation Error (cmot4): {e}")
                 return False
 

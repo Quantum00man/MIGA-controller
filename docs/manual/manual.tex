@@ -1316,6 +1316,22 @@ traversal, stages files in a temporary directory, requires both \pathcode{result
 archive contains \pathcode{sync_nodes/<node-id>/} and a sync manifest. Replication is
 bidirectional; failed transfers can be retried from the archive interface.
 
+Every run also contains an append-only \pathcode{run.log}. Each JSON line is flushed
+immediately and records its wall-clock time, severity, event name, run identity and
+relevant context. Shot records include the logical step and scanned parameters; sequence
+rendering, compilation, TMOT execution, acquisition and processing have separate start
+and completion boundaries. Captured CMOT/TMOT standard output, standard error and return
+codes are retained with their completion events. Errors include their traceback. Thus an
+interrupted controller normally leaves a final durable event identifying the operation
+that began but did not complete.
+
+For synchronized runs, the Master additionally records Slave status changes and a status
+heartbeat at least every five seconds while a node remains unchanged. After loading a run,
+the Archive can download each node's log or construct a timestamp-sorted merged log;
+merged records add \code{source_node} and \code{source_line} fields. Logging is diagnostic
+only: it does not impose a timeout or stop a run automatically. Legacy archives that
+predate this feature do not have a run log.
+
 \begin{procedure}{run a synchronized scan}
   \item Configure one Master and one or more Slaves with the same shared token.
   \item Test every enabled slave from \ui{Settings $>$ SYNC}.
