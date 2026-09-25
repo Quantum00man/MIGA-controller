@@ -1920,7 +1920,19 @@
                             <div class="form-text">Each node keeps its own fitted midpoint. The shared experimental T² is controlled by the Master MOT.</div>
                         </div>
                         <div v-if="braggFringeCalibration.error" class="alert alert-danger small py-2">{{ braggFringeCalibration.error }}</div>
-                        <a v-if="braggFringeCalibrationMotUrl()" class="btn btn-primary btn-sm fw-bold" :href="braggFringeCalibrationMotUrl()"><i class="bi bi-file-earmark-arrow-down me-1"></i>Download refined mid-fringe MOT</a>
+                        <div v-if="braggFringeCalibration.fine?.calibration_fit" class="border rounded bg-light p-3 mt-3">
+                            <div class="small fw-bold mb-1">Save this fringe to this controller</div>
+                            <div class="small text-muted mb-2">Adds the analyzed fringe to Interferometer Phase settings and makes it active on the controller serving this Archive page.</div>
+                            <div class="input-group input-group-sm">
+                                <input class="form-control" v-model.trim="archiveBraggSave.name" placeholder="Calibration name" aria-label="Archived Bragg calibration name">
+                                <button class="btn btn-primary fw-bold" @click="saveAndActivateArchivedBraggCalibration"
+                                    :disabled="archiveBraggSave.saving || !archiveBraggSave.name">
+                                    <span v-if="archiveBraggSave.saving" class="spinner-border spinner-border-sm me-1"></span>Save &amp; Activate
+                                </button>
+                            </div>
+                            <div v-if="archiveBraggSave.message" class="small mt-2" :class="archiveBraggSave.error ? 'text-danger' : 'text-success'">{{ archiveBraggSave.message }}</div>
+                        </div>
+                        <a v-if="braggFringeCalibrationMotUrl()" class="btn btn-primary btn-sm fw-bold mt-3" :href="braggFringeCalibrationMotUrl()"><i class="bi bi-file-earmark-arrow-down me-1"></i>Download refined mid-fringe MOT</a>
                     </div>
                 </section>
                 <section v-if="syncManifest" class="card mb-4 border-0 shadow-sm">
@@ -2798,6 +2810,7 @@
                     archivePhaseAnalysis: {},
                     markerOptimization: null, selectedOptimizationStep: null,
                     braggFringeCalibration: null, braggFringeCalibrationNodes: {},
+                    archiveBraggSave: { name: '', saving: false, error: false, message: '' },
                     syncManifest: null,
                     syncArchiveViewMode: 'node',
                     syncArchiveNodeSource: 'master',
@@ -3711,6 +3724,46 @@
                     const ref = this.loadedRunRef;
                     if (!ref || !this.braggFringeCalibration?.generated_mot_filename) return '';
                     return `/archive/bragg-fringe-calibration/${encodeURIComponent(ref.year)}/${encodeURIComponent(ref.month)}/${encodeURIComponent(ref.day)}/${encodeURIComponent(ref.run_id)}/mot`;
+                },
+                async saveAndActivateArchivedBraggCalibration() {
+                    const fitResult = this.braggFringeCalibration?.fine?.calibration_fit;
+                    const name = String(this.archiveBraggSave.name || '').trim();
+                    if (!fitResult || !name || this.archiveBraggSave.saving) return;
+                    this.archiveBraggSave.saving = true;
+                    this.archiveBraggSave.error = false;
+                    this.archiveBraggSave.message = '';
+                    try {
+                        const savedResponse = await axios.post('/archive/bragg-phase-calibrations', {
+                            name,
+                            fit_result: fitResult,
+                            source: {
+                                year: this.selectedYear,
+                                month: this.selectedMonth,
+                                day: this.selectedDay,
+                                run_id: this.selectedRun || this.loadedRunId,
+                                node_id: this.loadedSyncNode || '',
+                                sequence_name: this.loadedRunEntry?.sequence_name || '',
+                                archive_reanalysis: Boolean(this.braggFringeCalibration?.archive_reanalysis),
+                            }
+                        });
+                        const calibrationId = String(savedResponse.data?.id || '');
+                        if (!calibrationId) throw new Error('The saved calibration has no ID.');
+                        const activeResponse = await axios.post('/settings/interferometer-phase-calibrations/active', {
+                            calibration_id: calibrationId
+                        });
+                        const active = activeResponse.data?.active;
+                        if (!active || String(active.id || '') !== calibrationId) {
+                            throw new Error('The calibration was saved but could not be activated.');
+                        }
+                        await this.fetchBraggPhaseCalibrations();
+                        this.settingsActivePhaseCalibrationId = calibrationId;
+                        this.archiveBraggSave.message = `Saved and activated “${savedResponse.data.name}” on this controller.`;
+                    } catch (error) {
+                        this.archiveBraggSave.error = true;
+                        this.archiveBraggSave.message = error.response?.data?.detail || error.message || 'Unable to save and activate this calibration.';
+                    } finally {
+                        this.archiveBraggSave.saving = false;
+                    }
                 },
                 renderBraggFringeCalibrationPlot() {
                     const target = document.getElementById('braggFringeCalibrationPlot');
@@ -5741,6 +5794,7 @@
                     this.markerOptimization = null;
                     this.braggFringeCalibration = null;
                     this.braggFringeCalibrationNodes = {};
+                    this.archiveBraggSave = { name: '', saving: false, error: false, message: '' };
                     this.syncManifest = null;
                     this.archivePhaseReferenceContexts = {};
                     this.archivePhaseReferenceNodeId = '';
@@ -5826,6 +5880,11 @@
                             ? res.data.bragg_fringe_calibration : null;
                         this.braggFringeCalibrationNodes = res.data.bragg_fringe_calibration_nodes && typeof res.data.bragg_fringe_calibration_nodes === 'object'
                             ? res.data.bragg_fringe_calibration_nodes : {};
+                        if (this.braggFringeCalibration?.fine?.calibration_fit) {
+                            const nodeSuffix = String(res.data.archive_node_identity?.resolved_node || requestedSyncNode || '').trim();
+                            this.archiveBraggSave.name = String(this.loadedConfig.bragg_calibration_name || '').trim()
+                                || `Archive ${this.selectedRun}${nodeSuffix ? ` ${nodeSuffix}` : ''}`;
+                        }
                         this.syncManifest = res.data.sync_manifest && typeof res.data.sync_manifest === 'object'
                             ? res.data.sync_manifest : null;
                         if (this.syncManifest) this.showRawData = false;

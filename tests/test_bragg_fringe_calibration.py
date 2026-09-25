@@ -1,4 +1,5 @@
 import math
+from pathlib import Path
 import unittest
 
 import numpy as np
@@ -101,6 +102,13 @@ class BraggFringeCalibrationTests(unittest.TestCase):
         )
         self.assertEqual(result["status"], "reanalysis_failed")
         self.assertIn("completed fine scan", result["error"])
+
+    def test_archive_recovered_fringe_can_be_saved_and_activated(self):
+        html = (Path(__file__).parents[1] / "static" / "archive.html").read_text(encoding="utf-8")
+        self.assertIn("saveAndActivateArchivedBraggCalibration", html)
+        self.assertIn("Save &amp; Activate", html)
+        self.assertIn("/archive/bragg-phase-calibrations", html)
+        self.assertIn("/settings/interferometer-phase-calibrations/active", html)
 
 
 if __name__ == "__main__":
