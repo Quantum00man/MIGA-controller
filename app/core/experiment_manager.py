@@ -3140,6 +3140,7 @@ class ExperimentManager:
                 intf_alpha_applied=(None if metadata.get("intf_alpha_calibration") else float(settings.get("intf_alpha", 0.35))),
                 intf_alpha_calibration_block_id=metadata.get("intf_alpha_calibration_block_id"),
                 intf_alpha_calibration_shot=metadata.get("intf_alpha_calibration_shot"),
+                bragg_calibration_stage=str(metadata.get("bragg_calibration_stage") or ""),
                 ramsey_delta_f_mhz=metadata.get('ramsey_delta_f_mhz'),
                 ramsey_repeat=metadata.get('ramsey_repeat'),
                 ramsey_center_frequency_mhz=metadata.get('ramsey_center_frequency_mhz'),

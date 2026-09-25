@@ -57,6 +57,9 @@ class ScanResult:
     intf_alpha_calibration_block_id: Optional[int] = None
     intf_alpha_calibration_shot: Optional[int] = None
 
+    # Bragg Fringes Calibration provenance. Empty for ordinary scan points.
+    bragg_calibration_stage: str = ""
+
     # Ramsey Interferometer provenance. The displayed parameter is delta f in MHz.
     ramsey_delta_f_mhz: Optional[float] = None
     ramsey_repeat: Optional[int] = None
