@@ -21,6 +21,7 @@ class DynamicShotTimingTests(unittest.TestCase):
 
         measured_job = manager.data_queue.put.call_args_list[0].args[0]
         self.assertEqual(measured_job["shot_duration_sec"], 1.75)
+        self.assertIsNone(manager._scan_finalize_error)
 
     def test_index_accumulates_and_persists_completed_scan_average(self):
         index_html = (Path(__file__).resolve().parents[1] / "static" / "index.html").read_text(encoding="utf-8")

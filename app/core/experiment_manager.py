@@ -3295,7 +3295,7 @@ class ExperimentManager:
                 nonlocal alpha_last_started, alpha_block_id
                 def expand_boundary(item):
                     nonlocal alpha_last_started, alpha_block_id
-                    metadata = item.get("metadata") or {}
+                    metadata = (item.get("metadata") or {}) if isinstance(item, dict) else {}
                     boundary = str(metadata.get("intf_alpha_calibration_boundary") or "")
                     if not boundary or not alpha_calibration_enabled:
                         yield item
