@@ -42,6 +42,7 @@ RESULTS_CSV_HEADER = [
     "Power_Meter_Serial", "Power_Meter_Reference_W", "Power_Meter_Deviation_Percent",
     "Power_Meter_Valid", "Power_Meter_Invalid_Reason", "Transfer_Frequency_Attempt",
     "I_Alpha_Applied", "I_Alpha_Calibration_Block", "I_Alpha_Calibration_Shot",
+    "Bragg_Calibration_Stage",
 ]
 
 
@@ -457,6 +458,7 @@ class DataManager:
             f(result.intf_alpha_applied, 10),
             result.intf_alpha_calibration_block_id if result.intf_alpha_calibration_block_id is not None else "",
             result.intf_alpha_calibration_shot if result.intf_alpha_calibration_shot is not None else "",
+            result.bragg_calibration_stage or "",
         ]
         self.csv_writer.writerow(row)
         self.csv_handle.flush()

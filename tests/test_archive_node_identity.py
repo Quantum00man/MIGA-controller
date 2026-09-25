@@ -79,6 +79,41 @@ def test_slave_layout_defaults_to_local_slave_and_can_resolve_replicated_master(
         assert master["data"][0]["atom_number_up"] == 22
 
 
+def test_slave_bragg_archive_recovers_mode_from_replicated_master_config():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "2026" / "09" / "23" / "run05"
+        _write_run(root, "slave", "slave-a", 21)
+        _write_run(root / "sync_nodes" / "master", "master", "MIGA22", 22)
+        slave_config = json.loads((root / "config.json").read_text(encoding="utf-8"))
+        slave_config["mode"] = "standard"
+        (root / "config.json").write_text(json.dumps(slave_config), encoding="utf-8")
+        master_config = json.loads((root / "sync_nodes" / "master" / "config.json").read_text(encoding="utf-8"))
+        master_config.update({
+            "mode": "bragg_fringe_calibration",
+            "_bragg_calibration_coarse_shots": 8,
+            "bragg_calibration_target_fringe": 1,
+        })
+        (root / "sync_nodes" / "master" / "config.json").write_text(
+            json.dumps(master_config), encoding="utf-8"
+        )
+        (root / "sync_manifest.json").write_text(json.dumps({
+            "runtime": {"sync_role": "master", "slaves": [{"node_id": "slave-a"}]},
+            "archive_nodes": {
+                "master": {"role": "master", "local": False, "path": "sync_nodes/master"},
+                "slave-a": {"role": "slave", "local": True, "path": "."},
+            },
+            "pairs": [],
+        }), encoding="utf-8")
+        loader = DataLoader()
+        loader.base_dir = Path(tmp)
+
+        loaded = loader.load_run("2026", "09", "23", "run05")
+
+        assert loaded["config"]["mode"] == "bragg_fringe_calibration"
+        assert loaded["config"]["_archive_mode_recovered_from_master"] is True
+        assert loaded["bragg_fringe_calibration"]["status"] == "reanalysis_failed"
+
+
 def test_legacy_sync_run_keeps_root_as_master():
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp) / "2026" / "09" / "23" / "run03"

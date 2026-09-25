@@ -1888,6 +1888,9 @@
                         <span class="badge" :class="braggFringeCalibration.status === 'passed' ? 'bg-success' : 'bg-danger'">{{ braggFringeCalibration.status || 'unknown' }}</span>
                     </div>
                     <div class="card-body">
+                        <div v-if="braggFringeCalibration.archive_reanalysis" class="alert alert-warning small py-2">
+                            {{ braggFringeCalibration.archive_reanalysis_message || 'The saved calibration result was missing, so Archive attempted to reconstruct it from the stored shots. This does not save or activate a calibration.' }}
+                        </div>
                         <div id="braggFringeCalibrationPlot" style="height:430px" class="mb-3"></div>
                         <div v-if="braggFringeCalibration.fine" class="row g-3 mb-3">
                             <div class="col-md-3"><div class="form-label-small">Coarse midpoint T²</div><div class="fw-bold font-monospace">{{ formatMetricValue(braggFringeCalibration.coarse?.selected_mid_fringe_t2_us2) }} µs²</div></div>

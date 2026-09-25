@@ -13,7 +13,10 @@ import numpy as np
 from app.analysis.allan_uncertainty import ONE_SIGMA_CONFIDENCE, chi_square_errors, white_noise_edf
 from scipy.optimize import differential_evolution
 
-from app.analysis import fitting, physics, interferometer_phase, phase_noise, interferometer_alpha
+from app.analysis import (
+    bragg_fringe_calibration, fitting, physics, interferometer_phase, phase_noise,
+    interferometer_alpha,
+)
 from app.analysis.transfer_function import build_transfer_function_summary
 from app.analysis.lock_in import build_lock_in_analysis
 import config
@@ -616,6 +619,39 @@ class DataLoader:
             return payload if isinstance(payload, dict) else None
         except (OSError, ValueError):
             return {"runtime": {"status": "invalid", "message": "Sync manifest could not be read"}, "pairs": []}
+
+    def _apply_sync_bragg_config_fallback(
+        self,
+        root_run_dir: Path,
+        config_data: Dict[str, Any],
+        sync_manifest: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Recover the scan mode/settings for legacy Slave archives.
+
+        Some replicated SYNC Slave runs retained ``mode=standard`` even though
+        the Master executed Bragg Fringes Calibration. The Master configuration
+        is authoritative for the shared scan type and Bragg plan parameters.
+        """
+        if not sync_manifest or str(config_data.get("mode") or "").strip().lower() == "bragg_fringe_calibration":
+            return config_data
+        master_entry = (sync_manifest.get("archive_nodes") or {}).get("master") or {}
+        relative = str(master_entry.get("path") or "").strip()
+        if not relative:
+            legacy_master = root_run_dir / "sync_nodes" / "master"
+            relative = "sync_nodes/master" if legacy_master.is_dir() else "."
+        master_dir = (root_run_dir / relative).resolve()
+        root = root_run_dir.resolve()
+        if master_dir != root and root not in master_dir.parents:
+            return config_data
+        master_config = self._load_config_data(master_dir)
+        if str(master_config.get("mode") or "").strip().lower() != "bragg_fringe_calibration":
+            return config_data
+        recovered = dict(config_data)
+        for key, value in master_config.items():
+            if key == "mode" or key.startswith("bragg_calibration_") or key.startswith("_bragg_calibration_"):
+                recovered[key] = deepcopy(value)
+        recovered["_archive_mode_recovered_from_master"] = True
+        return recovered
 
     def _read_archive_phase_reference_store(self, run_dir: Path) -> Dict[str, Any]:
         metadata_path = run_dir / "sync_phase_analysis.json"
@@ -1298,6 +1334,7 @@ class DataLoader:
             "intf_n2_nofit": self._parse_float(row.get("NF_Intf_N2")),
             "intf_p1_nofit": self._parse_float(row.get("NF_Intf_P1")),
             "intf_p2_nofit": self._parse_float(row.get("NF_Intf_P2")),
+            "bragg_calibration_stage": str(row.get("Bragg_Calibration_Stage") or "").strip().lower(),
             "interferometer_phase": self._parse_float(row.get("Interferometer_Phase_Rad")),
             "interferometer_phase_raw": self._parse_float(row.get("Interferometer_Phase_Raw_Rad")),
             "interferometer_phase_valid": str(row.get("Interferometer_Phase_Valid") or "").strip().lower() in {"1", "true", "yes"},
@@ -1761,6 +1798,70 @@ class DataLoader:
             "step_name": selected_step.get("marker_name") if selected_step else "",
         })
 
+    @staticmethod
+    def _reanalyze_archived_bragg_calibration(
+        points: List[Dict[str, Any]], config_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Rebuild a missing Bragg result from an archived shot sequence.
+
+        Current archives carry an explicit stage per row. Older archives are
+        recoverable because calibration execution always stores all coarse
+        science shots before the dynamically generated fine shots.
+        """
+        try:
+            staged = [dict(point) for point in points]
+            has_explicit_stages = any(
+                point.get("bragg_calibration_stage") in {"coarse", "fine"}
+                for point in staged
+            )
+            if not has_explicit_stages:
+                coarse_shots = int(config_data.get("_bragg_calibration_coarse_shots") or 0)
+                if coarse_shots <= 0:
+                    coarse_repeats = max(1, int(config_data.get("bragg_calibration_coarse_repeats") or 1))
+                    fine_points = max(5, int(config_data.get("bragg_calibration_fine_points") or 7))
+                    fine_repeats = max(1, int(config_data.get("bragg_calibration_fine_repeats") or 1))
+                    coarse_shots = len(staged) - fine_points * fine_repeats
+                    if coarse_shots <= 0 or coarse_shots % coarse_repeats:
+                        raise ValueError("The archived coarse/fine shot boundary cannot be determined")
+                if len(staged) <= coarse_shots:
+                    raise ValueError("The archive does not contain the completed fine scan")
+                for index, point in enumerate(staged):
+                    point["bragg_calibration_stage"] = "coarse" if index < coarse_shots else "fine"
+
+            coarse = bragg_fringe_calibration.coarse_fit(
+                staged, int(config_data.get("bragg_calibration_target_fringe") or 1)
+            )
+            fine = bragg_fringe_calibration.fine_fit(
+                staged,
+                coarse,
+                half_range_rad=float(config_data.get("bragg_calibration_fine_phase_half_range_rad") or 0.6),
+                minimum_contrast=float(config_data.get("bragg_calibration_min_contrast") or 0.0),
+                maximum_t2_uncertainty_us2=float(
+                    config_data.get("bragg_calibration_max_t2_uncertainty_us2") or 0.0
+                ),
+            )
+            return {
+                "version": 1,
+                "status": "passed" if fine.get("quality_passed") else "failed",
+                "target_fringe_number": int(config_data.get("bragg_calibration_target_fringe") or 1),
+                "coarse": coarse,
+                "fine": fine,
+                "saved_calibration": None,
+                "applied_active": False,
+                "archive_reanalysis": True,
+                "archive_reanalysis_message": (
+                    "Recovered from archived shots; no calibration was saved or activated."
+                ),
+            }
+        except Exception as exc:
+            return {
+                "version": 1,
+                "status": "reanalysis_failed",
+                "error": f"Archive Bragg calibration reanalysis failed: {exc}",
+                "target_fringe_number": int(config_data.get("bragg_calibration_target_fringe") or 1),
+                "archive_reanalysis": True,
+            }
+
     def load_run(
         self, year: str, month: str, day: str, run_id: str, node_id: Optional[str] = None,
         current_phase_calibration: Optional[Dict[str, Any]] = None,
@@ -1809,6 +1910,9 @@ class DataLoader:
                 point["power_meter_valid"] = False
                 point["power_meter_invalid_reason"] = "threshold_exceeded"
         sync_manifest = self._load_sync_manifest_payload(root_run_dir)
+        config_data = self._apply_sync_bragg_config_fallback(
+            root_run_dir, config_data, sync_manifest
+        )
         phase_node_key, phase_context, phase_contexts = self._archive_phase_reference_context(
             year, month, day, run_id, node_id, current_phase_calibration
         )
@@ -1892,24 +1996,45 @@ class DataLoader:
                 if isinstance(loaded_bragg_result, dict):
                     bragg_calibration_result = loaded_bragg_result
             except (OSError, ValueError):
-                bragg_calibration_result = {"status": "unreadable"}
+                bragg_calibration_result = None
+        if (
+            str(config_data.get("mode") or "").strip().lower() == "bragg_fringe_calibration"
+            and bragg_calibration_result is None
+        ):
+            bragg_calibration_result = self._reanalyze_archived_bragg_calibration(
+                science_points, config_data
+            )
         bragg_calibration_nodes: Dict[str, Any] = {}
         if isinstance(bragg_calibration_result, dict):
             bragg_calibration_nodes["master" if sync_manifest else "local"] = bragg_calibration_result
         if sync_manifest:
             for node_id, entry in (sync_manifest.get("archive_nodes") or {}).items():
-                if node_id == "master" or not isinstance(entry, dict):
+                if not isinstance(entry, dict):
                     continue
                 relative = str(entry.get("path") or "").strip()
-                node_path = (run_dir / relative / "bragg_fringe_calibration.json").resolve()
-                if run_dir.resolve() not in node_path.parents or not node_path.is_file():
+                node_dir = (root_run_dir / (relative or ".")).resolve()
+                root = root_run_dir.resolve()
+                if node_dir != root and root not in node_dir.parents:
                     continue
+                node_path = node_dir / "bragg_fringe_calibration.json"
                 try:
-                    node_result = json.loads(node_path.read_text(encoding="utf-8"))
-                    if isinstance(node_result, dict):
-                        bragg_calibration_nodes[str(node_id)] = node_result
+                    node_result = (
+                        json.loads(node_path.read_text(encoding="utf-8"))
+                        if node_path.is_file() else None
+                    )
                 except (OSError, ValueError):
-                    bragg_calibration_nodes[str(node_id)] = {"status": "unreadable"}
+                    node_result = None
+                node_config = self._apply_sync_bragg_config_fallback(
+                    root_run_dir, self._load_config_data(node_dir), sync_manifest
+                )
+                if (
+                    not isinstance(node_result, dict)
+                    and str(node_config.get("mode") or "").strip().lower() == "bragg_fringe_calibration"
+                ):
+                    node_points = self._science_points(self._read_results_csv(node_dir, max_points=None))
+                    node_result = self._reanalyze_archived_bragg_calibration(node_points, node_config)
+                if isinstance(node_result, dict):
+                    bragg_calibration_nodes[str(node_id)] = node_result
         return {
             "config": config_data,
             "run_entry": self._build_run_entry(root_run_dir),
