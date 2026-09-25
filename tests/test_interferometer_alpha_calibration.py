@@ -1,4 +1,7 @@
+import json
+import tempfile
 import unittest
+from pathlib import Path
 
 from app.analysis.interferometer_alpha import (
     alpha_from_probability_percent,
@@ -39,6 +42,39 @@ class InterferometerAlphaAnalysisTests(unittest.TestCase):
         before = interpolate_alpha(5.0, events)
         self.assertAlmostEqual(before["value"], 0.3)
         self.assertTrue(before["extrapolated"])
+
+    def test_archive_selection_changes_interpolated_alpha_without_mutating_events(self):
+        loader = DataLoader()
+        points = [{
+            "timestamp": 15.0, "atom_number_dw": 70.0, "atom_number_up": 30.0,
+            "atom_number_dw_nofit": 70.0, "atom_number_up_nofit": 30.0,
+        }]
+        events = [
+            {"accepted": True, "representative_time": 10.0, "intf_alpha": 0.2, "calibration_id": "a"},
+            {"accepted": False, "representative_time": 15.0, "intf_alpha": 0.9, "calibration_id": "outlier"},
+            {"accepted": True, "representative_time": 20.0, "intf_alpha": 0.6, "calibration_id": "b"},
+        ]
+        result = loader._apply_intf_alpha_history(
+            [dict(points[0])], events, {"_system_settings_snapshot": {}}, None
+        )
+        self.assertAlmostEqual(result[0]["intf_alpha_applied"], 0.4)
+        self.assertFalse(events[1]["accepted"])
+
+    def test_archive_analysis_copy_round_trip(self):
+        loader = DataLoader()
+        with tempfile.TemporaryDirectory() as root:
+            run_dir = Path(root)
+            saved = loader.save_intf_alpha_analysis_copy(run_dir, "exclude drift spike", ["b", "a", "a"])
+            copies = loader.load_intf_alpha_analysis_copies(run_dir)
+            self.assertEqual(copies, [saved])
+            self.assertEqual(saved["accepted_calibration_ids"], ["a", "b"])
+            self.assertEqual(saved["interpolation"], "linear")
+            self.assertEqual(json.loads((run_dir / "intf_alpha_analysis_copies.json").read_text()), copies)
+
+    def test_archive_analysis_copy_requires_name(self):
+        with tempfile.TemporaryDirectory() as root:
+            with self.assertRaisesRegex(ValueError, "name is required"):
+                DataLoader().save_intf_alpha_analysis_copy(Path(root), "  ", ["a"])
 
 
 class InterferometerAlphaPlanTests(unittest.TestCase):

@@ -220,6 +220,38 @@ class DataLoader:
         temporary.replace(path)
         return record
 
+    def _intf_alpha_analysis_copies_path(self, run_dir: Path) -> Path:
+        return run_dir / "intf_alpha_analysis_copies.json"
+
+    def load_intf_alpha_analysis_copies(self, run_dir: Path) -> List[Dict[str, Any]]:
+        path = self._intf_alpha_analysis_copies_path(run_dir)
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, OSError, ValueError):
+            return []
+        return payload if isinstance(payload, list) else []
+
+    def save_intf_alpha_analysis_copy(
+        self, run_dir: Path, name: str, accepted_ids: List[str]
+    ) -> Dict[str, Any]:
+        clean_name = str(name or "").strip()
+        if not clean_name:
+            raise ValueError("Analysis copy name is required")
+        record = {
+            "id": uuid.uuid4().hex,
+            "name": clean_name,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "interpolation": "linear",
+            "accepted_calibration_ids": sorted(set(str(value) for value in accepted_ids if value)),
+        }
+        copies = self.load_intf_alpha_analysis_copies(run_dir)
+        copies.append(record)
+        path = self._intf_alpha_analysis_copies_path(run_dir)
+        temporary = path.with_suffix(".json.tmp")
+        temporary.write_text(json.dumps(copies, ensure_ascii=False, indent=2), encoding="utf-8")
+        temporary.replace(path)
+        return record
+
     def load_sync_transfer_normalization(self, year: str, month: str, day: str, run_id: str) -> Dict[str, Any]:
         path = self._get_run_dir(year, month, day, run_id) / "sync_transfer_normalization.json"
         try: payload = json.loads(path.read_text(encoding="utf-8"))
@@ -1670,6 +1702,7 @@ class DataLoader:
         phase_noise_allan_orders: Optional[List[int]] = None,
         analysis_copy_id: Optional[str] = None,
         analysis_copy_override: Optional[Dict[str, Any]] = None,
+        intf_alpha_accepted_ids: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         root_run_dir = self._get_run_dir(year, month, day, run_id)
         run_dir, archive_node_identity = self._resolve_archive_node_identity(root_run_dir, node_id)
@@ -1692,6 +1725,12 @@ class DataLoader:
                 intf_alpha_calibrations = loaded_alpha if isinstance(loaded_alpha, list) else []
             except (OSError, ValueError):
                 intf_alpha_calibrations = []
+        if intf_alpha_accepted_ids is not None:
+            accepted_ids = {str(value) for value in intf_alpha_accepted_ids}
+            intf_alpha_calibrations = [
+                {**event, "accepted": str(event.get("calibration_id") or "") in accepted_ids}
+                for event in intf_alpha_calibrations
+            ]
         invalid_attempts = {
             (float(event.get("frequency_hz")), int(event.get("attempt", 1)))
             for event in power_monitor_events
@@ -1825,6 +1864,7 @@ class DataLoader:
             "bragg_fringe_calibration_nodes": bragg_calibration_nodes,
             "power_monitor_events": power_monitor_events,
             "intf_alpha_calibrations": intf_alpha_calibrations,
+            "intf_alpha_analysis_copies": self.load_intf_alpha_analysis_copies(run_dir),
             "preview_map": (
                 initial_step.get("preview_map", {})
                 if is_marker_optimization

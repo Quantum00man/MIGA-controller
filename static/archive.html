@@ -2546,6 +2546,15 @@
                         </div>
                         <div v-if="intfAlphaCalibrations.length" class="border-top">
                             <div class="px-3 pt-3 fw-bold">Interferometer I_alpha calibration</div><div id="archiveIntfAlphaPlot" style="height:320px"></div>
+                            <div class="px-3 pb-3">
+                                <div class="table-responsive"><table class="table table-sm align-middle mb-2"><thead><tr><th>Use</th><th>ID</th><th>I_alpha</th><th>SEM</th><th>Valid shots</th><th>Status</th></tr></thead><tbody><tr v-for="event in intfAlphaCalibrations" :key="event.calibration_id"><td><input class="form-check-input" type="checkbox" v-model="intfAlphaDraft[event.calibration_id]" :disabled="!Number.isFinite(Number(event.intf_alpha))"></td><td class="font-monospace small">{{ event.calibration_id }}</td><td>{{ Number.isFinite(Number(event.intf_alpha)) ? Number(event.intf_alpha).toFixed(7) : '—' }}</td><td>{{ Number.isFinite(Number(event.intf_alpha_sem)) ? Number(event.intf_alpha_sem).toExponential(2) : '—' }}</td><td>{{ event.valid_shots }}/{{ event.requested_shots }}</td><td>{{ intfAlphaDraft[event.calibration_id] ? 'included' : (event.rejection_reason || 'excluded') }}</td></tr></tbody></table></div>
+                                <div class="row g-2 align-items-end"><div class="col-md-4"><label class="form-label-small">INTERPOLATION</label><input class="form-control form-control-sm" value="Linear" disabled></div><div class="col-md-4"><label class="form-label-small">COPY NAME</label><input class="form-control form-control-sm" maxlength="120" v-model.trim="intfAlphaAnalysisName" placeholder="e.g. remove outlier block 3"></div><div class="col-md-4 d-flex gap-2"><button class="btn btn-primary btn-sm flex-fill" @click="previewIntfAlphaAnalysis" :disabled="intfAlphaAnalysisBusy">Preview</button><button class="btn btn-outline-secondary btn-sm" @click="restoreIntfAlphaSelection" :disabled="intfAlphaAnalysisBusy">Restore</button><button class="btn btn-success btn-sm flex-fill" @click="saveIntfAlphaAnalysis" :disabled="intfAlphaAnalysisBusy || !intfAlphaAnalysisName">Save copy</button></div></div>
+                                <div v-if="intfAlphaAnalysisMessage" class="alert small py-2 mt-2 mb-0" :class="intfAlphaAnalysisError ? 'alert-danger' : 'alert-success'">{{ intfAlphaAnalysisMessage }}</div>
+                                <div v-if="intfAlphaAnalysisCopies.length" class="row g-2 align-items-end mt-1">
+                                    <div class="col-md-8"><label class="form-label-small">SAVED ANALYSIS COPY</label><select class="form-select form-select-sm" v-model="intfAlphaSelectedCopyId"><option value="">Select a saved copy...</option><option v-for="copy in intfAlphaAnalysisCopies" :key="copy.id" :value="copy.id">{{ copy.name }} · {{ new Date(copy.created_at).toLocaleString() }}</option></select></div>
+                                    <div class="col-md-4"><button class="btn btn-outline-primary btn-sm w-100" @click="loadIntfAlphaAnalysisCopy" :disabled="intfAlphaAnalysisBusy || !intfAlphaSelectedCopyId">Load copy</button></div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -2756,6 +2765,7 @@
                     selectedAllanWindow: null,
                     loadedPoints: [], currentCalculatedPoints: [], originalSettings: {}, loadedConfig: {}, currentScanDimensions: 1,
                     intfAlphaCalibrations: [],
+                    intfAlphaOriginalCalibrations: [], intfAlphaDraft: {}, intfAlphaAnalysisCopies: [], intfAlphaSelectedCopyId: '', intfAlphaAnalysisName: '', intfAlphaAnalysisBusy: false, intfAlphaAnalysisMessage: '', intfAlphaAnalysisError: false,
                     archivePhaseCalibration: null, archivePhaseCalibrationProvenance: 'unavailable',
                     archivePhaseReferenceContexts: {}, archivePhaseReferenceNodeId: '', archivePhaseReferenceDraft: {},
                     archivePhaseReferenceBusy: false, archivePhaseReferenceMessage: '', archivePhaseReferenceError: false,
@@ -5744,6 +5754,12 @@
                         const snap = res.data.config?.['_system_settings_snapshot'] || {};
                         this.loadedConfig = res.data.config || {};
                         this.intfAlphaCalibrations = Array.isArray(res.data.intf_alpha_calibrations) ? res.data.intf_alpha_calibrations : [];
+                        this.intfAlphaOriginalCalibrations = this.intfAlphaCalibrations.map(item => ({ ...item }));
+                        this.intfAlphaDraft = Object.fromEntries(this.intfAlphaCalibrations.map(item => [item.calibration_id, item.accepted === true]));
+                        this.intfAlphaAnalysisCopies = Array.isArray(res.data.intf_alpha_analysis_copies) ? res.data.intf_alpha_analysis_copies : [];
+                        this.intfAlphaSelectedCopyId = '';
+                        this.intfAlphaAnalysisMessage = '';
+                        this.intfAlphaAnalysisError = false;
                         this.archivePhaseCalibration = res.data.interferometer_phase_calibration || null;
                         this.archivePhaseCalibrationProvenance = String(res.data.interferometer_phase_calibration_provenance || 'unavailable');
                         this.archivePhaseReferenceContexts = res.data.archive_phase_reference_contexts && typeof res.data.archive_phase_reference_contexts === 'object'
@@ -10081,6 +10097,63 @@
                         legend: { orientation: 'h', x: 1, xanchor: 'right', y: 1.12 }, paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)'
                     }, { responsive: true, displaylogo: false });
                 },
+                acceptedIntfAlphaCalibrationIds() {
+                    return (this.intfAlphaCalibrations || [])
+                        .filter(event => this.intfAlphaDraft[event.calibration_id] === true && Number.isFinite(Number(event.intf_alpha)))
+                        .map(event => String(event.calibration_id));
+                },
+                async restoreIntfAlphaSelection() {
+                    this.intfAlphaCalibrations = this.intfAlphaOriginalCalibrations.map(item => ({ ...item }));
+                    this.intfAlphaDraft = Object.fromEntries(this.intfAlphaOriginalCalibrations.map(item => [item.calibration_id, item.accepted === true]));
+                    await this.runIntfAlphaAnalysis(false, 'Original calibration-point selection restored and recalculated.');
+                },
+                async loadIntfAlphaAnalysisCopy() {
+                    const copy = (this.intfAlphaAnalysisCopies || []).find(item => item.id === this.intfAlphaSelectedCopyId);
+                    if (!copy) return;
+                    const accepted = new Set((copy.accepted_calibration_ids || []).map(String));
+                    this.intfAlphaDraft = Object.fromEntries((this.intfAlphaCalibrations || []).map(item => [item.calibration_id, accepted.has(String(item.calibration_id))]));
+                    await this.runIntfAlphaAnalysis(false, `Loaded analysis copy: ${copy.name}`);
+                },
+                async runIntfAlphaAnalysis(save = false, successMessage = '') {
+                    if (!this.selectedRun) return;
+                    const accepted = this.acceptedIntfAlphaCalibrationIds();
+                    if (!accepted.length) {
+                        this.intfAlphaAnalysisError = true;
+                        this.intfAlphaAnalysisMessage = 'Select at least one valid calibration point.';
+                        return;
+                    }
+                    this.intfAlphaAnalysisBusy = true;
+                    this.intfAlphaAnalysisMessage = '';
+                    try {
+                        const res = await axios.post('/archive/intf-alpha/reanalyze', {
+                            year: this.selectedYear, month: this.selectedMonth, day: this.selectedDay, run_id: this.selectedRun,
+                            node_id: this.loadedSyncNode || null,
+                            accepted_calibration_ids: accepted,
+                            name: save ? this.intfAlphaAnalysisName : '', save,
+                        });
+                        const data = res.data || {};
+                        this.intfAlphaCalibrations = Array.isArray(data.intf_alpha_calibrations) ? data.intf_alpha_calibrations : this.intfAlphaCalibrations;
+                        this.intfAlphaAnalysisCopies = Array.isArray(data.intf_alpha_analysis_copies) ? data.intf_alpha_analysis_copies : this.intfAlphaAnalysisCopies;
+                        this.loadedPoints = Array.isArray(data.data) ? data.data : this.loadedPoints;
+                        this.currentCalculatedPoints = this.loadedPoints;
+                        this.recalculatedStats = this.normalizeStatsRows(data.stats || []);
+                        this.recalculatedTransferFunctionSummary = Array.isArray(data.transfer_function_summary) ? data.transfer_function_summary : [];
+                        this.transferFunctionSummary = this.recalculatedTransferFunctionSummary;
+                        this.recalculatedPreviewMap = data.preview_map && typeof data.preview_map === 'object' ? data.preview_map : {};
+                        this.displayMode = 'recalculated';
+                        await this.applyDisplayedPoints(this.loadedPoints, this.recalculatedStats, this.recalculatedPreviewMap, true);
+                        this.intfAlphaAnalysisError = false;
+                        this.intfAlphaAnalysisMessage = successMessage || (save ? 'Analysis copy saved; original raw data were not changed.' : 'Linear I_alpha interpolation preview applied.');
+                        this.$nextTick(() => this.renderArchiveIntfAlphaPlot());
+                    } catch (error) {
+                        this.intfAlphaAnalysisError = true;
+                        this.intfAlphaAnalysisMessage = error.response?.data?.detail || error.message || 'I_alpha re-analysis failed.';
+                    } finally {
+                        this.intfAlphaAnalysisBusy = false;
+                    }
+                },
+                previewIntfAlphaAnalysis() { return this.runIntfAlphaAnalysis(false); },
+                saveIntfAlphaAnalysis() { return this.runIntfAlphaAnalysis(true); },
             }
         }).mount('#app');
     </script>

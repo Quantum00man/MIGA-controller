@@ -1021,6 +1021,17 @@ class ArchiveSyncAnalysisCopySaveRequest(BaseModel):
     transfer_normalization_result: Optional[Dict[str, Any]] = None
 
 
+class ArchiveIntfAlphaReanalysisRequest(BaseModel):
+    year: str
+    month: str
+    day: str
+    run_id: str
+    node_id: Optional[str] = None
+    accepted_calibration_ids: List[str] = Field(default_factory=list)
+    name: str = Field("", max_length=120)
+    save: bool = Field(False)
+
+
 class ArchiveLabPlotExportRequest(BaseModel):
     year: str
     month: str

@@ -599,6 +599,16 @@ Slave nodes acquire, archive and interpolate independent calibration histories. 
 Archive page preserves the raw calibration points, uncertainties, validity decisions and
 the piecewise-linear history used for final analysis.
 
+After a run, the Archive calibration panel also supports non-destructive re-analysis.  The
+operator may include or exclude individual calibration blocks and press \ui{Preview}; the
+controller then rebuilds the linear $I_\alpha(t)$ history and recalculates the displayed
+science probabilities, interferometer phases and Transfer Function summary.  \ui{Restore}
+returns to the acceptance decisions recorded during acquisition.  A named analysis copy
+stores only the selected calibration IDs and can be loaded again later.  Neither preview nor
+copy creation modifies \pathcode{results.csv}, waveforms, or the original
+\pathcode{intf_alpha_calibrations.json}.  In a SYNC archive these selections and copies belong
+to the currently selected Master or Slave node.
+
 \section{Arrival time and temperature}
 For launch velocity $v_0$, target height $z$ and gravitational acceleration $g$,
 \begin{equation}
@@ -1350,6 +1360,15 @@ fit windows, runs the selected fit model and recomputes physics metrics. The dis
 switch between saved and recalculated results. \ui{Overwrite} updates calculated archive
 products only when the user explicitly requests it; raw NPZ waveforms remain the primary
 evidence.
+
+For runs containing time-resolved interferometer-labelling calibrations, the
+\ui{Interferometer $I_\alpha$ calibration} panel provides a more targeted re-analysis.  Each
+row shows the block ID, value, standard error and valid-shot count.  Clear a block's
+\ui{Use} checkbox to reject an outlier, or select a previously rejected finite block, then
+press \ui{Preview}.  The resulting curve always uses linear interpolation in physical time
+and nearest-endpoint extrapolation.  \ui{Save copy} records the selection under a user name;
+the saved-copy selector reapplies it later.  Copies are node-local for synchronized runs and
+are analysis metadata rather than replacements for the acquired calibration record.
 
 \section{Scan fitting}
 Aggregate curves can be fitted over a selected $x$ range. Built-in scan models are Gaussian,

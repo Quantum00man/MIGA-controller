@@ -98,6 +98,7 @@ from app.models.schemas import (
     ArchiveSyncDifferentialFitRequest,
     ArchiveSyncPhaseCalibrationApplyRequest,
     ArchiveSyncAnalysisCopySaveRequest,
+    ArchiveIntfAlphaReanalysisRequest,
     ArchiveSyncTransferNormalizationRequest,
     ArchiveSyncPhaseCalibrationOptimizeRequest,
     ArchiveSyncPhaseCalibrationSaveRequest,
@@ -2231,6 +2232,33 @@ async def recalculate_archived_run(req: ReAnalysisRequest):
             node_id=req.node_id,
             phase_noise_allan_orders=req.phase_noise_allan_orders,
         )
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@router.post("/archive/intf-alpha/reanalyze")
+async def reanalyze_archive_intf_alpha(req: ArchiveIntfAlphaReanalysisRequest):
+    try:
+        root = data_loader._get_run_dir(req.year, req.month, req.day, req.run_id)
+        run_dir = data_loader._resolve_archive_node_dir(root, req.node_id or None)
+        result = data_loader.load_run(
+            req.year, req.month, req.day, req.run_id,
+            node_id=req.node_id or None,
+            current_phase_calibration=manager.get_active_bragg_phase_calibration(),
+            intf_alpha_accepted_ids=req.accepted_calibration_ids,
+        )
+        saved = None
+        if req.save:
+            saved = data_loader.save_intf_alpha_analysis_copy(
+                run_dir, req.name, req.accepted_calibration_ids
+            )
+            result["intf_alpha_analysis_copies"] = data_loader.load_intf_alpha_analysis_copies(run_dir)
+        result["saved_intf_alpha_analysis_copy"] = saved
+        return result
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc))
     except ValueError as exc:
