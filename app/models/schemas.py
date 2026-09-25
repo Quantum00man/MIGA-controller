@@ -579,6 +579,8 @@ class SystemSettings(BaseModel):
     intf_alpha: float = 0.35
     intf_beta: float = 0.07636
     intf_gamma: float = 0.25
+    intf_alpha_calibration_accepted_min: float = Field(0.0, ge=0.0, le=1.0)
+    intf_alpha_calibration_accepted_max: float = Field(1.0, ge=0.0, le=1.0)
     intf_alpha_calibration_sequence_name: str = Field("")
     intf_alpha_calibration_sequence_content_base64: str = Field("")
     atom_area_method: str = Field("legacy")
@@ -620,6 +622,13 @@ class SystemSettings(BaseModel):
     )
     std_p_interferometer: float = Field(1.1, ge=0)
     laser_frequency_phase_noise_mrad: float = Field(100.0, ge=0)
+
+    @validator("intf_alpha_calibration_accepted_max")
+    def validate_intf_alpha_calibration_range(cls, value, values):
+        minimum = float(values.get("intf_alpha_calibration_accepted_min", 0.0))
+        if float(value) <= minimum:
+            raise ValueError("I_alpha calibration accepted maximum must be greater than minimum")
+        return value
 
     @validator("tti_host")
     def normalize_tti_host(cls, value):

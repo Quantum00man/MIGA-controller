@@ -54,7 +54,11 @@ def interpolate_alpha(timestamp: Any, events: Iterable[Dict[str, Any]]) -> Optio
     return None
 
 
-def summarize_block(probabilities: Iterable[Any], timestamps: Iterable[Any], gamma: Any, calibration_id: str, requested_shots: int) -> Dict[str, Any]:
+def summarize_block(
+    probabilities: Iterable[Any], timestamps: Iterable[Any], gamma: Any,
+    calibration_id: str, requested_shots: int,
+    accepted_min: Any = 0.0, accepted_max: Any = 1.0,
+) -> Dict[str, Any]:
     values = np.asarray([float(value) for value in probabilities if value is not None and math.isfinite(float(value))], dtype=float)
     times = np.asarray([float(value) for value in timestamps if value is not None and math.isfinite(float(value))], dtype=float)
     event: Dict[str, Any] = {
@@ -72,10 +76,17 @@ def summarize_block(probabilities: Iterable[Any], timestamps: Iterable[Any], gam
         "transition_probability_up_std_percent": std,
         "transition_probability_up_sem_percent": float(std / math.sqrt(values.size)),
         "intf_gamma": float(gamma),
+        "accepted_min": float(accepted_min),
+        "accepted_max": float(accepted_max),
     })
     try:
         event["intf_alpha"] = alpha_from_probability_percent(mean, gamma)
         event["intf_alpha_sem"] = float((std / math.sqrt(values.size)) / 100.0 / (1.0 - float(gamma)))
+        if not float(accepted_min) <= event["intf_alpha"] <= float(accepted_max):
+            raise ValueError(
+                f"calibrated I_alpha {event['intf_alpha']:.6g} is outside accepted range "
+                f"[{float(accepted_min):.6g}, {float(accepted_max):.6g}]"
+            )
         event["accepted"] = True
         event["rejection_reason"] = ""
     except (TypeError, ValueError) as exc:

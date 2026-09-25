@@ -1117,6 +1117,17 @@
                                             Used for calculating N1, N2, and P_N1. Formula: N1 = [β*n_f1 - (1-β+γ)*n_f2] / [(β-α)*(1+γ)]
                                         </div>
                                     </div>
+                                    <div class="col-md-6 mt-2">
+                                        <label class="form-label small fw-bold text-muted">Accepted I_alpha minimum</label>
+                                        <input type="number" class="form-control form-control-sm font-monospace" v-model.number="s.intf_alpha_calibration_accepted_min" min="0" max="1" step="0.001">
+                                    </div>
+                                    <div class="col-md-6 mt-2">
+                                        <label class="form-label small fw-bold text-muted">Accepted I_alpha maximum</label>
+                                        <input type="number" class="form-control form-control-sm font-monospace" v-model.number="s.intf_alpha_calibration_accepted_max" min="0" max="1" step="0.001">
+                                    </div>
+                                    <div class="col-12">
+                                        <div class="form-text">Calibration blocks outside this inclusive range are archived as rejected and do not update the online I_alpha.</div>
+                                    </div>
                                     <div class="col-12 mt-2 pt-2 border-top">
                                         <label class="form-label small fw-bold text-muted">Local I_alpha Calibration MOT</label>
                                         <input type="file" class="form-control form-control-sm" accept=".mot" @change="selectIntfAlphaCalibrationMot">
@@ -3377,6 +3388,10 @@
                     normalized.atom_area_method = normalized.atom_area_method === 'edge_line' ? 'edge_line' : 'legacy';
                     const baselinePoints = Number.parseInt(normalized.atom_area_baseline_points ?? 2, 10);
                     normalized.atom_area_baseline_points = Number.isFinite(baselinePoints) && baselinePoints > 0 ? baselinePoints : 2;
+                    const alphaAcceptedMin = Number(normalized.intf_alpha_calibration_accepted_min);
+                    const alphaAcceptedMax = Number(normalized.intf_alpha_calibration_accepted_max);
+                    normalized.intf_alpha_calibration_accepted_min = Number.isFinite(alphaAcceptedMin) ? alphaAcceptedMin : 0;
+                    normalized.intf_alpha_calibration_accepted_max = Number.isFinite(alphaAcceptedMax) ? alphaAcceptedMax : 1;
                     normalized.intf_alpha_calibration_sequence_name = String(normalized.intf_alpha_calibration_sequence_name || '');
                     normalized.intf_alpha_calibration_sequence_content_base64 = String(normalized.intf_alpha_calibration_sequence_content_base64 || '');
                     normalized.fit_models = this.normalizeFitModels(normalized.fit_models);

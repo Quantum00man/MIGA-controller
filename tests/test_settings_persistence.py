@@ -18,11 +18,15 @@ class AtomicSettingsPersistenceTests(unittest.TestCase):
         }).model_dump()
         payload["intf_alpha_calibration_sequence_name"] = "local-alpha.mot"
         payload["intf_alpha_calibration_sequence_content_base64"] = "YWxwaGE="
+        payload["intf_alpha_calibration_accepted_min"] = 0.25
+        payload["intf_alpha_calibration_accepted_max"] = 0.65
 
         validated = SystemSettings(**payload).model_dump()
 
         self.assertEqual(validated["intf_alpha_calibration_sequence_name"], "local-alpha.mot")
         self.assertEqual(validated["intf_alpha_calibration_sequence_content_base64"], "YWxwaGE=")
+        self.assertEqual(validated["intf_alpha_calibration_accepted_min"], 0.25)
+        self.assertEqual(validated["intf_alpha_calibration_accepted_max"], 0.65)
 
     def test_system_settings_replace_a_read_only_existing_file(self):
         with tempfile.TemporaryDirectory() as tmp:

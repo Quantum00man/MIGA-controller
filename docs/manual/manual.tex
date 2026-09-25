@@ -574,6 +574,14 @@ the block size and time interval exposed in the run configuration.  Its represen
 time is the mean timestamp of its valid shots; the archived uncertainty is the standard
 error propagated through the equation above.
 
+The physically allowed interval remains $[0,1]$, while a narrower operational acceptance
+range is configurable under \ui{Settings $\rightarrow$ Interferometer Parameters} using
+\ui{Accepted $I_\alpha$ minimum} and \ui{maximum}.  Both endpoints are inclusive and the
+maximum must be greater than the minimum.  A finite calibration result outside this range
+is archived with its value and an explicit rejection reason, but it does not replace the
+online $I_\alpha$.  These limits are controller-local, so Master and Slave may use ranges
+appropriate to their own labelling efficiencies.
+
 The calibration MOT is a controller-local resource configured under
 \ui{Settings $\rightarrow$ Interferometer Parameters}.  SYNC distributes the enable flag,
 interval and block size, but never distributes this MOT payload.  Master and each Slave

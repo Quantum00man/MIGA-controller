@@ -651,6 +651,8 @@ class ExperimentManager:
             "intf_alpha": 0.35,
             "intf_beta": 0.07636,
             "intf_gamma": 0.25,
+            "intf_alpha_calibration_accepted_min": 0.0,
+            "intf_alpha_calibration_accepted_max": 1.0,
             "intf_alpha_calibration_sequence_name": "",
             "intf_alpha_calibration_sequence_content_base64": "",
             # ----------------------------------------
@@ -3874,6 +3876,8 @@ class ExperimentManager:
                             block["probabilities"], block["timestamps"],
                             self.settings.get("intf_gamma", 0.25),
                             f"alpha-{block_id:04d}", int(metadata.get("intf_alpha_calibration_shots", 10)),
+                            self.settings.get("intf_alpha_calibration_accepted_min", 0.0),
+                            self.settings.get("intf_alpha_calibration_accepted_max", 1.0),
                         )
                         event.update({
                             "block_id": block_id,

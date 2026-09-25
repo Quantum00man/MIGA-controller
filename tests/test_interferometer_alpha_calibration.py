@@ -31,6 +31,17 @@ class InterferometerAlphaAnalysisTests(unittest.TestCase):
         self.assertAlmostEqual(event["intf_alpha"], 0.4)
         self.assertGreater(event["intf_alpha_sem"], 0)
 
+    def test_block_outside_configured_alpha_range_is_rejected(self):
+        event = summarize_block(
+            [29.0, 30.0, 31.0], [10.0, 11.0, 12.0], 0.25,
+            "alpha-0001", 3, 0.45, 0.55,
+        )
+        self.assertFalse(event["accepted"])
+        self.assertAlmostEqual(event["intf_alpha"], 0.4)
+        self.assertIn("outside accepted range [0.45, 0.55]", event["rejection_reason"])
+        self.assertEqual(event["accepted_min"], 0.45)
+        self.assertEqual(event["accepted_max"], 0.55)
+
     def test_linear_interpolation_and_edge_extrapolation(self):
         events = [
             {"accepted": True, "representative_time": 10.0, "intf_alpha": 0.3, "calibration_id": "a"},
