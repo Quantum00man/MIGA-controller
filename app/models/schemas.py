@@ -1038,6 +1038,8 @@ class ArchiveIntfAlphaReanalysisRequest(BaseModel):
     node_id: Optional[str] = None
     accepted_calibration_ids: List[str] = Field(default_factory=list)
     interpolation_method: str = Field("weighted_smoothing_spline")
+    accepted_min: float = Field(0.0, ge=0.0, le=1.0)
+    accepted_max: float = Field(1.0, ge=0.0, le=1.0)
     name: str = Field("", max_length=120)
     save: bool = Field(False)
 
@@ -1047,6 +1049,12 @@ class ArchiveIntfAlphaReanalysisRequest(BaseModel):
         if normalized not in {"linear", "weighted_smoothing_spline", "nearest"}:
             raise ValueError("Unsupported I_alpha interpolation method")
         return normalized
+
+    @validator("accepted_max")
+    def validate_archive_accepted_range(cls, value, values):
+        if float(value) <= float(values.get("accepted_min", 0.0)):
+            raise ValueError("Archive I_alpha accepted maximum must be greater than minimum")
+        return value
 
 
 class ArchiveLabPlotExportRequest(BaseModel):

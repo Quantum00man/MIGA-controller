@@ -2548,6 +2548,8 @@
                             <div class="px-3 pt-3 fw-bold">Interferometer I_alpha calibration</div><div id="archiveIntfAlphaPlot" style="height:320px"></div>
                             <div class="px-3 pb-3">
                                 <div class="table-responsive"><table class="table table-sm align-middle mb-2"><thead><tr><th>Use</th><th>ID</th><th>I_alpha</th><th>SEM</th><th>Valid shots</th><th>Status</th></tr></thead><tbody><tr v-for="event in intfAlphaCalibrations" :key="event.calibration_id"><td><input class="form-check-input" type="checkbox" v-model="intfAlphaDraft[event.calibration_id]" :disabled="!Number.isFinite(Number(event.intf_alpha))"></td><td class="font-monospace small">{{ event.calibration_id }}</td><td>{{ Number.isFinite(Number(event.intf_alpha)) ? Number(event.intf_alpha).toFixed(7) : '—' }}</td><td>{{ Number.isFinite(Number(event.intf_alpha_sem)) ? Number(event.intf_alpha_sem).toExponential(2) : '—' }}</td><td>{{ event.valid_shots }}/{{ event.requested_shots }}</td><td>{{ intfAlphaDraft[event.calibration_id] ? 'included' : (event.rejection_reason || 'excluded') }}</td></tr></tbody></table></div>
+                                <div class="row g-2 align-items-end mb-2"><div class="col-md-4"><label class="form-label-small">ARCHIVE ACCEPTED MIN</label><input type="number" class="form-control form-control-sm" min="0" max="1" step="0.001" v-model.number="intfAlphaAcceptedMin"></div><div class="col-md-4"><label class="form-label-small">ARCHIVE ACCEPTED MAX</label><input type="number" class="form-control form-control-sm" min="0" max="1" step="0.001" v-model.number="intfAlphaAcceptedMax"></div><div class="col-md-4"><button class="btn btn-outline-primary btn-sm w-100" @click="applyIntfAlphaAcceptedRange" :disabled="intfAlphaAnalysisBusy">Apply range &amp; preview</button></div></div>
+                                <div class="form-text mb-2">This range is only for Archive re-analysis. It can replace the original 0–1 decision for an old run without modifying its raw calibration record.</div>
                                 <div class="row g-2 align-items-end"><div class="col-md-4"><label class="form-label-small">INTERPOLATION</label><select class="form-select form-select-sm" v-model="intfAlphaInterpolationMethod"><option value="weighted_smoothing_spline">Weighted smoothing spline (recommended)</option><option value="linear">Linear</option><option value="nearest">Nearest / constant</option></select></div><div class="col-md-4"><label class="form-label-small">COPY NAME</label><input class="form-control form-control-sm" maxlength="120" v-model.trim="intfAlphaAnalysisName" placeholder="e.g. remove outlier block 3"></div><div class="col-md-4 d-flex gap-2"><button class="btn btn-primary btn-sm flex-fill" @click="previewIntfAlphaAnalysis" :disabled="intfAlphaAnalysisBusy">Preview</button><button class="btn btn-outline-secondary btn-sm" @click="restoreIntfAlphaSelection" :disabled="intfAlphaAnalysisBusy">Restore</button><button class="btn btn-success btn-sm flex-fill" @click="saveIntfAlphaAnalysis" :disabled="intfAlphaAnalysisBusy || !intfAlphaAnalysisName">Save copy</button></div></div>
                                 <div class="form-text mt-1">Spline weights use 1/SEM and stay constant outside the first/last accepted point. With fewer than four accepted points it falls back to linear.</div>
                                 <div v-if="intfAlphaAnalysisMessage" class="alert small py-2 mt-2 mb-0" :class="intfAlphaAnalysisError ? 'alert-danger' : 'alert-success'">{{ intfAlphaAnalysisMessage }}</div>
@@ -2766,7 +2768,7 @@
                     selectedAllanWindow: null,
                     loadedPoints: [], currentCalculatedPoints: [], originalSettings: {}, loadedConfig: {}, currentScanDimensions: 1,
                     intfAlphaCalibrations: [],
-                    intfAlphaOriginalCalibrations: [], intfAlphaDraft: {}, intfAlphaAnalysisCopies: [], intfAlphaSelectedCopyId: '', intfAlphaInterpolationMethod: 'weighted_smoothing_spline', intfAlphaInterpolationCurve: null, intfAlphaAnalysisName: '', intfAlphaAnalysisBusy: false, intfAlphaAnalysisMessage: '', intfAlphaAnalysisError: false,
+                    intfAlphaOriginalCalibrations: [], intfAlphaDraft: {}, intfAlphaAnalysisCopies: [], intfAlphaSelectedCopyId: '', intfAlphaAcceptedMin: 0, intfAlphaAcceptedMax: 1, intfAlphaInterpolationMethod: 'weighted_smoothing_spline', intfAlphaInterpolationCurve: null, intfAlphaAnalysisName: '', intfAlphaAnalysisBusy: false, intfAlphaAnalysisMessage: '', intfAlphaAnalysisError: false,
                     archivePhaseCalibration: null, archivePhaseCalibrationProvenance: 'unavailable',
                     archivePhaseReferenceContexts: {}, archivePhaseReferenceNodeId: '', archivePhaseReferenceDraft: {},
                     archivePhaseReferenceBusy: false, archivePhaseReferenceMessage: '', archivePhaseReferenceError: false,
@@ -5759,6 +5761,8 @@
                         this.intfAlphaDraft = Object.fromEntries(this.intfAlphaCalibrations.map(item => [item.calibration_id, item.accepted === true]));
                         this.intfAlphaAnalysisCopies = Array.isArray(res.data.intf_alpha_analysis_copies) ? res.data.intf_alpha_analysis_copies : [];
                         this.intfAlphaInterpolationCurve = res.data.intf_alpha_interpolation_curve || null;
+                        this.intfAlphaAcceptedMin = Number.isFinite(Number(snap.intf_alpha_calibration_accepted_min)) ? Number(snap.intf_alpha_calibration_accepted_min) : 0;
+                        this.intfAlphaAcceptedMax = Number.isFinite(Number(snap.intf_alpha_calibration_accepted_max)) ? Number(snap.intf_alpha_calibration_accepted_max) : 1;
                         this.intfAlphaSelectedCopyId = '';
                         this.intfAlphaAnalysisMessage = '';
                         this.intfAlphaAnalysisError = false;
@@ -10111,16 +10115,39 @@
                     this.intfAlphaDraft = Object.fromEntries(this.intfAlphaOriginalCalibrations.map(item => [item.calibration_id, item.accepted === true]));
                     await this.runIntfAlphaAnalysis(false, 'Original calibration-point selection restored and recalculated.');
                 },
+                async applyIntfAlphaAcceptedRange() {
+                    const minimum = Number(this.intfAlphaAcceptedMin);
+                    const maximum = Number(this.intfAlphaAcceptedMax);
+                    if (!Number.isFinite(minimum) || !Number.isFinite(maximum) || minimum < 0 || maximum > 1 || minimum >= maximum) {
+                        this.intfAlphaAnalysisError = true;
+                        this.intfAlphaAnalysisMessage = 'Archive accepted range must satisfy 0 ≤ minimum < maximum ≤ 1.';
+                        return;
+                    }
+                    this.intfAlphaDraft = Object.fromEntries((this.intfAlphaCalibrations || []).map(event => {
+                        const alpha = Number(event.intf_alpha);
+                        return [event.calibration_id, Number.isFinite(alpha) && alpha >= minimum && alpha <= maximum];
+                    }));
+                    await this.runIntfAlphaAnalysis(false, `Applied Archive range [${minimum}, ${maximum}] and recalculated.`);
+                },
                 async loadIntfAlphaAnalysisCopy() {
                     const copy = (this.intfAlphaAnalysisCopies || []).find(item => item.id === this.intfAlphaSelectedCopyId);
                     if (!copy) return;
                     const accepted = new Set((copy.accepted_calibration_ids || []).map(String));
                     this.intfAlphaInterpolationMethod = copy.interpolation || 'linear';
+                    this.intfAlphaAcceptedMin = Number.isFinite(Number(copy.accepted_min)) ? Number(copy.accepted_min) : 0;
+                    this.intfAlphaAcceptedMax = Number.isFinite(Number(copy.accepted_max)) ? Number(copy.accepted_max) : 1;
                     this.intfAlphaDraft = Object.fromEntries((this.intfAlphaCalibrations || []).map(item => [item.calibration_id, accepted.has(String(item.calibration_id))]));
                     await this.runIntfAlphaAnalysis(false, `Loaded analysis copy: ${copy.name}`);
                 },
                 async runIntfAlphaAnalysis(save = false, successMessage = '') {
                     if (!this.selectedRun) return;
+                    const minimum = Number(this.intfAlphaAcceptedMin);
+                    const maximum = Number(this.intfAlphaAcceptedMax);
+                    if (!Number.isFinite(minimum) || !Number.isFinite(maximum) || minimum < 0 || maximum > 1 || minimum >= maximum) {
+                        this.intfAlphaAnalysisError = true;
+                        this.intfAlphaAnalysisMessage = 'Archive accepted range must satisfy 0 ≤ minimum < maximum ≤ 1.';
+                        return;
+                    }
                     const accepted = this.acceptedIntfAlphaCalibrationIds();
                     if (!accepted.length) {
                         this.intfAlphaAnalysisError = true;
@@ -10135,6 +10162,8 @@
                             node_id: this.loadedSyncNode || null,
                             accepted_calibration_ids: accepted,
                             interpolation_method: this.intfAlphaInterpolationMethod,
+                            accepted_min: this.intfAlphaAcceptedMin,
+                            accepted_max: this.intfAlphaAcceptedMax,
                             name: save ? this.intfAlphaAnalysisName : '', save,
                         });
                         const data = res.data || {};

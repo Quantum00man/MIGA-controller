@@ -103,12 +103,15 @@ class InterferometerAlphaAnalysisTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             run_dir = Path(root)
             saved = loader.save_intf_alpha_analysis_copy(
-                run_dir, "exclude drift spike", ["b", "a", "a"], "weighted_smoothing_spline"
+                run_dir, "exclude drift spike", ["b", "a", "a"],
+                "weighted_smoothing_spline", 0.32, 0.58,
             )
             copies = loader.load_intf_alpha_analysis_copies(run_dir)
             self.assertEqual(copies, [saved])
             self.assertEqual(saved["accepted_calibration_ids"], ["a", "b"])
             self.assertEqual(saved["interpolation"], "weighted_smoothing_spline")
+            self.assertEqual(saved["accepted_min"], 0.32)
+            self.assertEqual(saved["accepted_max"], 0.58)
             self.assertEqual(json.loads((run_dir / "intf_alpha_analysis_copies.json").read_text()), copies)
 
     def test_archive_analysis_copy_requires_name(self):

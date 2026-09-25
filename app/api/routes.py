@@ -2255,7 +2255,8 @@ async def reanalyze_archive_intf_alpha(req: ArchiveIntfAlphaReanalysisRequest):
         saved = None
         if req.save:
             saved = data_loader.save_intf_alpha_analysis_copy(
-                run_dir, req.name, req.accepted_calibration_ids, req.interpolation_method
+                run_dir, req.name, req.accepted_calibration_ids, req.interpolation_method,
+                req.accepted_min, req.accepted_max,
             )
             result["intf_alpha_analysis_copies"] = data_loader.load_intf_alpha_analysis_copies(run_dir)
         result["saved_intf_alpha_analysis_copy"] = saved

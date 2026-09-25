@@ -256,7 +256,8 @@ class DataLoader:
         return payload if isinstance(payload, list) else []
 
     def save_intf_alpha_analysis_copy(
-        self, run_dir: Path, name: str, accepted_ids: List[str], interpolation_method: str = "linear"
+        self, run_dir: Path, name: str, accepted_ids: List[str], interpolation_method: str = "linear",
+        accepted_min: float = 0.0, accepted_max: float = 1.0,
     ) -> Dict[str, Any]:
         clean_name = str(name or "").strip()
         if not clean_name:
@@ -266,6 +267,8 @@ class DataLoader:
             "name": clean_name,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "interpolation": interpolation_method,
+            "accepted_min": float(accepted_min),
+            "accepted_max": float(accepted_max),
             "accepted_calibration_ids": sorted(set(str(value) for value in accepted_ids if value)),
         }
         copies = self.load_intf_alpha_analysis_copies(run_dir)

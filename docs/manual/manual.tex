@@ -1373,13 +1373,16 @@ For runs containing time-resolved interferometer-labelling calibrations, the
 \ui{Interferometer $I_\alpha$ calibration} panel provides a more targeted re-analysis.  Each
 row shows the block ID, value, standard error and valid-shot count.  Clear a block's
 \ui{Use} checkbox to reject an outlier, or select a previously rejected finite block, then
-press \ui{Preview}.  The interpolation selector offers linear interpolation, nearest-point
+press \ui{Preview}.  For an older run, \ui{Archive accepted minimum/maximum} and
+\ui{Apply range \& preview} rebuild the selection from any narrower interval in $[0,1]$;
+this Archive-only decision is independent of the range that was active during acquisition.
+The interpolation selector offers linear interpolation, nearest-point
 constant interpolation and a weighted smoothing spline.  The smoothing spline is recommended
 for final offline analysis: it uses inverse-SEM weights and a residual target equal to the
 number of accepted calibration points, so noisy blocks influence the curve less strongly.
 It requires at least four accepted points and otherwise falls back to linear interpolation.
 All methods hold the nearest endpoint outside the accepted time span rather than freely
-extrapolating.  \ui{Save copy} records both the point selection and interpolation method;
+extrapolating.  \ui{Save copy} records the Archive range, point selection and interpolation method;
 the saved-copy selector reapplies it later.  Copies are node-local for synchronized runs and
 are analysis metadata rather than replacements for the acquired calibration record.
 
