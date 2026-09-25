@@ -2548,7 +2548,8 @@
                             <div class="px-3 pt-3 fw-bold">Interferometer I_alpha calibration</div><div id="archiveIntfAlphaPlot" style="height:320px"></div>
                             <div class="px-3 pb-3">
                                 <div class="table-responsive"><table class="table table-sm align-middle mb-2"><thead><tr><th>Use</th><th>ID</th><th>I_alpha</th><th>SEM</th><th>Valid shots</th><th>Status</th></tr></thead><tbody><tr v-for="event in intfAlphaCalibrations" :key="event.calibration_id"><td><input class="form-check-input" type="checkbox" v-model="intfAlphaDraft[event.calibration_id]" :disabled="!Number.isFinite(Number(event.intf_alpha))"></td><td class="font-monospace small">{{ event.calibration_id }}</td><td>{{ Number.isFinite(Number(event.intf_alpha)) ? Number(event.intf_alpha).toFixed(7) : '—' }}</td><td>{{ Number.isFinite(Number(event.intf_alpha_sem)) ? Number(event.intf_alpha_sem).toExponential(2) : '—' }}</td><td>{{ event.valid_shots }}/{{ event.requested_shots }}</td><td>{{ intfAlphaDraft[event.calibration_id] ? 'included' : (event.rejection_reason || 'excluded') }}</td></tr></tbody></table></div>
-                                <div class="row g-2 align-items-end"><div class="col-md-4"><label class="form-label-small">INTERPOLATION</label><input class="form-control form-control-sm" value="Linear" disabled></div><div class="col-md-4"><label class="form-label-small">COPY NAME</label><input class="form-control form-control-sm" maxlength="120" v-model.trim="intfAlphaAnalysisName" placeholder="e.g. remove outlier block 3"></div><div class="col-md-4 d-flex gap-2"><button class="btn btn-primary btn-sm flex-fill" @click="previewIntfAlphaAnalysis" :disabled="intfAlphaAnalysisBusy">Preview</button><button class="btn btn-outline-secondary btn-sm" @click="restoreIntfAlphaSelection" :disabled="intfAlphaAnalysisBusy">Restore</button><button class="btn btn-success btn-sm flex-fill" @click="saveIntfAlphaAnalysis" :disabled="intfAlphaAnalysisBusy || !intfAlphaAnalysisName">Save copy</button></div></div>
+                                <div class="row g-2 align-items-end"><div class="col-md-4"><label class="form-label-small">INTERPOLATION</label><select class="form-select form-select-sm" v-model="intfAlphaInterpolationMethod"><option value="weighted_smoothing_spline">Weighted smoothing spline (recommended)</option><option value="linear">Linear</option><option value="nearest">Nearest / constant</option></select></div><div class="col-md-4"><label class="form-label-small">COPY NAME</label><input class="form-control form-control-sm" maxlength="120" v-model.trim="intfAlphaAnalysisName" placeholder="e.g. remove outlier block 3"></div><div class="col-md-4 d-flex gap-2"><button class="btn btn-primary btn-sm flex-fill" @click="previewIntfAlphaAnalysis" :disabled="intfAlphaAnalysisBusy">Preview</button><button class="btn btn-outline-secondary btn-sm" @click="restoreIntfAlphaSelection" :disabled="intfAlphaAnalysisBusy">Restore</button><button class="btn btn-success btn-sm flex-fill" @click="saveIntfAlphaAnalysis" :disabled="intfAlphaAnalysisBusy || !intfAlphaAnalysisName">Save copy</button></div></div>
+                                <div class="form-text mt-1">Spline weights use 1/SEM and stay constant outside the first/last accepted point. With fewer than four accepted points it falls back to linear.</div>
                                 <div v-if="intfAlphaAnalysisMessage" class="alert small py-2 mt-2 mb-0" :class="intfAlphaAnalysisError ? 'alert-danger' : 'alert-success'">{{ intfAlphaAnalysisMessage }}</div>
                                 <div v-if="intfAlphaAnalysisCopies.length" class="row g-2 align-items-end mt-1">
                                     <div class="col-md-8"><label class="form-label-small">SAVED ANALYSIS COPY</label><select class="form-select form-select-sm" v-model="intfAlphaSelectedCopyId"><option value="">Select a saved copy...</option><option v-for="copy in intfAlphaAnalysisCopies" :key="copy.id" :value="copy.id">{{ copy.name }} · {{ new Date(copy.created_at).toLocaleString() }}</option></select></div>
@@ -2765,7 +2766,7 @@
                     selectedAllanWindow: null,
                     loadedPoints: [], currentCalculatedPoints: [], originalSettings: {}, loadedConfig: {}, currentScanDimensions: 1,
                     intfAlphaCalibrations: [],
-                    intfAlphaOriginalCalibrations: [], intfAlphaDraft: {}, intfAlphaAnalysisCopies: [], intfAlphaSelectedCopyId: '', intfAlphaAnalysisName: '', intfAlphaAnalysisBusy: false, intfAlphaAnalysisMessage: '', intfAlphaAnalysisError: false,
+                    intfAlphaOriginalCalibrations: [], intfAlphaDraft: {}, intfAlphaAnalysisCopies: [], intfAlphaSelectedCopyId: '', intfAlphaInterpolationMethod: 'weighted_smoothing_spline', intfAlphaInterpolationCurve: null, intfAlphaAnalysisName: '', intfAlphaAnalysisBusy: false, intfAlphaAnalysisMessage: '', intfAlphaAnalysisError: false,
                     archivePhaseCalibration: null, archivePhaseCalibrationProvenance: 'unavailable',
                     archivePhaseReferenceContexts: {}, archivePhaseReferenceNodeId: '', archivePhaseReferenceDraft: {},
                     archivePhaseReferenceBusy: false, archivePhaseReferenceMessage: '', archivePhaseReferenceError: false,
@@ -5757,6 +5758,7 @@
                         this.intfAlphaOriginalCalibrations = this.intfAlphaCalibrations.map(item => ({ ...item }));
                         this.intfAlphaDraft = Object.fromEntries(this.intfAlphaCalibrations.map(item => [item.calibration_id, item.accepted === true]));
                         this.intfAlphaAnalysisCopies = Array.isArray(res.data.intf_alpha_analysis_copies) ? res.data.intf_alpha_analysis_copies : [];
+                        this.intfAlphaInterpolationCurve = res.data.intf_alpha_interpolation_curve || null;
                         this.intfAlphaSelectedCopyId = '';
                         this.intfAlphaAnalysisMessage = '';
                         this.intfAlphaAnalysisError = false;
@@ -10089,10 +10091,12 @@
                         y: items.map(row => Number(row.intf_alpha)),
                         error_y: { type: 'data', array: items.map(row => Number(row.intf_alpha_sem || 0)), visible: true },
                         customdata: items.map(row => [row.valid_shots, row.requested_shots, row.boundary, row.rejection_reason || '']),
-                        type: 'scatter', mode: 'lines+markers', name, line: { color, width: 1.8 }, marker: { color, size: 8, symbol },
+                        type: 'scatter', mode: 'markers', name, marker: { color, size: 8, symbol },
                         hovertemplate: 'Time=%{x}<br>I_alpha=%{y:.7f}<br>valid=%{customdata[0]}/%{customdata[1]}<br>boundary=%{customdata[2]}<br>%{customdata[3]}<extra></extra>'
                     });
-                    Plotly.react(element, [trace(accepted, 'Accepted / linear interpolation', '#00897b', 'circle'), trace(rejected, 'Rejected', '#c62828', 'x')], {
+                    const curvePoints = Array.isArray(this.intfAlphaInterpolationCurve?.points) ? this.intfAlphaInterpolationCurve.points : [];
+                    const curve = { x: curvePoints.map(row => new Date(Number(row.timestamp) * 1000)), y: curvePoints.map(row => Number(row.intf_alpha)), type: 'scatter', mode: 'lines', name: this.intfAlphaInterpolationCurve?.effective_method || 'interpolation', line: { color: '#00897b', width: 2.2 }, hovertemplate: 'Time=%{x}<br>I_alpha=%{y:.7f}<extra></extra>' };
+                    Plotly.react(element, [curve, trace(accepted, 'Accepted calibration', '#00897b', 'circle'), trace(rejected, 'Rejected', '#c62828', 'x')], {
                         margin: { t: 25, b: 52, l: 76, r: 20 }, xaxis: { title: 'Time' }, yaxis: { title: 'I_alpha', range: [0, 1] },
                         legend: { orientation: 'h', x: 1, xanchor: 'right', y: 1.12 }, paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)'
                     }, { responsive: true, displaylogo: false });
@@ -10111,6 +10115,7 @@
                     const copy = (this.intfAlphaAnalysisCopies || []).find(item => item.id === this.intfAlphaSelectedCopyId);
                     if (!copy) return;
                     const accepted = new Set((copy.accepted_calibration_ids || []).map(String));
+                    this.intfAlphaInterpolationMethod = copy.interpolation || 'linear';
                     this.intfAlphaDraft = Object.fromEntries((this.intfAlphaCalibrations || []).map(item => [item.calibration_id, accepted.has(String(item.calibration_id))]));
                     await this.runIntfAlphaAnalysis(false, `Loaded analysis copy: ${copy.name}`);
                 },
@@ -10129,11 +10134,13 @@
                             year: this.selectedYear, month: this.selectedMonth, day: this.selectedDay, run_id: this.selectedRun,
                             node_id: this.loadedSyncNode || null,
                             accepted_calibration_ids: accepted,
+                            interpolation_method: this.intfAlphaInterpolationMethod,
                             name: save ? this.intfAlphaAnalysisName : '', save,
                         });
                         const data = res.data || {};
                         this.intfAlphaCalibrations = Array.isArray(data.intf_alpha_calibrations) ? data.intf_alpha_calibrations : this.intfAlphaCalibrations;
                         this.intfAlphaAnalysisCopies = Array.isArray(data.intf_alpha_analysis_copies) ? data.intf_alpha_analysis_copies : this.intfAlphaAnalysisCopies;
+                        this.intfAlphaInterpolationCurve = data.intf_alpha_interpolation_curve || this.intfAlphaInterpolationCurve;
                         this.loadedPoints = Array.isArray(data.data) ? data.data : this.loadedPoints;
                         this.currentCalculatedPoints = this.loadedPoints;
                         this.recalculatedStats = this.normalizeStatsRows(data.stats || []);
@@ -10143,7 +10150,8 @@
                         this.displayMode = 'recalculated';
                         await this.applyDisplayedPoints(this.loadedPoints, this.recalculatedStats, this.recalculatedPreviewMap, true);
                         this.intfAlphaAnalysisError = false;
-                        this.intfAlphaAnalysisMessage = successMessage || (save ? 'Analysis copy saved; original raw data were not changed.' : 'Linear I_alpha interpolation preview applied.');
+                        const effectiveMethod = this.intfAlphaInterpolationCurve?.effective_method || this.intfAlphaInterpolationMethod;
+                        this.intfAlphaAnalysisMessage = successMessage || (save ? `Analysis copy saved with ${effectiveMethod}; original raw data were not changed.` : `${effectiveMethod} I_alpha preview applied.`);
                         this.$nextTick(() => this.renderArchiveIntfAlphaPlot());
                     } catch (error) {
                         this.intfAlphaAnalysisError = true;

@@ -609,7 +609,7 @@ the piecewise-linear history used for final analysis.
 
 After a run, the Archive calibration panel also supports non-destructive re-analysis.  The
 operator may include or exclude individual calibration blocks and press \ui{Preview}; the
-controller then rebuilds the linear $I_\alpha(t)$ history and recalculates the displayed
+controller then rebuilds the selected $I_\alpha(t)$ history and recalculates the displayed
 science probabilities, interferometer phases and Transfer Function summary.  \ui{Restore}
 returns to the acceptance decisions recorded during acquisition.  A named analysis copy
 stores only the selected calibration IDs and can be loaded again later.  Neither preview nor
@@ -1373,8 +1373,13 @@ For runs containing time-resolved interferometer-labelling calibrations, the
 \ui{Interferometer $I_\alpha$ calibration} panel provides a more targeted re-analysis.  Each
 row shows the block ID, value, standard error and valid-shot count.  Clear a block's
 \ui{Use} checkbox to reject an outlier, or select a previously rejected finite block, then
-press \ui{Preview}.  The resulting curve always uses linear interpolation in physical time
-and nearest-endpoint extrapolation.  \ui{Save copy} records the selection under a user name;
+press \ui{Preview}.  The interpolation selector offers linear interpolation, nearest-point
+constant interpolation and a weighted smoothing spline.  The smoothing spline is recommended
+for final offline analysis: it uses inverse-SEM weights and a residual target equal to the
+number of accepted calibration points, so noisy blocks influence the curve less strongly.
+It requires at least four accepted points and otherwise falls back to linear interpolation.
+All methods hold the nearest endpoint outside the accepted time span rather than freely
+extrapolating.  \ui{Save copy} records both the point selection and interpolation method;
 the saved-copy selector reapplies it later.  Copies are node-local for synchronized runs and
 are analysis metadata rather than replacements for the acquired calibration record.
 

@@ -54,6 +54,33 @@ class InterferometerAlphaAnalysisTests(unittest.TestCase):
         self.assertAlmostEqual(before["value"], 0.3)
         self.assertTrue(before["extrapolated"])
 
+    def test_nearest_interpolation_uses_closest_calibration(self):
+        events = [
+            {"accepted": True, "representative_time": 10.0, "intf_alpha": 0.3, "calibration_id": "a"},
+            {"accepted": True, "representative_time": 20.0, "intf_alpha": 0.5, "calibration_id": "b"},
+        ]
+        self.assertAlmostEqual(interpolate_alpha(16.0, events, "nearest")["value"], 0.5)
+
+    def test_weighted_smoothing_spline_smooths_noisy_points_and_holds_endpoints(self):
+        events = [
+            {"accepted": True, "representative_time": float(index), "intf_alpha": alpha, "intf_alpha_sem": 0.01, "calibration_id": str(index)}
+            for index, alpha in enumerate([0.30, 0.34, 0.29, 0.35, 0.31, 0.33])
+        ]
+        middle = interpolate_alpha(2.0, events, "weighted_smoothing_spline")
+        self.assertEqual(middle["method"], "weighted_smoothing_spline")
+        self.assertNotAlmostEqual(middle["value"], events[2]["intf_alpha"], places=5)
+        self.assertAlmostEqual(interpolate_alpha(-1.0, events, "weighted_smoothing_spline")["value"], 0.30)
+        self.assertAlmostEqual(interpolate_alpha(7.0, events, "weighted_smoothing_spline")["value"], 0.33)
+
+    def test_weighted_smoothing_spline_falls_back_to_linear_with_too_few_points(self):
+        events = [
+            {"accepted": True, "representative_time": 10.0, "intf_alpha": 0.3, "calibration_id": "a"},
+            {"accepted": True, "representative_time": 20.0, "intf_alpha": 0.5, "calibration_id": "b"},
+        ]
+        result = interpolate_alpha(15.0, events, "weighted_smoothing_spline")
+        self.assertEqual(result["method"], "linear")
+        self.assertAlmostEqual(result["value"], 0.4)
+
     def test_archive_selection_changes_interpolated_alpha_without_mutating_events(self):
         loader = DataLoader()
         points = [{
@@ -75,11 +102,13 @@ class InterferometerAlphaAnalysisTests(unittest.TestCase):
         loader = DataLoader()
         with tempfile.TemporaryDirectory() as root:
             run_dir = Path(root)
-            saved = loader.save_intf_alpha_analysis_copy(run_dir, "exclude drift spike", ["b", "a", "a"])
+            saved = loader.save_intf_alpha_analysis_copy(
+                run_dir, "exclude drift spike", ["b", "a", "a"], "weighted_smoothing_spline"
+            )
             copies = loader.load_intf_alpha_analysis_copies(run_dir)
             self.assertEqual(copies, [saved])
             self.assertEqual(saved["accepted_calibration_ids"], ["a", "b"])
-            self.assertEqual(saved["interpolation"], "linear")
+            self.assertEqual(saved["interpolation"], "weighted_smoothing_spline")
             self.assertEqual(json.loads((run_dir / "intf_alpha_analysis_copies.json").read_text()), copies)
 
     def test_archive_analysis_copy_requires_name(self):

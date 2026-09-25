@@ -2250,11 +2250,12 @@ async def reanalyze_archive_intf_alpha(req: ArchiveIntfAlphaReanalysisRequest):
             node_id=req.node_id or None,
             current_phase_calibration=manager.get_active_bragg_phase_calibration(),
             intf_alpha_accepted_ids=req.accepted_calibration_ids,
+            intf_alpha_interpolation_method=req.interpolation_method,
         )
         saved = None
         if req.save:
             saved = data_loader.save_intf_alpha_analysis_copy(
-                run_dir, req.name, req.accepted_calibration_ids
+                run_dir, req.name, req.accepted_calibration_ids, req.interpolation_method
             )
             result["intf_alpha_analysis_copies"] = data_loader.load_intf_alpha_analysis_copies(run_dir)
         result["saved_intf_alpha_analysis_copy"] = saved

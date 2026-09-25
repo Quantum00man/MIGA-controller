@@ -6,6 +6,18 @@ import math
 from typing import Any, Dict, Iterable, Optional
 
 import numpy as np
+from scipy.interpolate import UnivariateSpline
+
+
+INTERPOLATION_METHODS = {"linear", "weighted_smoothing_spline", "nearest"}
+
+
+def _finite_float_or_nan(value: Any) -> float:
+    try:
+        converted = float(value)
+    except (TypeError, ValueError):
+        return float("nan")
+    return converted if math.isfinite(converted) else float("nan")
 
 
 def alpha_from_probability_percent(probability_percent: Any, gamma: Any) -> float:
@@ -33,25 +45,62 @@ def accepted_points(events: Iterable[Dict[str, Any]]) -> list[Dict[str, Any]]:
     return sorted(points, key=lambda item: item["representative_time"])
 
 
-def interpolate_alpha(timestamp: Any, events: Iterable[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+def build_alpha_interpolator(events: Iterable[Dict[str, Any]], method: str = "linear"):
     points = accepted_points(events)
     if not points:
-        return None
-    value = float(timestamp)
-    if len(points) == 1 or value <= points[0]["representative_time"]:
-        point = points[0]
-        return {"value": point["intf_alpha"], "left_id": point["calibration_id"], "right_id": point["calibration_id"], "extrapolated": value != point["representative_time"]}
-    if value >= points[-1]["representative_time"]:
-        point = points[-1]
-        return {"value": point["intf_alpha"], "left_id": point["calibration_id"], "right_id": point["calibration_id"], "extrapolated": value != point["representative_time"]}
-    for left, right in zip(points, points[1:]):
-        if left["representative_time"] <= value <= right["representative_time"]:
-            fraction = (value - left["representative_time"]) / (right["representative_time"] - left["representative_time"])
-            return {
-                "value": float(left["intf_alpha"] + fraction * (right["intf_alpha"] - left["intf_alpha"])),
-                "left_id": left["calibration_id"], "right_id": right["calibration_id"], "extrapolated": False,
-            }
-    return None
+        return None, method
+    requested_method = str(method or "linear").strip().lower()
+    if requested_method not in INTERPOLATION_METHODS:
+        raise ValueError(f"Unsupported I_alpha interpolation method: {method}")
+    effective_method = requested_method
+    spline = None
+    if requested_method == "weighted_smoothing_spline" and len(points) >= 4:
+        timestamps = np.asarray([point["representative_time"] for point in points], dtype=float)
+        span = float(timestamps[-1] - timestamps[0])
+        if span > 0 and np.all(np.diff(timestamps) > 0):
+            x = (timestamps - timestamps[0]) / span
+            y = np.asarray([point["intf_alpha"] for point in points], dtype=float)
+            raw_sem = np.asarray([
+                _finite_float_or_nan(point.get("intf_alpha_sem")) for point in points
+            ], dtype=float)
+            positive_sem = raw_sem[np.isfinite(raw_sem) & (raw_sem > 0)]
+            fallback_sem = float(np.median(positive_sem)) if positive_sem.size else 1.0
+            sigma = np.where(np.isfinite(raw_sem) & (raw_sem > 0), raw_sem, fallback_sem)
+            sigma = np.maximum(sigma, max(fallback_sem * 0.1, np.finfo(float).eps))
+            spline = UnivariateSpline(x, y, w=1.0 / sigma, k=3, s=float(len(points)))
+        else:
+            effective_method = "linear"
+    elif requested_method == "weighted_smoothing_spline":
+        effective_method = "linear"
+
+    def evaluate(timestamp: Any) -> Dict[str, Any]:
+        value = float(timestamp)
+        if len(points) == 1 or value <= points[0]["representative_time"]:
+            point = points[0]
+            return {"value": point["intf_alpha"], "left_id": point["calibration_id"], "right_id": point["calibration_id"], "extrapolated": value != point["representative_time"], "method": effective_method}
+        if value >= points[-1]["representative_time"]:
+            point = points[-1]
+            return {"value": point["intf_alpha"], "left_id": point["calibration_id"], "right_id": point["calibration_id"], "extrapolated": value != point["representative_time"], "method": effective_method}
+        for left, right in zip(points, points[1:]):
+            if left["representative_time"] <= value <= right["representative_time"]:
+                if requested_method == "nearest":
+                    selected = left if value - left["representative_time"] <= right["representative_time"] - value else right
+                    interpolated = selected["intf_alpha"]
+                elif spline is not None:
+                    normalized_time = (value - points[0]["representative_time"]) / (points[-1]["representative_time"] - points[0]["representative_time"])
+                    interpolated = float(spline(normalized_time))
+                else:
+                    fraction = (value - left["representative_time"]) / (right["representative_time"] - left["representative_time"])
+                    interpolated = float(left["intf_alpha"] + fraction * (right["intf_alpha"] - left["intf_alpha"]))
+                return {"value": float(np.clip(interpolated, 0.0, 1.0)), "left_id": left["calibration_id"], "right_id": right["calibration_id"], "extrapolated": False, "method": effective_method}
+        raise ValueError("I_alpha interpolation interval could not be resolved")
+
+    return evaluate, effective_method
+
+
+def interpolate_alpha(timestamp: Any, events: Iterable[Dict[str, Any]], method: str = "linear") -> Optional[Dict[str, Any]]:
+    interpolator, _ = build_alpha_interpolator(events, method)
+    return interpolator(timestamp) if interpolator is not None else None
 
 
 def summarize_block(

@@ -48,22 +48,27 @@ class DataLoader:
     def _apply_intf_alpha_history(
         self, points: List[Dict[str, Any]], events: List[Dict[str, Any]],
         config_data: Dict[str, Any], phase_calibration: Optional[Dict[str, Any]],
+        interpolation_method: str = "linear",
     ) -> List[Dict[str, Any]]:
         settings = config_data.get("_system_settings_snapshot") or {}
         beta = settings.get("intf_beta", 0.07636)
         gamma = settings.get("intf_gamma", 0.25)
         zero = config_data.get("_transfer_zero_phase_rad")
+        alpha_interpolator, _ = interferometer_alpha.build_alpha_interpolator(
+            events, interpolation_method
+        )
+        if alpha_interpolator is None:
+            return points
         for point in points:
             if point.get("intf_alpha_calibration_block_id") is not None:
                 continue
-            interpolation = interferometer_alpha.interpolate_alpha(point.get("timestamp"), events)
-            if interpolation is None:
-                continue
+            interpolation = alpha_interpolator(point.get("timestamp"))
             alpha = float(interpolation["value"])
             point["intf_alpha_applied"] = alpha
             point["intf_alpha_left_calibration_id"] = interpolation["left_id"]
             point["intf_alpha_right_calibration_id"] = interpolation["right_id"]
             point["intf_alpha_extrapolated"] = interpolation["extrapolated"]
+            point["intf_alpha_interpolation_method"] = interpolation["method"]
             point["intf_n1"], point["intf_n2"], point["intf_p1"], point["intf_p2"] = physics.calculate_interferometer_output(
                 point.get("atom_number_dw"), point.get("atom_number_up"), alpha, beta, gamma
             )
@@ -76,6 +81,25 @@ class DataLoader:
             if phase_result.get("interferometer_phase_valid") and zero is not None:
                 point["interferometer_phase"] = float(phase_result["interferometer_phase"]) - float(zero)
         return points
+
+    @staticmethod
+    def _build_intf_alpha_interpolation_curve(
+        events: List[Dict[str, Any]], interpolation_method: str,
+    ) -> Dict[str, Any]:
+        points = interferometer_alpha.accepted_points(events)
+        interpolator, effective_method = interferometer_alpha.build_alpha_interpolator(
+            events, interpolation_method
+        )
+        if interpolator is None or not points:
+            return {"requested_method": interpolation_method, "effective_method": effective_method, "points": []}
+        start = float(points[0]["representative_time"])
+        stop = float(points[-1]["representative_time"])
+        timestamps = [start] if stop <= start else np.linspace(start, stop, 320).tolist()
+        curve = [
+            {"timestamp": float(timestamp), "intf_alpha": float(interpolator(timestamp)["value"])}
+            for timestamp in timestamps
+        ]
+        return {"requested_method": interpolation_method, "effective_method": effective_method, "points": curve}
 
     def _apply_transfer_zero_phase_reference(
         self, points: List[Dict[str, Any]], settings: Dict[str, Any]
@@ -232,7 +256,7 @@ class DataLoader:
         return payload if isinstance(payload, list) else []
 
     def save_intf_alpha_analysis_copy(
-        self, run_dir: Path, name: str, accepted_ids: List[str]
+        self, run_dir: Path, name: str, accepted_ids: List[str], interpolation_method: str = "linear"
     ) -> Dict[str, Any]:
         clean_name = str(name or "").strip()
         if not clean_name:
@@ -241,7 +265,7 @@ class DataLoader:
             "id": uuid.uuid4().hex,
             "name": clean_name,
             "created_at": datetime.now(timezone.utc).isoformat(),
-            "interpolation": "linear",
+            "interpolation": interpolation_method,
             "accepted_calibration_ids": sorted(set(str(value) for value in accepted_ids if value)),
         }
         copies = self.load_intf_alpha_analysis_copies(run_dir)
@@ -1703,6 +1727,7 @@ class DataLoader:
         analysis_copy_id: Optional[str] = None,
         analysis_copy_override: Optional[Dict[str, Any]] = None,
         intf_alpha_accepted_ids: Optional[List[str]] = None,
+        intf_alpha_interpolation_method: str = "linear",
     ) -> Dict[str, Any]:
         root_run_dir = self._get_run_dir(year, month, day, run_id)
         run_dir, archive_node_identity = self._resolve_archive_node_identity(root_run_dir, node_id)
@@ -1773,7 +1798,8 @@ class DataLoader:
                 full_points = self._rebase_converted_transfer_phases(full_points, config_data)
         if config_data.get("intf_alpha_calibration_enabled") and intf_alpha_calibrations:
             full_points = self._apply_intf_alpha_history(
-                full_points, intf_alpha_calibrations, config_data, phase_calibration
+                full_points, intf_alpha_calibrations, config_data, phase_calibration,
+                intf_alpha_interpolation_method,
             )
         science_points = self._science_points(full_points)
         marker_optimization = self._build_marker_optimization_archive(run_dir, science_points)
@@ -1864,6 +1890,9 @@ class DataLoader:
             "bragg_fringe_calibration_nodes": bragg_calibration_nodes,
             "power_monitor_events": power_monitor_events,
             "intf_alpha_calibrations": intf_alpha_calibrations,
+            "intf_alpha_interpolation_curve": self._build_intf_alpha_interpolation_curve(
+                intf_alpha_calibrations, intf_alpha_interpolation_method
+            ),
             "intf_alpha_analysis_copies": self.load_intf_alpha_analysis_copies(run_dir),
             "preview_map": (
                 initial_step.get("preview_map", {})

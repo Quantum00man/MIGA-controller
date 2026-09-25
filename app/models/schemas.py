@@ -1037,8 +1037,16 @@ class ArchiveIntfAlphaReanalysisRequest(BaseModel):
     run_id: str
     node_id: Optional[str] = None
     accepted_calibration_ids: List[str] = Field(default_factory=list)
+    interpolation_method: str = Field("weighted_smoothing_spline")
     name: str = Field("", max_length=120)
     save: bool = Field(False)
+
+    @validator("interpolation_method")
+    def validate_interpolation_method(cls, value):
+        normalized = str(value or "").strip().lower()
+        if normalized not in {"linear", "weighted_smoothing_spline", "nearest"}:
+            raise ValueError("Unsupported I_alpha interpolation method")
+        return normalized
 
 
 class ArchiveLabPlotExportRequest(BaseModel):
