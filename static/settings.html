@@ -1137,6 +1137,16 @@
                                         </div>
                                         <button v-if="s.intf_alpha_calibration_sequence_content_base64" type="button" class="btn btn-sm btn-outline-danger mt-2" @click="clearIntfAlphaCalibrationMot">Remove calibration MOT</button>
                                     </div>
+                                    <div class="col-12 mt-2 pt-2 border-top">
+                                        <label class="form-label small fw-bold text-muted">Local I_alpha calibration fit windows</label>
+                                        <div class="row g-2">
+                                            <div class="col-md-3"><label class="form-label small mb-1">UP center (ms)</label><input type="number" class="form-control form-control-sm font-monospace" v-model.number="s.intf_alpha_calibration_fit_center_up" step="any"></div>
+                                            <div class="col-md-3"><label class="form-label small mb-1">UP width (ms)</label><input type="number" class="form-control form-control-sm font-monospace" v-model.number="s.intf_alpha_calibration_fit_width_up" min="0" step="any"></div>
+                                            <div class="col-md-3"><label class="form-label small mb-1">DOWN center (ms)</label><input type="number" class="form-control form-control-sm font-monospace" v-model.number="s.intf_alpha_calibration_fit_center_dw" step="any"></div>
+                                            <div class="col-md-3"><label class="form-label small mb-1">DOWN width (ms)</label><input type="number" class="form-control form-control-sm font-monospace" v-model.number="s.intf_alpha_calibration_fit_width_dw" min="0" step="any"></div>
+                                        </div>
+                                        <div class="form-text">Stored on this controller and used only for automatic I_alpha calibration. Width 0 fits the full acquired trace. SYNC Master and Slave use their own values.</div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -3394,6 +3404,10 @@
                     normalized.intf_alpha_calibration_accepted_max = Number.isFinite(alphaAcceptedMax) ? alphaAcceptedMax : 1;
                     normalized.intf_alpha_calibration_sequence_name = String(normalized.intf_alpha_calibration_sequence_name || '');
                     normalized.intf_alpha_calibration_sequence_content_base64 = String(normalized.intf_alpha_calibration_sequence_content_base64 || '');
+                    ['intf_alpha_calibration_fit_center_up', 'intf_alpha_calibration_fit_width_up', 'intf_alpha_calibration_fit_center_dw', 'intf_alpha_calibration_fit_width_dw'].forEach((key) => {
+                        const value = Number(normalized[key]);
+                        normalized[key] = Number.isFinite(value) ? value : 0;
+                    });
                     normalized.fit_models = this.normalizeFitModels(normalized.fit_models);
                     if (!normalized.fit_models.find(model => model.key === normalized.fit_model_key)) {
                         normalized.fit_model_key = normalized.fit_models[0].key;

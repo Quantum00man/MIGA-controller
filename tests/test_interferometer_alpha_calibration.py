@@ -138,6 +138,32 @@ class InterferometerAlphaPlanTests(unittest.TestCase):
         self.manager.settings["intf_alpha_calibration_sequence_content_base64"] = "c2xhdmU="
         self.assertEqual(self.manager.settings["intf_alpha_calibration_sequence_name"], "slave-alpha.mot")
 
+    def test_alpha_calibration_fit_config_is_node_local(self):
+        self.manager.settings.update({
+            "intf_alpha_calibration_fit_center_up": 12.5,
+            "intf_alpha_calibration_fit_width_up": 3.0,
+            "intf_alpha_calibration_fit_center_dw": 14.5,
+            "intf_alpha_calibration_fit_width_dw": 4.0,
+        })
+
+        fit_config = self.manager.build_intf_alpha_calibration_fit_config()
+
+        self.assertEqual(fit_config["center_up"], 12.5)
+        self.assertEqual(fit_config["width_up"], 3.0)
+        self.assertEqual(fit_config["center_dw"], 14.5)
+        self.assertEqual(fit_config["width_dw"], 4.0)
+
+        master_scan_fit = {"center_up": 99.0, "width_up": 1.0}
+        selected = self.manager.fit_config_for_job(
+            {"metadata": {"intf_alpha_calibration": True}}, master_scan_fit
+        )
+        self.assertEqual(selected["center_up"], 12.5)
+        self.assertEqual(selected["width_up"], 3.0)
+        self.assertIs(
+            self.manager.fit_config_for_job({"metadata": {}}, master_scan_fit),
+            master_scan_fit,
+        )
+
     def test_transfer_plan_adds_start_phase_boundaries_and_end(self):
         config = {
             "mode": "transfer_function", "scan_dimensions": 1, "parameter_source": "classic",

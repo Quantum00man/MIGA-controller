@@ -655,6 +655,10 @@ class ExperimentManager:
             "intf_alpha_calibration_accepted_max": 1.0,
             "intf_alpha_calibration_sequence_name": "",
             "intf_alpha_calibration_sequence_content_base64": "",
+            "intf_alpha_calibration_fit_center_up": 0.0,
+            "intf_alpha_calibration_fit_width_up": 0.0,
+            "intf_alpha_calibration_fit_center_dw": 0.0,
+            "intf_alpha_calibration_fit_width_dw": 0.0,
             # ----------------------------------------
             
             # 合并 config.py 中的默认分析参数
@@ -1204,6 +1208,23 @@ class ExperimentManager:
             'model_key': self.settings.get('fit_model_key', selected_fit_model['key']),
             'models': fit_models,
         }
+
+    def build_intf_alpha_calibration_fit_config(self) -> Dict[str, Any]:
+        """Build a node-local fit context for the dedicated I_alpha MOT."""
+        return self.build_fit_config({
+            "fit_center_up": self.settings.get("intf_alpha_calibration_fit_center_up", 0.0),
+            "fit_width_up": self.settings.get("intf_alpha_calibration_fit_width_up", 0.0),
+            "fit_center_dw": self.settings.get("intf_alpha_calibration_fit_center_dw", 0.0),
+            "fit_width_dw": self.settings.get("intf_alpha_calibration_fit_width_dw", 0.0),
+        })
+
+    def fit_config_for_job(
+        self, job: Dict[str, Any], scan_fit_config: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        metadata = job.get("metadata") or {}
+        if metadata.get("intf_alpha_calibration"):
+            return self.build_intf_alpha_calibration_fit_config()
+        return scan_fit_config
 
     def _validate_ac_stark_sequence(self) -> None:
         template_path = Path(
@@ -3965,14 +3986,15 @@ class ExperimentManager:
                 self.status.total_steps = int(job.get('total', 1) or 1)
                 self.status.message = f"Processing: {params} (Queue: {self.data_queue.qsize()})"
 
+                metadata = job.get("metadata") or {}
+                job_fit_config = self.fit_config_for_job(job, fit_config)
                 result, payload = self.process_measurement_job(
                     job,
-                    fit_config,
+                    job_fit_config,
                     data_manager=self.data_manager,
                     stream_type='scan_point',
                     execution_config=scan_config,
                 )
-                metadata = job.get("metadata") or {}
                 if metadata.get("intf_alpha_calibration"):
                     block_id = int(metadata.get("intf_alpha_calibration_block_id", 0))
                     block = intf_alpha_blocks.setdefault(block_id, {"probabilities": [], "timestamps": []})

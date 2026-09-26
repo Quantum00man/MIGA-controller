@@ -20,6 +20,10 @@ class AtomicSettingsPersistenceTests(unittest.TestCase):
         payload["intf_alpha_calibration_sequence_content_base64"] = "YWxwaGE="
         payload["intf_alpha_calibration_accepted_min"] = 0.25
         payload["intf_alpha_calibration_accepted_max"] = 0.65
+        payload["intf_alpha_calibration_fit_center_up"] = 12.5
+        payload["intf_alpha_calibration_fit_width_up"] = 3.0
+        payload["intf_alpha_calibration_fit_center_dw"] = 14.5
+        payload["intf_alpha_calibration_fit_width_dw"] = 4.0
 
         validated = SystemSettings(**payload).model_dump()
 
@@ -27,6 +31,10 @@ class AtomicSettingsPersistenceTests(unittest.TestCase):
         self.assertEqual(validated["intf_alpha_calibration_sequence_content_base64"], "YWxwaGE=")
         self.assertEqual(validated["intf_alpha_calibration_accepted_min"], 0.25)
         self.assertEqual(validated["intf_alpha_calibration_accepted_max"], 0.65)
+        self.assertEqual(validated["intf_alpha_calibration_fit_center_up"], 12.5)
+        self.assertEqual(validated["intf_alpha_calibration_fit_width_up"], 3.0)
+        self.assertEqual(validated["intf_alpha_calibration_fit_center_dw"], 14.5)
+        self.assertEqual(validated["intf_alpha_calibration_fit_width_dw"], 4.0)
 
     def test_system_settings_replace_a_read_only_existing_file(self):
         with tempfile.TemporaryDirectory() as tmp:
