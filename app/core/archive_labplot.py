@@ -443,6 +443,67 @@ def _phase_noise_worksheets(
     return worksheets
 
 
+def _phase_noise_detail_worksheet(loaded: Dict[str, Any]) -> Optional[Worksheet]:
+    """Export every Phase Noise shot, grouped into one plot per T."""
+    def curve(label: str, x_values: Sequence[float], y_values: Sequence[Optional[float]], color, line_style: int = 1) -> Optional[Curve]:
+        points = [(x, y) for x, y in zip(x_values, y_values) if math.isfinite(x) and y is not None and math.isfinite(y)]
+        return Curve(label, [item[0] for item in points], [item[1] for item in points], color, line_style=line_style) if points else None
+
+    manifest = loaded.get("sync_manifest") or {}
+    pairs = [row for row in manifest.get("pairs") or [] if isinstance(row, dict)]
+    standalone = [row for row in loaded.get("phase_noise_series") or [] if isinstance(row, dict)]
+    sources: List[Tuple[Dict[str, Any], Optional[Dict[str, Any]]]] = []
+    if pairs:
+        sources = [((row.get("master") or {}), (row.get("slave") or {})) for row in pairs]
+    else:
+        sources = [(row, None) for row in standalone]
+
+    grouped: Dict[float, List[Tuple[Dict[str, Any], Optional[Dict[str, Any]]]]] = defaultdict(list)
+    for master, slave in sources:
+        t2 = _finite(master.get("phase_noise_t2_us2") or master.get("interferometer_phase_reference_t2_us2"))
+        if t2 is not None:
+            grouped[t2].append((master, slave))
+
+    plots: List[Plot] = []
+    for index, t2 in enumerate(sorted(grouped)):
+        rows = sorted(grouped[t2], key=lambda pair: _finite(pair[0].get("phase_noise_repeat")) or 0.0)
+        x = [(_finite(master.get("phase_noise_repeat")) or float(position + 1)) for position, (master, _) in enumerate(rows)]
+        curves: List[Curve] = []
+        master_y = [_finite(master.get("interferometer_phase")) for master, _ in rows]
+        if master_curve := curve("Master" if pairs else "Phase", x, [value * 1000.0 if value is not None else None for value in master_y], COLORS[0]):
+            curves.append(master_curve)
+        if pairs:
+            slave_y = [_finite((slave or {}).get("interferometer_phase")) for _, slave in rows]
+            if slave_curve := curve("Slave", x, [value * 1000.0 if value is not None else None for value in slave_y], COLORS[1]):
+                curves.append(slave_curve)
+            difference = [
+                (slave_value - master_value) * 1000.0
+                if master_value is not None and slave_value is not None else None
+                for master_value, slave_value in zip(master_y, slave_y)
+            ]
+            if difference_curve := curve("Slave - Master", x, difference, COLORS[6], line_style=2):
+                curves.append(difference_curve)
+        if curves:
+            t_ms = math.sqrt(t2) / 1000.0
+            plots.append(Plot(f"T={t_ms:.9g} ms (T2={t2:.12g})", "Shot number within T", "Interferometer phase (mrad)", curves))
+
+        diagnostic_curves: List[Curve] = []
+        power = [_finite(master.get("power_meter_power_w")) for master, _ in rows]
+        if power_curve := curve("PM100A power", x, power, COLORS[2]):
+            diagnostic_curves.append(power_curve)
+        alpha_definitions = (("Master I_alpha", COLORS[0], "master"), ("Slave I_alpha", COLORS[1], "slave")) if pairs else (("I_alpha", COLORS[0], "master"),)
+        for label, color, key in alpha_definitions:
+            values = [
+                _finite((master if key == "master" else (slave or {})).get("intf_alpha_applied"))
+                for master, slave in rows
+            ]
+            if alpha_curve := curve(label, x, values, color):
+                diagnostic_curves.append(alpha_curve)
+        if diagnostic_curves:
+            plots.append(Plot(f"T2={t2:.12g} diagnostics", "Shot number within T", "Power (W) / I_alpha", diagnostic_curves))
+    return Worksheet("Phase Noise - T Detail", plots) if plots else None
+
+
 def _power_meter_worksheet(points: Sequence[Dict[str, Any]]) -> Optional[Worksheet]:
     valid = []
     invalid = []
@@ -621,6 +682,9 @@ def build_archive_project(
             summary if selected else [],
             "t" if str(phase_noise_x_axis).strip().lower() == "t" else "t2",
         )
+        detail_worksheet = _phase_noise_detail_worksheet(loaded_root)
+        if detail_worksheet:
+            worksheets.append(detail_worksheet)
         comment = (
             f"Phase Noise archive {year}-{month}-{day}/{run_id}; "
             f"x={'T (ms)' if phase_noise_x_axis == 't' else 'T2 (us2)'}; "

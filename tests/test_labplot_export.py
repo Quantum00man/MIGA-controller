@@ -85,6 +85,16 @@ class PhaseNoiseLoader:
         return {
             "config": {"mode": "phase_noise"},
             "phase_noise_summary": [],
+            "phase_noise_series": [
+                {
+                    "phase_noise_t2_us2": 1_000_000.0,
+                    "phase_noise_repeat": repeat,
+                    "interferometer_phase": 0.01 * repeat,
+                    "power_meter_power_w": 1e-6 * repeat,
+                    "intf_alpha_applied": 0.3 + repeat * 0.01,
+                }
+                for repeat in range(1, 4)
+            ],
         }
 
 
@@ -352,6 +362,7 @@ class LabPlotExportTests(unittest.TestCase):
         worksheets = {item.attrib["name"]: item for item in root.iter("worksheet")}
         self.assertEqual(set(worksheets), {
             "Phase Noise - Standard Deviation", "Phase Noise - Allan Deviation",
+            "Phase Noise - T Detail",
         })
         allan_plots = list(worksheets["Phase Noise - Allan Deviation"].iter("cartesianPlot"))
         self.assertEqual(len(allan_plots), 2)
@@ -377,6 +388,13 @@ class LabPlotExportTests(unittest.TestCase):
             if item.attrib["name"] == "Expected total"
         )
         self.assertEqual(expected_curve.find("errorBars").attrib["yErrorType"], "0")
+        detail_plots = list(worksheets["Phase Noise - T Detail"].iter("cartesianPlot"))
+        self.assertEqual(len(detail_plots), 2)
+        self.assertEqual(detail_plots[0].attrib["name"], "T=1 ms (T2=1000000)")
+        detail_curves = {item.attrib["name"] for item in detail_plots[0].iter("xyCurve")}
+        self.assertEqual(detail_curves, {"Phase"})
+        diagnostic_curves = {item.attrib["name"] for item in detail_plots[1].iter("xyCurve")}
+        self.assertEqual(diagnostic_curves, {"PM100A power", "I_alpha"})
 
 
 if __name__ == "__main__":

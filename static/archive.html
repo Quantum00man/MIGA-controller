@@ -9154,6 +9154,10 @@
                         await this.exportTransferFunctionCSV();
                         return;
                     }
+                    if (this.isPhaseNoiseArchive()) {
+                        await this.exportPhaseNoiseCSV();
+                        return;
+                    }
                     if (Object.keys(this.historyMap).length === 0) return;
                     const stats = this.getStatsArray();
                     const scanDimensions = this.getActiveScanDimensions();
@@ -9216,6 +9220,54 @@
                         const link = document.createElement("a"); link.setAttribute("href", url); link.setAttribute("download", `analysis_${this.selectedDay}_${this.selectedRun}.csv`);
                         document.body.appendChild(link); link.click(); document.body.removeChild(link);
                     }
+                },
+
+                async exportPhaseNoiseCSV() {
+                    const header = [
+                        'science_shot', 'sync_shot_index', 'T_index', 'T_count', 'T2_us2', 'T_ms',
+                        'shot_within_T', 'shots_per_T', 'timestamp',
+                        'master_phase_rad', 'master_phase_valid', 'master_intf_p1', 'master_intf_p1_nofit', 'master_I_alpha',
+                        'slave_node_id', 'slave_phase_rad', 'slave_phase_valid', 'slave_intf_p1', 'slave_intf_p1_nofit', 'slave_I_alpha',
+                        'raw_difference_rad', 'wrapped_difference_rad',
+                        'power_meter_W', 'power_meter_valid', 'power_meter_invalid_reason',
+                        'phase_calibration_id', 'phase_calibration_name', 'phase_reference_T2_us2'
+                    ];
+                    const rows = [];
+                    const pushRow = (master, slave = null, slaveId = '', syncShot = '') => {
+                        const t2 = Number(master?.phase_noise_t2_us2 ?? master?.interferometer_phase_reference_t2_us2 ?? master?.sync_p0 ?? master?.parameter);
+                        const masterPhase = Number(master?.interferometer_phase);
+                        const slavePhase = Number(slave?.interferometer_phase);
+                        const difference = Number.isFinite(masterPhase) && Number.isFinite(slavePhase) ? slavePhase - masterPhase : null;
+                        rows.push([
+                            master?.phase_noise_science_shot ?? '', syncShot,
+                            master?.phase_noise_t_index ?? '', master?.phase_noise_t_count ?? '',
+                            Number.isFinite(t2) ? t2 : '', Number.isFinite(t2) && t2 >= 0 ? Math.sqrt(t2) / 1000 : '',
+                            master?.phase_noise_repeat ?? '', master?.phase_noise_total_repeats ?? '', master?.timestamp ?? '',
+                            Number.isFinite(masterPhase) ? masterPhase : '', master?.interferometer_phase_valid === true,
+                            master?.intf_p1 ?? '', master?.intf_p1_nofit ?? '', master?.intf_alpha_applied ?? '',
+                            slaveId, Number.isFinite(slavePhase) ? slavePhase : '', slave?.interferometer_phase_valid === true,
+                            slave?.intf_p1 ?? '', slave?.intf_p1_nofit ?? '', slave?.intf_alpha_applied ?? '',
+                            difference ?? '', difference == null ? '' : this.wrapSyncPhase(difference),
+                            master?.power_meter_power_w ?? '', master?.power_meter_valid ?? '', master?.power_meter_invalid_reason ?? '',
+                            master?.interferometer_phase_calibration_id ?? '', master?.interferometer_phase_calibration_name ?? '',
+                            master?.interferometer_phase_reference_t2_us2 ?? ''
+                        ]);
+                    };
+                    if (this.syncManifest) {
+                        (this.syncManifest.pairs || []).forEach(pair => pushRow(
+                            pair?.master || {}, pair?.slave || {}, String(pair?.slave_node_id || ''), pair?.sync_shot_index ?? ''
+                        ));
+                    } else {
+                        (this.phaseNoiseSeries || []).forEach(point => pushRow(point));
+                    }
+                    if (!rows.length) {
+                        this.errorMsg = 'Phase Noise CSV export failed: no science-shot data are available.';
+                        return;
+                    }
+                    rows.sort((left, right) => Number(left[0] || left[1] || 0) - Number(right[0] || right[1] || 0));
+                    const content = '\uFEFF' + [header, ...rows].map(row => row.map(value => this.csvCell(value ?? '')).join(',')).join('\n');
+                    const runPart = this.sanitizeFilenamePart(this.selectedRun || this.loadedRunId || 'run');
+                    await this.downloadCsvContent(content, `phase_noise_shots_${runPart}.csv`);
                 },
 
                 async exportTransferFunctionCSV() {
@@ -10051,9 +10103,9 @@
                         if (!hasAllSelectedOrders) await this.refreshPhaseNoiseAllan();
 
                         const header = [
-                            'T2_us2', 'T_ms', 'n_order', 'measured_allan_rad', 'measured_error_minus_rad', 'measured_error_plus_rad', 'measured_ci_lower_rad', 'measured_ci_upper_rad', 'measured_edf_white', 'confidence_level', 'edf_noise_model',
+                            'T2_us2', 'T_ms', 'n_order', 'averaging_time_s', 'measured_allan_rad', 'measured_error_minus_rad', 'measured_error_plus_rad', 'measured_ci_lower_rad', 'measured_ci_upper_rad', 'measured_edf_white', 'confidence_level', 'edf_noise_model',
                             'expected_allan_rad', 'detection_allan_rad', 'laser_allan_rad',
-                            'valid_window_count', 'shot_count'
+                            'valid_window_count', 'shot_count', 'power_meter_count', 'power_meter_mean_W', 'power_meter_std_W'
                         ];
                         const rows = [];
                         (Array.isArray(this.phaseNoiseSummary) ? this.phaseNoiseSummary : []).forEach(summary => {
@@ -10062,7 +10114,7 @@
                                     .find(item => Number(item.order) === Number(order));
                                 if (!allan) return;
                                 rows.push([
-                                    summary.t2_us2, summary.t_ms, order,
+                                    summary.t2_us2, summary.t_ms, order, allan.averaging_time_s,
                                     allan.measured_phase_noise_rad,
                                     allan.measured_error_minus_rad,
                                     allan.measured_error_plus_rad,
@@ -10074,8 +10126,8 @@
                                     allan.expected_total_phase_noise_rad,
                                     allan.detection_phase_noise_rad,
                                     allan.laser_phase_noise_rad,
-                                    allan.valid_window_count,
-                                    summary.shot_count
+                                    allan.valid_window_count, summary.shot_count,
+                                    summary.power_meter_count, summary.power_meter_mean_w, summary.power_meter_std_w
                                 ]);
                             });
                         });
