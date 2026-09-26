@@ -1988,6 +1988,7 @@
                                 <select class="form-select form-select-sm" style="width:auto" v-model="syncArchiveNodeSource" @change="handleSyncArchiveNodeSourceChange"><option v-for="nodeId in syncPhaseNodeIds()" :key="nodeId" :value="nodeId">{{ syncArchiveNodeLabel(nodeId) }}</option></select>
                                 <div class="btn-group btn-group-sm" role="group" aria-label="SYNC phase plot mode"><button class="btn" :class="syncPhasePlotMode === 'series' ? 'btn-dark' : 'btn-outline-dark'" @click="setSyncPhasePlotMode('series')">Series</button><button class="btn" :class="syncPhasePlotMode === 'allan' ? 'btn-dark' : 'btn-outline-dark'" @click="setSyncPhasePlotMode('allan')">Allan</button></div>
                                 <span v-if="syncPhasePlotMode === 'series' && isTransferFunctionArchive()" class="badge bg-light text-dark border">Averaged by frequency and generator phase</span>
+                                <span v-else-if="syncPhasePlotMode === 'series' && isPhaseNoiseArchive()" class="badge bg-light text-dark border">Selected T · shot sequence</span>
                                 <select v-else-if="syncPhasePlotMode === 'series'" class="form-select form-select-sm" style="width:auto" v-model="syncPhaseAggregation" @change="renderSyncArchiveNodePlots"><option value="shots">Every shot</option><option value="average">Averaged by P0</option></select>
                                 <button class="btn btn-outline-success btn-sm" @click="downloadSyncPhaseCSV" :disabled="!syncPhaseExportRows().length"><i class="bi bi-download me-1"></i>Phase CSV</button>
                             </div>
@@ -6958,7 +6959,12 @@
                             ? preview.value != null && Number.isFinite(phase)
                             : row?.interferometer_phase_valid === true && Number.isFinite(phase);
                         return { row, nodeId, shot, p0: this.syncPhaseP0(row), phase, valid, optimizationPreview: Boolean(preview) };
-                    }).filter(item => Number.isFinite(item.p0) && (includeInvalid || item.valid))
+                    }).filter(item => {
+                        if (!Number.isFinite(item.p0) || (!includeInvalid && !item.valid)) return false;
+                        if (!this.isPhaseNoiseArchive() || !Number.isFinite(Number(this.phaseNoiseSelectedT2))) return true;
+                        const rowT2 = Number(item.row?.phase_noise_t2_us2 ?? item.row?.interferometer_phase_reference_t2_us2 ?? item.p0);
+                        return this.syncPhaseSameP0(rowT2, this.phaseNoiseSelectedT2);
+                    })
                         .sort((a, b) => a.shot - b.shot);
                 },
                 syncPhaseSameP0(left, right) {
@@ -7700,6 +7706,7 @@
                         title = `All Hosts + Phase Difference · ${this.syncPhaseAllanScale === 'relative' ? 'Relative' : 'Absolute'} overlapping Allan`;
                     } else {
                         const transferFunction = this.isTransferFunctionArchive();
+                        const phaseNoise = this.isPhaseNoiseArchive();
                         traces = definitions.flatMap(definition => {
                             const rows = this.syncPhaseAggregateRows(definition.rows);
                             const phases = transferFunction ? [0, 90] : [null];
@@ -7707,7 +7714,9 @@
                                 const selected = generatorPhase === null ? rows : rows.filter(item => item.transfer_phase_deg === generatorPhase);
                                 const name = definition.kind === 'difference' ? `Difference: ${definition.label}` : definition.label;
                                 return {
-                                    x: selected.map(item => transferFunction ? item.frequency_hz : item.p0),
+                                    x: selected.map((item, index) => transferFunction
+                                        ? item.frequency_hz
+                                        : (phaseNoise ? Number((item.row || item.target?.row)?.phase_noise_repeat ?? index + 1) : item.p0)),
                                     y: selected.map(item => item.phase * scale),
                                     customdata: selected.map(item => [item.shot, item.count || 1, item.transfer_phase_deg]),
                                     type: 'scatter', mode: 'lines+markers',
@@ -7717,11 +7726,13 @@
                                     marker: { color: definition.color, symbol: definition.kind === 'difference' ? 'diamond' : 'circle', size: transferFunction || this.syncPhaseAggregation === 'average' ? 8 : 7, opacity: 0.82 },
                                     hovertemplate: transferFunction
                                         ? 'Frequency=%{x:.9g} Hz<br>Generator phase=%{customdata[2]}°<br>Δφ=%{y:.6g}<br>first shot=%{customdata[0]}<br>shots=%{customdata[1]}<extra>%{fullData.name}</extra>'
-                                        : 'P0=%{x:.9g}<br>Δφ=%{y:.6g}<br>first shot=%{customdata[0]}<br>shots=%{customdata[1]}<extra>%{fullData.name}</extra>',
+                                        : (phaseNoise
+                                            ? 'Shot within T=%{x}<br>Δφ=%{y:.6g}<br>global shot=%{customdata[0]}<extra>%{fullData.name}</extra>'
+                                            : 'P0=%{x:.9g}<br>Δφ=%{y:.6g}<br>first shot=%{customdata[0]}<br>shots=%{customdata[1]}<extra>%{fullData.name}</extra>'),
                                 };
                             }).filter(trace => trace.x.length);
                         });
-                        xTitle = transferFunction ? 'TTI carrier frequency (Hz)' : 'Parameter P0';
+                        xTitle = transferFunction ? 'TTI carrier frequency (Hz)' : (phaseNoise ? 'Shot number within selected T' : 'Parameter P0');
                         const hostCount = definitions.filter(definition => definition.kind === 'host').length;
                         const hasDifference = definitions.some(definition => definition.kind === 'difference');
                         title = transferFunction
@@ -7734,7 +7745,7 @@
                         xaxis: { title: xTitle, type: this.syncPhasePlotMode === 'allan' ? this.syncPhaseAllanXAxis : 'linear', anchor: 'y', showline: true, mirror: true, ticks: 'inside', gridcolor: '#dde5ee' },
                         yaxis: { title: relative ? 'Relative Allan deviation' : `Interferometer Δφ (${this.phaseUnit})`, type: this.syncPhasePlotMode === 'allan' ? this.syncPhaseAllanYAxis : 'linear', anchor: 'x', showline: true, mirror: true, ticks: 'inside', gridcolor: '#dde5ee' },
                         legend: { orientation: 'h', x: 1, xanchor: 'right', y: 1.13 }, hovermode: 'closest', paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
-                        uirevision: `sync-phase:${this.syncPhasePlotMode}:${this.syncPhaseSelectedNodes.join('|')}:${this.syncPhaseReferenceNode}:${this.syncPhaseTargetNode}`,
+                        uirevision: `sync-phase:${this.syncPhasePlotMode}:${this.syncPhaseSelectedNodes.join('|')}:${this.syncPhaseReferenceNode}:${this.syncPhaseTargetNode}:${this.isPhaseNoiseArchive() ? Number(this.phaseNoiseSelectedT2) : ''}`,
                     };
                     Plotly.react(element, traces, layout, { responsive: true, displaylogo: false });
                 },
@@ -10092,6 +10103,11 @@
                     }
                     await this.$nextTick();
                     this.renderPhaseNoiseArchivePlot();
+                    if (this.syncManifest) {
+                        this.resetSyncPhaseShotRange(false);
+                        this.syncPhaseAllanOrder = Math.max(1, Math.min(this.syncPhaseMaxAllanOrder(), Math.round(Number(this.syncPhaseAllanOrder) || 1)));
+                        this.renderSyncArchiveNodePlots();
+                    }
                     await this.$nextTick();
                     this.resizeAnalysisPlots();
                 },

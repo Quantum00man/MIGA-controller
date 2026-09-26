@@ -190,6 +190,9 @@ class PhaseNoiseAnalyzeTests(unittest.TestCase):
         self.assertIn("INTERFEROMETER T", archive)
         self.assertIn("phase-noise-opt-t-", archive)
         self.assertIn("await this.$nextTick();", archive)
+        self.assertIn("Selected T · shot sequence", archive)
+        self.assertIn("Shot number within selected T", archive)
+        self.assertIn("this.renderSyncArchiveNodePlots();", archive)
         self.assertIn("summary-square-layout", archive)
         self.assertIn('v-show="!isSquareSummaryArchive()" class="card border-0 shadow-sm"', archive)
 
