@@ -2027,6 +2027,7 @@
                                     <div class="row g-2 align-items-end">
                                         <div v-if="isTransferFunctionArchive()" class="col-sm-6 col-lg-2"><label class="form-label-small">{{ isTransferBurstTimeScanArchive() ? 'P0' : 'TTI FREQUENCY (HZ)' }}</label><select class="form-select form-select-sm" v-model.number="syncPhaseCalibrationOptimization.transferFrequencyHz"><option v-for="frequency in syncTransferFunctionOptimizationFrequencies()" :key="frequency" :value="frequency">{{ Number(frequency).toPrecision(9) }}</option></select></div>
                                         <div v-if="isTransferFunctionArchive()" class="col-sm-6 col-lg-2"><label class="form-label-small">GENERATOR PHASE</label><select class="form-select form-select-sm" v-model.number="syncPhaseCalibrationOptimization.transferPhaseDeg"><option :value="0">0°</option><option :value="90">90°</option></select></div>
+                                        <div v-if="isPhaseNoiseArchive()" class="col-sm-6 col-lg-3"><label class="form-label-small">INTERFEROMETER T</label><select class="form-select form-select-sm" v-model.number="phaseNoiseSelectedT2" @change="selectPhaseNoiseT"><option v-for="row in phaseNoiseSummary" :key="`phase-noise-opt-t-${row.t2_us2}`" :value="Number(row.t2_us2)">T={{ Number(row.t_ms).toPrecision(6) }} ms · T²={{ Number(row.t2_us2).toPrecision(9) }}</option></select></div>
                                         <div class="col-sm-6 col-lg-2"><label class="form-label-small">OBJECTIVE</label><select class="form-select form-select-sm" v-model="syncPhaseCalibrationOptimization.objective"><option value="allan">Allan n=1</option><option value="std">Standard deviation</option><option value="combined">Combined</option></select></div>
                                         <div class="col-sm-6 col-lg-2" v-if="syncPhaseCalibrationOptimization.objective === 'combined'"><label class="form-label-small">ALLAN WEIGHT</label><input type="number" class="form-control form-control-sm" min="0" max="1" step="0.05" v-model.number="syncPhaseCalibrationOptimization.combinedAllanWeight"></div>
                                         <div class="col-sm-6 col-lg-2"><label class="form-label-small">A/C BOUNDS (%)</label><input type="number" class="form-control form-control-sm" min="0.1" max="50" step="1" v-model.number="syncPhaseCalibrationOptimization.boundPercent"></div>
@@ -2034,7 +2035,7 @@
                                         <div class="col-sm-6 col-lg-2"><label class="form-label-small">PRIOR WEIGHT</label><input type="number" class="form-control form-control-sm" min="0" max="1000" step="0.01" v-model.number="syncPhaseCalibrationOptimization.priorWeight"></div>
                                         <div class="col-sm-6 col-lg-2"><button class="btn btn-primary btn-sm w-100 fw-bold" @click="runSyncPhaseCalibrationOptimization" :disabled="syncPhaseCalibrationOptimization.loading"><span v-if="syncPhaseCalibrationOptimization.loading" class="spinner-border spinner-border-sm me-1"></span>{{ syncPhaseCalibrationOptimization.loading ? 'Optimizing…' : 'Optimize A/C' }}</button></div>
                                     </div>
-                                    <div class="form-text">{{ isTransferFunctionArchive() ? `Uses one selected ${isTransferBurstTimeScanArchive() ? 'P0 value' : 'TTI frequency'} and generator phase, plus the actual shot-index range. Allan never combines 0° and 90° shots.` : 'Uses the current P0 and actual shot-index ranges.' }} Larger fringe/prior weights keep A and C closer to the original calibration.</div>
+                                    <div class="form-text">{{ isTransferFunctionArchive() ? `Uses one selected ${isTransferBurstTimeScanArchive() ? 'P0 value' : 'TTI frequency'} and generator phase, plus the actual shot-index range. Allan never combines 0° and 90° shots.` : (isPhaseNoiseArchive() ? 'Uses only the selected interferometer T and actual shot-index range.' : 'Uses the current P0 and actual shot-index ranges.') }} Larger fringe/prior weights keep A and C closer to the original calibration.</div>
                                     <div v-if="syncPhaseCalibrationOptimization.error" class="alert alert-danger small py-2 mt-2 mb-0">{{ syncPhaseCalibrationOptimization.error }}</div>
                                     <div v-if="syncPhaseCalibrationOptimization.message" class="alert alert-success small py-2 mt-2 mb-0">{{ syncPhaseCalibrationOptimization.message }}</div>
                                     <div v-if="syncPhaseCalibrationOptimization.saved.length" class="row g-2 align-items-end mt-1">
@@ -10076,19 +10077,23 @@
                     this.plotRevision++;
                     this.renderPhaseNoiseArchivePlot();
                 },
-                setPhaseNoiseView(view) {
+                async setPhaseNoiseView(view) {
                     this.phaseNoiseView = view === 'detail' ? 'detail' : 'overview';
                     if (this.phaseNoiseView === 'detail' && !Number.isFinite(Number(this.phaseNoiseSelectedT2)) && this.phaseNoiseSummary.length) this.phaseNoiseSelectedT2 = Number(this.phaseNoiseSummary[0].t2_us2);
-                    this.selectPhaseNoiseT();
+                    await this.$nextTick();
+                    await this.selectPhaseNoiseT();
                 },
-                selectPhaseNoiseT() {
+                async selectPhaseNoiseT() {
                     const t2 = Number(this.phaseNoiseSelectedT2);
                     if (Number.isFinite(t2) && this.syncManifest) {
                         this.syncPhaseP0Min = t2; this.syncPhaseP0Max = t2;
                         this.syncPhaseP0MinInput = String(t2); this.syncPhaseP0MaxInput = String(t2);
                         this.clearSyncPhaseCalibrationOptimization();
                     }
+                    await this.$nextTick();
                     this.renderPhaseNoiseArchivePlot();
+                    await this.$nextTick();
+                    this.resizeAnalysisPlots();
                 },
                 phaseNoiseDetailRows() {
                     const selected = Number(this.phaseNoiseSelectedT2);
