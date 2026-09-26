@@ -6940,25 +6940,39 @@
                     const value = Number(row?.sync_shot_index ?? row?.step ?? fallback);
                     return Number.isFinite(value) ? value : fallback;
                 },
-                syncPhaseOptimizationPreviewRecord(nodeId, shot) {
+                syncPhaseOptimizationShot(row, fallback = 0) {
+                    if (this.isPhaseNoiseArchive()) {
+                        const repeat = Number(row?.phase_noise_repeat);
+                        if (Number.isFinite(repeat)) return repeat;
+                    }
+                    return this.syncPhaseShot(row, fallback);
+                },
+                syncPhaseOptimizationPreviewRecord(nodeId, previewShot) {
                     const result = this.syncPhaseCalibrationOptimization.result;
                     if (!result || !Array.isArray(result.series)) return null;
+                    if (this.isPhaseNoiseArchive()) {
+                        const resultT2 = Number(result?.settings?.phase_noise_t2_us2);
+                        const selectedT2 = Number(this.phaseNoiseSelectedT2);
+                        if (!Number.isFinite(resultT2) || !Number.isFinite(selectedT2) || !this.syncPhaseSameP0(resultT2, selectedT2)) return null;
+                    }
                     let field = '';
                     if (String(nodeId) === String(result.reference_node_id)) field = 'reference_after_rad';
                     else if (String(nodeId) === String(result.target_node_id)) field = 'target_after_rad';
                     if (!field) return null;
-                    const record = result.series.find(item => Number(item.shot) === Number(shot));
-                    return { matched: true, value: record ? record[field] : null };
+                    const record = result.series.find(item => Number(item.shot) === Number(previewShot));
+                    if (!record || record[field] == null || !Number.isFinite(Number(record[field]))) return null;
+                    return { matched: true, value: Number(record[field]) };
                 },
                 syncPhaseRows(nodeId, includeInvalid = false) {
                     return this.syncArchiveNodeRows(nodeId).map((row, index) => {
                         const shot = this.syncPhaseShot(row, index);
-                        const preview = this.syncPhaseOptimizationPreviewRecord(nodeId, shot);
+                        const optimizationShot = this.syncPhaseOptimizationShot(row, index);
+                        const preview = this.syncPhaseOptimizationPreviewRecord(nodeId, optimizationShot);
                         const phase = preview ? Number(preview.value) : Number(row?.interferometer_phase);
                         const valid = preview
                             ? preview.value != null && Number.isFinite(phase)
                             : row?.interferometer_phase_valid === true && Number.isFinite(phase);
-                        return { row, nodeId, shot, p0: this.syncPhaseP0(row), phase, valid, optimizationPreview: Boolean(preview) };
+                        return { row, nodeId, shot, optimizationShot, p0: this.syncPhaseP0(row), phase, valid, optimizationPreview: Boolean(preview) };
                     }).filter(item => {
                         if (!Number.isFinite(item.p0) || (!includeInvalid && !item.valid)) return false;
                         if (!this.isPhaseNoiseArchive() || !Number.isFinite(Number(this.phaseNoiseSelectedT2))) return true;
@@ -6990,7 +7004,7 @@
                             && String(referenceNode) === String(result.reference_node_id)
                             && String(targetNode) === String(result.target_node_id);
                         const optimizedRecord = optimizedPair
-                            ? (result.series || []).find(item => Number(item.shot) === Number(target.shot)) : null;
+                            ? (result.series || []).find(item => Number(item.shot) === Number(target.optimizationShot)) : null;
                         const optimizedDifference = Number(optimizedRecord?.after_rad);
                         const phase = optimizedRecord?.after_rad != null && Number.isFinite(optimizedDifference)
                             ? optimizedDifference : this.wrapSyncPhase(rawDifference);

@@ -193,6 +193,9 @@ class PhaseNoiseAnalyzeTests(unittest.TestCase):
         self.assertIn("Selected T · shot sequence", archive)
         self.assertIn("Shot number within selected T", archive)
         self.assertIn("this.renderSyncArchiveNodePlots();", archive)
+        self.assertIn("syncPhaseOptimizationShot(row", archive)
+        self.assertIn("Number(target.optimizationShot)", archive)
+        self.assertIn("if (!record || record[field] == null", archive)
         self.assertIn("summary-square-layout", archive)
         self.assertIn('v-show="!isSquareSummaryArchive()" class="card border-0 shadow-sm"', archive)
 
