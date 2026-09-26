@@ -209,7 +209,8 @@ class LabPlotExportTests(unittest.TestCase):
         self.assertTrue(all(grid.attrib["style"] == "0" for grid in root.iter("minorGrid")))
 
         plot_title = next(label for label in plot.findall("textLabel") if label.attrib["name"].endswith("Title"))
-        self.assertEqual(plot_title.find("geometry").attrib["visible"], "0")
+        self.assertEqual(plot_title.find("geometry").attrib["visible"], "1")
+        self.assertEqual(plot_title.findtext("text"), plot.attrib["name"])
         legend = plot.find("cartesianPlotLegend/general")
         self.assertIsNotNone(legend)
         self.assertEqual(legend.attrib["fontFamily"], "Arial")
@@ -391,6 +392,10 @@ class LabPlotExportTests(unittest.TestCase):
         detail_plots = list(worksheets["Phase Noise - T Detail"].iter("cartesianPlot"))
         self.assertEqual(len(detail_plots), 2)
         self.assertEqual(detail_plots[0].attrib["name"], "T=1 ms (T2=1000000)")
+        for plot in root.iter("cartesianPlot"):
+            title = next(label for label in plot.findall("textLabel") if label.attrib["name"].endswith("Title"))
+            self.assertEqual(title.find("geometry").attrib["visible"], "1")
+            self.assertEqual(title.findtext("text"), plot.attrib["name"])
         detail_curves = {item.attrib["name"] for item in detail_plots[0].iter("xyCurve")}
         self.assertEqual(detail_curves, {"Phase"})
         diagnostic_curves = {item.attrib["name"] for item in detail_plots[1].iter("xyCurve")}

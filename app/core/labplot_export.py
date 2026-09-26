@@ -390,7 +390,7 @@ def build_project(project_name: str, worksheets: Iterable[Worksheet], comment: s
             })
             ET.SubElement(systems, "coordinateSystem", {"name": "Default", "xIndex": "0", "yIndex": "0"})
             _background(element, "plotArea", border=True)
-            _label(element, f"{plot.title} - Title", "", PLOT_TITLE_POINT_SIZE, visible=False)
+            _label(element, f"{plot.title} - Title", plot.title, PLOT_TITLE_POINT_SIZE)
             _axis(element, "x", 0, 1, plot.x_label)
             _axis(element, "y", 1, 2, plot.y_label)
             for curve, x_path, y_path, plus_path, minus_path in curves:
