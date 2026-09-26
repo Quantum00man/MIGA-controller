@@ -6963,8 +6963,14 @@
                     if (!record || record[field] == null || !Number.isFinite(Number(record[field]))) return null;
                     return { matched: true, value: Number(record[field]) };
                 },
+                syncPhaseNodeRows(nodeId) {
+                    const nodes = this.syncManifest?.node_results;
+                    if (nodeId === 'master' && Array.isArray(nodes?.master) && nodes.master.length) return nodes.master;
+                    if (nodeId !== 'master' && Array.isArray(nodes?.slaves?.[nodeId]) && nodes.slaves[nodeId].length) return nodes.slaves[nodeId];
+                    return this.syncArchiveNodeRows(nodeId);
+                },
                 syncPhaseRows(nodeId, includeInvalid = false) {
-                    return this.syncArchiveNodeRows(nodeId).map((row, index) => {
+                    return this.syncPhaseNodeRows(nodeId).map((row, index) => {
                         const shot = this.syncPhaseShot(row, index);
                         const optimizationShot = this.syncPhaseOptimizationShot(row, index);
                         const preview = this.syncPhaseOptimizationPreviewRecord(nodeId, optimizationShot);
@@ -6994,9 +7000,10 @@
                 },
                 syncPhaseDifferenceRows(referenceNode = this.syncPhaseReferenceNode, targetNode = this.syncPhaseTargetNode) {
                     if (!referenceNode || !targetNode || referenceNode === targetNode) return [];
-                    const referenceByShot = new Map(this.syncPhaseRows(referenceNode).map(item => [item.shot, item]));
+                    const pairingShot = item => this.isPhaseNoiseArchive() ? item.optimizationShot : item.shot;
+                    const referenceByShot = new Map(this.syncPhaseRows(referenceNode).map(item => [pairingShot(item), item]));
                     return this.syncPhaseRows(targetNode).map(target => {
-                        const reference = referenceByShot.get(target.shot);
+                        const reference = referenceByShot.get(pairingShot(target));
                         if (!reference || !this.syncPhaseSameP0(reference.p0, target.p0)) return null;
                         const rawDifference = target.phase - reference.phase;
                         const result = this.syncPhaseCalibrationOptimization.result;

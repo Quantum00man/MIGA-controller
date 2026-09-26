@@ -367,6 +367,7 @@ class InterferometerPhaseTests(unittest.TestCase):
         self.assertIn("syncArchiveNodeLabel(syncPhaseTargetNode)", archive_html)
         self.assertIn("syncArchiveNodeLabel(syncPhaseReferenceNode)", archive_html)
         self.assertIn("syncPhaseDifferenceRows", archive_html)
+        self.assertIn("syncPhaseNodeRows(nodeId)", archive_html)
         self.assertIn("this.syncPhaseSameP0(reference.p0, target.p0)", archive_html)
         self.assertIn("wrapped <= -Math.PI + 1e-12", archive_html)
         self.assertIn("syncPhaseAllanCurve", archive_html)
