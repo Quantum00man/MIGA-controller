@@ -78,7 +78,19 @@ class DataLoader:
             point["intf_n1_nofit"], point["intf_n2_nofit"], point["intf_p1_nofit"], point["intf_p2_nofit"] = physics.calculate_interferometer_output(
                 point.get("atom_number_dw_nofit"), point.get("atom_number_up_nofit"), alpha, beta, gamma
             )
-            phase_result = interferometer_phase.calculate_phase(point, phase_calibration)
+            point_phase_calibration = phase_calibration
+            if (
+                str(config_data.get("mode") or "").strip().lower() == "phase_noise"
+                and isinstance(phase_calibration, dict)
+            ):
+                reference = point.get("phase_noise_t2_us2")
+                if reference is None:
+                    reference = point.get("interferometer_phase_reference_t2_us2", point.get("parameter"))
+                if reference is not None:
+                    point_phase_calibration = phase_noise.calibration_at_mid_fringe(
+                        phase_calibration, float(reference)
+                    )
+            phase_result = interferometer_phase.calculate_phase(point, point_phase_calibration)
             point.update(phase_result)
             point["interferometer_phase_raw"] = phase_result.get("interferometer_phase")
             if phase_result.get("interferometer_phase_valid") and zero is not None:
@@ -1380,6 +1392,12 @@ class DataLoader:
             "intf_alpha_applied": self._parse_float(row.get("I_Alpha_Applied")),
             "intf_alpha_calibration_block_id": self._parse_int(row.get("I_Alpha_Calibration_Block"), None),
             "intf_alpha_calibration_shot": self._parse_int(row.get("I_Alpha_Calibration_Shot"), None),
+            "phase_noise_t2_us2": self._parse_float(row.get("Phase_Noise_T2_us2")),
+            "phase_noise_repeat": self._parse_int(row.get("Phase_Noise_Repeat"), None),
+            "phase_noise_total_repeats": self._parse_int(row.get("Phase_Noise_Total_Repeats"), None),
+            "phase_noise_t_index": self._parse_int(row.get("Phase_Noise_T_Index"), None),
+            "phase_noise_t_count": self._parse_int(row.get("Phase_Noise_T_Count"), None),
+            "phase_noise_science_shot": self._parse_int(row.get("Phase_Noise_Science_Shot"), None),
             "transfer_frequency_attempt": self._parse_int(row.get("Transfer_Frequency_Attempt"), 1),
             "ramsey_delta_f_mhz": self._parse_float(row.get("Ramsey_Delta_F_MHz")),
             "ramsey_repeat": self._parse_int(row.get("Ramsey_Repeat"), -1),
@@ -1987,6 +2005,24 @@ class DataLoader:
             )
             if is_phase_noise else []
         )
+        phase_noise_series = (
+            [
+                {
+                    key: point.get(key)
+                    for key in (
+                        "step", "timestamp", "parameter", "phase_noise_t2_us2",
+                        "phase_noise_repeat", "phase_noise_total_repeats",
+                        "phase_noise_t_index", "phase_noise_t_count",
+                        "phase_noise_science_shot", "interferometer_phase",
+                        "interferometer_phase_valid", "intf_p1", "intf_p1_nofit",
+                        "intf_alpha_applied", "power_meter_power_w",
+                        "power_meter_valid", "power_meter_invalid_reason",
+                    )
+                }
+                for point in science_points
+            ]
+            if is_phase_noise else []
+        )
         sync_manifest = self._apply_sync_phase_reference_overrides(sync_manifest, phase_contexts)
         bragg_calibration_result = None
         bragg_calibration_path = run_dir / "bragg_fringe_calibration.json"
@@ -2052,6 +2088,7 @@ class DataLoader:
             "lock_in_analysis": lock_in_analysis,
             "transfer_function_summary": transfer_function_summary,
             "phase_noise_summary": phase_noise_summary,
+            "phase_noise_series": phase_noise_series,
             "bragg_fringe_calibration": bragg_calibration_result,
             "bragg_fringe_calibration_nodes": bragg_calibration_nodes,
             "power_monitor_events": power_monitor_events,

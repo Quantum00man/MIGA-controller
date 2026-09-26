@@ -42,6 +42,8 @@ RESULTS_CSV_HEADER = [
     "Power_Meter_Serial", "Power_Meter_Reference_W", "Power_Meter_Deviation_Percent",
     "Power_Meter_Valid", "Power_Meter_Invalid_Reason", "Transfer_Frequency_Attempt",
     "I_Alpha_Applied", "I_Alpha_Calibration_Block", "I_Alpha_Calibration_Shot",
+    "Phase_Noise_T2_us2", "Phase_Noise_Repeat", "Phase_Noise_Total_Repeats",
+    "Phase_Noise_T_Index", "Phase_Noise_T_Count", "Phase_Noise_Science_Shot",
     "Bragg_Calibration_Stage",
 ]
 
@@ -458,6 +460,12 @@ class DataManager:
             f(result.intf_alpha_applied, 10),
             result.intf_alpha_calibration_block_id if result.intf_alpha_calibration_block_id is not None else "",
             result.intf_alpha_calibration_shot if result.intf_alpha_calibration_shot is not None else "",
+            f(result.phase_noise_t2_us2, 9),
+            result.phase_noise_repeat if result.phase_noise_repeat is not None else "",
+            result.phase_noise_total_repeats if result.phase_noise_total_repeats is not None else "",
+            result.phase_noise_t_index if result.phase_noise_t_index is not None else "",
+            result.phase_noise_t_count if result.phase_noise_t_count is not None else "",
+            result.phase_noise_science_shot if result.phase_noise_science_shot is not None else "",
             result.bragg_calibration_stage or "",
         ]
         self.csv_writer.writerow(row)
@@ -544,6 +552,16 @@ class DataManager:
                     f('ramsey_center_frequency_mhz', 9),
                     f('ramsey_ch1_frequency_mhz', 9), f('ramsey_ch2_frequency_mhz', 9),
                     f('ramsey_ch1_power_dbm', 6), f('ramsey_ch2_power_dbm', 6),
+                    f('power_meter_power_w', 12), str(pt.get('power_meter_measured_at') or ''),
+                    f('power_meter_wavelength_nm', 6), str(pt.get('power_meter_serial_number') or ''),
+                    f('power_meter_reference_w', 12), f('power_meter_deviation_percent', 6),
+                    pt.get('power_meter_valid', ''), str(pt.get('power_meter_invalid_reason') or ''),
+                    pt.get('transfer_frequency_attempt', 1), f('intf_alpha_applied', 10),
+                    pt.get('intf_alpha_calibration_block_id', ''), pt.get('intf_alpha_calibration_shot', ''),
+                    f('phase_noise_t2_us2', 9), pt.get('phase_noise_repeat', ''),
+                    pt.get('phase_noise_total_repeats', ''), pt.get('phase_noise_t_index', ''),
+                    pt.get('phase_noise_t_count', ''), pt.get('phase_noise_science_shot', ''),
+                    str(pt.get('bragg_calibration_stage') or ''),
                 ]
                 writer.writerow(row)
 

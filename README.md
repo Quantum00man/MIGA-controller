@@ -6,6 +6,8 @@ Transfer Function scans can optionally read a Thorlabs PM100A from the authentic
 
 Transfer Function and Bragg Fringes Calibration can also run a user-supplied periodic interferometer-labeling MOT. The MOT is stored locally in Settings on each controller and is never copied through SYNC, so Master and every Slave execute their own file. Each block derives $I_\alpha$ from fitted `Prob_UP_F2`, archives its uncertainty and validity, and updates the live monitor. Normal completion adds an endpoint block; final analysis uses piecewise-linear time interpolation of accepted calibration points independently on every node.
 
+Phase Noise Analyze supports the same local, time-based periodic $I_\alpha$ calibration in standalone and SYNC runs. The Master selects every shared $T^2$ from its active fringe calibration, while each Slave converts the same shots with its own local fringe curve at that reference. Calibration shots are excluded from the per-$T$ 1--N science-shot sequence and Allan statistics. An optional Master-only PM100A reading is attached to each science shot without threshold pauses. Archive provides cross-$T$ summaries, per-$T$ phase/power/$I_\alpha$ timelines, SYNC differential Allan n=1, and independent per-$T$ A/C optimization previews and saved copies.
+
 The backend is built with Python and FastAPI. The browser interface uses Vue 3 and Plotly.js.
 
 ## Installation

@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 from typing import Dict, Any, List, Optional
-from app.analysis import fitting, interferometer_phase, phase_calibration_optimization
+from app.analysis import fitting, interferometer_phase, phase_calibration_optimization, phase_noise
 from app.analysis.transfer_function import optimize_slave_normalization_scale
 from app.core.experiment_manager import ExperimentManager
 from app.core.data_loader import DataLoader
@@ -2604,7 +2604,31 @@ async def optimize_archive_sync_phase_calibrations(req: ArchiveSyncPhaseCalibrat
 
         reference_calibration = calibration_for(req.reference_node_id)
         target_calibration = calibration_for(req.target_node_id)
+        if req.phase_noise_t2_us2 is not None:
+            reference_calibration = phase_noise.calibration_at_mid_fringe(
+                reference_calibration, req.phase_noise_t2_us2
+            )
+            target_calibration = phase_noise.calibration_at_mid_fringe(
+                target_calibration, req.phase_noise_t2_us2
+            )
         node_results = manifest.get("node_results") or {}
+
+        # SYNC manifest rows capture the live signal.  Periodic I_alpha analysis
+        # is finalized per node in its own archive, so overlay those recalculated
+        # science rows before optimizing A/C.
+        reanalyzed_rows: Dict[str, List[Dict[str, Any]]] = {}
+        for selected_node_id in {req.reference_node_id, req.target_node_id}:
+            if selected_node_id == str(loaded.get("archive_phase_reference_node_id") or "master"):
+                node_loaded = loaded
+            else:
+                node_loaded = await run_in_threadpool(
+                    data_loader.load_run,
+                    req.year, req.month, req.day, req.run_id,
+                    selected_node_id,
+                    manager.get_active_bragg_phase_calibration(),
+                )
+            node_rows = node_loaded.get("archive_node_data") or node_loaded.get("data") or []
+            reanalyzed_rows[selected_node_id] = [row for row in node_rows if isinstance(row, dict)]
 
         def rows_for(node_id: str) -> List[Dict[str, Any]]:
             if node_id == "master":
@@ -2612,7 +2636,18 @@ async def optimize_archive_sync_phase_calibrations(req: ArchiveSyncPhaseCalibrat
             else:
                 rows = (node_results.get("slaves") or {}).get(node_id)
             if isinstance(rows, list) and rows:
-                return rows
+                merged = [dict(row) for row in rows if isinstance(row, dict)]
+                recalculated = reanalyzed_rows.get(node_id) or []
+                for index, recalculated_row in enumerate(recalculated[:len(merged)]):
+                    merged[index].update({
+                        key: recalculated_row.get(key)
+                        for key in (
+                            "intf_p1", "intf_p2", "intf_p1_nofit", "intf_p2_nofit",
+                            "intf_alpha_applied", "interferometer_phase",
+                            "interferometer_phase_valid", "interferometer_phase_source_value",
+                        )
+                    })
+                return merged
             pairs = manifest.get("pairs") or []
             if node_id == "master":
                 candidates = [item.get("master") for item in pairs]
@@ -2679,6 +2714,12 @@ async def optimize_archive_sync_phase_calibrations(req: ArchiveSyncPhaseCalibrat
                 continue
             if req.shot_index_max is not None and shot > req.shot_index_max:
                 continue
+            if req.phase_noise_t2_us2 is not None:
+                if target_p0 is None or not math.isclose(
+                    target_p0, req.phase_noise_t2_us2,
+                    rel_tol=1e-9, abs_tol=1e-9,
+                ):
+                    continue
             if req.transfer_frequency_hz is not None:
                 reference_frequency = transfer_value(reference_row, "transfer_frequency_hz")
                 target_frequency = transfer_value(target_row, "transfer_frequency_hz")
@@ -2706,8 +2747,12 @@ async def optimize_archive_sync_phase_calibrations(req: ArchiveSyncPhaseCalibrat
                 continue
             if not np.isfinite(reference_signal) or not np.isfinite(target_signal):
                 continue
+            local_phase_noise_shot = target_row.get("phase_noise_repeat")
             pairs.append({
-                "shot": shot,
+                # Phase Noise excludes calibration shots and intentionally
+                # treats the remaining repeats as one contiguous sequence.
+                "shot": int(local_phase_noise_shot) if req.phase_noise_t2_us2 is not None and local_phase_noise_shot is not None else shot,
+                "sync_shot_index": shot,
                 "p0": target_p0,
                 "transfer_frequency_hz": transfer_value(target_row, "transfer_frequency_hz"),
                 "transfer_phase_deg": transfer_value(target_row, "transfer_phase_deg"),
@@ -2743,6 +2788,7 @@ async def optimize_archive_sync_phase_calibrations(req: ArchiveSyncPhaseCalibrat
             "shot_index_max": req.shot_index_max,
             "transfer_frequency_hz": req.transfer_frequency_hz,
             "transfer_phase_deg": req.transfer_phase_deg,
+            "phase_noise_t2_us2": req.phase_noise_t2_us2,
         }
         return result
     except FileNotFoundError as exc:

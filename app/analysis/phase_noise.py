@@ -145,6 +145,8 @@ def build_phase_noise_summary(
 
     grouped: Dict[float, List[Optional[float]]] = {}
     counts: Dict[float, int] = {}
+    timestamps: Dict[float, List[float]] = {}
+    powers: Dict[float, List[float]] = {}
     for point in points:
         getter = point.get if isinstance(point, dict) else lambda key, default=None: getattr(point, key, default)
         reference = _finite(getter("interferometer_phase_reference_t2_us2"))
@@ -157,6 +159,12 @@ def build_phase_noise_summary(
         phase = _finite(getter("interferometer_phase"))
         valid = bool(getter("interferometer_phase_valid", False))
         grouped.setdefault(key, []).append(phase if valid and phase is not None else None)
+        timestamp = _finite(getter("timestamp"))
+        if timestamp is not None:
+            timestamps.setdefault(key, []).append(timestamp)
+        power = _finite(getter("power_meter_power_w"))
+        if power is not None:
+            powers.setdefault(key, []).append(power)
 
     result: List[Dict[str, Any]] = []
     requested_orders = normalize_allan_orders(allan_orders)
@@ -164,6 +172,10 @@ def build_phase_noise_summary(
         sequence = grouped.get(t2, [])
         phases = [value for value in sequence if value is not None]
         measured = float(np.std(phases, ddof=1)) if len(phases) >= 2 else None
+        ordered_times = sorted(timestamps.get(t2, []))
+        intervals = [right - left for left, right in zip(ordered_times, ordered_times[1:]) if right > left]
+        median_cycle_s = float(np.median(intervals)) if intervals else None
+        power_values = powers.get(t2, [])
         allan_rows = []
         for order in requested_orders:
             allan_result = overlapping_allan_result(sequence, order)
@@ -175,6 +187,7 @@ def build_phase_noise_summary(
             allan_expected = expected_rad / order_scale if expected_rad is not None else None
             allan_rows.append({
                 "order": order,
+                "averaging_time_s": float(order * median_cycle_s) if median_cycle_s is not None else None,
                 "measured_phase_noise_rad": allan_measured,
                 "valid_window_count": valid_windows,
                 "measured_edf_white": allan_result["edf"],
@@ -198,6 +211,10 @@ def build_phase_noise_summary(
             "laser_phase_noise_rad": laser_rad,
             "expected_total_phase_noise_rad": expected_rad,
             "available_allan_max_order": len(sequence) // 2,
+            "median_science_shot_cycle_s": median_cycle_s,
+            "power_meter_count": len(power_values),
+            "power_meter_mean_w": float(np.mean(power_values)) if power_values else None,
+            "power_meter_std_w": float(np.std(power_values, ddof=1)) if len(power_values) >= 2 else None,
             "allan_deviations": allan_rows,
         })
     return result

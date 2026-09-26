@@ -57,6 +57,15 @@ class ScanResult:
     intf_alpha_calibration_block_id: Optional[int] = None
     intf_alpha_calibration_shot: Optional[int] = None
 
+    # Phase Noise Analyze provenance.  Science-shot counters deliberately
+    # exclude inserted I_alpha calibration shots.
+    phase_noise_t2_us2: Optional[float] = None
+    phase_noise_repeat: Optional[int] = None
+    phase_noise_total_repeats: Optional[int] = None
+    phase_noise_t_index: Optional[int] = None
+    phase_noise_t_count: Optional[int] = None
+    phase_noise_science_shot: Optional[int] = None
+
     # Bragg Fringes Calibration provenance. Empty for ordinary scan points.
     bragg_calibration_stage: str = ""
 

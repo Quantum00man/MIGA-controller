@@ -55,6 +55,7 @@ class ScanConfig(BaseModel):
     link_formulas: List[str] = Field(default_factory=list)
     phase_noise_mid_fringe_values: List[float] = Field(default_factory=list, max_length=200)
     phase_noise_repeats: int = Field(10, ge=2, le=100000)
+    phase_noise_power_monitor_enabled: bool = Field(False)
     bragg_calibration_target_fringe: int = Field(1, ge=1, le=1000)
     bragg_calibration_coarse_repeats: int = Field(2, ge=1, le=100000)
     bragg_calibration_fine_phase_half_range_rad: float = Field(0.6, gt=0, lt=math.pi / 2)
@@ -992,6 +993,7 @@ class ArchiveSyncPhaseCalibrationOptimizeRequest(BaseModel):
     shot_index_max: Optional[int] = Field(None)
     transfer_frequency_hz: Optional[float] = Field(None)
     transfer_phase_deg: Optional[float] = Field(None)
+    phase_noise_t2_us2: Optional[float] = Field(None, ge=0)
 
 
 class ArchiveSyncPhaseCalibrationSaveRequest(BaseModel):

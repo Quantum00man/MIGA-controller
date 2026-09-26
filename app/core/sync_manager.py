@@ -56,6 +56,11 @@ SYNC_RESULT_FIELDS = (
     "transfer_frequency_modulation_mhz", "transfer_atom_mirror_distance_m",
     "transfer_phase_noise_sigma_mrad", "transfer_generator_model",
     "transfer_generator_channel",
+    "phase_noise_t2_us2", "phase_noise_repeat", "phase_noise_total_repeats",
+    "phase_noise_t_index", "phase_noise_t_count", "phase_noise_science_shot",
+    "power_meter_power_w", "power_meter_measured_at", "power_meter_wavelength_nm",
+    "power_meter_serial_number", "power_meter_valid", "power_meter_invalid_reason",
+    "intf_alpha_applied",
 )
 SYNC_STATUS_MAX_CONSECUTIVE_FAILURES = 3
 
@@ -417,8 +422,16 @@ class SyncManager:
         node_name = str(self.manager.get_settings().get("sync_node_name") or "Slave")
         scan_mode = str(scan_config.get("mode") or "").strip().lower()
         transfer_mode = scan_mode in {"transfer_function", "transfer_burst_time_scan"}
+        phase_noise_mode = scan_mode == "phase_noise"
         bragg_calibration_mode = scan_mode == "bragg_fringe_calibration"
         local_settings = self.manager.get_settings()
+        if phase_noise_mode:
+            local_phase_calibration = self.manager.get_active_bragg_phase_calibration()
+            if not isinstance(local_phase_calibration, dict):
+                raise ValueError("Phase Noise Analyze requires an active local Bragg phase calibration on the Slave")
+            # T values are owned by the Master, but every node converts phase
+            # with its own fringe curve at that shared reference T.
+            scan_config["interferometer_phase_calibration_override"] = deepcopy(local_phase_calibration)
         parameters = []
         for index, raw_parameters in enumerate(plan):
             if isinstance(raw_parameters, dict):
@@ -431,7 +444,7 @@ class SyncManager:
             display_parameters = shot_metadata.get("display_parameters") or shot_parameters
             master_parameters = self._plan_values(master_plan[index]) if index < len(master_plan) else []
             parameters.append({
-                "sequence_parameters": shot_parameters if independent_p0 else [],
+                "sequence_parameters": shot_parameters if (independent_p0 or phase_noise_mode) else [],
                 "metadata": {
                     **shot_metadata,
                     "sync_run_id": sync_run_id,
@@ -447,7 +460,7 @@ class SyncManager:
                 },
             })
         scan_config.update({
-            "mode": str(scan_config.get("mode") or "transfer_function") if (transfer_mode or bragg_calibration_mode) else "standard",
+            "mode": str(scan_config.get("mode") or "transfer_function") if (transfer_mode or bragg_calibration_mode or phase_noise_mode) else "standard",
             "parameter_source": "classic",
             "marker_axes": [],
             "averages": 1,
@@ -630,7 +643,12 @@ class SyncManager:
         # remain empty for Transfer Function, so no Master value is written into
         # a Slave sequence.
         shot_plan = deepcopy(parameters)
-        expected_shots = int(scan_config.get("_bragg_calibration_expected_total_shots", len(shot_plan)))
+        expected_shots = int(
+            scan_config.get(
+                "_bragg_calibration_expected_total_shots",
+                scan_config.get("_phase_noise_expected_science_shots", len(shot_plan)),
+            )
+        )
         sync_run_id = f"sync_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid4().hex[:8]}"
         node_name = str(settings.get("sync_node_name") or "Master")
         delay_ms = max(0.0, float(payload.get("master_delay_ms") or 0.0))
@@ -939,6 +957,15 @@ class SyncManager:
                     if master_payload.get("transfer_zero_phase_baseline") or slave_payload.get("transfer_zero_phase_baseline"):
                         self._emitted_pairs.add(key)
                         continue
+                    slave_compact = self._compact_result(slave_payload)
+                    if master_payload.get("phase_noise_t2_us2") is not None:
+                        for field in (
+                            "power_meter_power_w", "power_meter_measured_at",
+                            "power_meter_wavelength_nm", "power_meter_serial_number",
+                            "power_meter_valid", "power_meter_invalid_reason",
+                        ):
+                            slave_compact[field] = master_payload.get(field)
+                        slave_compact["power_meter_source_node"] = "master"
                     pair = {
                         "stream_type": "sync_pair",
                         "sync_run_id": self._runtime.get("sync_run_id"),
@@ -949,7 +976,7 @@ class SyncManager:
                             or [master_payload.get("sync_p0")],
                         "slave_node_id": slave_id,
                         "master": self._compact_result(master_payload),
-                        "slave": self._compact_result(slave_payload),
+                        "slave": slave_compact,
                     }
                     self._emitted_pairs.add(key)
                     emitted.append(pair)
@@ -1386,6 +1413,15 @@ class SyncManager:
                     continue
                 if master.get("error") or slave.get("error"):
                     continue
+                slave_compact = self._compact_result(slave)
+                if master.get("phase_noise_t2_us2") is not None:
+                    for field in (
+                        "power_meter_power_w", "power_meter_measured_at",
+                        "power_meter_wavelength_nm", "power_meter_serial_number",
+                        "power_meter_valid", "power_meter_invalid_reason",
+                    ):
+                        slave_compact[field] = master.get(field)
+                    slave_compact["power_meter_source_node"] = "master"
                 pairs.append({
                     "sync_shot_index": shot_index,
                     "sync_p0": master.get("sync_p0"),
@@ -1394,7 +1430,7 @@ class SyncManager:
                         or [master.get("sync_p0")],
                     "slave_node_id": slave_id,
                     "master": self._compact_result(master),
-                    "slave": self._compact_result(slave),
+                    "slave": slave_compact,
                 })
             node_results = {
                 "master": [

@@ -1736,10 +1736,10 @@ class ExperimentManager:
     def build_scan_parameter_plan(self, scan_config: Dict[str, Any]) -> List[Any]:
         payload = dict(scan_config or {})
         mode = str(payload.get('mode') or 'standard').strip().lower()
-        supported_modes = {'standard', 'timing', 'rabi', 'half', 'link', 'bragg_rabi', 'transfer_function', 'transfer_burst_time_scan', 'bragg_fringe_calibration'}
+        supported_modes = {'standard', 'timing', 'rabi', 'half', 'link', 'bragg_rabi', 'transfer_function', 'transfer_burst_time_scan', 'bragg_fringe_calibration', 'phase_noise'}
         if mode not in supported_modes:
             raise ValueError(
-                "Sync mode supports Standard, Timing, Rabi, Half, Link, Bragg Rabi, Bragg Fringes Calibration and Transfer Function scan logic"
+                "Sync mode supports Standard, Timing, Rabi, Half, Link, Bragg Rabi, Bragg Fringes Calibration, Phase Noise Analyze and Transfer Function scan logic"
             )
         if mode == 'bragg_fringe_calibration':
             return self._build_bragg_calibration_execution(scan_config)
@@ -1747,6 +1747,8 @@ class ExperimentManager:
             # Transfer Function resolves node settings into the run config so
             # acquisition and archive summaries use the Master's snapshot.
             return self._build_transfer_function_execution(scan_config)
+        if mode == 'phase_noise':
+            return self._build_phase_noise_execution(scan_config)
         return self._generate_parameters(payload)
 
     def _build_phase_noise_execution(self, scan_config: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -1770,22 +1772,41 @@ class ExperimentManager:
         })
         parameter_sets = self._generate_parameters(link_payload)
         plan: List[Dict[str, Any]] = []
-        for parameters in parameter_sets:
+        science_shot = 0
+        for t_index, parameters in enumerate(parameter_sets, start=1):
             t2 = float(parameters[0])
             for repeat in range(1, repeats + 1):
+                science_shot += 1
                 plan.append({
                     "sequence_parameters": parameters,
                     "metadata": {
                         "phase_noise_t2_us2": t2,
                         "phase_noise_repeat": repeat,
                         "phase_noise_total_repeats": repeats,
+                        "phase_noise_t_index": t_index,
+                        "phase_noise_t_count": len(parameter_sets),
+                        "phase_noise_science_shot": science_shot,
                     },
                 })
         scan_config["phase_noise_mid_fringe_values"] = selected
         scan_config["phase_noise_repeats"] = repeats
+        scan_config["_phase_noise_expected_science_shots"] = len(parameter_sets) * repeats
         scan_config["averages"] = 1
         scan_config["randomize"] = False
         scan_config["interferometer_phase_calibration_override"] = deepcopy(calibration)
+        if scan_config.get("intf_alpha_calibration_enabled"):
+            if not str(self.settings.get("intf_alpha_calibration_sequence_content_base64") or ""):
+                raise ValueError("Periodic I_alpha calibration requires a local calibration MOT in Settings")
+            bounded: List[Dict[str, Any]] = [
+                {"sequence_parameters": [], "metadata": {"intf_alpha_calibration_boundary": "start"}}
+            ]
+            for item in plan:
+                # A boundary before every science shot makes the interval truly
+                # time based while expand_boundary cheaply skips blocks not due.
+                bounded.append({"sequence_parameters": [], "metadata": {"intf_alpha_calibration_boundary": "periodic"}})
+                bounded.append(item)
+            bounded.append({"sequence_parameters": [], "metadata": {"intf_alpha_calibration_boundary": "end"}})
+            plan = bounded
         return plan
 
     def _link_parameters_at_p0(self, scan_config: Dict[str, Any], p0: float) -> List[Any]:
@@ -1934,8 +1955,8 @@ class ExperimentManager:
         ac_stark_context: Optional[Dict[str, Any]] = None
         try:
             if scan_config.get("intf_alpha_calibration_enabled"):
-                if str(scan_config.get("mode") or "").strip().lower() not in {"transfer_function", "bragg_fringe_calibration"}:
-                    raise ValueError("I_alpha calibration is supported only for Transfer Function and Bragg Fringes Calibration")
+                if str(scan_config.get("mode") or "").strip().lower() not in {"transfer_function", "transfer_burst_time_scan", "bragg_fringe_calibration", "phase_noise"}:
+                    raise ValueError("I_alpha calibration is supported only for Transfer Function, Phase Noise Analyze and Bragg Fringes Calibration")
                 if not str(self.settings.get("intf_alpha_calibration_sequence_content_base64") or ""):
                     raise ValueError("I_alpha calibration requires a local calibration MOT in Settings")
             if parameters_override is not None:
@@ -3140,6 +3161,12 @@ class ExperimentManager:
                 intf_alpha_applied=(None if metadata.get("intf_alpha_calibration") else float(settings.get("intf_alpha", 0.35))),
                 intf_alpha_calibration_block_id=metadata.get("intf_alpha_calibration_block_id"),
                 intf_alpha_calibration_shot=metadata.get("intf_alpha_calibration_shot"),
+                phase_noise_t2_us2=metadata.get("phase_noise_t2_us2"),
+                phase_noise_repeat=metadata.get("phase_noise_repeat"),
+                phase_noise_total_repeats=metadata.get("phase_noise_total_repeats"),
+                phase_noise_t_index=metadata.get("phase_noise_t_index"),
+                phase_noise_t_count=metadata.get("phase_noise_t_count"),
+                phase_noise_science_shot=metadata.get("phase_noise_science_shot"),
                 bragg_calibration_stage=str(metadata.get("bragg_calibration_stage") or ""),
                 ramsey_delta_f_mhz=metadata.get('ramsey_delta_f_mhz'),
                 ramsey_repeat=metadata.get('ramsey_repeat'),
@@ -3272,10 +3299,13 @@ class ExperimentManager:
         transfer_calibrate_zero_phase = bool(scan_config.get("transfer_calibrate_zero_phase", False))
         transfer_output_enabled = False
         pending_transfer_recovery: Optional[Tuple[float, float]] = None
+        scan_mode = str(scan_config.get("mode") or "").strip().lower()
         power_monitor_enabled = bool(
-            str(scan_config.get("mode") or "").strip().lower() == "transfer_function"
-            and scan_config.get("transfer_power_monitor_enabled", False)
-            and not scan_config.get("_sync_slave", False)
+            not scan_config.get("_sync_slave", False)
+            and (
+                (scan_mode == "transfer_function" and scan_config.get("transfer_power_monitor_enabled", False))
+                or (scan_mode == "phase_noise" and scan_config.get("phase_noise_power_monitor_enabled", False))
+            )
         )
         power_threshold_percent = max(0.0, float(scan_config.get("transfer_power_threshold_percent", 0.0) or 0.0))
         power_meter_client: Optional[PowerMeterClient] = None
@@ -3589,7 +3619,10 @@ class ExperimentManager:
                             self._power_meter_reference_w = power_w
                         reference_w = self._power_meter_reference_w
                         deviation = abs(power_w - reference_w) / reference_w * 100.0 if reference_w else None
-                        exceeded = bool(power_threshold_percent > 0 and deviation is not None and deviation > power_threshold_percent)
+                        exceeded = bool(
+                            transfer_mode and power_threshold_percent > 0
+                            and deviation is not None and deviation > power_threshold_percent
+                        )
                         power_threshold_exceeded = exceeded
                         metadata.update({
                             "power_meter_power_w": power_w, "power_meter_measured_at": str(reading.get("measured_at") or ""),
@@ -3733,7 +3766,16 @@ class ExperimentManager:
                 result.atom_number_dw_nofit, result.atom_number_up_nofit, alpha,
                 self.settings.get("intf_beta", 0.07636), self.settings.get("intf_gamma", 0.25),
             )
-            phase_result = interferometer_phase.calculate_phase(asdict(result), phase_calibration)
+            result_phase_calibration = phase_calibration
+            if (
+                str(scan_config.get("mode") or "").strip().lower() == "phase_noise"
+                and result.phase_noise_t2_us2 is not None
+                and isinstance(phase_calibration, dict)
+            ):
+                result_phase_calibration = phase_noise.calibration_at_mid_fringe(
+                    phase_calibration, result.phase_noise_t2_us2
+                )
+            phase_result = interferometer_phase.calculate_phase(asdict(result), result_phase_calibration)
             for key, value in phase_result.items():
                 if hasattr(result, key):
                     setattr(result, key, value)
@@ -4086,6 +4128,9 @@ class ExperimentManager:
                     print(f"[Transfer Function] {self._scan_finalize_error}")
             if scan_config and scan_config.get('mode') == 'phase_noise':
                 try:
+                    phase_noise_results = self._apply_final_intf_alpha_calibration(
+                        phase_noise_results, scan_config
+                    )
                     summary = phase_noise.build_phase_noise_summary(
                         phase_noise_results,
                         self.data_manager.phase_calibration_snapshot,

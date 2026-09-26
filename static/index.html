@@ -1071,7 +1071,7 @@
                             <option value="half">Half (P0/2)</option>
                             <option value="link">Link (Custom Formula)</option>
                             <option value="bragg_fringe_calibration" :disabled="isScheduledMode()">Bragg Fringes Calibration</option>
-                            <option value="phase_noise" :disabled="isSyncMode()">Phase Noise Analyze</option>
+                            <option value="phase_noise">Phase Noise Analyze</option>
                             <option value="bragg_rabi">Bragg Rabi</option>
                             <option value="lock_in" :disabled="isSyncMode()">Lock-in Measurement</option>
                             <option value="ac_stark" :disabled="isSyncMode()">AC Stark Centering</option>
@@ -1079,7 +1079,7 @@
                             <option value="transfer_burst_time_scan">Transfer function Burst time scan</option>
                             <option value="ramsey_interferometer" :disabled="isSyncMode() || isScheduledMode()">Ramsey Interferometer</option>
                         </select>
-                        <div v-if="isSyncMode()" class="form-text">SYNC supports Standard, Timing, Rabi, Half, Link, Bragg Rabi, Bragg Fringes Calibration and Transfer Function. Only the Master changes Bragg parameters; Slave MOT files remain unchanged.</div>
+                        <div v-if="isSyncMode()" class="form-text">SYNC supports Standard, Timing, Rabi, Half, Link, Bragg Rabi, Bragg Fringes Calibration, Phase Noise Analyze and Transfer Function. Phase Noise uses Master-selected T values while each node uses its own fringe calibration.</div>
                     </div>
                     <div v-if="config.mode === 'transfer_function'" class="mt-1">
                         <div class="alert alert-light border py-2 px-3 small mb-3">
@@ -1259,6 +1259,11 @@
                                     <button type="button" class="btn btn-sm btn-outline-secondary" @click="config.phase_noise_mid_fringe_values = []">Clear</button>
                                 </div>
                             </div>
+                            <div class="card border-info mt-3"><div class="card-body py-2 px-3">
+                                <div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="phaseNoiseIntfAlphaCalibration" v-model="config.intf_alpha_calibration_enabled"><label class="form-check-label fw-bold" for="phaseNoiseIntfAlphaCalibration">Periodic I_alpha calibration</label></div>
+                                <div v-if="config.intf_alpha_calibration_enabled" class="row g-2 mt-1"><div class="col-6"><label class="form-label small mb-1">Interval</label><div class="input-group input-group-sm"><input type="number" min="0.01" max="1440" step="any" class="form-control" v-model.number="config.intf_alpha_calibration_interval_minutes"><span class="input-group-text">min</span></div></div><div class="col-6"><label class="form-label small mb-1">Shots per block</label><input type="number" min="2" max="1000" step="1" class="form-control form-control-sm" v-model.number="config.intf_alpha_calibration_shots"></div><div class="col-12 form-text">Time-based blocks may run within one T. Calibration shots are excluded from Phase Noise numbering and statistics. Every SYNC node uses its local calibration MOT.</div></div>
+                            </div></div>
+                            <div class="card border-warning mt-2"><div class="card-body py-2 px-3"><div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="phaseNoisePowerMonitor" v-model="config.phase_noise_power_monitor_enabled"><label class="form-check-label fw-bold" for="phaseNoisePowerMonitor">Record PM100A power</label></div><div class="form-text">The Master reads once after each science shot. Read failures are recorded without pausing.</div></div></div>
                         </template>
                     </div>
                     <div v-if="config.mode === 'lock_in'" class="mt-1">
@@ -1819,11 +1824,11 @@
                 </div>
             </div>
 
-            <div v-if="config.mode === 'transfer_function' && config.transfer_power_monitor_enabled" class="card mb-4 border-0 shadow-sm">
+            <div v-if="(config.mode === 'transfer_function' && config.transfer_power_monitor_enabled) || (config.mode === 'phase_noise' && config.phase_noise_power_monitor_enabled)" class="card mb-4 border-0 shadow-sm">
                 <div class="card-header bg-white fw-bold"><i class="bi bi-lightning-charge me-2 text-warning"></i>PM100A power after each shot</div>
                 <div id="powerMeterPlot" style="height:320px"></div>
             </div>
-            <div v-if="['transfer_function','bragg_fringe_calibration'].includes(config.mode) && config.intf_alpha_calibration_enabled" class="card mb-4 border-0 shadow-sm">
+            <div v-if="['transfer_function','bragg_fringe_calibration','phase_noise'].includes(config.mode) && config.intf_alpha_calibration_enabled" class="card mb-4 border-0 shadow-sm">
                 <div class="card-header bg-white fw-bold">Interferometer I_alpha calibration</div>
                 <div id="intfAlphaPlot" style="height:320px"></div>
             </div>
@@ -1930,7 +1935,7 @@
                         ramsey_delta_step_mhz: 0.1,
                         ramsey_repeats: 1,
                         ramsey_settling_time_s: 5,
-                        phase_noise_mid_fringe_values: [], phase_noise_repeats: 10,
+                        phase_noise_mid_fringe_values: [], phase_noise_repeats: 10, phase_noise_power_monitor_enabled: false,
                         bragg_calibration_target_fringe: 1,
                         bragg_calibration_coarse_repeats: 2,
                         bragg_calibration_fine_phase_half_range_rad: 0.6,

@@ -2354,10 +2354,17 @@
                                     <option value="rad">rad</option><option value="mrad">mrad</option>
                                 </select>
                                 <div v-if="loadedRunId && isPhaseNoiseArchive()" class="btn-group btn-group-sm" role="group" aria-label="Phase Noise statistic">
+                                    <button class="btn" :class="phaseNoiseView === 'overview' ? 'btn-primary' : 'btn-outline-primary'" @click="setPhaseNoiseView('overview')">Overview</button>
+                                    <button class="btn" :class="phaseNoiseView === 'detail' ? 'btn-primary' : 'btn-outline-primary'" @click="setPhaseNoiseView('detail')">T Detail</button>
+                                </div>
+                                <select v-if="loadedRunId && isPhaseNoiseArchive() && phaseNoiseView === 'detail'" class="form-select form-select-sm" style="width:auto" v-model.number="phaseNoiseSelectedT2" @change="selectPhaseNoiseT()" aria-label="Phase Noise T selection">
+                                    <option v-for="row in phaseNoiseSummary" :key="`phase-noise-t-${row.t2_us2}`" :value="Number(row.t2_us2)">T={{ Number(row.t_ms).toPrecision(6) }} ms · T²={{ Number(row.t2_us2).toPrecision(7) }}</option>
+                                </select>
+                                <div v-if="loadedRunId && isPhaseNoiseArchive() && phaseNoiseView === 'overview'" class="btn-group btn-group-sm" role="group" aria-label="Phase Noise statistic">
                                     <button class="btn" :class="phaseNoiseStatistic === 'std' ? 'btn-dark' : 'btn-outline-dark'" @click="setPhaseNoiseStatistic('std')">Standard deviation</button>
                                     <button class="btn" :class="phaseNoiseStatistic === 'allan' ? 'btn-dark' : 'btn-outline-dark'" @click="setPhaseNoiseStatistic('allan')">Allan deviation</button>
                                 </div>
-                                <div v-if="loadedRunId && isPhaseNoiseArchive()" class="btn-group btn-group-sm" role="group" aria-label="Phase Noise x axis">
+                                <div v-if="loadedRunId && isPhaseNoiseArchive() && phaseNoiseView === 'overview'" class="btn-group btn-group-sm" role="group" aria-label="Phase Noise x axis">
                                     <button class="btn" :class="phaseNoiseXAxis === 't2' ? 'btn-primary' : 'btn-outline-primary'" @click="phaseNoiseXAxis = 't2'">T²</button>
                                     <button class="btn" :class="phaseNoiseXAxis === 't' ? 'btn-primary' : 'btn-outline-primary'" @click="phaseNoiseXAxis = 't'">T (ms)</button>
                                 </div>
@@ -2369,7 +2376,7 @@
                                     <button class="btn" :class="phaseNoiseYAxisScale === 'linear' ? 'btn-secondary' : 'btn-outline-secondary'" @click="setPhaseNoiseAxisScale('y', 'linear')">Linear Y</button>
                                     <button class="btn" :class="phaseNoiseYAxisScale === 'log' ? 'btn-secondary' : 'btn-outline-secondary'" @click="setPhaseNoiseAxisScale('y', 'log')" title="Log Y displays positive values only">Log Y</button>
                                 </div>
-                                <div v-if="loadedRunId && isPhaseNoiseArchive() && phaseNoiseStatistic === 'allan'" class="d-flex flex-wrap align-items-center gap-1">
+                                <div v-if="loadedRunId && isPhaseNoiseArchive() && phaseNoiseView === 'overview' && phaseNoiseStatistic === 'allan'" class="d-flex flex-wrap align-items-center gap-1">
                                     <span class="small text-muted me-1">Orders</span>
                                     <button v-for="order in phaseNoiseAllanOrders" :key="`phase-noise-allan-${order}`" type="button"
                                         class="btn btn-sm btn-outline-primary" :disabled="phaseNoiseAllanOrders.length === 1"
@@ -2561,20 +2568,20 @@
                         </div>
 
                         <div v-show="loadedRunId" class="analysis-card-body"
-                            :class="{'analysis-3d-layout': isThreeDimensionalView(), 'summary-square-layout': isSquareSummaryArchive()}">
+                            :class="{'analysis-3d-layout': isThreeDimensionalView(), 'summary-square-layout': isSquareSummaryArchive() && !(isPhaseNoiseArchive() && phaseNoiseView === 'detail')}">
                             <div id="resultsPlotUp" class="analysis-plot-panel"
                                 :class="{'plot-split-container': !isThreeDimensionalView()}"
-                                :style="{height: isSquareSummaryArchive() ? 'auto' : getAnalysisPlotHeight('up')}">
+                                :style="{height: isSquareSummaryArchive() && !(isPhaseNoiseArchive() && phaseNoiseView === 'detail') ? 'auto' : getAnalysisPlotHeight('up')}">
                             </div>
                             <div id="resultsPlotDw" class="analysis-plot-panel"
                                 :class="{'plot-split-container': showTotalPlot() && !isThreeDimensionalView()}"
-                                :style="{height: getAnalysisPlotHeight('dw'), display: currentTab === 'phase' ? 'none' : 'block'}">
+                                :style="{height: getAnalysisPlotHeight('dw'), display: currentTab === 'phase' && !(isPhaseNoiseArchive() && phaseNoiseView === 'detail') ? 'none' : 'block'}">
                             </div>
                             <div id="resultsPlotTotal"
                                 :style="{display: showTotalPlot() ? 'block' : 'none', height: getAnalysisPlotHeight('total')}">
                             </div>
                         </div>
-                        <div v-if="isTransferFunctionArchive() && loadedPoints.some(point => Number.isFinite(Number(point.power_meter_power_w)))" class="border-top">
+                        <div v-if="(isTransferFunctionArchive() || isPhaseNoiseArchive()) && (loadedPoints.some(point => Number.isFinite(Number(point.power_meter_power_w))) || phaseNoiseSeries.some(point => Number.isFinite(Number(point.power_meter_power_w))))" class="border-top">
                             <div class="px-3 pt-3 fw-bold">PM100A power by shot</div><div id="archivePowerMeterPlot" style="height:320px"></div>
                         </div>
                         <div v-if="intfAlphaCalibrations.length" class="border-top">
@@ -2862,6 +2869,8 @@
                     lockInAnalysis: {}, savedLockInAnalysis: {}, recalculatedLockInAnalysis: {},
                     transferFunctionSummary: [], savedTransferFunctionSummary: [], recalculatedTransferFunctionSummary: [],
                     phaseNoiseSummary: [], savedPhaseNoiseSummary: [], recalculatedPhaseNoiseSummary: [], phaseNoiseXAxis: 't2',
+                    phaseNoiseView: 'overview', phaseNoiseSelectedT2: null,
+                    phaseNoiseSeries: [],
                     phaseNoiseXAxisScale: 'linear', phaseNoiseYAxisScale: 'linear',
                     phaseNoiseStatistic: 'std', phaseNoiseAllanOrders: [1], phaseNoiseAllanOrderDraft: 2,
                     savedAllanCache: {}, recalculatedAllanCache: {}, currentAllanData: null,
@@ -5922,6 +5931,7 @@
                         }
                         if (this.isPhaseNoiseArchive()) {
                             this.currentTab = "phase";
+                            this.syncArchiveTab = "phase";
                             this.phaseUnit = "mrad";
                             this.plotMode = "series";
                             this.phaseNoiseStatistic = "std";
@@ -5955,6 +5965,10 @@
                         this.transferFunctionSummary = this.savedTransferFunctionSummary;
                         this.savedPhaseNoiseSummary = Array.isArray(res.data.phase_noise_summary) ? res.data.phase_noise_summary : [];
                         this.phaseNoiseSummary = this.savedPhaseNoiseSummary;
+                        this.phaseNoiseSeries = Array.isArray(res.data.phase_noise_series) ? res.data.phase_noise_series : [];
+                        if (this.phaseNoiseSummary.length && !Number.isFinite(Number(this.phaseNoiseSelectedT2))) {
+                            this.phaseNoiseSelectedT2 = Number(this.phaseNoiseSummary[0].t2_us2);
+                        }
                         this.savedPreviewMap = res.data.preview_map && typeof res.data.preview_map === 'object' ? res.data.preview_map : {};
                         this.savedDataCount = Number.isFinite(res.data.total_points) ? res.data.total_points : this.loadedPoints.length;
                         this.dataCount = this.savedDataCount;
@@ -7330,6 +7344,7 @@
                             shot_index_max: this.syncPhaseShotMax !== null && this.syncPhaseShotMax !== '' && Number.isFinite(Number(this.syncPhaseShotMax)) ? Math.trunc(Number(this.syncPhaseShotMax)) : null,
                             transfer_frequency_hz: transferFunction ? transferFrequencyHz : null,
                             transfer_phase_deg: transferFunction ? transferPhaseDeg : null,
+                            phase_noise_t2_us2: this.isPhaseNoiseArchive() && Number.isFinite(Number(this.phaseNoiseSelectedT2)) ? Number(this.phaseNoiseSelectedT2) : null,
                         });
                         state.result = response.data;
                         await this.$nextTick();
@@ -7417,6 +7432,10 @@
                     }
                     if (settings.p0_max != null && Number.isFinite(Number(settings.p0_max))) {
                         this.syncPhaseP0Max = Number(settings.p0_max); this.syncPhaseP0MaxInput = String(settings.p0_max);
+                    }
+                    if (settings.phase_noise_t2_us2 != null && Number.isFinite(Number(settings.phase_noise_t2_us2))) {
+                        this.phaseNoiseSelectedT2 = Number(settings.phase_noise_t2_us2);
+                        this.phaseNoiseView = 'detail';
                     }
                     if (settings.shot_index_min != null && Number.isFinite(Number(settings.shot_index_min))) {
                         this.syncPhaseShotMin = Math.trunc(Number(settings.shot_index_min)); this.syncPhaseShotMinInput = String(this.syncPhaseShotMin);
@@ -10057,7 +10076,100 @@
                     this.plotRevision++;
                     this.renderPhaseNoiseArchivePlot();
                 },
+                setPhaseNoiseView(view) {
+                    this.phaseNoiseView = view === 'detail' ? 'detail' : 'overview';
+                    if (this.phaseNoiseView === 'detail' && !Number.isFinite(Number(this.phaseNoiseSelectedT2)) && this.phaseNoiseSummary.length) this.phaseNoiseSelectedT2 = Number(this.phaseNoiseSummary[0].t2_us2);
+                    this.selectPhaseNoiseT();
+                },
+                selectPhaseNoiseT() {
+                    const t2 = Number(this.phaseNoiseSelectedT2);
+                    if (Number.isFinite(t2) && this.syncManifest) {
+                        this.syncPhaseP0Min = t2; this.syncPhaseP0Max = t2;
+                        this.syncPhaseP0MinInput = String(t2); this.syncPhaseP0MaxInput = String(t2);
+                        this.clearSyncPhaseCalibrationOptimization();
+                    }
+                    this.renderPhaseNoiseArchivePlot();
+                },
+                phaseNoiseDetailRows() {
+                    const selected = Number(this.phaseNoiseSelectedT2);
+                    const sameT = row => {
+                        const value = Number(row?.phase_noise_t2_us2 ?? row?.interferometer_phase_reference_t2_us2 ?? row?.sync_p0 ?? row?.parameter);
+                        return Number.isFinite(value) && Number.isFinite(selected) && Math.abs(value - selected) <= 1e-9 * Math.max(1, Math.abs(value), Math.abs(selected));
+                    };
+                    if (!this.syncManifest) return (this.phaseNoiseSeries || []).filter(sameT).sort((a, b) => Number(a.phase_noise_repeat || a.step) - Number(b.phase_noise_repeat || b.step));
+                    const nodes = this.syncManifest?.node_results || {};
+                    const master = (nodes.master || []).filter(sameT);
+                    const slaveId = this.syncArchiveSlaveOptions()[0];
+                    const slave = ((nodes.slaves || {})[slaveId] || []).filter(sameT);
+                    const slaveByIndex = new Map(slave.map(row => [Number(row.sync_shot_index), row]));
+                    return master.map((row, index) => {
+                        const peer = slaveByIndex.get(Number(row.sync_shot_index));
+                        const masterPhase = Number(row.interferometer_phase);
+                        const slavePhase = Number(peer?.interferometer_phase);
+                        return { ...row, phase_noise_repeat: Number(row.phase_noise_repeat || index + 1), master_phase: Number.isFinite(masterPhase) ? masterPhase : null, slave_phase: Number.isFinite(slavePhase) ? slavePhase : null, difference_phase: Number.isFinite(masterPhase) && Number.isFinite(slavePhase) ? slavePhase - masterPhase : null };
+                    }).sort((a, b) => Number(a.phase_noise_repeat) - Number(b.phase_noise_repeat));
+                },
+                phaseNoiseOptimizationForT(t2) {
+                    const matches = record => Number(record?.settings?.phase_noise_t2_us2) === Number(t2);
+                    const current = this.currentSyncAnalysisPhaseResult();
+                    if (current && matches(current)) return current;
+                    const selected = this.selectedSavedSyncPhaseCalibrationOptimization();
+                    if (selected && matches(selected)) return selected;
+                    const saved = (this.syncPhaseCalibrationOptimization.saved || []).filter(matches);
+                    return saved.length ? saved[saved.length - 1] : null;
+                },
+                phaseNoiseSyncMetric(t2, field) {
+                    const previous = this.phaseNoiseSelectedT2;
+                    this.phaseNoiseSelectedT2 = Number(t2);
+                    const rows = this.phaseNoiseDetailRows();
+                    this.phaseNoiseSelectedT2 = previous;
+                    const optimization = this.phaseNoiseOptimizationForT(t2);
+                    const optimized = new Map((optimization?.series || []).map(row => [Number(row.shot), row]));
+                    const values = rows.map(row => {
+                        const record = optimized.get(Number(row.phase_noise_repeat));
+                        if (field === 'master') return record?.reference_after_rad ?? row.master_phase;
+                        if (field === 'slave') return record?.target_after_rad ?? row.slave_phase;
+                        return record?.after_rad ?? row.difference_phase;
+                    }).filter(value => Number.isFinite(Number(value))).map(Number);
+                    if (values.length < 2) return null;
+                    if (this.phaseNoiseStatistic === 'allan') return Math.sqrt(values.slice(1).reduce((sum, value, index) => sum + Math.pow(value - values[index], 2), 0) / (2 * (values.length - 1)));
+                    const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+                    return Math.sqrt(values.reduce((sum, value) => sum + Math.pow(value - mean, 2), 0) / (values.length - 1));
+                },
+                renderPhaseNoiseDetailPlot() {
+                    const rows = this.phaseNoiseDetailRows();
+                    const x = rows.map((row, index) => Number(row.phase_noise_repeat || index + 1));
+                    const optimization = this.phaseNoiseOptimizationForT(this.phaseNoiseSelectedT2);
+                    const optimizedForT = optimization && Number(optimization?.settings?.phase_noise_t2_us2) === Number(this.phaseNoiseSelectedT2);
+                    const optimizedByShot = new Map((optimizedForT ? optimization.series || [] : []).map(row => [Number(row.shot), row]));
+                    if (optimizedForT) rows.forEach(row => {
+                        const optimized = optimizedByShot.get(Number(row.phase_noise_repeat));
+                        if (!optimized) return;
+                        row.master_phase = optimized.reference_after_rad;
+                        row.slave_phase = optimized.target_after_rad;
+                        row.difference_phase = optimized.after_rad;
+                    });
+                    const traces = this.syncManifest ? [
+                        { x, y: rows.map(row => row.master_phase == null ? null : Number(row.master_phase) * 1000), name: 'Master', type: 'scatter', mode: 'lines+markers', marker: { size: 5 } },
+                        { x, y: rows.map(row => row.slave_phase == null ? null : Number(row.slave_phase) * 1000), name: 'Slave', type: 'scatter', mode: 'lines+markers', marker: { size: 5 } },
+                        { x, y: rows.map(row => row.difference_phase == null ? null : Number(row.difference_phase) * 1000), name: optimizedForT ? 'Slave − Master · A/C preview' : 'Slave − Master', type: 'scatter', mode: 'lines+markers', line: { width: 2.8 }, marker: { size: 6 } },
+                    ] : [{ x, y: rows.map(row => row.interferometer_phase_valid === false || row.interferometer_phase == null ? null : Number(row.interferometer_phase) * 1000), name: 'Phase', type: 'scatter', mode: 'lines+markers', marker: { size: 6 }, connectgaps: false }];
+                    const values = (this.syncManifest ? rows.map(row => row.difference_phase) : rows.map(row => row.interferometer_phase)).filter(value => Number.isFinite(Number(value))).map(Number);
+                    const allan = values.length > 1 ? Math.sqrt(values.slice(1).reduce((sum, value, index) => sum + Math.pow(value - values[index], 2), 0) / (2 * (values.length - 1))) : null;
+                    const timestamps = rows.map(row => Number(row.timestamp)).filter(Number.isFinite).sort((a, b) => a - b);
+                    const intervals = timestamps.slice(1).map((value, index) => value - timestamps[index]).filter(value => value > 0).sort((a, b) => a - b);
+                    const cadence = intervals.length ? intervals[Math.floor(intervals.length / 2)] : null;
+                    const base = this.buildCommonAnalysisLayout();
+                    this.layoutResUp = { ...base, margin: { t: 52, b: 58, l: 78, r: 20 }, title: { text: `T Detail · T²=${Number(this.phaseNoiseSelectedT2).toPrecision(8)} · Allan n=1=${allan == null ? '—' : (allan * 1000).toPrecision(5)} mrad · τ≈${cadence == null ? '—' : cadence.toPrecision(4)} s`, font: { size: 14 }, x: 0.04 }, xaxis: { ...base.xaxis, title: 'Shot number within T' }, yaxis: { ...base.yaxis, title: 'Phase (mrad)' }, legend: { orientation: 'h', x: 0.5, xanchor: 'center', y: 1.15 } };
+                    Plotly.react('resultsPlotUp', traces, this.layoutResUp, { responsive: true, displaylogo: false });
+                    Plotly.react('resultsPlotDw', [
+                        { x, y: rows.map(row => Number.isFinite(Number(row.power_meter_power_w)) ? Number(row.power_meter_power_w) * 1e6 : null), name: 'Master PM100A', type: 'scatter', mode: 'lines+markers', yaxis: 'y', marker: { size: 5 } },
+                        { x, y: rows.map(row => Number.isFinite(Number(row.intf_alpha_applied)) ? Number(row.intf_alpha_applied) : null), name: 'I_alpha', type: 'scatter', mode: 'lines', yaxis: 'y2' },
+                    ], { ...base, margin: { t: 35, b: 58, l: 78, r: 70 }, xaxis: { title: 'Shot number within T' }, yaxis: { title: 'Power (µW)' }, yaxis2: { title: 'I_alpha', overlaying: 'y', side: 'right', range: [0, 1] }, legend: { orientation: 'h' } }, { responsive: true, displaylogo: false });
+                    Plotly.react('resultsPlotTotal', [], { ...base, title: '' }, { responsive: true, displaylogo: false });
+                },
                 renderPhaseNoiseArchivePlot() {
+                    if (this.phaseNoiseView === 'detail') { this.renderPhaseNoiseDetailPlot(); return; }
                     const rows = Array.isArray(this.phaseNoiseSummary) ? this.phaseNoiseSummary : [];
                     const xField = this.phaseNoiseXAxis === 't' ? 't_ms' : 't2_us2';
                     const xTitle = this.phaseNoiseXAxis === 't' ? 'Interferometer time T (ms)' : 'P0 = T² ((μs)²)';
@@ -10124,6 +10236,15 @@
                             hovertemplate: `${xTitle}=%{x:.9g}<br>σφ=%{y:.6g} mrad<br>T²=%{customdata[0]:.9g} (μs)²<br>T=%{customdata[1]:.6g} ms<br>valid N=%{customdata[2]}/%{customdata[3]}<extra>${name}</extra>`
                         }));
                     }
+                    if (this.syncManifest) {
+                        const syncDefinitions = [['master', 'Master', '#0d6efd'], ['slave', 'Slave', '#198754'], ['difference', 'Slave − Master', '#6f42c1']];
+                        traces.push(...syncDefinitions.map(([field, name, color]) => ({
+                            x: rows.map(row => plotX(row[xField])),
+                            y: rows.map(row => plotY(this.phaseNoiseSyncMetric(row.t2_us2, field))),
+                            type: 'scatter', mode: 'lines+markers', name: `${name} ${this.phaseNoiseStatistic === 'allan' ? 'Allan n=1' : 'standard deviation'}`,
+                            line: { color, width: field === 'difference' ? 3 : 2 }, marker: { color, size: field === 'difference' ? 9 : 7 }, connectgaps: false,
+                        })));
+                    }
                     const base = this.buildCommonAnalysisLayout();
                     this.layoutResUp = {
                         ...base, margin: { t: 45, b: 58, l: 78, r: 20 },
@@ -10175,9 +10296,10 @@
                 renderArchivePowerMeterPlot() {
                     const element = document.getElementById('archivePowerMeterPlot');
                     if (!element || typeof Plotly === 'undefined') return;
-                    const rows = (this.loadedPoints || []).filter(row => Number.isFinite(Number(row.power_meter_power_w)));
+                    const sourceRows = this.isPhaseNoiseArchive() && this.phaseNoiseSeries.length ? this.phaseNoiseSeries : (this.loadedPoints || []);
+                    const rows = sourceRows.filter(row => Number.isFinite(Number(row.power_meter_power_w)));
                     const makeTrace = (items, name, color, symbol) => ({
-                        x: items.map(row => Number(row.step)), y: items.map(row => Number(row.power_meter_power_w)),
+                        x: items.map((row, index) => Number(row.phase_noise_science_shot || row.step || index + 1)), y: items.map(row => Number(row.power_meter_power_w)),
                         customdata: items.map(row => [row.transfer_frequency_hz, row.transfer_phase_deg, row.transfer_repeat, row.power_meter_deviation_percent]),
                         type: 'scatter', mode: 'lines+markers', name, line: { color, width: 1.8 }, marker: { color, size: 7, symbol },
                         hovertemplate: 'Shot %{x}<br>Power=%{y:.6g} W<br>f=%{customdata[0]:.8g} Hz<br>phase=%{customdata[1]:.4g}°<br>repeat=%{customdata[2]}<br>change=%{customdata[3]:.4g}%<extra></extra>'
@@ -10280,6 +10402,9 @@
                         this.recalculatedStats = this.normalizeStatsRows(data.stats || []);
                         this.recalculatedTransferFunctionSummary = Array.isArray(data.transfer_function_summary) ? data.transfer_function_summary : [];
                         this.transferFunctionSummary = this.recalculatedTransferFunctionSummary;
+                        this.recalculatedPhaseNoiseSummary = Array.isArray(data.phase_noise_summary) ? data.phase_noise_summary : [];
+                        if (this.isPhaseNoiseArchive()) this.phaseNoiseSummary = this.recalculatedPhaseNoiseSummary;
+                        if (Array.isArray(data.phase_noise_series)) this.phaseNoiseSeries = data.phase_noise_series;
                         this.recalculatedPreviewMap = data.preview_map && typeof data.preview_map === 'object' ? data.preview_map : {};
                         this.displayMode = 'recalculated';
                         await this.applyDisplayedPoints(this.loadedPoints, this.recalculatedStats, this.recalculatedPreviewMap, true);

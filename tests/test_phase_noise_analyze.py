@@ -75,6 +75,27 @@ class PhaseNoiseAnalyzeTests(unittest.TestCase):
         self.assertEqual(plan[3]["sequence_parameters"], [15.0, 30.0, 31.0])
         self.assertFalse(config["randomize"])
         self.assertEqual(config["averages"], 1)
+        self.assertEqual([item["metadata"]["phase_noise_repeat"] for item in plan], [1, 2, 3, 1, 2, 3])
+        self.assertEqual([item["metadata"]["phase_noise_science_shot"] for item in plan], list(range(1, 7)))
+
+    def test_periodic_alpha_plan_checks_elapsed_time_before_every_science_shot(self):
+        manager = ExperimentManager.__new__(ExperimentManager)
+        manager.settings = {"intf_alpha_calibration_sequence_content_base64": "YQ=="}
+        config = {
+            "mode": "phase_noise", "scan_dimensions": 1,
+            "phase_noise_mid_fringe_values": [5.0], "phase_noise_repeats": 3,
+            "link_formulas": [], "interferometer_phase_calibration_override": self.calibration(),
+            "intf_alpha_calibration_enabled": True,
+        }
+        plan = manager._build_phase_noise_execution(config)
+        boundaries = [
+            item["metadata"].get("intf_alpha_calibration_boundary")
+            for item in plan if item["metadata"].get("intf_alpha_calibration_boundary")
+        ]
+        self.assertEqual(boundaries, ["start", "periodic", "periodic", "periodic", "end"])
+        science = [item for item in plan if item["metadata"].get("phase_noise_t2_us2") is not None]
+        self.assertEqual([item["metadata"]["phase_noise_repeat"] for item in science], [1, 2, 3])
+        self.assertEqual(config["_phase_noise_expected_science_shots"], 3)
 
     def test_selected_values_must_come_from_calibration(self):
         self.assertEqual(validate_mid_fringe_values(self.calibration(), [15, 5, 15]), [5.0, 15.0])
@@ -129,6 +150,18 @@ class PhaseNoiseAnalyzeTests(unittest.TestCase):
         self.assertGreater(row["allan_deviations"][1]["measured_error_plus_rad"], 0)
         self.assertGreater(row["allan_deviations"][1]["measured_error_minus_rad"], 0)
 
+    def test_summary_reports_order_and_estimated_averaging_time_and_power(self):
+        points = [
+            {"parameter": 5.0, "interferometer_phase_reference_t2_us2": 5.0,
+             "interferometer_phase": float(index), "interferometer_phase_valid": True,
+             "timestamp": 100.0 + 2.0 * index, "power_meter_power_w": 1e-6 + index * 1e-8}
+            for index in range(4)
+        ]
+        row = build_phase_noise_summary(points, self.calibration(), 1.1, 100.0, [1, 2])[0]
+        self.assertEqual(row["median_science_shot_cycle_s"], 2.0)
+        self.assertEqual([item["averaging_time_s"] for item in row["allan_deviations"]], [2.0, 4.0])
+        self.assertEqual(row["power_meter_count"], 4)
+
     def test_pages_expose_new_settings_mode_and_archive_plot(self):
         root = Path(__file__).resolve().parents[1]
         settings = (root / "static" / "settings.html").read_text(encoding="utf-8")
@@ -137,6 +170,9 @@ class PhaseNoiseAnalyzeTests(unittest.TestCase):
         self.assertIn("Phase Noise Analyze", settings)
         self.assertIn("std_p_interferometer", settings)
         self.assertIn('value="phase_noise"', index)
+        self.assertNotIn('<option value="phase_noise" :disabled="isSyncMode()">', index)
+        self.assertIn("phase_noise_power_monitor_enabled", index)
+        self.assertIn("phaseNoiseIntfAlphaCalibration", index)
         self.assertIn("phaseNoiseSelectionPlot", index)
         self.assertIn("renderPhaseNoiseArchivePlot", archive)
         self.assertIn("expected_total_phase_noise_rad", archive)
@@ -148,6 +184,9 @@ class PhaseNoiseAnalyzeTests(unittest.TestCase):
         self.assertIn("allan.valid_window_count", archive)
         self.assertIn("phaseNoiseXAxisScale", archive)
         self.assertIn("phaseNoiseYAxisScale", archive)
+        self.assertIn("T Detail", archive)
+        self.assertIn("phaseNoiseDetailRows", archive)
+        self.assertIn("phase_noise_t2_us2", archive)
         self.assertIn("summary-square-layout", archive)
         self.assertIn('v-show="!isSquareSummaryArchive()" class="card border-0 shadow-sm"', archive)
 
