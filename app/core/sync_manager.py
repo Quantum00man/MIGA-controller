@@ -74,6 +74,8 @@ class SyncManager:
         self._prepared: Dict[str, Dict[str, Any]] = {}
         self._node_results: Deque[Tuple[int, Dict[str, Any]]] = deque(maxlen=256)
         self._node_result_sequence = 0
+        self._node_completed_shots = 0
+        self._node_completed_indices: set[int] = set()
         self._node_active_sync_run_id = ""
         self._master_results: Dict[int, Dict[str, Any]] = {}
         self._slave_results: Dict[str, Dict[int, Dict[str, Any]]] = {}
@@ -407,6 +409,8 @@ class SyncManager:
             self._prepared[sync_run_id] = record
             self._node_results.clear()
             self._node_result_sequence = 0
+            self._node_completed_shots = 0
+            self._node_completed_indices.clear()
             self._node_active_sync_run_id = ""
         return {"ready": True, "sync_run_id": sync_run_id, "shot_count": len(plan)}
 
@@ -433,6 +437,7 @@ class SyncManager:
             # with its own fringe curve at that shared reference T.
             scan_config["interferometer_phase_calibration_override"] = deepcopy(local_phase_calibration)
         parameters = []
+        science_shot_index = 0
         for index, raw_parameters in enumerate(plan):
             if isinstance(raw_parameters, dict):
                 raw_sequence_parameters = raw_parameters.get("sequence_parameters") or []
@@ -443,20 +448,24 @@ class SyncManager:
                 shot_metadata = {}
             display_parameters = shot_metadata.get("display_parameters") or shot_parameters
             master_parameters = self._plan_values(master_plan[index]) if index < len(master_plan) else []
+            is_science_shot = self._is_sync_science_item(raw_parameters)
+            sync_metadata = {}
+            if is_science_shot:
+                sync_metadata = {
+                    "sync_run_id": sync_run_id,
+                    "sync_role": "slave",
+                    "sync_node_id": node_name,
+                    "sync_shot_index": science_shot_index,
+                    "sync_p0": display_parameters[0] if display_parameters else None,
+                    "sync_parameters": list(display_parameters[:1]),
+                    "sync_master_parameters": master_parameters,
+                }
+                science_shot_index += 1
             parameters.append({
                 "sequence_parameters": shot_parameters if (independent_p0 or phase_noise_mode) else [],
                 "metadata": {
                     **shot_metadata,
-                    "sync_run_id": sync_run_id,
-                    "sync_role": "slave",
-                    "sync_node_id": node_name,
-                    "sync_shot_index": index,
-                    "sync_p0": display_parameters[0] if display_parameters else None,
-                    # In legacy SYNC the Slave sequence remains fixed and P0 is
-                    # the shared Master label. Independent-P0 STANDARD scans
-                    # instead write this node's local P0 into its own sequence.
-                    "sync_parameters": list(display_parameters[:1]),
-                    "sync_master_parameters": master_parameters,
+                    **sync_metadata,
                 },
             })
         scan_config.update({
@@ -476,7 +485,11 @@ class SyncManager:
             "sync_independent_p0": independent_p0,
         })
         if bragg_calibration_mode:
-            self.manager.prepare_external_bragg_calibration_plan(scan_config, len(parameters))
+            coarse_shots = int(
+                scan_config.get("_bragg_calibration_coarse_shots")
+                or sum(1 for item in plan if self._is_sync_science_item(item))
+            )
+            self.manager.prepare_external_bragg_calibration_plan(scan_config, coarse_shots)
         if transfer_mode:
             # The Master owns the only signal generator. The Slave merely runs
             # the aligned fixed sequence and analyzes its response using its own
@@ -570,10 +583,14 @@ class SyncManager:
                 if sequence > int(after or 0)
             ]
             latest_sequence = self._node_result_sequence
+            completed_shots = self._node_completed_shots
         return {
             "sync_run_id": sync_run_id,
             "is_running": bool(self.manager.status.is_running),
+            "is_paused": bool(getattr(self.manager.status, "is_paused", False)),
+            "pause_reason": str(getattr(self.manager.status, "pause_reason", "") or ""),
             "current_step": int(self.manager.status.current_step or 0),
+            "completed_shots": completed_shots,
             "total_steps": int(self.manager.status.total_steps or 0),
             "message": self.manager.status.message,
             "run_id": self.manager.data_manager.current_run_id_str,
@@ -591,11 +608,28 @@ class SyncManager:
             return list(raw)
         return [raw]
 
+    @staticmethod
+    def _is_sync_science_item(item: Any) -> bool:
+        """Return False for local calibration boundary placeholders.
+
+        Boundaries expand independently on every node and therefore must not
+        consume a shared SYNC shot index.
+        """
+        metadata = item.get("metadata") if isinstance(item, dict) else None
+        return not bool((metadata or {}).get("intf_alpha_calibration_boundary"))
+
     def _master_plan(self, parameters: List[Any], sync_run_id: str, node_name: str) -> List[Any]:
         decorated = []
-        for index, item in enumerate(parameters):
+        science_shot_index = 0
+        for item in parameters:
             values = self._plan_values(item)
             existing_metadata = item.get("metadata") if isinstance(item, dict) else {}
+            if not self._is_sync_science_item(item):
+                decorated.append({
+                    "sequence_parameters": values,
+                    "metadata": deepcopy(existing_metadata or {}),
+                })
+                continue
             display_values = (existing_metadata or {}).get("display_parameters") or values
             decorated.append({
                 "sequence_parameters": values,
@@ -604,11 +638,12 @@ class SyncManager:
                     "sync_run_id": sync_run_id,
                     "sync_role": "master",
                     "sync_node_id": node_name,
-                    "sync_shot_index": index,
+                    "sync_shot_index": science_shot_index,
                     "sync_p0": display_values[0] if display_values else None,
                     "sync_parameters": list(display_values),
                 },
             })
+            science_shot_index += 1
         return decorated
 
     def start_master(self, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -866,6 +901,10 @@ class SyncManager:
             with self._lock:
                 self._node_result_sequence += 1
                 self._node_results.append((self._node_result_sequence, deepcopy(payload)))
+                shot_index = int(payload.get("sync_shot_index", -1))
+                if shot_index >= 0:
+                    self._node_completed_indices.add(shot_index)
+                    self._node_completed_shots = len(self._node_completed_indices)
             return
         if payload.get("power_meter_invalid_reason") == "threshold_exceeded":
             threading.Thread(target=self._broadcast_pause_state, args=(True,), daemon=True).start()
@@ -905,6 +944,9 @@ class SyncManager:
         converted = []
         for item in fine_plan:
             metadata = deepcopy((item or {}).get("metadata") or {})
+            if not self._is_sync_science_item(item):
+                converted.append({"sequence_parameters": [], "metadata": metadata})
+                continue
             p0 = metadata.get("sync_p0")
             if p0 is None:
                 values = self._plan_values(item)
@@ -1019,6 +1061,9 @@ class SyncManager:
                     status_step = int(node_state.get("current_step") or 0)
                     status_message = str(node_state.get("message") or "")
                     status_running = bool(node_state.get("is_running"))
+                    status_paused = bool(node_state.get("is_paused"))
+                    pause_reason = str(node_state.get("pause_reason") or "")
+                    completed_shots = int(node_state.get("completed_shots", status_step) or 0)
                     now_monotonic = time.monotonic()
                     if (
                         status_step != int(slave.get("current_step") or 0)
@@ -1030,7 +1075,9 @@ class SyncManager:
                             "sync.node.status", sync_run_id=sync_run_id, node_id=slave.get("node_id"),
                             node_name=slave.get("name"), current_step=status_step,
                             total_steps=int(node_state.get("total_steps") or 0), is_running=status_running,
-                            status_message=status_message, latest_sequence=int(node_state.get("latest_sequence") or 0),
+                            is_paused=status_paused, pause_reason=pause_reason,
+                            completed_shots=completed_shots, status_message=status_message,
+                            latest_sequence=int(node_state.get("latest_sequence") or 0),
                         )
                         slave["last_status_message"] = status_message
                         slave["last_status_running"] = status_running
@@ -1049,13 +1096,21 @@ class SyncManager:
                         self.manager.publish_data(remote_payload, notify_listeners=False)
                     slave["cursor"] = int(node_state.get("latest_sequence") or slave.get("cursor") or 0)
                     slave["current_step"] = int(node_state.get("current_step") or 0)
+                    slave["completed_shots"] = completed_shots
+                    slave["is_paused"] = status_paused
+                    slave["pause_reason"] = pause_reason
                     slave["run_id"] = node_state.get("run_id") or slave.get("run_id")
-                    slave["status"] = "running" if node_state.get("is_running") else "done"
+                    slave["status"] = "paused" if status_paused else ("running" if status_running else "done")
                     slave["status_poll_failures"] = 0
                     slave.pop("error", None)
-                    if not node_state.get("is_running") and slave["current_step"] < expected:
+                    if status_paused and pause_reason != "sync_master":
+                        failed_reason = (
+                            f"Slave {slave['name']} paused before completing the shot plan"
+                            + (f": {pause_reason}" if pause_reason else "")
+                        )
+                    elif not status_running and completed_shots < expected:
                         failed_reason = f"Slave {slave['name']} stopped before completing the shot plan"
-                    all_slaves_complete = all_slaves_complete and slave["current_step"] >= expected
+                    all_slaves_complete = all_slaves_complete and completed_shots >= expected
                 except Exception as exc:
                     failures = int(slave.get("status_poll_failures") or 0) + 1
                     slave["status_poll_failures"] = failures

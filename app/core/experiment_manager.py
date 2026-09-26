@@ -3944,6 +3944,7 @@ class ExperimentManager:
         bragg_calibration_coarse_fit: Optional[Dict[str, Any]] = None
         bragg_calibration_plan_sent = False
         bragg_calibration_coarse_processed = 0
+        bragg_calibration_science_processed = 0
         intf_alpha_blocks: Dict[int, Dict[str, List[float]]] = {}
 
         try:
@@ -3956,7 +3957,11 @@ class ExperimentManager:
                     break
 
                 params = job.get('params') or []
-                self.status.current_step = int(job.get('idx', 0)) + 1
+                is_bragg_calibration = bool(
+                    scan_config and scan_config.get("mode") == "bragg_fringe_calibration"
+                )
+                if not is_bragg_calibration:
+                    self.status.current_step = int(job.get('idx', 0)) + 1
                 self.status.total_steps = int(job.get('total', 1) or 1)
                 self.status.message = f"Processing: {params} (Queue: {self.data_queue.qsize()})"
 
@@ -4003,6 +4008,9 @@ class ExperimentManager:
                     continue
                 if metadata.get("bragg_calibration_stage") == "coarse":
                     bragg_calibration_coarse_processed += 1
+                if metadata.get("bragg_calibration_stage") in {"coarse", "fine"}:
+                    bragg_calibration_science_processed += 1
+                    self.status.current_step = bragg_calibration_science_processed
                 if result is not None and metadata.get("bragg_calibration_stage"):
                     result.bragg_calibration_stage = str(metadata["bragg_calibration_stage"])
                     if result.bragg_calibration_stage == "coarse":

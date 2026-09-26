@@ -45,7 +45,10 @@ class FakeManager:
             "sync_allowed_master_ip": "",
             "sync_slaves": [],
         }
-        self.status = SimpleNamespace(is_running=False, current_step=0, total_steps=0, message="IDLE")
+        self.status = SimpleNamespace(
+            is_running=False, current_step=0, total_steps=0, message="IDLE",
+            is_paused=False, pause_reason="",
+        )
         self.data_manager = SimpleNamespace(current_run_dir=Path(root), current_run_id_str="run01_20260824")
         self.listeners = []
         self.published = []
@@ -131,6 +134,56 @@ class SyncManagerTests(unittest.TestCase):
             self.assertEqual(installed[0]["metadata"]["sync_parameters"], [1250.0])
             self.assertEqual(installed[0]["metadata"]["sync_master_parameters"], [1250.0, 2500.0])
             self.assertEqual(installed[0]["metadata"]["sync_role"], "slave")
+
+    def test_bragg_alpha_boundaries_do_not_consume_sync_shot_indices(self):
+        with tempfile.TemporaryDirectory() as root:
+            sync = SyncManager(FakeManager(root))
+            plan = [
+                {"sequence_parameters": [10.0], "metadata": {"bragg_calibration_stage": "coarse"}},
+                {"sequence_parameters": [], "metadata": {"intf_alpha_calibration_boundary": "periodic"}},
+                {"sequence_parameters": [20.0], "metadata": {"bragg_calibration_stage": "coarse"}},
+            ]
+
+            decorated = sync._master_plan(plan, "sync_calibration", "master")
+
+            self.assertEqual(decorated[0]["metadata"]["sync_shot_index"], 0)
+            self.assertNotIn("sync_shot_index", decorated[1]["metadata"])
+            self.assertNotIn("sync_role", decorated[1]["metadata"])
+            self.assertEqual(decorated[2]["metadata"]["sync_shot_index"], 1)
+
+    def test_slave_bragg_plan_uses_master_science_count_not_boundary_count(self):
+        with tempfile.TemporaryDirectory() as root:
+            manager = FakeManager(root, role="slave")
+            captured = {}
+            manager.prepare_external_bragg_calibration_plan = (
+                lambda config, count: captured.update(config= dict(config), count=count)
+            )
+            sync = SyncManager(manager)
+            plan = [
+                {"sequence_parameters": [10.0], "metadata": {"bragg_calibration_stage": "coarse"}},
+                {"sequence_parameters": [], "metadata": {"intf_alpha_calibration_boundary": "periodic"}},
+                {"sequence_parameters": [20.0], "metadata": {"bragg_calibration_stage": "coarse"}},
+            ]
+            with patch("app.core.sync_manager.config.BASE_DIR", Path(root)):
+                sync.prepare_node({
+                    "sync_run_id": "sync_calibration",
+                    "master_node_id": "master",
+                    "scan_config": {
+                        "mode": "bragg_fringe_calibration",
+                        "_bragg_calibration_coarse_shots": 2,
+                        "_bragg_calibration_expected_total_shots": 7,
+                    },
+                    "shot_plan": plan,
+                    "sequence_name": "slave.mot",
+                    "sequence_content": "+10us WAIT = OFF (1)\n",
+                })
+            sync.start_node("sync_calibration")
+
+            self.assertEqual(captured["count"], 2)
+            parameters = manager.started[0][1]
+            self.assertEqual(parameters[0]["metadata"]["sync_shot_index"], 0)
+            self.assertNotIn("sync_shot_index", parameters[1]["metadata"])
+            self.assertEqual(parameters[2]["metadata"]["sync_shot_index"], 1)
 
     def test_sync_parameter_plan_accepts_link_formula_mode(self):
         manager = ExperimentManager.__new__(ExperimentManager)
@@ -443,6 +496,42 @@ class SyncManagerTests(unittest.TestCase):
             self.assertEqual(sync.status()["status"], "done")
             self.assertEqual(sync.status()["slaves"][0]["status_poll_failures"], 0)
             self.assertNotIn("error", sync.status()["slaves"][0])
+
+    def test_slave_local_calibration_pause_fails_sync_instead_of_hanging(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = FakeManager(tmp)
+            manager.status.is_running = True
+            sync = SyncManager(manager)
+            sync._runtime.update({
+                "active": True,
+                "sync_run_id": "sync_test",
+                "status": "running",
+                "expected_shots": 10,
+                "slaves": [{
+                    "node_id": "slave_b", "name": "Node B",
+                    "base_url": "http://192.168.1.20:8000", "cursor": 0,
+                }],
+            })
+            paused = FakeResponse({
+                "is_running": True,
+                "is_paused": True,
+                "pause_reason": "intf_alpha_calibration_failed",
+                "current_step": 6,
+                "completed_shots": 5,
+                "latest_sequence": 5,
+                "results": [],
+            })
+
+            with patch("app.core.sync_manager.requests.get", return_value=paused), patch(
+                "app.core.sync_manager.requests.post", return_value=FakeResponse()
+            ):
+                sync._monitor_master()
+
+            self.assertFalse(manager.status.is_running)
+            self.assertFalse(sync.status()["active"])
+            self.assertEqual(sync.status()["status"], "error")
+            self.assertIn("intf_alpha_calibration_failed", sync.status()["message"])
+            self.assertEqual(sync.status()["slaves"][0]["status"], "paused")
 
     def test_stop_orders_slave_delay_then_master(self):
         with tempfile.TemporaryDirectory() as tmp:
