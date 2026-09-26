@@ -154,6 +154,36 @@ def test_legacy_slave_run_infers_local_slave_and_replicated_master():
         assert master["data"][0]["atom_number_up"] == 22
 
 
+def test_standalone_run_on_slave_role_loads_from_run_root():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "2026" / "09" / "26" / "run09_20260926"
+        root.mkdir(parents=True)
+        (root / "config.json").write_text(json.dumps({
+            "mode": "standard",
+            "scan_dimensions": 1,
+            "sync_role": "slave",
+            "_system_settings_snapshot": {
+                "sync_role": "slave",
+                "sync_node_name": "MIGA21",
+            },
+        }), encoding="utf-8")
+        (root / "results.csv").write_text(
+            "Step,Parameter,Atom_Up\n1,0,21\n", encoding="utf-8"
+        )
+        (root / "sequence.mot").write_text("standalone slave run\n", encoding="utf-8")
+        loader = DataLoader()
+        loader.base_dir = Path(tmp)
+
+        loaded = loader.load_run("2026", "09", "26", "run09_20260926")
+        sequence, _ = loader.get_archived_sequence_file(
+            "2026", "09", "26", "run09_20260926"
+        )
+
+        assert loaded["config"]["mode"] == "standard"
+        assert loaded["sync_manifest"] is None
+        assert sequence.read_text(encoding="utf-8") == "standalone slave run\n"
+
+
 def test_archive_ui_uses_loaded_points_and_rolls_back_failed_node_switch():
     html = (Path(__file__).parents[1] / "static" / "archive.html").read_text(encoding="utf-8")
 

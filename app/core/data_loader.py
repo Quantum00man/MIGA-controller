@@ -544,6 +544,28 @@ class DataLoader:
         root_snapshot = root_config.get("_system_settings_snapshot") or {}
         root_role = str(root_config.get("sync_role") or root_snapshot.get("sync_role") or "").strip().lower()
         root_node_id = str(root_config.get("sync_node_id") or root_snapshot.get("sync_node_id") or "").strip()
+        # A controller's configured role describes what it can do, not how this
+        # particular run was acquired.  A normal Live run created on a Slave has
+        # sync_role="slave" in its settings snapshot but no SYNC archive layout.
+        # Resolve such runs directly from their root instead of inventing a
+        # missing sync_nodes/master replica.
+        is_sync_run = bool(
+            manifest
+            or str(root_config.get("sync_run_id") or "").strip()
+            or (run_dir / "sync_nodes").is_dir()
+        )
+        if not is_sync_run:
+            identity = {
+                "requested_node": requested,
+                "resolved_node": "",
+                "relative_path": ".",
+                "role": "standalone",
+                "recorded_node_id": root_node_id,
+                "local": True,
+                "legacy_layout": False,
+                "warnings": [],
+            }
+            return run_dir, identity
         runtime_slaves = (manifest.get("runtime") or {}).get("slaves") or []
         legacy_slave_id = next((
             str(item.get("node_id") or "") for item in runtime_slaves
