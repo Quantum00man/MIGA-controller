@@ -2367,13 +2367,34 @@ class DataLoader:
             "sequence_statistics": sequence_statistics,
         }
 
-    def _build_allan_payload(self, points: List[Dict[str, Any]], requested_order: int) -> Dict[str, Any]:
+    def _build_allan_payload(
+        self,
+        points: List[Dict[str, Any]],
+        requested_order: int,
+        metric: Optional[str] = None,
+        source: Optional[str] = None,
+    ) -> Dict[str, Any]:
         payload = self._build_allan_curve_meta(points, requested_order)
         orders = payload["orders"]
         metrics: Dict[str, Any] = {}
-        for metric_name, source_map in self._get_allan_metric_fields().items():
+        metric_fields = self._get_allan_metric_fields()
+        normalized_metric = str(metric or "").strip().lower()
+        normalized_source = str(source or "").strip().lower()
+        if normalized_metric and normalized_metric not in metric_fields:
+            raise ValueError(f"Unknown Allan metric: {normalized_metric}")
+        selected_metrics = (
+            {normalized_metric: metric_fields[normalized_metric]}
+            if normalized_metric else metric_fields
+        )
+        for metric_name, source_map in selected_metrics.items():
             metrics[metric_name] = {}
-            for source_name, channel_map in source_map.items():
+            if normalized_source and normalized_source not in source_map:
+                raise ValueError(f"Unknown Allan source for {metric_name}: {normalized_source}")
+            selected_sources = (
+                {normalized_source: source_map[normalized_source]}
+                if normalized_source else source_map
+            )
+            for source_name, channel_map in selected_sources.items():
                 metrics[metric_name][source_name] = {}
                 for channel_name, field_names in channel_map.items():
                     metrics[metric_name][source_name][channel_name] = self._build_allan_channel(points, field_names, orders)
@@ -2434,6 +2455,8 @@ class DataLoader:
         p0_max: Optional[float] = None,
         node_id: Optional[str] = None,
         current_phase_calibration: Optional[Dict[str, Any]] = None,
+        metric: Optional[str] = None,
+        source: Optional[str] = None,
     ) -> Dict[str, Any]:
         root_run_dir = self._get_run_dir(year, month, day, run_id)
         run_dir = self._resolve_archive_node_dir(root_run_dir, node_id)
@@ -2474,9 +2497,11 @@ class DataLoader:
             p0_min=p0_min,
             p0_max=p0_max,
         )
-        payload = self._build_allan_payload(filtered_points, requested_order)
+        payload = self._build_allan_payload(filtered_points, requested_order, metric, source)
         payload.update(
             {
+                "requested_metric": str(metric or "").strip().lower() or None,
+                "requested_source": str(source or "").strip().lower() or None,
                 "display_mode": normalized_mode,
                 "scan_dimensions": scan_dimensions,
                 "randomize": randomized,

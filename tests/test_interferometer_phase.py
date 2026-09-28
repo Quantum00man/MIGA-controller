@@ -95,6 +95,24 @@ class InterferometerPhaseTests(unittest.TestCase):
         self.assertIn("phase", allan["metrics"])
         self.assertGreater(len(allan["metrics"]["phase"]["fit"]["up"]["y"]), 0)
 
+    def test_allan_payload_can_limit_calculation_to_one_metric_and_source(self):
+        loader = DataLoader()
+        points = [
+            {
+                "parameter": float(index), "all_parameters": [float(index)],
+                "transition_probability_up": value,
+                "transition_probability_dw": 1.0 - value,
+                "atom_number_up": 100.0 + index,
+            }
+            for index, value in enumerate((0.1, 0.2, 0.3, 0.4), start=1)
+        ]
+
+        allan = loader._build_allan_payload(points, 2, metric="prob", source="fit")
+
+        self.assertEqual(set(allan["metrics"]), {"prob"})
+        self.assertEqual(set(allan["metrics"]["prob"]), {"fit"})
+        self.assertGreater(len(allan["metrics"]["prob"]["fit"]["up"]["y"]), 0)
+
     def test_phase_noise_reanalysis_uses_each_shot_mid_fringe_reference(self):
         cal = calibration(parameter_values={"A": 20.0, "C": 50.0, "phi0": 0.0}, reference_t2_us2=5.0)
         points = [

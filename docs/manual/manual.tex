@@ -1742,6 +1742,12 @@ filtered sequence length. The UI supports absolute or mean-normalized values, li
 logarithmic order axes, and displays valid-window count, mean, RMS and sample standard
 deviation for Fit and raw channels.
 
+The Archive calculates only the currently selected physical metric and Fit/raw source.
+Changing metric or source requests that curve on demand and caches it for the current
+archive, display mode, order and $P_0$ range. Allan jobs run outside the web event loop and
+are serialized per controller, so a long archive calculation does not block live scan updates
+or compete with another archive Allan calculation on the same controller.
+
 All measured Allan curves include asymmetric one-standard-deviation confidence bands. Under
 the current white-noise assumption, the implementation forms the covariance of the actual
 overlapping windows (including gaps), moment-matches it to an equivalent number of

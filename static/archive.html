@@ -3509,6 +3509,10 @@
                     }
                     this.showDisplayMenu = false;
                     this.plotRevision++;
+                    if (this.plotMode === 'allan') {
+                        this.syncCurrentAllanData();
+                        await this.refreshAllanIfNeeded(false);
+                    }
                     // Tab changes can reveal the Total plot and resize all three panels.
                     // Wait for Vue to apply display/height changes before Plotly measures them.
                     await this.$nextTick();
@@ -4786,8 +4790,10 @@
                 getAllanCacheKey(order = this.allanOrder) {
                     const normalizedOrder = Math.max(1, Math.round(Number(order) || 1));
                     const normalizedRange = this.normalizeAllanP0RangeValues(this.allanP0Min, this.allanP0Max);
-                    if (!normalizedRange) return String(normalizedOrder);
-                    return `${normalizedOrder}|${this.formatAllanCacheFloat(normalizedRange.min)}|${this.formatAllanCacheFloat(normalizedRange.max)}`;
+                    const metric = String(this.currentTab || 'atoms');
+                    const source = this.showRawData ? 'raw' : 'fit';
+                    if (!normalizedRange) return `${metric}|${source}|${normalizedOrder}`;
+                    return `${metric}|${source}|${normalizedOrder}|${this.formatAllanCacheFloat(normalizedRange.min)}|${this.formatAllanCacheFloat(normalizedRange.max)}`;
                 },
                 syncCurrentAllanData(order = this.allanOrder) {
                     const bucket = this.getAllanCacheBucket();
@@ -4820,6 +4826,8 @@
                         const res = await axios.post('/archive/allan', this.buildArchivePayload({
                             order: requestedOrder,
                             display_mode: this.displayMode,
+                            metric: this.currentTab,
+                            source: this.showRawData ? 'raw' : 'fit',
                             p0_min: normalizedRange?.min ?? null,
                             p0_max: normalizedRange?.max ?? null,
                         }));

@@ -902,6 +902,8 @@ class ArchiveAllanRequest(BaseModel):
     node_id: Optional[str] = Field(None)
     order: int = Field(1, ge=1)
     display_mode: str = Field("saved")
+    metric: Optional[str] = Field(None)
+    source: Optional[str] = Field(None)
     p0_min: Optional[float] = Field(None)
     p0_max: Optional[float] = Field(None)
     new_settings: ArchiveAnalysisSettings

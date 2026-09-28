@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import ipaddress
 import json
@@ -167,6 +168,7 @@ archive_collection_store = ArchiveCollectionStore(config.DATA_BASE_DIR)
 archive_audit_service = ArchiveAuditService(config.DATA_BASE_DIR, archive_collection_store)
 sync_manager = SyncManager(manager)
 schedule_manager = ScheduleManager(manager, sync_manager)
+archive_allan_lock = asyncio.Lock()
 
 
 def _bragg_export_template_path(settings: Dict[str, Any]) -> Path:
@@ -2298,19 +2300,26 @@ async def calculate_archived_allan(req: ArchiveAllanRequest):
     try:
         settings = req.new_settings.dict()
         settings["_interferometer_phase_calibration"] = manager.get_active_bragg_phase_calibration()
-        return data_loader.calculate_allan_run(
-            req.year,
-            req.month,
-            req.day,
-            req.run_id,
-            req.order,
-            req.display_mode,
-            settings,
-            p0_min=req.p0_min,
-            p0_max=req.p0_max,
-            node_id=req.node_id,
-            current_phase_calibration=manager.get_active_bragg_phase_calibration(),
-        )
+        # Allan reanalysis can be CPU- and I/O-intensive.  Keep it off the
+        # event loop so live WebSocket updates continue, and serialize these
+        # jobs to avoid competing with active acquisition for resources.
+        async with archive_allan_lock:
+            return await run_in_threadpool(
+                data_loader.calculate_allan_run,
+                req.year,
+                req.month,
+                req.day,
+                req.run_id,
+                req.order,
+                req.display_mode,
+                settings,
+                req.p0_min,
+                req.p0_max,
+                req.node_id,
+                manager.get_active_bragg_phase_calibration(),
+                req.metric,
+                req.source,
+            )
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc))
     except ValueError as exc:
