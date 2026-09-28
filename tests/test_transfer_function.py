@@ -263,6 +263,41 @@ class TransferFunctionPlanTests(unittest.TestCase):
             for point in plan
         ))
 
+    def test_plan_accepts_discrete_frequency_list_in_entered_order(self):
+        config = {
+            "scan_dimensions": 1,
+            "parameter_source": "classic",
+            "mode": "transfer_function",
+            "randomize": False,
+            "transfer_frequency_source": "list",
+            "transfer_frequency_list_hz": "10.1, 20.1\n40.1",
+            "transfer_repeats": 2,
+            "transfer_phase_degrees": [0],
+            "transfer_frequency_order": "random",
+        }
+        plan = self.manager._build_transfer_function_execution(config)
+
+        self.assertEqual(
+            [point["metadata"]["transfer_frequency_hz"] for point in plan],
+            [10.1, 10.1, 20.1, 20.1, 40.1, 40.1],
+        )
+        self.assertEqual(config["transfer_frequency_values_hz"], [10.1, 20.1, 40.1])
+        self.assertEqual(config["transfer_frequency_order"], "sequential")
+
+    def test_plan_rejects_duplicate_discrete_frequencies(self):
+        config = {
+            "scan_dimensions": 1,
+            "parameter_source": "classic",
+            "mode": "transfer_function",
+            "randomize": False,
+            "transfer_frequency_source": "list",
+            "transfer_frequency_list_hz": "10.1, 20.1, 10.1",
+            "transfer_repeats": 2,
+        }
+
+        with self.assertRaisesRegex(ValueError, "duplicate values: 10.1 Hz"):
+            self.manager._build_transfer_function_execution(config)
+
     def test_plan_supports_descending_frequency(self):
         config = {
             "scan_dimensions": 1,
@@ -635,6 +670,9 @@ class TransferFunctionStatisticsTests(unittest.TestCase):
         self.assertIn('id="transferPhase90"', index_html)
         self.assertIn('v-model="config.transfer_phase_scan_mode"', index_html)
         self.assertIn('v-model="config.transfer_frequency_order"', index_html)
+        self.assertIn('v-model="config.transfer_frequency_source"', index_html)
+        self.assertIn('v-model="config.transfer_frequency_list_hz"', index_html)
+        self.assertIn("parseTransferFrequencyList", index_html)
         self.assertIn('symmetric_converging', index_html)
         self.assertIn('<option value="random">Random</option>', index_html)
         self.assertIn('v-model="config.transfer_control_output"', index_html)
@@ -647,6 +685,7 @@ class TransferFunctionStatisticsTests(unittest.TestCase):
         self.assertIn("Automatic low-frequency recovery interval", manual_tex)
         self.assertIn("eq:transfer-low-frequency-recovery", manual_tex)
         self.assertIn("Control FM output during scan", manual_tex)
+        self.assertIn("Discrete list", manual_tex)
 
         settings_html = (
             Path(__file__).resolve().parents[1] / "static" / "settings.html"

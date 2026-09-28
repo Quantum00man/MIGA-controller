@@ -982,8 +982,11 @@ floor is $\sigma_A^2$. The normalized $S^2$ view contains no noise-floor curve, 
 view subtracts the configured floor from the measured result.
 
 \subsection{Configuration and test controls}
-Select \ui{Transfer Function} under \ui{Scan Logic}. Enter the inclusive carrier-frequency
-start, stop and nonzero step, then set \ui{Repeats per frequency}; at least two repeats are
+Select \ui{Transfer Function} under \ui{Scan Logic}. Select either \ui{Range} and enter the
+inclusive carrier-frequency start, stop and nonzero step, or \ui{Discrete list} and enter
+the desired frequencies separated by commas, spaces or line breaks (for example,
+\code{10.1, 20.1, 40.1}). List values must be finite and unique; they are visited exactly
+in the entered order. Then set \ui{Repeats per frequency}; at least two repeats are
 required so that a sample standard deviation can be evaluated. Immediately below that
 field, select one or both generator phases. The defaults are \ang{0} and \ang{90}; the UI
 does not allow the final selected phase to be cleared. Transfer Function is a
@@ -1013,7 +1016,7 @@ frequency points (default interval: 10). It requires \ui{frequency-interleaved} 
 ordering, so that the \ang{0} and \ang{90} acquisitions for one frequency always use the
 same phase-zero block. The final incomplete interval reuses its most recent reference.
 
-The \ui{Frequency order} selector controls only the order in which the configured
+For range scans, the \ui{Frequency order} selector controls only the order in which the configured
 frequency points are visited; it does not change the frequencies included in the final
 response. \ui{Start to Stop} uses the conventional monotonic order. \ui{Endpoints toward
 center} visits the first configured frequency, then the last, then the second, then the

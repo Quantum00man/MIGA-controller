@@ -102,6 +102,8 @@ class ScanConfig(BaseModel):
     transfer_frequency_start_hz: float = Field(1000.0)
     transfer_frequency_stop_hz: float = Field(10000.0)
     transfer_frequency_step_hz: float = Field(1000.0)
+    transfer_frequency_source: str = Field("range")
+    transfer_frequency_list_hz: str = Field("")
     transfer_burst_time_frequency_hz: float = Field(1000.0, gt=0)
     transfer_repeats: int = Field(10, ge=2, le=100000)
     transfer_settling_time_s: float = Field(5.0, ge=0.0, le=3600.0)
@@ -182,6 +184,13 @@ class ScanConfig(BaseModel):
             raise ValueError(
                 "Transfer Function frequency order must be sequential, symmetric_converging or random"
             )
+        return normalized
+
+    @validator("transfer_frequency_source")
+    def validate_transfer_frequency_source(cls, value):
+        normalized = str(value or "range").strip().lower()
+        if normalized not in {"range", "list"}:
+            raise ValueError("Transfer Function frequency source must be range or list")
         return normalized
 
     @validator("ac_stark_raman_group")

@@ -5,6 +5,7 @@ import traceback
 import json
 import random
 import math
+import re
 import queue
 import os
 import shutil
@@ -1316,6 +1317,9 @@ class ExperimentManager:
         start = float(scan_config.get("transfer_frequency_start_hz", 0))
         stop = float(scan_config.get("transfer_frequency_stop_hz", 0))
         step = float(scan_config.get("transfer_frequency_step_hz", 0))
+        frequency_source = str(scan_config.get("transfer_frequency_source") or "range").strip().lower()
+        if frequency_source not in {"range", "list"}:
+            raise ValueError("Transfer Function frequency source must be range or list")
         raw_fixed_generator_frequency = scan_config.get("transfer_burst_time_frequency_hz", 1000.0)
         if burst_time_scan:
             fixed_generator_frequency = float(raw_fixed_generator_frequency)
@@ -1328,9 +1332,9 @@ class ExperimentManager:
                 fixed_generator_frequency = 1000.0
         if burst_time_scan and (not math.isfinite(fixed_generator_frequency) or fixed_generator_frequency <= 0):
             raise ValueError("Transfer function Burst time scan requires a positive fixed TTI frequency")
-        if not burst_time_scan and not all(math.isfinite(value) for value in (start, stop, step)):
+        if not burst_time_scan and frequency_source == "range" and not all(math.isfinite(value) for value in (start, stop, step)):
             raise ValueError("Transfer Function frequencies must be finite")
-        if not burst_time_scan and step == 0:
+        if not burst_time_scan and frequency_source == "range" and step == 0:
             raise ValueError("Transfer Function frequency step cannot be zero")
         repeats = int(scan_config.get("transfer_repeats", 10))
         if repeats < 2:
@@ -1364,6 +1368,8 @@ class ExperimentManager:
                 "Transfer Function phase scan mode must be phase_blocks or frequency_interleaved"
             )
         frequency_order = str(scan_config.get("transfer_frequency_order") or "sequential").strip().lower()
+        if not burst_time_scan and frequency_source == "list":
+            frequency_order = "sequential"
         if frequency_order not in {"sequential", "symmetric_converging", "random"}:
             raise ValueError(
                 "Transfer Function frequency order must be sequential, symmetric_converging or random"
@@ -1394,6 +1400,29 @@ class ExperimentManager:
                 timing_parameters[p0] = list(sequence_parameters)
             if len(frequencies) > 10000:
                 raise ValueError("Transfer function Burst time scan exceeds 10000 P0 points")
+        elif frequency_source == "list":
+            raw_frequency_list = str(scan_config.get("transfer_frequency_list_hz") or "")
+            tokens = [token for token in re.split(r"[\s,]+", raw_frequency_list.strip()) if token]
+            if not tokens:
+                raise ValueError("Transfer Function frequency list must contain at least one frequency")
+            try:
+                frequencies = [float(token) for token in tokens]
+            except ValueError as exc:
+                raise ValueError("Transfer Function frequency list must contain only numeric values") from exc
+            if not all(math.isfinite(frequency) for frequency in frequencies):
+                raise ValueError("Transfer Function frequency list must contain only finite values")
+            if len(frequencies) > 10000:
+                raise ValueError("Transfer Function scan exceeds 10000 frequency points")
+            seen_frequencies = set()
+            duplicates = set()
+            for frequency in frequencies:
+                if frequency in seen_frequencies:
+                    duplicates.add(frequency)
+                seen_frequencies.add(frequency)
+            duplicates = sorted(duplicates)
+            if duplicates:
+                joined = ", ".join(f"{frequency:g}" for frequency in duplicates)
+                raise ValueError(f"Transfer Function frequency list contains duplicate values: {joined} Hz")
         else:
             direction = 1.0 if stop >= start else -1.0
             effective_step = abs(step) * direction
@@ -1507,6 +1536,7 @@ class ExperimentManager:
         scan_config["transfer_phase_degrees"] = phase_degrees
         scan_config["transfer_phase_scan_mode"] = phase_scan_mode
         scan_config["transfer_frequency_order"] = frequency_order
+        scan_config["transfer_frequency_source"] = frequency_source
         scan_config["transfer_control_output"] = control_output
         scan_config["transfer_calibrate_zero_phase"] = calibrate_zero_phase
         scan_config["transfer_zero_phase_repeats"] = zero_phase_repeats

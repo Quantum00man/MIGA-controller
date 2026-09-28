@@ -1097,13 +1097,24 @@
                             Live 1D quadrature scan. {{ config.transfer_phase_scan_mode === 'frequency_interleaved'
                                 ? 'Measures every selected phase at each frequency before advancing.'
                                 : 'Completes the full frequency sweep at one phase before starting the next.' }}
-                            Frequency order: {{ config.transfer_frequency_order === 'symmetric_converging'
+                            {{ config.transfer_frequency_source === 'list'
+                                ? 'Visits the listed frequencies exactly in the order entered.'
+                                : `Frequency order: ${config.transfer_frequency_order === 'symmetric_converging'
                                 ? 'alternate the two endpoints and converge toward the center.'
                                 : config.transfer_frequency_order === 'random'
                                     ? 'visit every frequency once in a new random order for this scan.'
-                                    : 'scan from Start to Stop.' }}
+                                    : 'scan from Start to Stop.'}` }}
                         </div>
-                        <div class="row g-2">
+                        <div class="mb-2">
+                            <label class="form-label small text-muted mb-1">Frequency source</label>
+                            <div class="btn-group btn-group-sm w-100" role="group" aria-label="Transfer Function frequency source">
+                                <input id="transferFrequencyRange" class="btn-check" type="radio" value="range" v-model="config.transfer_frequency_source">
+                                <label class="btn btn-outline-primary" for="transferFrequencyRange">Range</label>
+                                <input id="transferFrequencyList" class="btn-check" type="radio" value="list" v-model="config.transfer_frequency_source">
+                                <label class="btn btn-outline-primary" for="transferFrequencyList">Discrete list</label>
+                            </div>
+                        </div>
+                        <div v-if="config.transfer_frequency_source === 'range'" class="row g-2">
                             <div class="col-4">
                                 <label class="form-label small text-muted mb-1">Start (Hz)</label>
                                 <input type="number" step="any" class="form-control form-control-sm" v-model.number="config.transfer_frequency_start_hz">
@@ -1127,6 +1138,12 @@
                                     <span class="input-group-text">s</span>
                                 </div>
                             </div>
+                        </div>
+                        <div v-else class="mt-2">
+                            <label class="form-label small text-muted mb-1">Frequencies (Hz)</label>
+                            <textarea class="form-control form-control-sm" rows="3" v-model="config.transfer_frequency_list_hz"
+                                placeholder="10.1, 20.1, 40.1" aria-label="Discrete Transfer Function frequencies"></textarea>
+                            <div class="form-text">Separate values with commas, spaces or new lines. Frequencies must be unique and are scanned in the entered order.</div>
                         </div>
                         <div class="form-text mt-2">The phase scan order is selected under Execution Control. Statistics are updated after every shot.</div>
                         <div class="card border-info mt-3"><div class="card-body py-2 px-3">
@@ -1580,12 +1597,13 @@
                             </div>
                             <div class="col-md-5">
                                 <label class="form-label small text-muted mb-1" for="transferFrequencyOrder">Frequency order</label>
-                                <select id="transferFrequencyOrder" class="form-select form-select-sm"
+                                <select v-if="config.transfer_frequency_source !== 'list'" id="transferFrequencyOrder" class="form-select form-select-sm"
                                     v-model="config.transfer_frequency_order">
                                     <option value="sequential">Start to Stop</option>
                                     <option value="symmetric_converging">Endpoints toward center</option>
                                     <option value="random">Random</option>
                                 </select>
+                                <div v-else class="form-control form-control-sm bg-light">Entered order</div>
                             </div>
                             <div class="col-md-5 d-flex align-items-end">
                                 <div class="form-check border rounded px-3 py-2 w-100 bg-white">
@@ -1925,6 +1943,8 @@
                         transfer_frequency_start_hz: 1000,
                         transfer_frequency_stop_hz: 10000,
                         transfer_frequency_step_hz: 1000,
+                        transfer_frequency_source: 'range',
+                        transfer_frequency_list_hz: '',
                         transfer_burst_time_frequency_hz: 1000,
                         transfer_repeats: 10,
                         transfer_settling_time_s: 5,
@@ -3554,11 +3574,11 @@ getLiveEstimatedShotCount() {
         if (this.isTransferFunctionMode()) {
             const burst = this.isTransferBurstTimeScan();
             const frequencyCount = this.estimateAxisPointCount({
-                scan_type: burst ? this.config.dim1_type : 'range', method: burst ? this.config.dim1_method : 'step_size',
+                scan_type: burst ? this.config.dim1_type : (this.config.transfer_frequency_source === 'list' ? 'list' : 'range'), method: burst ? this.config.dim1_method : 'step_size',
                 start: burst ? this.config.start : this.config.transfer_frequency_start_hz,
                 stop: burst ? this.config.stop : this.config.transfer_frequency_stop_hz,
                 step: burst ? this.config.step : this.config.transfer_frequency_step_hz,
-                list: burst ? this.config.custom_list : ''
+                list: burst ? this.config.custom_list : this.config.transfer_frequency_list_hz
             });
             const phaseCount = Array.isArray(this.config.transfer_phase_degrees) && this.config.transfer_phase_degrees.length
                 ? this.config.transfer_phase_degrees.length : 2;
@@ -3602,13 +3622,23 @@ getTransferRecoveryEstimateSeconds(configObj = this.config, shotDurationSec = th
         return wait * Math.max(0, responsePoints * repeats * phaseCount - 1);
     }
 
+    const listMode = configObj.transfer_frequency_source === 'list';
     const count = this.estimateAxisPointCount({
-        scan_type: 'range', method: 'step_size',
+        scan_type: listMode ? 'list' : 'range', method: 'step_size',
         start: configObj.transfer_frequency_start_hz,
         stop: configObj.transfer_frequency_stop_hz,
         step: configObj.transfer_frequency_step_hz,
-        list: ''
+        list: configObj.transfer_frequency_list_hz
     });
+    if (listMode) {
+        const frequencies = this.parseTransferFrequencyList(configObj.transfer_frequency_list_hz);
+        const shotsPerFrequency = repeats * phaseCount;
+        let total = frequencies.reduce((sum, frequency) => (
+            sum + shotsPerFrequency * this.getTransferRecoveryWaitSeconds(frequency, shotDurationSec)
+        ), 0);
+        total -= this.getTransferRecoveryWaitSeconds(frequencies[frequencies.length - 1], shotDurationSec);
+        return Math.max(0, total);
+    }
     const start = Number(configObj.transfer_frequency_start_hz);
     const stop = Number(configObj.transfer_frequency_stop_hz);
     const step = Math.abs(Number(configObj.transfer_frequency_step_hz));
@@ -3713,7 +3743,7 @@ estimateAxisPointCount(spec = {}) {
     const method = String(spec.method || 'step_size');
     if (scanType === 'list') {
         const values = String(spec.list || '')
-            .split(',')
+            .split(/[\s,]+/)
             .map((item) => item.trim())
             .filter(Boolean)
             .map((item) => Number(item));
@@ -3752,15 +3782,30 @@ estimateAxisPointCount(spec = {}) {
     }
     return Math.max(count, 1);
 },
+parseTransferFrequencyList(value) {
+    const values = String(value || '')
+        .split(/[\s,]+/)
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .map((item) => Number(item));
+    if (!values.length || values.some((item) => !Number.isFinite(item))) {
+        throw new Error('Transfer Function frequency list must contain numeric values.');
+    }
+    const duplicates = [...new Set(values.filter((value, index) => values.indexOf(value) !== index))];
+    if (duplicates.length) {
+        throw new Error(`Transfer Function frequency list contains duplicate values: ${duplicates.join(', ')} Hz.`);
+    }
+    return values;
+},
 estimateScanStepCount(configObj = this.config) {
     if (this.isTransferFunctionMode(configObj.mode)) {
         const burst = this.isTransferBurstTimeScan(configObj.mode);
         const frequencyCount = this.estimateAxisPointCount({
-            scan_type: burst ? configObj.dim1_type : 'range', method: burst ? configObj.dim1_method : 'step_size',
+            scan_type: burst ? configObj.dim1_type : (configObj.transfer_frequency_source === 'list' ? 'list' : 'range'), method: burst ? configObj.dim1_method : 'step_size',
             start: burst ? configObj.start : configObj.transfer_frequency_start_hz,
             stop: burst ? configObj.stop : configObj.transfer_frequency_stop_hz,
             step: burst ? configObj.step : configObj.transfer_frequency_step_hz,
-            list: burst ? configObj.custom_list : ''
+            list: burst ? configObj.custom_list : configObj.transfer_frequency_list_hz
         });
         const phases = Array.isArray(configObj.transfer_phase_degrees)
             ? configObj.transfer_phase_degrees.map(Number).filter(value => value === 0 || value === 90)
@@ -4565,12 +4610,18 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     }
                     if (this.isTransferFunctionMode(payload.mode)) {
                         const burst = this.isTransferBurstTimeScan(payload.mode);
-                        (burst ? ['transfer_burst_time_frequency_hz'] : ['transfer_frequency_start_hz', 'transfer_frequency_stop_hz', 'transfer_frequency_step_hz']).forEach((field) => {
+                        payload.transfer_frequency_source = ['range', 'list'].includes(payload.transfer_frequency_source)
+                            ? payload.transfer_frequency_source : 'range';
+                        (burst ? ['transfer_burst_time_frequency_hz'] : (payload.transfer_frequency_source === 'list' ? [] : ['transfer_frequency_start_hz', 'transfer_frequency_stop_hz', 'transfer_frequency_step_hz'])).forEach((field) => {
                             const value = Number(payload[field]);
                             if (!Number.isFinite(value)) throw new Error(`${field} must be numeric.`);
                             payload[field] = value;
                         });
-                        if (!burst && payload.transfer_frequency_step_hz === 0) throw new Error('Transfer Function frequency step must not be zero.');
+                        if (!burst && payload.transfer_frequency_source === 'list') {
+                            this.parseTransferFrequencyList(payload.transfer_frequency_list_hz);
+                            payload.transfer_frequency_order = 'sequential';
+                        }
+                        if (!burst && payload.transfer_frequency_source === 'range' && payload.transfer_frequency_step_hz === 0) throw new Error('Transfer Function frequency step must not be zero.');
                         if (burst && payload.transfer_burst_time_frequency_hz <= 0) throw new Error('Fixed TTI frequency must be greater than zero.');
                         if (burst && !this.isValidModeParam(payload.mode_param)) throw new Error('Transfer function Burst time scan requires a numeric Total Parameter.');
                         payload.transfer_repeats = Math.round(Number(payload.transfer_repeats));
