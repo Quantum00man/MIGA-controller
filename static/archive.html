@@ -7576,6 +7576,17 @@
                 },
                 syncArchiveNodeSeries(channel, noFit = false, source = this.syncArchiveNodeSource) {
                     const field = this.syncArchiveTabField(this.syncArchiveTab, channel, noFit);
+                    const singleTPhaseNoise = this.isPhaseNoiseArchive() && !this.isLegacyMultiTPhaseNoiseArchive();
+                    if (singleTPhaseNoise) {
+                        return this.syncArchiveNodeRows(source).map((row, index) => {
+                            if (row?.error) return null;
+                            const rawY = Number(row[field]);
+                            const y = this.syncArchiveTab === 'phase' && this.phaseUnit === 'mrad' ? rawY * 1000 : rawY;
+                            const shot = Number(row.phase_noise_repeat ?? row.phase_noise_science_shot ?? row.sync_shot_index ?? row.step ?? index + 1);
+                            if (!Number.isFinite(shot) || !Number.isFinite(y)) return null;
+                            return { x: shot, y, count: 1 };
+                        }).filter(Boolean).sort((left, right) => left.x - right.x);
+                    }
                     const grouped = new Map();
                     this.syncArchiveNodeRows(source).forEach(row => {
                         if (row?.error) return;
@@ -7647,7 +7658,7 @@
                         Plotly.react(element, traces, {
                             margin: isUp ? { t: 42, b: 8, l: 68, r: 20 } : { t: 18, b: 48, l: 68, r: 20 },
                             title: { text: `${sourceLabel} | ${isUp ? 'UP Channel' : 'DOWN Channel'}`, font: { size: 13 }, x: 0.05 },
-                            xaxis: { title: isUp ? '' : 'Parameter P0', showticklabels: !isUp, showline: true, mirror: true, ticks: 'inside', gridcolor: '#dde5ee' },
+                            xaxis: { title: isUp ? '' : (this.isPhaseNoiseArchive() && !this.isLegacyMultiTPhaseNoiseArchive() ? 'Science shot index' : 'Parameter P0'), showticklabels: !isUp, showline: true, mirror: true, ticks: 'inside', gridcolor: '#dde5ee' },
                             yaxis: { title: this.syncArchiveTab === 'phase' ? `Interferometer Δφ (${this.phaseUnit})` : metric.label + (isUp ? metric.suffixUp : metric.suffixDw), showline: true, mirror: true, ticks: 'inside', gridcolor: '#dde5ee' },
                             legend: { orientation: 'h', x: 1, xanchor: 'right', y: 1.12 }, hovermode: 'closest',
                             paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
