@@ -173,7 +173,7 @@ class InterferometerAlphaPlanTests(unittest.TestCase):
             master_scan_fit,
         )
 
-    def test_transfer_plan_adds_start_phase_boundaries_and_end(self):
+    def test_transfer_plan_adds_start_and_periodic_boundaries_without_end(self):
         config = {
             "mode": "transfer_function", "scan_dimensions": 1, "parameter_source": "classic",
             "randomize": False, "transfer_frequency_start_hz": 100,
@@ -184,7 +184,7 @@ class InterferometerAlphaPlanTests(unittest.TestCase):
         self.manager.settings["intf_alpha_calibration_sequence_content_base64"] = "YQ=="
         plan = self.manager._build_transfer_function_execution(config)
         boundaries = [item["metadata"].get("intf_alpha_calibration_boundary") for item in plan if item["metadata"].get("intf_alpha_calibration_boundary")]
-        self.assertEqual(boundaries, ["start", "periodic", "periodic", "periodic", "end"])
+        self.assertEqual(boundaries, ["start", "periodic", "periodic", "periodic"])
 
     def test_bragg_coarse_plan_checks_interval_after_each_p0_block(self):
         config = {

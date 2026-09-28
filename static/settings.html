@@ -800,6 +800,18 @@
                             </div>
                             <div class="form-text">Per-quadrature fixed noise. With both phases selected, the ΔΦ² noise floor is 2σ².</div>
                         </div>
+                        <div class="col-12">
+                            <div v-if="transferS2NoiseFloor" class="border rounded bg-light px-3 py-2">
+                                <div class="small fw-bold mb-1">Normalized Transfer Function S² noise floor</div>
+                                <div class="row g-2 small">
+                                    <div class="col-md-4"><span class="text-muted">Bragg phase modulation φ<sub>ω</sub></span><br><span class="font-monospace">{{ formatTransferS2Floor(transferS2NoiseFloor.phaseAmplitudeRad) }} rad</span></div>
+                                    <div class="col-md-4"><span class="text-muted">Single phase</span><br><span class="font-monospace">{{ formatTransferS2Floor(transferS2NoiseFloor.singlePhase) }}</span></div>
+                                    <div class="col-md-4"><span class="text-muted">0° + 90° quadrature</span><br><span class="font-monospace">{{ formatTransferS2Floor(transferS2NoiseFloor.quadrature) }}</span></div>
+                                </div>
+                                <div class="form-text mt-1">Uses S²<sub>floor</sub> = (σ/φ<sub>ω</sub>)² per phase; the quadrature floor is twice this value. Values are dimensionless.</div>
+                            </div>
+                            <div v-else class="form-text text-warning">Enter a non-negative σ and positive 780 nm FM amplitude and distance L to calculate the S² noise floor.</div>
+                        </div>
                         <div class="col-md-6">
                             <label class="form-label fw-bold" for="tti-host">Instrument IP address</label>
                             <input v-if="s.tti_model !== 'DG4162'" id="tti-host" class="form-control font-monospace" v-model.trim="s.tti_host"
@@ -2028,6 +2040,22 @@
                     if (!this.savedSettingsSnapshot) return false;
                     return JSON.stringify(this.s) !== this.savedSettingsSnapshot
                         || JSON.stringify(this.markerDocument) !== this.savedMarkerSnapshot;
+                },
+                transferS2NoiseFloor() {
+                    const modulationMhz = Number(this.s.transfer_frequency_modulation_mhz);
+                    const distanceM = Number(this.s.transfer_atom_mirror_distance_m);
+                    const sigmaMrad = Number(this.s.transfer_phase_noise_sigma_mrad);
+                    if (!Number.isFinite(modulationMhz) || modulationMhz <= 0
+                        || !Number.isFinite(distanceM) || distanceM <= 0
+                        || !Number.isFinite(sigmaMrad) || sigmaMrad < 0) return null;
+                    const phaseAmplitudeRad = (4 * Math.PI * distanceM / 299792458) * modulationMhz * 1e6;
+                    if (!Number.isFinite(phaseAmplitudeRad) || phaseAmplitudeRad <= 0) return null;
+                    const singlePhase = ((sigmaMrad / 1000) / phaseAmplitudeRad) ** 2;
+                    return {
+                        phaseAmplitudeRad,
+                        singlePhase,
+                        quadrature: 2 * singlePhase,
+                    };
                 }
             },
             watch: {
@@ -2494,6 +2522,12 @@
                     const numeric = Number(value);
                     if (!Number.isFinite(numeric)) return 'n/a';
                     return (Math.abs(numeric) >= 10000 || (Math.abs(numeric) > 0 && Math.abs(numeric) < 0.001)) ? numeric.toExponential(5) : numeric.toPrecision(7);
+                },
+                formatTransferS2Floor(value) {
+                    const numeric = Number(value);
+                    if (!Number.isFinite(numeric)) return 'n/a';
+                    return numeric === 0 || (Math.abs(numeric) >= 0.001 && Math.abs(numeric) < 10000)
+                        ? numeric.toPrecision(6) : numeric.toExponential(5);
                 },
                 async fetchPhaseCalibrations() {
                     try {

@@ -418,6 +418,22 @@ class TransferFunctionPlanTests(unittest.TestCase):
         self.assertEqual([plan[index]["metadata"]["transfer_zero_phase_block_id"] for index in baseline_indices], [0, 0, 0, 1, 1, 1])
         self.assertEqual(len(plan), 18)
 
+    def test_phase_blocks_can_calibrate_before_every_frequency_change(self):
+        config = {
+            "scan_dimensions": 1, "parameter_source": "classic", "mode": "transfer_function",
+            "randomize": False, "transfer_frequency_start_hz": 100, "transfer_frequency_stop_hz": 200,
+            "transfer_frequency_step_hz": 100, "transfer_repeats": 2,
+            "transfer_phase_degrees": [0, 90], "transfer_phase_scan_mode": "phase_blocks",
+            "transfer_control_output": True, "transfer_calibrate_zero_phase": True,
+            "transfer_zero_phase_repeats": 2, "transfer_periodic_zero_phase": True,
+            "transfer_zero_phase_frequency_interval": 1,
+        }
+        plan = self.manager._build_transfer_function_execution(config)
+        baselines = [item for item in plan if item["metadata"].get("transfer_zero_phase_baseline")]
+        science = [item for item in plan if not item["metadata"].get("transfer_zero_phase_baseline")]
+        self.assertEqual([item["metadata"]["transfer_frequency_hz"] for item in baselines[::2]], [100, 200, 100, 200])
+        self.assertEqual([item["metadata"]["transfer_zero_phase_block_id"] for item in science[::2]], [0, 1, 2, 3])
+
     def test_invalid_phase_scan_mode_is_rejected(self):
         config = {
             "scan_dimensions": 1,
@@ -720,6 +736,9 @@ class TransferFunctionStatisticsTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("v-model.number=\"s.transfer_atom_mirror_distance_m\"", settings_html)
         self.assertIn("v-model.number=\"s.transfer_phase_noise_sigma_mrad\"", settings_html)
+        self.assertIn("transferS2NoiseFloor", settings_html)
+        self.assertIn("0° + 90° quadrature", settings_html)
+        self.assertIn("formatTransferS2Floor", settings_html)
 
     def test_summary_calculates_s2_from_780_nm_frequency_modulation(self):
         rows = [

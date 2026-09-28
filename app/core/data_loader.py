@@ -117,7 +117,8 @@ class DataLoader:
         return {"requested_method": interpolation_method, "effective_method": effective_method, "points": curve}
 
     def _apply_transfer_zero_phase_reference(
-        self, points: List[Dict[str, Any]], settings: Dict[str, Any]
+        self, points: List[Dict[str, Any]], settings: Dict[str, Any],
+        phase_calibration: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         """Rebase transfer phases from persisted raw phases without touching disk."""
         mode = str(settings.get("transfer_zero_phase_reference_mode") or "recorded").strip().lower()
@@ -134,6 +135,19 @@ class DataLoader:
             if raw is not None and block_id >= 0:
                 references.setdefault(block_id, []).append(raw)
         means = {block_id: float(np.mean(values)) for block_id, values in references.items() if values}
+        probability_samples: Dict[int, List[float]] = {}
+        for point in points:
+            if not self._is_transfer_zero_phase_baseline(point):
+                continue
+            value = self._parse_float(point.get("intf_p1"))
+            block_id = self._parse_int(point.get("transfer_zero_phase_block_id"), -1)
+            if value is not None and block_id >= 0:
+                probability_samples.setdefault(block_id, []).append(value)
+        probability_means = {
+            block_id: float(np.mean(values)) for block_id, values in probability_samples.items() if values
+        }
+        use_probability_baseline = int(settings.get("transfer_baseline_calibration_version") or 0) >= 2
+        calibration = phase_calibration or settings.get("_interferometer_phase_calibration") or settings.get("_interferometer_phase_calibration_snapshot")
         rebased: List[Dict[str, Any]] = []
         for point in points:
             item = dict(point)
@@ -142,6 +156,18 @@ class DataLoader:
                 raw = self._parse_float(item.get("interferometer_phase"))
             if raw is not None:
                 item["interferometer_phase_raw"] = raw
+            if not self._is_transfer_zero_phase_baseline(item):
+                block_id = self._parse_int(item.get("transfer_zero_phase_block_id"), -1)
+                probability_reference = (
+                    probability_means.get(self._parse_int(selected_block, -1))
+                    if mode == "block" else probability_means.get(block_id)
+                )
+                if use_probability_baseline and mode != "manual" and probability_reference is not None:
+                    item.update(interferometer_phase.calculate_phase_from_local_center(
+                        item, calibration, probability_reference
+                    ))
+                    rebased.append(item)
+                    continue
             if raw is not None and not self._is_transfer_zero_phase_baseline(item):
                 block_id = self._parse_int(item.get("transfer_zero_phase_block_id"), -1)
                 reference = (
@@ -155,7 +181,8 @@ class DataLoader:
         return rebased
 
     def _rebase_converted_transfer_phases(
-        self, points: List[Dict[str, Any]], settings: Dict[str, Any]
+        self, points: List[Dict[str, Any]], settings: Dict[str, Any],
+        phase_calibration: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         """Treat a freshly converted phase as raw before applying transfer zeroing.
 
@@ -168,7 +195,32 @@ class DataLoader:
             item = dict(point)
             item["interferometer_phase_raw"] = item.get("interferometer_phase")
             converted.append(item)
-        return self._apply_transfer_zero_phase_reference(converted, settings)
+        return self._apply_transfer_zero_phase_reference(converted, settings, phase_calibration)
+
+    def _build_transfer_baseline_calibrations(self, points: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        blocks: Dict[int, List[Dict[str, float]]] = {}
+        for point in points:
+            if not bool(point.get("transfer_zero_phase_baseline", False)):
+                continue
+            block_id = self._parse_int(point.get("transfer_zero_phase_block_id"), -1)
+            value = self._parse_float(point.get("intf_p1"))
+            timestamp = self._parse_float(point.get("timestamp"))
+            if block_id >= 0 and value is not None and timestamp is not None:
+                blocks.setdefault(block_id, []).append({"value": value, "timestamp": timestamp})
+        events = []
+        for block_id, samples in sorted(blocks.items()):
+            values = np.asarray([sample["value"] for sample in samples], dtype=float)
+            timestamps = [sample["timestamp"] for sample in samples]
+            std = float(np.std(values, ddof=1)) if values.size > 1 else 0.0
+            events.append({
+                "block_id": block_id,
+                "representative_time": float(np.mean(timestamps)),
+                "intf_p1": float(np.mean(values)),
+                "intf_p1_std": std,
+                "intf_p1_sem": std / math.sqrt(values.size) if values.size else None,
+                "valid_shots": int(values.size),
+            })
+        return events
 
     @staticmethod
     def _apply_phase_calibration_to_points(
@@ -1980,11 +2032,18 @@ class DataLoader:
                 full_points, phase_calibration, str(config_data.get("mode") or ""),
             )
             if str(config_data.get("mode") or "").strip().lower() in {"transfer_function", "transfer_burst_time_scan"}:
-                full_points = self._rebase_converted_transfer_phases(full_points, config_data)
+                full_points = self._rebase_converted_transfer_phases(full_points, config_data, phase_calibration)
         if config_data.get("intf_alpha_calibration_enabled") and intf_alpha_calibrations:
             full_points = self._apply_intf_alpha_history(
                 full_points, intf_alpha_calibrations, config_data, phase_calibration,
                 intf_alpha_interpolation_method,
+            )
+        if (
+            str(config_data.get("mode") or "").strip().lower() in {"transfer_function", "transfer_burst_time_scan"}
+            and int(config_data.get("transfer_baseline_calibration_version") or 0) >= 2
+        ):
+            full_points = self._apply_transfer_zero_phase_reference(
+                full_points, config_data, phase_calibration
             )
         science_points = self._science_points(full_points)
         marker_optimization = self._build_marker_optimization_archive(run_dir, science_points)
@@ -2119,6 +2178,10 @@ class DataLoader:
                 intf_alpha_calibrations, intf_alpha_interpolation_method
             ),
             "intf_alpha_analysis_copies": self.load_intf_alpha_analysis_copies(run_dir),
+            "transfer_baseline_calibrations": (
+                self._build_transfer_baseline_calibrations(full_points)
+                if int(config_data.get("transfer_baseline_calibration_version") or 0) >= 2 else []
+            ),
             "preview_map": (
                 initial_step.get("preview_map", {})
                 if is_marker_optimization

@@ -1377,15 +1377,15 @@ class ExperimentManager:
             )
         control_output = bool(scan_config.get("transfer_control_output", False))
         calibrate_zero_phase = bool(scan_config.get("transfer_calibrate_zero_phase", False))
-        zero_phase_repeats = int(scan_config.get("transfer_zero_phase_repeats", 50))
+        zero_phase_repeats = int(scan_config.get("transfer_zero_phase_repeats", 40))
         if calibrate_zero_phase and not control_output:
             raise ValueError("Transfer Function zero-phase calibration requires TTI OUTPUT control")
         if zero_phase_repeats < 2:
             raise ValueError("Transfer Function zero-phase calibration requires at least 2 repeats")
         periodic_zero_phase = bool(scan_config.get("transfer_periodic_zero_phase", False))
         zero_phase_frequency_interval = int(scan_config.get("transfer_zero_phase_frequency_interval", 10))
-        if periodic_zero_phase and (not calibrate_zero_phase or phase_scan_mode != "frequency_interleaved"):
-            raise ValueError("Periodic zero-phase calibration requires initial calibration and frequency-interleaved phases")
+        if periodic_zero_phase and not calibrate_zero_phase:
+            raise ValueError("Periodic FM-off baseline calibration requires initial calibration")
         if zero_phase_frequency_interval < 1:
             raise ValueError("Periodic zero-phase calibration interval must be at least one frequency")
 
@@ -1469,9 +1469,6 @@ class ExperimentManager:
                         "transfer_zero_phase_repeats": zero_phase_repeats,
                     },
                 })
-        if calibrate_zero_phase:
-            append_zero_phase_baseline(0, frequencies[0])
-
         def append_frequency_phase_block(
             phase_index: int,
             phase_deg: float,
@@ -1501,10 +1498,7 @@ class ExperimentManager:
                         "transfer_phase_scan_mode": phase_scan_mode,
                         "transfer_frequency_order": frequency_order,
                         "transfer_control_output": control_output,
-                        "transfer_zero_phase_block_id": (
-                            (frequency_index - 1) // zero_phase_frequency_interval
-                            if periodic_zero_phase else 0
-                        ),
+                        "transfer_zero_phase_block_id": 0,
                     },
                 })
 
@@ -1514,14 +1508,33 @@ class ExperimentManager:
                     append_frequency_phase_block(
                         phase_index, phase_deg, frequency_index, frequency
                     )
-                if periodic_zero_phase and frequency_index % zero_phase_frequency_interval == 0 and frequency_index < len(frequencies):
-                    append_zero_phase_baseline(frequency_index // zero_phase_frequency_interval, frequencies[frequency_index])
         else:
             for phase_index, phase_deg in enumerate(phase_degrees, start=1):
                 for frequency_index, frequency in enumerate(frequencies, start=1):
                     append_frequency_phase_block(
                         phase_index, phase_deg, frequency_index, frequency
                     )
+
+        if calibrate_zero_phase:
+            science_parameters = parameters
+            parameters = []
+            previous_frequency = None
+            frequency_block_index = -1
+            active_baseline_block = -1
+            for item in science_parameters:
+                metadata = item.get("metadata") or {}
+                frequency = float(metadata["transfer_frequency_hz"])
+                if previous_frequency is None or frequency != previous_frequency:
+                    frequency_block_index += 1
+                    if frequency_block_index == 0 or (
+                        periodic_zero_phase
+                        and frequency_block_index % zero_phase_frequency_interval == 0
+                    ):
+                        active_baseline_block += 1
+                        append_zero_phase_baseline(active_baseline_block, frequency)
+                    previous_frequency = frequency
+                metadata["transfer_zero_phase_block_id"] = active_baseline_block
+                parameters.append(item)
 
         scan_config["scan_dimensions"] = 1
         scan_config["dim2_enabled"] = False
@@ -1543,6 +1556,7 @@ class ExperimentManager:
         scan_config["transfer_zero_phase_repeats"] = zero_phase_repeats
         scan_config["transfer_periodic_zero_phase"] = periodic_zero_phase
         scan_config["transfer_zero_phase_frequency_interval"] = zero_phase_frequency_interval
+        scan_config["transfer_baseline_calibration_version"] = 1 if burst_time_scan else 2
         scan_config["transfer_frequency_values_hz"] = frequencies
         # Keep this schema-required field numeric even when ordinary Transfer
         # Function mode does not use it. SYNC forwards the normalized config to
@@ -1572,7 +1586,6 @@ class ExperimentManager:
                     and current_block != next_block
                 ):
                     with_boundaries.append({"sequence_parameters": [], "metadata": {"intf_alpha_calibration_boundary": "periodic"}})
-            with_boundaries.append({"sequence_parameters": [], "metadata": {"intf_alpha_calibration_boundary": "end"}})
             parameters = with_boundaries
         return parameters
 
@@ -3169,14 +3182,28 @@ class ExperimentManager:
                 phase_calibration = phase_noise.calibration_at_mid_fringe(
                     phase_calibration, metadata["phase_noise_t2_us2"]
                 )
-            phase_result = interferometer_phase.calculate_phase(phase_input, phase_calibration)
-            raw_interferometer_phase = phase_result.get("interferometer_phase")
+            transfer_local_center = execution_config.get("_transfer_baseline_intf_p1")
+            raw_phase_result = interferometer_phase.calculate_phase(phase_input, phase_calibration)
+            if (
+                str(execution_config.get("mode") or "").strip().lower() in {"transfer_function", "transfer_burst_time_scan"}
+                and not metadata.get("transfer_zero_phase_baseline", False)
+                and transfer_local_center is not None
+            ):
+                phase_result = interferometer_phase.calculate_phase_from_local_center(
+                    phase_input, phase_calibration, transfer_local_center
+                )
+            else:
+                phase_result = raw_phase_result
+            raw_interferometer_phase = raw_phase_result.get("interferometer_phase")
             if (
                 str(execution_config.get("mode") or "").strip().lower() in {"transfer_function", "transfer_burst_time_scan"}
                 and not metadata.get("transfer_zero_phase_baseline", False)
                 and phase_result.get("interferometer_phase_valid")
             ):
-                reference_phase = execution_config.get("_transfer_zero_phase_rad")
+                reference_phase = (
+                    None if transfer_local_center is not None
+                    else execution_config.get("_transfer_zero_phase_rad")
+                )
                 if reference_phase is not None and math.isfinite(float(reference_phase)):
                     phase_result = dict(phase_result)
                     phase_result["interferometer_phase"] = float(phase_result["interferometer_phase"]) - float(reference_phase)
@@ -3843,6 +3870,32 @@ class ExperimentManager:
                 result.interferometer_phase = float(result.interferometer_phase) - float(scan_config["_transfer_zero_phase_rad"])
         return results
 
+    def _apply_transfer_probability_baselines(
+        self, results: List[ScanResult], baseline_results: List[ScanResult], scan_config: Dict[str, Any]
+    ) -> List[ScanResult]:
+        if int(scan_config.get("transfer_baseline_calibration_version") or 0) < 2:
+            return results
+        samples: Dict[int, List[float]] = {}
+        for result in baseline_results:
+            if result.transfer_zero_phase_block_id is None or result.intf_p1 is None:
+                continue
+            value = float(result.intf_p1)
+            if math.isfinite(value):
+                samples.setdefault(int(result.transfer_zero_phase_block_id), []).append(value)
+        centers = {block_id: float(np.mean(values)) for block_id, values in samples.items() if values}
+        calibration = self.data_manager.phase_calibration_snapshot
+        for result in results:
+            center = centers.get(int(result.transfer_zero_phase_block_id or 0))
+            if center is None:
+                continue
+            phase = interferometer_phase.calculate_phase_from_local_center(
+                asdict(result), calibration, center
+            )
+            for key, value in phase.items():
+                if hasattr(result, key):
+                    setattr(result, key, value)
+        return results
+
     def _build_ac_stark_summary(self, results: List[ScanResult]) -> List[Dict[str, Any]]:
         metrics = (
             'atom_number_up',
@@ -3996,7 +4049,8 @@ class ExperimentManager:
         ac_stark_results: List[ScanResult] = []
         lock_in_results: List[ScanResult] = []
         transfer_function_results: List[ScanResult] = []
-        transfer_zero_phase_samples: Dict[int, List[float]] = {}
+        transfer_baseline_results: List[ScanResult] = []
+        transfer_zero_phase_samples: Dict[int, List[Dict[str, float]]] = {}
         phase_noise_results: List[ScanResult] = []
         bragg_calibration_coarse_results: List[ScanResult] = []
         bragg_calibration_fine_results: List[ScanResult] = []
@@ -4111,23 +4165,39 @@ class ExperimentManager:
                         if not scan_config.get("_sync_slave"):
                             self._bragg_calibration_fine_plan_queue.put([])
                 if result is not None and metadata.get("transfer_zero_phase_baseline"):
+                    transfer_baseline_results.append(result)
                     block_id = int(metadata.get("transfer_zero_phase_block_id", 0))
                     samples = transfer_zero_phase_samples.setdefault(block_id, [])
-                    value = getattr(result, "interferometer_phase", None)
+                    probability_baseline = int((scan_config or {}).get("transfer_baseline_calibration_version") or 0) >= 2
+                    value = getattr(result, "intf_p1" if probability_baseline else "interferometer_phase", None)
                     if value is not None and math.isfinite(float(value)):
-                        samples.append(float(value))
-                    expected = max(2, int((scan_config or {}).get("transfer_zero_phase_repeats", 50)))
+                        samples.append({"value": float(value), "timestamp": float(result.timestamp)})
+                    expected = max(2, int((scan_config or {}).get("transfer_zero_phase_repeats", 40)))
                     if int(metadata.get("transfer_zero_phase_repeat", 0)) == expected:
                         if len(samples) < 2:
-                            self._scan_finalize_error = "Zero-phase calibration produced fewer than two valid phase shots"
+                            self._scan_finalize_error = "FM-off baseline calibration produced fewer than two valid INTF P1 shots"
                         else:
-                            reference = float(np.mean(samples))
-                            scan_config["_transfer_zero_phase_rad"] = reference
-                            scan_config["_transfer_zero_phase_valid_count"] = len(samples)
-                            scan_config["_transfer_zero_phase_std_rad"] = (
-                                float(np.std(samples, ddof=1))
-                                if len(samples) >= 2 else None
-                            )
+                            values = [sample["value"] for sample in samples]
+                            timestamps = [sample["timestamp"] for sample in samples]
+                            center = float(np.mean(values))
+                            std = float(np.std(values, ddof=1))
+                            if probability_baseline:
+                                event = {
+                                    "block_id": block_id,
+                                    "representative_time": float(np.mean(timestamps)),
+                                    "intf_p1": center,
+                                    "intf_p1_std": std,
+                                    "intf_p1_sem": std / math.sqrt(len(values)),
+                                    "valid_shots": len(values),
+                                    "requested_shots": expected,
+                                }
+                                scan_config["_transfer_baseline_intf_p1"] = center
+                                scan_config["_transfer_baseline_block_id"] = block_id
+                                self.publish_data({"stream_type": "transfer_baseline_calibration", **event})
+                            else:
+                                scan_config["_transfer_zero_phase_rad"] = center
+                                scan_config["_transfer_zero_phase_valid_count"] = len(values)
+                                scan_config["_transfer_zero_phase_std_rad"] = std
                 if result is not None and result.ac_stark_ratio is not None:
                     ac_stark_results.append(result)
                 if result is not None and result.lock_in_block_index is not None:
@@ -4176,8 +4246,10 @@ class ExperimentManager:
                         result for result in transfer_function_results
                         if (float(result.transfer_frequency_hz), int(result.transfer_frequency_attempt)) not in invalid_attempts
                     ]
-                    transfer_function_results = self._apply_final_intf_alpha_calibration(
-                        transfer_function_results, scan_config
+                    combined_transfer_results = transfer_baseline_results + transfer_function_results
+                    self._apply_final_intf_alpha_calibration(combined_transfer_results, scan_config)
+                    transfer_function_results = self._apply_transfer_probability_baselines(
+                        transfer_function_results, transfer_baseline_results, scan_config
                     )
                     self.data_manager.save_transfer_function_summary(
                         build_transfer_function_summary(

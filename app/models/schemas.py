@@ -112,7 +112,7 @@ class ScanConfig(BaseModel):
     transfer_frequency_order: str = Field("sequential")
     transfer_control_output: bool = Field(False)
     transfer_calibrate_zero_phase: bool = Field(False)
-    transfer_zero_phase_repeats: int = Field(50, ge=2, le=100000)
+    transfer_zero_phase_repeats: int = Field(40, ge=2, le=100000)
     transfer_periodic_zero_phase: bool = Field(False)
     transfer_zero_phase_frequency_interval: int = Field(10, ge=1, le=10000)
     transfer_power_monitor_enabled: bool = Field(False)

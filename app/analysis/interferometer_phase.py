@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from copy import deepcopy
 from typing import Any, Dict, Optional
 
 
@@ -140,3 +141,27 @@ def calculate_phase(point: Dict[str, Any], calibration: Optional[Dict[str, Any]]
 
 def apply_phase(point: Dict[str, Any], calibration: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     return {**point, **calculate_phase(point, calibration)}
+
+
+def calculate_phase_from_local_center(
+    point: Dict[str, Any], calibration: Optional[Dict[str, Any]], center_probability: Any,
+) -> Dict[str, Any]:
+    """Convert one point relative to an FM-off probability measured at the same T.
+
+    The active fringe still supplies its amplitude and monotonic branch.  Replacing
+    C with the run-local baseline makes the baseline itself exactly zero while
+    retaining the calibrated nonlinear acos conversion.
+    """
+    center = _finite(center_probability)
+    if not isinstance(calibration, dict) or center is None:
+        return calculate_phase(point, calibration)
+    local = deepcopy(calibration)
+    local.setdefault("parameter_values", {})["C"] = center
+    converted = calculate_phase(point, local)
+    field = source_field(local)
+    zero = calculate_phase({field: center}, local)
+    if converted.get("interferometer_phase_valid") and zero.get("interferometer_phase_valid"):
+        converted["interferometer_phase"] = (
+            float(converted["interferometer_phase"]) - float(zero["interferometer_phase"])
+        )
+    return converted

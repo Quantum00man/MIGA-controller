@@ -1283,7 +1283,7 @@
                             <div class="col-12" v-if="analysis.transfer_zero_phase_reference_mode === 'block'">
                                 <select class="form-select form-select-sm" v-model.number="analysis.transfer_zero_phase_reference_block_id">
                                     <option :value="null" disabled>Select calibration block</option>
-                                    <option v-for="block in transferZeroPhaseBlocks()" :key="block.id" :value="block.id">Block {{ block.id }} · {{ block.count }} shots · mean {{ formatMetricValue(block.mean) }} rad</option>
+                                    <option v-for="block in transferZeroPhaseBlocks()" :key="block.id" :value="block.id">Block {{ block.id }} · {{ block.count }} shots · mean {{ formatMetricValue(block.mean) }} {{ block.unit }}</option>
                                 </select>
                             </div>
                             <div class="col-12" v-if="analysis.transfer_zero_phase_reference_mode === 'manual'">
@@ -2605,6 +2605,10 @@
                                 </div>
                             </div>
                         </div>
+                        <div v-if="transferBaselineCalibrations.length" class="border-top">
+                            <div class="px-3 pt-3 fw-bold">FM-off INTF P1 baseline</div>
+                            <div id="archiveTransferBaselinePlot" style="height:320px"></div>
+                        </div>
                     </div>
                 </div>
 
@@ -2814,6 +2818,7 @@
                     selectedAllanWindow: null,
                     loadedPoints: [], currentCalculatedPoints: [], originalSettings: {}, loadedConfig: {}, currentScanDimensions: 1,
                     intfAlphaCalibrations: [],
+                    transferBaselineCalibrations: [],
                     intfAlphaOriginalCalibrations: [], intfAlphaDraft: {}, intfAlphaAnalysisCopies: [], intfAlphaSelectedCopyId: '', intfAlphaAcceptedMin: 0, intfAlphaAcceptedMax: 1, intfAlphaInterpolationMethod: 'weighted_smoothing_spline', intfAlphaInterpolationCurve: null, intfAlphaAnalysisName: '', intfAlphaAnalysisBusy: false, intfAlphaAnalysisMessage: '', intfAlphaAnalysisError: false,
                     archivePhaseCalibration: null, archivePhaseCalibrationProvenance: 'unavailable',
                     archivePhaseReferenceContexts: {}, archivePhaseReferenceNodeId: '', archivePhaseReferenceDraft: {},
@@ -3688,16 +3693,18 @@
                 },
                 transferZeroPhaseBlocks() {
                     const blocks = new Map();
+                    const probabilityBaseline = Number(this.loadedConfig?.transfer_baseline_calibration_version || 0) >= 2;
                     (Array.isArray(this.loadedPoints) ? this.loadedPoints : []).forEach((point) => {
                         if (!(point.transfer_zero_phase_baseline === true || point.transfer_zero_phase_baseline === 1 || point.transfer_zero_phase_baseline === '1')) return;
                         const id = Number(point.transfer_zero_phase_block_id);
-                        const phase = Number(point.interferometer_phase_raw ?? point.interferometer_phase);
-                        if (!Number.isInteger(id) || id < 0 || !Number.isFinite(phase)) return;
+                        const value = Number(probabilityBaseline ? point.intf_p1 : (point.interferometer_phase_raw ?? point.interferometer_phase));
+                        if (!Number.isInteger(id) || id < 0 || !Number.isFinite(value)) return;
                         const values = blocks.get(id) || [];
-                        values.push(phase); blocks.set(id, values);
+                        values.push(value); blocks.set(id, values);
                     });
                     return [...blocks.entries()].sort((a, b) => a[0] - b[0]).map(([id, values]) => ({
-                        id, count: values.length, mean: values.reduce((sum, value) => sum + value, 0) / values.length
+                        id, count: values.length, mean: values.reduce((sum, value) => sum + value, 0) / values.length,
+                        unit: probabilityBaseline ? 'INTF P1' : 'rad'
                     }));
                 },
                 resolveScanDimensions(scanDimensions = null, configData = this.loadedConfig) {
@@ -5883,6 +5890,7 @@
                         const snap = res.data.config?.['_system_settings_snapshot'] || {};
                         this.loadedConfig = res.data.config || {};
                         this.intfAlphaCalibrations = Array.isArray(res.data.intf_alpha_calibrations) ? res.data.intf_alpha_calibrations : [];
+                        this.transferBaselineCalibrations = Array.isArray(res.data.transfer_baseline_calibrations) ? res.data.transfer_baseline_calibrations : [];
                         this.intfAlphaOriginalCalibrations = this.intfAlphaCalibrations.map(item => ({ ...item }));
                         this.intfAlphaDraft = Object.fromEntries(this.intfAlphaCalibrations.map(item => [item.calibration_id, item.accepted === true]));
                         this.intfAlphaAnalysisCopies = Array.isArray(res.data.intf_alpha_analysis_copies) ? res.data.intf_alpha_analysis_copies : [];
@@ -10428,6 +10436,7 @@
                 renderMainPlot() {
                     this.$nextTick(() => this.renderArchivePowerMeterPlot());
                     this.$nextTick(() => this.renderArchiveIntfAlphaPlot());
+                    this.$nextTick(() => this.renderArchiveTransferBaselinePlot());
                     if (this.isPhaseNoiseArchive()) {
                         this.renderPhaseNoiseArchivePlot();
                         return;
@@ -10498,6 +10507,23 @@
                     Plotly.react(element, [curve, trace(accepted, 'Accepted calibration', '#00897b', 'circle'), trace(rejected, 'Rejected', '#c62828', 'x')], {
                         margin: { t: 25, b: 52, l: 76, r: 20 }, xaxis: { title: 'Time' }, yaxis: { title: 'I_alpha', range: [0, 1] },
                         legend: { orientation: 'h', x: 1, xanchor: 'right', y: 1.12 }, paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)'
+                    }, { responsive: true, displaylogo: false });
+                },
+                renderArchiveTransferBaselinePlot() {
+                    const element = document.getElementById('archiveTransferBaselinePlot');
+                    if (!element || typeof Plotly === 'undefined') return;
+                    const rows = this.transferBaselineCalibrations || [];
+                    Plotly.react(element, [{
+                        x: rows.map(row => new Date(Number(row.representative_time || 0) * 1000)),
+                        y: rows.map(row => Number(row.intf_p1)),
+                        error_y: { type: 'data', array: rows.map(row => Number(row.intf_p1_sem || 0)), visible: true },
+                        customdata: rows.map(row => [row.block_id, row.valid_shots]),
+                        type: 'scatter', mode: 'lines+markers', name: 'INTF P1 baseline',
+                        line: { color: '#6f42c1', width: 2 }, marker: { size: 8 },
+                        hovertemplate: 'Time=%{x}<br>INTF P1=%{y:.7f}<br>block=%{customdata[0]}<br>valid=%{customdata[1]}<extra></extra>'
+                    }], {
+                        margin: { t: 25, b: 52, l: 76, r: 20 }, xaxis: { title: 'Time' }, yaxis: { title: 'FM-off INTF P1' },
+                        paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)'
                     }, { responsive: true, displaylogo: false });
                 },
                 acceptedIntfAlphaCalibrationIds() {

@@ -1616,7 +1616,7 @@
                                 <div class="form-check border rounded px-3 py-2 bg-light">
                                     <input id="transferCalibrateZeroPhase" class="form-check-input ms-0 me-2" type="checkbox"
                                         v-model="config.transfer_calibrate_zero_phase">
-                                    <label class="form-check-label small fw-bold" for="transferCalibrateZeroPhase">Calibrate zero phase with OUTPUT OFF before scan</label>
+                                    <label class="form-check-label small fw-bold" for="transferCalibrateZeroPhase">Calibrate INTF P1 baseline with FM OFF</label>
                                     <div v-if="config.transfer_calibrate_zero_phase" class="input-group input-group-sm mt-2" style="max-width: 260px;">
                                         <span class="input-group-text">Baseline shots</span>
                                         <input type="number" min="2" step="1" class="form-control" v-model.number="config.transfer_zero_phase_repeats">
@@ -1628,7 +1628,7 @@
                                         <input v-if="config.transfer_periodic_zero_phase" type="number" min="1" step="1"
                                             class="form-control form-control-sm d-inline-block ms-1" style="width: 76px;"
                                             v-model.number="config.transfer_zero_phase_frequency_interval">
-                                        <span v-if="config.transfer_periodic_zero_phase" class="small ms-1">complete frequency points (requires interleaved phases)</span>
+                                        <span v-if="config.transfer_periodic_zero_phase" class="small ms-1">frequency changes (1 = before every frequency)</span>
                                     </div>
                                 </div>
                             </div>
@@ -1866,6 +1866,10 @@
                 <div class="card-header bg-white fw-bold">Interferometer I_alpha calibration</div>
                 <div id="intfAlphaPlot" style="height:320px"></div>
             </div>
+            <div v-if="config.mode === 'transfer_function' && config.transfer_calibrate_zero_phase" class="card mb-4 border-0 shadow-sm">
+                <div class="card-header bg-white fw-bold">FM-off INTF P1 baseline</div>
+                <div id="transferBaselinePlot" style="height:320px"></div>
+            </div>
 
             <div class="row g-4">
                 <div class="col-lg-7">
@@ -1953,7 +1957,7 @@
                         transfer_frequency_order: 'sequential',
                         transfer_control_output: false,
                         transfer_calibrate_zero_phase: false,
-                        transfer_zero_phase_repeats: 50,
+                        transfer_zero_phase_repeats: 40,
                         transfer_periodic_zero_phase: false,
                         transfer_zero_phase_frequency_interval: 10,
                         transfer_power_monitor_enabled: false,
@@ -1983,7 +1987,7 @@
                         bragg_calibration_apply_active: false
                     },
                     isRunning: false, isPaused: false, isSimulation: false, statusMessage: "IDLE", currentStep: 0, plotRevision: 0, logs: [], ws: null,
-                    powerMeterHistory: [], powerThresholdPrompted: false, intfAlphaHistory: [],
+                    powerMeterHistory: [], powerThresholdPrompted: false, intfAlphaHistory: [], transferBaselineHistory: [],
                     recoveryCalibrationRuns: [], selectedRecoveryCalibration: '', recoveryCalibrationLoading: false,
                     lastLoggedScheduleErrorKey: '',
                     progressPercent: 0,
@@ -3583,7 +3587,11 @@ getLiveEstimatedShotCount() {
             const phaseCount = Array.isArray(this.config.transfer_phase_degrees) && this.config.transfer_phase_degrees.length
                 ? this.config.transfer_phase_degrees.length : 2;
             const scanShots = frequencyCount * Math.max(2, Math.round(Number(this.config.transfer_repeats) || 2)) * phaseCount;
-            return scanShots + (this.config.transfer_calibrate_zero_phase ? Math.max(2, Math.round(Number(this.config.transfer_zero_phase_repeats) || 50)) : 0);
+            const frequencyBlocks = this.config.transfer_phase_scan_mode === 'frequency_interleaved' ? frequencyCount : frequencyCount * phaseCount;
+            const baselineBlocks = this.config.transfer_calibrate_zero_phase
+                ? 1 + (this.config.transfer_periodic_zero_phase ? Math.floor(Math.max(0, frequencyBlocks - 1) / Math.max(1, Math.round(Number(this.config.transfer_zero_phase_frequency_interval) || 1))) : 0)
+                : 0;
+            return scanShots + baselineBlocks * Math.max(2, Math.round(Number(this.config.transfer_zero_phase_repeats) || 40));
         }
         if (this.config.mode === 'ramsey_interferometer') {
             const deltaCount = this.estimateAxisPointCount({
@@ -3812,7 +3820,11 @@ estimateScanStepCount(configObj = this.config) {
             : [];
         const phaseCount = new Set(phases).size || 2;
         const scanShots = frequencyCount * Math.max(2, Math.round(Number(configObj.transfer_repeats) || 2)) * phaseCount;
-        return scanShots + (configObj.transfer_calibrate_zero_phase ? Math.max(2, Math.round(Number(configObj.transfer_zero_phase_repeats) || 50)) : 0);
+        const frequencyBlocks = configObj.transfer_phase_scan_mode === 'frequency_interleaved' ? frequencyCount : frequencyCount * phaseCount;
+        const baselineBlocks = configObj.transfer_calibrate_zero_phase
+            ? 1 + (configObj.transfer_periodic_zero_phase ? Math.floor(Math.max(0, frequencyBlocks - 1) / Math.max(1, Math.round(Number(configObj.transfer_zero_phase_frequency_interval) || 1))) : 0)
+            : 0;
+        return scanShots + baselineBlocks * Math.max(2, Math.round(Number(configObj.transfer_zero_phase_repeats) || 40));
     }
     if (String(configObj.mode || '') === 'lock_in') {
         return Math.max(1, Math.round(Number(configObj.averages) || 1)) * 4;
@@ -4651,8 +4663,8 @@ finishScheduledRun(finalStatus = 'IDLE') {
                         if (!Number.isInteger(payload.transfer_zero_phase_frequency_interval) || payload.transfer_zero_phase_frequency_interval < 1) {
                             throw new Error('Periodic zero-phase calibration interval must be at least one frequency.');
                         }
-                        if (payload.transfer_periodic_zero_phase && (!payload.transfer_calibrate_zero_phase || payload.transfer_phase_scan_mode !== 'frequency_interleaved')) {
-                            throw new Error('Periodic zero-phase calibration requires initial calibration and frequency-interleaved phases.');
+                        if (payload.transfer_periodic_zero_phase && !payload.transfer_calibrate_zero_phase) {
+                            throw new Error('Periodic FM-off baseline calibration requires initial calibration.');
                         }
                         payload.transfer_settling_time_s = 5;
                         payload.scan_dimensions = 1;
@@ -5933,6 +5945,23 @@ finishScheduledRun(finalStatus = 'IDLE') {
                         legend: { orientation: 'h', x: 1, xanchor: 'right', y: 1.12 }, paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)'
                     }, { responsive: true, displaylogo: false });
                 },
+                renderTransferBaselinePlot() {
+                    const element = document.getElementById('transferBaselinePlot');
+                    if (!element || typeof Plotly === 'undefined') return;
+                    const rows = this.transferBaselineHistory || [];
+                    Plotly.react(element, [{
+                        x: rows.map(row => new Date(Number(row.time) * 1000)),
+                        y: rows.map(row => row.value),
+                        error_y: { type: 'data', array: rows.map(row => row.error || 0), visible: true },
+                        customdata: rows.map(row => [row.block, row.valid, row.requested]),
+                        type: 'scatter', mode: 'lines+markers', name: 'INTF P1 baseline',
+                        line: { color: '#6f42c1', width: 1.8 }, marker: { size: 8 },
+                        hovertemplate: 'Time=%{x}<br>INTF P1=%{y:.7f}<br>block=%{customdata[0]}<br>valid=%{customdata[1]}/%{customdata[2]}<extra></extra>'
+                    }], {
+                        margin: { t: 25, b: 52, l: 76, r: 20 }, xaxis: { title: 'Time' }, yaxis: { title: 'FM-off INTF P1' },
+                        paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)'
+                    }, { responsive: true, displaylogo: false });
+                },
                 connectWebSocket() {
                     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
                     const wsUrl = `${protocol}//${window.location.host}/ws`;
@@ -6474,6 +6503,16 @@ finishScheduledRun(finalStatus = 'IDLE') {
                             requested: Number(data.requested_shots || 0), reason: data.rejection_reason || ''
                         });
                         this.$nextTick(() => this.renderIntfAlphaPlot());
+                        return;
+                    }
+                    if (data?.stream_type === 'transfer_baseline_calibration') {
+                        this.transferBaselineHistory.push({
+                            time: Number(data.representative_time || Date.now() / 1000),
+                            value: Number(data.intf_p1), error: Number(data.intf_p1_sem || 0),
+                            block: Number(data.block_id || 0), valid: Number(data.valid_shots || 0),
+                            requested: Number(data.requested_shots || 0)
+                        });
+                        this.$nextTick(() => this.renderTransferBaselinePlot());
                         return;
                     }
                     if (data?.stream_type === 'power_recovery_completed') {
@@ -7046,6 +7085,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
             this.transferPhaseDegrees = [];
             this.powerMeterHistory = [];
             this.intfAlphaHistory = [];
+            this.transferBaselineHistory = [];
             this.powerThresholdPrompted = false;
             this.initPlots();
         }

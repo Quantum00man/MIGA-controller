@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from app.analysis.interferometer_phase import (
     calculate_phase,
+    calculate_phase_from_local_center,
     monotonic_slope,
     phase_deviation_limits,
     reference_t2_us2,
@@ -81,6 +82,39 @@ class InterferometerPhaseTests(unittest.TestCase):
         result = calculate_phase({"intf_p1": 71.0}, calibration())
         self.assertFalse(result["interferometer_phase_valid"])
         self.assertIsNone(result["interferometer_phase"])
+
+    def test_local_center_is_exact_zero_and_cancels_additive_drift(self):
+        cal = calibration(
+            monotonic_slope="negative",
+            parameter_values={"A": 20.0, "C": 50.0, "phi0": 0.0},
+            reference_t2_us2=(math.pi / 2) / 0.01,
+        )
+        self.assertAlmostEqual(
+            calculate_phase_from_local_center({"intf_p1": 50.1}, cal, 50.1)["interferometer_phase"],
+            0.0,
+        )
+        shifted = calculate_phase_from_local_center({"intf_p1": 52.1}, cal, 50.1)
+        self.assertTrue(shifted["interferometer_phase_valid"])
+        self.assertAlmostEqual(shifted["interferometer_phase"], -math.asin(0.1), places=10)
+
+    def test_archive_probability_baselines_are_applied_by_block(self):
+        loader = DataLoader()
+        cal = calibration(
+            monotonic_slope="negative",
+            parameter_values={"A": 20.0, "C": 50.0, "phi0": 0.0},
+            reference_t2_us2=(math.pi / 2) / 0.01,
+        )
+        points = [
+            {"transfer_zero_phase_baseline": True, "transfer_zero_phase_block_id": 0, "intf_p1": 50.1},
+            {"transfer_zero_phase_baseline": False, "transfer_zero_phase_block_id": 0, "intf_p1": 52.1},
+            {"transfer_zero_phase_baseline": True, "transfer_zero_phase_block_id": 1, "intf_p1": 50.3},
+            {"transfer_zero_phase_baseline": False, "transfer_zero_phase_block_id": 1, "intf_p1": 52.3},
+        ]
+        converted = loader._apply_transfer_zero_phase_reference(
+            points, {"transfer_baseline_calibration_version": 2}, cal
+        )
+        self.assertAlmostEqual(converted[1]["interferometer_phase"], -math.asin(0.1), places=10)
+        self.assertAlmostEqual(converted[3]["interferometer_phase"], -math.asin(0.1), places=10)
 
     def test_phase_is_in_stats_and_allan_as_single_channel(self):
         loader = DataLoader()
