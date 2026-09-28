@@ -2123,6 +2123,10 @@
                     }
                 },
                 'config.mode'(mode) {
+                    const alphaCalibrationModes = ['transfer_function', 'transfer_burst_time_scan', 'bragg_fringe_calibration', 'phase_noise'];
+                    if (!alphaCalibrationModes.includes(String(mode || '').trim().toLowerCase())) {
+                        this.config.intf_alpha_calibration_enabled = false;
+                    }
                     if (mode !== 'standard') this.syncIndependentP0Enabled = false;
                     if (this.runMode === 'sync' && ['lock_in', 'ac_stark', 'ramsey_interferometer'].includes(mode)) {
                         this.config.mode = 'standard';
@@ -4543,6 +4547,10 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     const scanDimensions = Math.max(1, Math.min(3, Number(payload.scan_dimensions || this.resolveScanDimensionsFromConfig(payload)) || 1));
                     payload.run_label = String(payload.run_label || '').trim();
                     payload.sequence_name = String(sequenceNameOverride || payload.sequence_name || this.currentSequenceName || 'sequence.mot').trim();
+                    const alphaCalibrationModes = ['transfer_function', 'transfer_burst_time_scan', 'bragg_fringe_calibration', 'phase_noise'];
+                    if (!alphaCalibrationModes.includes(String(payload.mode || '').trim().toLowerCase())) {
+                        payload.intf_alpha_calibration_enabled = false;
+                    }
                     if (this.isTransferFunctionMode(payload.mode)) {
                         const burst = this.isTransferBurstTimeScan(payload.mode);
                         (burst ? ['transfer_burst_time_frequency_hz'] : ['transfer_frequency_start_hz', 'transfer_frequency_stop_hz', 'transfer_frequency_step_hz']).forEach((field) => {

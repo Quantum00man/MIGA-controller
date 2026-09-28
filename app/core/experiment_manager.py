@@ -1975,9 +1975,16 @@ class ExperimentManager:
         self.refresh_runtime_settings_from_disk()
         ac_stark_context: Optional[Dict[str, Any]] = None
         try:
+            alpha_calibration_modes = {
+                "transfer_function", "transfer_burst_time_scan",
+                "bragg_fringe_calibration", "phase_noise",
+            }
+            if (
+                scan_config.get("intf_alpha_calibration_enabled")
+                and str(scan_config.get("mode") or "").strip().lower() not in alpha_calibration_modes
+            ):
+                scan_config["intf_alpha_calibration_enabled"] = False
             if scan_config.get("intf_alpha_calibration_enabled"):
-                if str(scan_config.get("mode") or "").strip().lower() not in {"transfer_function", "transfer_burst_time_scan", "bragg_fringe_calibration", "phase_noise"}:
-                    raise ValueError("I_alpha calibration is supported only for Transfer Function, Phase Noise Analyze and Bragg Fringes Calibration")
                 if not str(self.settings.get("intf_alpha_calibration_sequence_content_base64") or ""):
                     raise ValueError("I_alpha calibration requires a local calibration MOT in Settings")
             if parameters_override is not None:

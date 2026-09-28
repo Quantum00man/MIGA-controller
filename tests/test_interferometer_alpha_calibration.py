@@ -133,6 +133,15 @@ class InterferometerAlphaPlanTests(unittest.TestCase):
         self.assertFalse(config.intf_alpha_calibration_enabled)
         self.assertEqual(config.intf_alpha_calibration_shots, 10)
 
+    def test_index_and_backend_clear_stale_alpha_flag_for_standard_mode(self):
+        root = Path(__file__).resolve().parents[1]
+        index = (root / "static" / "index.html").read_text(encoding="utf-8")
+        manager = (root / "app" / "core" / "experiment_manager.py").read_text(encoding="utf-8")
+        self.assertIn("if (!alphaCalibrationModes.includes(String(mode || '').trim().toLowerCase()))", index)
+        self.assertIn("if (!alphaCalibrationModes.includes(String(payload.mode || '').trim().toLowerCase()))", index)
+        self.assertIn("payload.intf_alpha_calibration_enabled = false", index)
+        self.assertIn('scan_config["intf_alpha_calibration_enabled"] = False', manager)
+
     def test_local_settings_own_the_calibration_mot(self):
         self.manager.settings["intf_alpha_calibration_sequence_name"] = "slave-alpha.mot"
         self.manager.settings["intf_alpha_calibration_sequence_content_base64"] = "c2xhdmU="
