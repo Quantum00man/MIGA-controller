@@ -504,6 +504,46 @@ def _phase_noise_detail_worksheet(loaded: Dict[str, Any]) -> Optional[Worksheet]
     return Worksheet("Phase Noise - T Detail", plots) if plots else None
 
 
+def _phase_noise_single_allan_worksheet(loaded: Dict[str, Any]) -> Optional[Worksheet]:
+    """Build Allan-versus-order curves for a new single-T Phase Noise Scan."""
+    manifest = loaded.get("sync_manifest") or {}
+    pairs = [row for row in manifest.get("pairs") or [] if isinstance(row, dict)]
+    standalone = [row for row in loaded.get("phase_noise_series") or [] if isinstance(row, dict)]
+    series: List[Tuple[str, List[Optional[float]], Tuple[int, int, int], int]] = []
+    if pairs:
+        master = [_finite((row.get("master") or {}).get("interferometer_phase")) for row in pairs]
+        slave = [_finite((row.get("slave") or {}).get("interferometer_phase")) for row in pairs]
+        difference = [right - left if left is not None and right is not None else None for left, right in zip(master, slave)]
+        series = [("Master", master, COLORS[0], 1), ("Slave", slave, COLORS[1], 1), ("Slave - Master", difference, COLORS[6], 2)]
+    elif standalone:
+        series = [("Phase", [_finite(row.get("interferometer_phase")) for row in standalone], COLORS[0], 1)]
+
+    curves: List[Curve] = []
+    for label, values, color, line_style in series:
+        orders: List[float] = []
+        deviations: List[float] = []
+        for order in range(1, len(values) // 2 + 1):
+            windows: List[float] = []
+            for start in range(0, len(values) - 2 * order + 1):
+                left = values[start:start + order]
+                right = values[start + order:start + 2 * order]
+                if any(value is None for value in left + right):
+                    continue
+                left_mean = sum(value for value in left if value is not None) / order
+                right_mean = sum(value for value in right if value is not None) / order
+                windows.append((right_mean - left_mean) ** 2 / 2.0)
+            if windows:
+                orders.append(float(order))
+                deviations.append(math.sqrt(sum(windows) / len(windows)) * 1000.0)
+        if orders:
+            curves.append(Curve(label, orders, deviations, color, line_style=line_style))
+    if not curves:
+        return None
+    return Worksheet("Phase Noise - Allan", [Plot(
+        "Phase Noise Allan Deviation", "Allan order n", "Allan deviation (mrad)", curves,
+    )])
+
+
 def _power_meter_worksheet(points: Sequence[Dict[str, Any]]) -> Optional[Worksheet]:
     valid = []
     invalid = []
@@ -678,13 +718,18 @@ def build_archive_project(
             if phase_noise_summary is not None
             else loaded_root.get("phase_noise_summary") or []
         )
+        legacy_multi_t = len(summary) > 1
         worksheets = _phase_noise_worksheets(
             summary if selected else [],
             "t" if str(phase_noise_x_axis).strip().lower() == "t" else "t2",
-        )
+        ) if legacy_multi_t else []
         detail_worksheet = _phase_noise_detail_worksheet(loaded_root)
         if detail_worksheet:
             worksheets.append(detail_worksheet)
+        if not legacy_multi_t:
+            allan_worksheet = _phase_noise_single_allan_worksheet(loaded_root)
+            if allan_worksheet:
+                worksheets.append(allan_worksheet)
         comment = (
             f"Phase Noise archive {year}-{month}-{day}/{run_id}; "
             f"x={'T (ms)' if phase_noise_x_axis == 't' else 'T2 (us2)'}; "

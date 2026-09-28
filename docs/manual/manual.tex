@@ -409,7 +409,7 @@ Timing & $[P_0,P_{\mathrm{tot}}-P_0]$ & Maintains a fixed total timing; a numeri
 Rabi & $[P_0,P_{\mathrm{tot}}-P_0/2]$ & Couples pulse duration to a compensating timing.\\
 Half & $[P_0,P_0/2]$ & Supplies the half-value as the second placeholder.\\
 Link & $[P_0,f_1(P_0),f_2(P_0,P_1),\ldots]$ & Evaluates ordered formulas with \code{math}, \code{numpy}, and preceding parameters.\\
-Phase Noise Analyze & Selected mid-fringe $P_0$ values plus Link formulas & Measures every selected $T^2$ consecutively for a configurable number of repeats and applies a per-point mid-fringe phase reference.\\
+Phase Noise Analyze & One selected mid-fringe $P_0$ per Scan plus Link formulas & Runs the selected $T^2$ values as an ordered batch of independent Scan numbers, with one mid-fringe phase reference per Scan.\\
 Bragg Rabi & Derived MOT content & Generates a calibrated Gaussian, Blackman or square pulse and timing compensation.\\
 Lock-in & ABBA blocks & Repeats two parameter states in the order A--B--B--A.\\
 AC Stark & Interleaved ratio plan & Coordinates MOT placeholders with generated DDS elements.\\
@@ -1496,19 +1496,23 @@ Valid Bragg fit results can be saved as named reusable phase calibrations.
 
 \section{Phase-noise scan}
 Phase Noise Analyze uses the active Bragg calibration and lets the operator select one or
-more fitted mid-fringe intersections. For each selected value, the controller sets
-$P_0=T^2$, evaluates the ordinary Link formulas for subsequent parameters, completes all
-requested repeats, and only then advances to the next value. Randomization is disabled.
+more fitted mid-fringe intersections. The selected values form an ordered batch, but each
+value receives its own independent Scan number. For each Scan the controller sets
+$P_0=T^2$, evaluates the ordinary Link formulas for subsequent parameters, and completes
+all requested science shots before creating the next Scan. A failed or stopped Scan ends
+the batch, so no later Scan numbers are created. Randomization is disabled.
 Each shot uses its own mid-fringe reference and monotonic branch for phase inversion.
 
 Phase Noise Analyze is also available in SYNC mode. The Master owns the selected
 $T^2$ list and distributes the same sequence parameters to the Slave. Each node retains
 its own fringe calibration: the Slave evaluates its own curve at the Master-selected
 $T^2$, even when that location is not exactly one of the Slave's fitted mid fringes.
-Optional time-based $I_\alpha$ calibration blocks may occur inside one $T$ sequence;
-their shots are excluded from the visible per-$T$ science-shot counter and all noise
-statistics. The Master can additionally attach one PM100A reading to every science shot
-without enabling threshold pauses or automatic recovery.
+Every Phase Noise Scan starts with a local $I_\alpha$ calibration block. Further blocks
+are triggered by elapsed time inside the same Scan; their shots are excluded from the
+visible science-shot counter and all noise statistics. In SYNC, Master and Slave use
+their respective local calibration MOT files. The Master can additionally attach one
+PM100A reading to every science shot without enabling threshold pauses or automatic
+recovery.
 
 The configured detection background is converted at mid fringe using
 \begin{equation}
@@ -1520,9 +1524,11 @@ source and units. The fixed laser-frequency contribution is combined in quadratu
   \sigma_{\phi,\mathrm{expected}}=
   \sqrt{\sigma_{\phi,\mathrm{det}}^2+\sigma_{\phi,\mathrm{laser}}^2}.
 \end{equation}
-The measured value is the sample standard deviation of valid converted phases at each
-mid fringe and requires at least two valid shots. Archive plots compare measured,
-expected, detection and laser-frequency noise, with a switch between $T^2$ in
+The measured value is the sample standard deviation of valid converted phases and
+requires at least two valid shots. New single-$T$ archives open directly in the shot
+sequence layout with phase, PM100A, $I_\alpha$, Allan and SYNC differential tools. Older
+multi-$T$ archives retain their original overview and per-$T$ selector for compatibility.
+Legacy overview plots compare measured, expected, detection and laser-frequency noise, with a switch between $T^2$ in
 \si{\micro\second\squared} and $T$ in milliseconds.
 
 The Archive phase-noise view can also display selected overlapping Allan orders. For the

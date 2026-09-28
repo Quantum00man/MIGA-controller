@@ -1249,7 +1249,12 @@
                                 </div>
                             </div>
                             <div id="phaseNoiseSelectionPlot" style="height:300px; min-height:240px;"></div>
-                            <div class="small text-muted mt-2">Selected: {{ config.phase_noise_mid_fringe_values.length }} mid fringe(s)</div>
+                            <div class="small text-muted mt-2">Selected: {{ config.phase_noise_mid_fringe_values.length }} mid fringe(s). Each selected T creates one independent Scan number in the displayed order.</div>
+                            <div v-if="phaseNoiseBatch.active" class="alert alert-primary py-2 px-3 mt-2 mb-0 small">
+                                Phase Noise batch: T {{ phaseNoiseBatch.index + 1 }}/{{ phaseNoiseBatch.total }} ·
+                                T²={{ Number(phaseNoiseBatch.values[phaseNoiseBatch.index]).toPrecision(9) }} ·
+                                {{ currentRunId }}
+                            </div>
                             <div class="row g-2 align-items-end mt-1">
                                 <div class="col-8">
                                     <label class="form-label small text-muted mb-1">Repeats per mid fringe</label>
@@ -1260,7 +1265,7 @@
                                 </div>
                             </div>
                             <div class="card border-info mt-3"><div class="card-body py-2 px-3">
-                                <div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="phaseNoiseIntfAlphaCalibration" v-model="config.intf_alpha_calibration_enabled"><label class="form-check-label fw-bold" for="phaseNoiseIntfAlphaCalibration">Periodic I_alpha calibration</label></div>
+                                <div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="phaseNoiseIntfAlphaCalibration" v-model="config.intf_alpha_calibration_enabled" disabled><label class="form-check-label fw-bold" for="phaseNoiseIntfAlphaCalibration">Required I_alpha calibration</label></div>
                                 <div v-if="config.intf_alpha_calibration_enabled" class="row g-2 mt-1"><div class="col-6"><label class="form-label small mb-1">Interval</label><div class="input-group input-group-sm"><input type="number" min="0.01" max="1440" step="any" class="form-control" v-model.number="config.intf_alpha_calibration_interval_minutes"><span class="input-group-text">min</span></div></div><div class="col-6"><label class="form-label small mb-1">Shots per block</label><input type="number" min="2" max="1000" step="1" class="form-control form-control-sm" v-model.number="config.intf_alpha_calibration_shots"></div><div class="col-12 form-text">Time-based blocks may run within one T. Calibration shots are excluded from Phase Noise numbering and statistics. Every SYNC node uses its local calibration MOT.</div></div>
                             </div></div>
                             <div class="card border-warning mt-2"><div class="card-body py-2 px-3"><div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="phaseNoisePowerMonitor" v-model="config.phase_noise_power_monitor_enabled"><label class="form-check-label fw-bold" for="phaseNoisePowerMonitor">Record PM100A power</label></div><div class="form-text">The Master reads once after each science shot. Read failures are recorded without pausing.</div></div></div>
@@ -1523,7 +1528,7 @@
                         <div v-if="!['phase_noise', 'bragg_fringe_calibration'].includes(config.mode)" class="col-6"><label class="form-label small text-muted mb-1">{{ isTransferFunctionMode() ? 'Repeats per point' : (config.mode === 'ramsey_interferometer' ? 'Repeats per Δf' : (config.mode === 'ac_stark' ? 'Averages per half-point' : (config.mode === 'lock_in' ? 'ABBA blocks' : 'Averages'))) }}</label><input
                                 v-if="!['transfer_function', 'transfer_burst_time_scan', 'ramsey_interferometer'].includes(config.mode)" type="number" class="form-control form-control-sm" v-model.number="config.averages"
                                 min="1"><input v-else-if="isTransferFunctionMode()" type="number" class="form-control form-control-sm" v-model.number="config.transfer_repeats" min="2"><input v-else type="number" class="form-control form-control-sm" v-model.number="config.ramsey_repeats" min="1"></div>
-                        <div v-else-if="config.mode === 'phase_noise'" class="col-6"><label class="form-label small text-muted mb-1">Phase Noise plan</label><div class="form-control form-control-sm bg-light">{{ config.phase_noise_mid_fringe_values.length }} T values × {{ config.phase_noise_repeats }} repeats</div></div>
+                        <div v-else-if="config.mode === 'phase_noise'" class="col-6"><label class="form-label small text-muted mb-1">Phase Noise batch</label><div class="form-control form-control-sm bg-light">{{ config.phase_noise_mid_fringe_values.length }} independent scans × {{ config.phase_noise_repeats }} science shots</div></div>
                         <div v-else class="col-6"><label class="form-label small text-muted mb-1">Calibration plan</label><div class="form-control form-control-sm bg-light">Coarse × {{ config.bragg_calibration_coarse_repeats }}, then {{ config.bragg_calibration_fine_points }} fine P0 values × {{ config.bragg_calibration_fine_repeats }}</div></div>
                         <div class="col-6">
                             <div class="d-flex align-items-center gap-3 mt-4 flex-wrap">
@@ -1964,6 +1969,7 @@
                     phaseNoiseCalibrations: [],
                     activePhaseNoiseCalibration: null,
                     phaseNoiseCalibrationError: '',
+                    phaseNoiseBatch: { active: false, advancing: false, index: 0, total: 0, values: [], completed: [], mode: '' },
                     sequenceMarkerBusy: false,
                     sequenceMarkerError: '',
                     sequenceMarkerInspection: { markers: [], lines: [], marker_count: 0, line_count: 0 },
@@ -2163,6 +2169,7 @@
                         this.config.scan_dimensions = 1;
                         this.config.parameter_source = 'classic';
                         this.config.randomize = false;
+                        this.config.intf_alpha_calibration_enabled = true;
                         this.fetchPhaseNoiseCalibrations();
                         this.$nextTick(() => this.renderPhaseNoiseSelectionPlot());
                     }
@@ -2375,6 +2382,7 @@
                 },
                 async fetchStatus() {
                     try {
+                        const wasRunning = this.isRunning;
                         const res = await axios.get('/experiment/status');
                         const d = res.data.data || {};
                         const serverMessage = String(res.data.message || '').trim();
@@ -2389,6 +2397,10 @@
                             }
                         } else if (this.isRunning && serverMessage) {
                             this.statusMessage = serverMessage;
+                        }
+                        if (this.phaseNoiseBatch.active && wasRunning && !d.is_running && !this.isSyncMode()) {
+                            const failed = /failed|error|stopped|aborted/i.test(serverMessage);
+                            this.advancePhaseNoiseBatch(failed ? 'error' : 'done', serverMessage);
                         }
                         return d;
                     } catch (e) {
@@ -2476,6 +2488,7 @@
                 async fetchSyncStatus() {
                     if (!this.isSyncMode() && !this.syncRuntime.active) return;
                     try {
+                        const wasActive = Boolean(this.syncRuntime.active);
                         const res = await axios.get('/sync/status');
                         this.syncRuntime = res.data?.data || this.syncRuntime;
                         const stateById = new Map((this.syncRuntime.slaves || []).map(item => [String(item.node_id), item]));
@@ -2494,6 +2507,9 @@
                             if (!this.isScheduleActive()) {
                                 this.statusMessage = this.syncRuntime.status === 'error' ? this.syncRuntime.message : 'IDLE';
                             }
+                        }
+                        if (this.phaseNoiseBatch.active && wasActive && !this.syncRuntime.active && ['done', 'error', 'stopped'].includes(this.syncRuntime.status)) {
+                            this.advancePhaseNoiseBatch(this.syncRuntime.status, this.syncRuntime.message || '');
                         }
                     } catch (error) {
                         if (this.syncRuntime.active) this.addLog('SYNC status error: ' + this.formatRequestError(error));
@@ -4607,6 +4623,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                         }
                         payload.phase_noise_mid_fringe_values = selected;
                         payload.phase_noise_repeats = repeats;
+                        payload.intf_alpha_calibration_enabled = true;
                         payload.interferometer_phase_calibration_override = JSON.parse(JSON.stringify(this.activePhaseNoiseCalibration));
                         payload.scan_dimensions = 1;
                         payload.dim2_enabled = false;
@@ -6361,6 +6378,10 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     this.progressPercent = 100;
                     this.isRunning = false;
                     this.statusMessage = 'IDLE';
+                    if (this.phaseNoiseBatch.active) {
+                        this.statusMessage = `PHASE NOISE T ${this.phaseNoiseBatch.index + 1}/${this.phaseNoiseBatch.total} FINALIZING`;
+                        this.advancePhaseNoiseBatch('done');
+                    }
                     if (this.completionStatusSyncTimer) {
                         clearTimeout(this.completionStatusSyncTimer);
                     }
@@ -6563,13 +6584,85 @@ finishScheduledRun(finalStatus = 'IDLE') {
                 await this.startScheduledRun();
                 return;
             }
+            const phaseNoiseValues = this.config.mode === 'phase_noise'
+                ? [...new Set((this.config.phase_noise_mid_fringe_values || []).map(Number).filter(Number.isFinite))]
+                : [];
+            if (phaseNoiseValues.length > 1) {
+                await this.startPhaseNoiseBatch(phaseNoiseValues);
+                return;
+            }
             if (this.isSyncMode()) {
                 await this.startSyncRun();
                 return;
             }
             await this.startImmediateScan();
         },
-        async startSyncRun() {
+        phaseNoiseBatchConfig(t2) {
+            const config = this.cloneConfig(this.config);
+            config.phase_noise_mid_fringe_values = [Number(t2)];
+            return config;
+        },
+        async startPhaseNoiseBatch(values) {
+            if (this.isRunning || this.syncRuntime.active || this.phaseNoiseBatch.active) return;
+            this.phaseNoiseBatch = { active: true, advancing: false, index: 0, total: values.length, values: [...values], completed: [], mode: this.isSyncMode() ? 'sync' : 'live' };
+            this.addLog(`Phase Noise batch started: ${values.length} independent scans.`);
+            const started = this.isSyncMode()
+                ? await this.startSyncRun(this.phaseNoiseBatchConfig(values[0]))
+                : await this.startImmediateScan(this.phaseNoiseBatchConfig(values[0]));
+            if (!started) this.failPhaseNoiseBatch('The first T scan could not be started.');
+        },
+        failPhaseNoiseBatch(message) {
+            const batch = this.phaseNoiseBatch;
+            const position = Math.min(batch.total, batch.index + 1);
+            this.addLog(`Phase Noise batch stopped at T ${position}/${batch.total}: ${message}`);
+            this.phaseNoiseBatch = { active: false, advancing: false, index: batch.index, total: batch.total, values: batch.values, completed: batch.completed, mode: batch.mode };
+            this.isRunning = false;
+            this.statusMessage = 'ERROR';
+        },
+        async advancePhaseNoiseBatch(status = 'done', message = '') {
+            const batch = this.phaseNoiseBatch;
+            if (!batch.active || batch.advancing) return;
+            batch.advancing = true;
+            if (status !== 'done') {
+                this.failPhaseNoiseBatch(message || `Scan ended with status ${status}.`);
+                return;
+            }
+            try {
+                if (batch.mode === 'live') {
+                    for (let attempt = 0; attempt < 120; attempt += 1) {
+                        const response = await axios.get('/experiment/status');
+                        const data = response.data?.data || {};
+                        if (!data.is_running) {
+                            const serverMessage = String(response.data?.message || '');
+                            if (/failed|error|stopped|aborted/i.test(serverMessage)) throw new Error(serverMessage);
+                            await this.sleep(300);
+                            break;
+                        }
+                        await this.sleep(250);
+                        if (attempt === 119) throw new Error('Timed out waiting for the completed scan to close.');
+                    }
+                }
+                batch.completed.push({ t2: batch.values[batch.index], runId: this.currentRunId });
+                this.addLog(`Phase Noise T ${batch.index + 1}/${batch.total} completed: ${this.currentRunId}.`);
+                if (batch.index + 1 >= batch.total) {
+                    this.phaseNoiseBatch = { ...batch, active: false, advancing: false };
+                    this.isRunning = false;
+                    this.statusMessage = 'IDLE';
+                    this.addLog('Phase Noise batch completed.');
+                    return;
+                }
+                batch.index += 1;
+                batch.advancing = false;
+                const t2 = batch.values[batch.index];
+                const started = batch.mode === 'sync'
+                    ? await this.startSyncRun(this.phaseNoiseBatchConfig(t2))
+                    : await this.startImmediateScan(this.phaseNoiseBatchConfig(t2));
+                if (!started) throw new Error('The next independent scan could not be started.');
+            } catch (error) {
+                this.failPhaseNoiseBatch(error?.message || this.formatRequestError(error));
+            }
+        },
+        async startSyncRun(configOverride = null) {
             if (this.isRunning || this.syncRuntime.active) return;
             try {
                 await this.ensureRealHardwareMode();
@@ -6592,7 +6685,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                 this.syncReplayCount = 0;
                 this.syncReplayPlaying = false;
                 this.resetHistory();
-                const scanConfig = this.prepareScanPayload(this.config, this.currentSequenceName);
+                const scanConfig = this.prepareScanPayload(configOverride || this.config, this.currentSequenceName);
                 if (scanConfig.mode === 'transfer_function' && scanConfig.transfer_power_monitor_enabled) {
                     if (Number(scanConfig.transfer_power_threshold_percent) > 0 && !String(scanConfig.transfer_recovery_sequence_content_base64 || '')) {
                         throw new Error('Select a prepared Bragg calibration .mot file for automatic recovery.');
@@ -6624,16 +6717,18 @@ finishScheduledRun(finalStatus = 'IDLE') {
                 this.isRunning = true;
                 this.statusMessage = 'SYNC RUNNING';
                 this.$nextTick(() => this.renderSyncPlot());
+                return true;
             } catch (error) {
                 this.isRunning = false;
                 this.addLog('SYNC start failed: ' + this.formatRequestError(error));
+                return false;
             }
         },
-        async startImmediateScan() {
+        async startImmediateScan(configOverride = null) {
             if (this.isRunning || this.isScheduleActive()) return;
             let payload;
             try {
-                payload = this.prepareScanPayload(this.config, this.currentSequenceName);
+                payload = this.prepareScanPayload(configOverride || this.config, this.currentSequenceName);
             } catch (error) {
                 this.addLog('Start failed: ' + (error?.message || this.formatRequestError(error)));
                 return;
@@ -6683,10 +6778,12 @@ finishScheduledRun(finalStatus = 'IDLE') {
                 if (res.data.status === 'success') {
                     this.isRunning = true;
                     this.statusMessage = 'RUNNING';
+                    return true;
                 }
             } catch (error) {
                 this.addLog('Start failed: ' + this.formatRequestError(error));
             }
+            return false;
         },
         async startScheduledRun() {
             if (this.isRunning || this.isScheduleActive()) return;
@@ -6752,6 +6849,11 @@ finishScheduledRun(finalStatus = 'IDLE') {
             }
         },
         async stopScan() {
+            if (this.phaseNoiseBatch.active) {
+                this.phaseNoiseBatch.active = false;
+                this.phaseNoiseBatch.advancing = false;
+                this.addLog('Phase Noise batch stop requested; no later T scans will be created.');
+            }
             if (this.isScheduleActive()) {
                 this.scheduleRuntime.stopRequested = true;
                 this.statusMessage = this.isRunning ? 'STOPPING' : 'STOPPED';

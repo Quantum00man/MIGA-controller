@@ -401,6 +401,19 @@ class LabPlotExportTests(unittest.TestCase):
         diagnostic_curves = {item.attrib["name"] for item in detail_plots[1].iter("xyCurve")}
         self.assertEqual(diagnostic_curves, {"PM100A power", "I_alpha"})
 
+    def test_single_t_phase_noise_exports_shot_detail_and_allan_order_layout(self):
+        payload = build_archive_project(
+            PhaseNoiseLoader(), "2026", "09", "26", "run_single_t", ["phase"],
+        )
+        root = self.parse(payload)
+        worksheets = {item.attrib["name"]: item for item in root.iter("worksheet")}
+        self.assertEqual(set(worksheets), {"Phase Noise - T Detail", "Phase Noise - Allan"})
+        allan_plot = next(worksheets["Phase Noise - Allan"].iter("cartesianPlot"))
+        self.assertEqual(allan_plot.attrib["name"], "Phase Noise Allan Deviation")
+        self.assertEqual({item.attrib["name"] for item in allan_plot.iter("xyCurve")}, {"Phase"})
+        x_axis = next(axis for axis in allan_plot.iter("axis") if axis.attrib["name"] == "x")
+        self.assertEqual(x_axis.findtext("textLabel/text"), "Allan order n")
+
 
 if __name__ == "__main__":
     unittest.main()
