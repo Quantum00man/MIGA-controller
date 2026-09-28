@@ -456,6 +456,32 @@ class SyncManagerTests(unittest.TestCase):
             self.assertIn("3 consecutive status failures", sync.status()["message"])
             self.assertIn("offline", sync.status()["message"])
 
+    def test_configured_sync_request_timeout_is_used_for_status_polling(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = FakeManager(tmp)
+            manager.settings["sync_request_timeout_s"] = 12.5
+            manager.status.is_running = True
+            sync = SyncManager(manager)
+            sync._runtime.update({
+                "active": True,
+                "sync_run_id": "sync_test",
+                "status": "running",
+                "expected_shots": 1,
+                "slaves": [{"node_id": "slave_b", "name": "Node B", "base_url": "http://slave", "cursor": 0}],
+            })
+
+            def poll_status(*_args, **_kwargs):
+                manager.status.is_running = False
+                manager.status.current_step = 1
+                return FakeResponse({"is_running": False, "current_step": 1, "latest_sequence": 0, "results": []})
+
+            with patch("app.core.sync_manager.requests.get", side_effect=poll_status) as request_get, patch(
+                "app.core.sync_manager.time.sleep", return_value=None
+            ), patch.object(sync, "_replicate_archives", return_value={}):
+                sync._monitor_master()
+
+            self.assertEqual(request_get.call_args.kwargs["timeout"], 12.5)
+
     def test_single_status_poll_failure_is_retried_without_stopping_sync(self):
         with tempfile.TemporaryDirectory() as tmp:
             manager = FakeManager(tmp)

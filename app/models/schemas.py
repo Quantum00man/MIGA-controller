@@ -616,6 +616,7 @@ class SystemSettings(BaseModel):
     sync_shared_token: str = Field("")
     sync_allowed_master_ip: str = Field("")
     sync_slaves: List[SyncSlaveSettings] = Field(default_factory=list)
+    sync_request_timeout_s: float = Field(3.0, ge=0.2, le=120.0)
     tti_host: str = Field("")
     tti_port: int = Field(9221, ge=1, le=65535)
     tti_timeout_s: float = Field(3.0, ge=0.2, le=120.0)

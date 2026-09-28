@@ -363,9 +363,17 @@ class SyncManager:
             },
         }
 
+    def _request_timeout_s(self) -> float:
+        """Return the master-configured timeout for short SYNC node requests."""
+        try:
+            timeout_s = float(self.manager.get_settings().get("sync_request_timeout_s", 3.0))
+        except (TypeError, ValueError):
+            timeout_s = 3.0
+        return min(120.0, max(0.2, timeout_s))
+
     def test_node(self, base_url: str) -> Dict[str, Any]:
         url = self._normalize_url(base_url)
-        response = requests.get(f"{url}/sync/node/health", headers=self._headers(), timeout=3.0)
+        response = requests.get(f"{url}/sync/node/health", headers=self._headers(), timeout=self._request_timeout_s())
         response.raise_for_status()
         return response.json()
 
@@ -559,7 +567,7 @@ class SyncManager:
         path = "pause" if paused else "resume"
         for slave in runtime.get("slaves") or []:
             try:
-                requests.post(f"{slave['base_url']}/sync/node/{path}", json={"sync_run_id": runtime.get("sync_run_id"), "retry_frequency_hz": retry_frequency_hz, "invalid_attempt": invalid_attempt}, headers=self._headers(), timeout=3.0).raise_for_status()
+                requests.post(f"{slave['base_url']}/sync/node/{path}", json={"sync_run_id": runtime.get("sync_run_id"), "retry_frequency_hz": retry_frequency_hz, "invalid_attempt": invalid_attempt}, headers=self._headers(), timeout=self._request_timeout_s()).raise_for_status()
             except Exception as exc:
                 print(f"[SYNC] Failed to {path} {slave.get('name')}: {exc}")
 
@@ -825,7 +833,7 @@ class SyncManager:
                 try:
                     requests.post(
                         f"{slave['base_url']}/sync/node/stop",
-                        json={"sync_run_id": sync_run_id}, headers=self._headers(), timeout=3.0,
+                        json={"sync_run_id": sync_run_id}, headers=self._headers(), timeout=self._request_timeout_s(),
                     )
                 except Exception:
                     pass
@@ -860,7 +868,7 @@ class SyncManager:
             try:
                 requests.post(
                     f"{slave['base_url']}/sync/node/stop",
-                    json={"sync_run_id": sync_run_id}, headers=self._headers(), timeout=3.0,
+                    json={"sync_run_id": sync_run_id}, headers=self._headers(), timeout=self._request_timeout_s(),
                 )
                 slave["status"] = "stopping"
             except Exception as exc:
@@ -1054,7 +1062,7 @@ class SyncManager:
                     response = requests.get(
                         f"{slave['base_url']}/sync/node/status/{sync_run_id}",
                         params={"after": int(slave.get("cursor") or 0)},
-                        headers=self._headers(), timeout=3.0,
+                        headers=self._headers(), timeout=self._request_timeout_s(),
                     )
                     response.raise_for_status()
                     node_state = response.json()

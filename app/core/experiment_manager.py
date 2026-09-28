@@ -623,6 +623,7 @@ class ExperimentManager:
             "sync_shared_token": "",
             "sync_allowed_master_ip": "",
             "sync_slaves": [],
+            "sync_request_timeout_s": 3.0,
             "tti_host": "",
             "tti_port": 9221,
             "tti_timeout_s": 3.0,

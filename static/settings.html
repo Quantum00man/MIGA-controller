@@ -658,6 +658,11 @@
                             <label class="form-label">Allowed Master IP <span class="text-muted">(optional)</span></label>
                             <input class="form-control font-monospace" v-model.trim="s.sync_allowed_master_ip" placeholder="192.168.1.10">
                         </div>
+                        <div class="col-md-3" v-if="s.sync_role === 'master'">
+                            <label class="form-label">SYNC request timeout</label>
+                            <div class="input-group"><input type="number" min="0.2" max="120" step="0.1" class="form-control" v-model.number="s.sync_request_timeout_s"><span class="input-group-text">s</span></div>
+                            <div class="form-text">Status, health and stop requests to Slaves.</div>
+                        </div>
                     </div>
                     <div v-if="s.sync_role === 'master'" class="mt-4 pt-3 border-top">
                         <div class="d-flex justify-content-between align-items-center mb-2">
@@ -3474,6 +3479,9 @@
                     normalized.sync_node_name = String(normalized.sync_node_name || 'Local controller').trim() || 'Local controller';
                     normalized.sync_shared_token = String(normalized.sync_shared_token || '');
                     normalized.sync_allowed_master_ip = String(normalized.sync_allowed_master_ip || '').trim();
+                    const syncRequestTimeout = Number(normalized.sync_request_timeout_s ?? 3);
+                    normalized.sync_request_timeout_s = Number.isFinite(syncRequestTimeout) && syncRequestTimeout >= 0.2 && syncRequestTimeout <= 120
+                        ? syncRequestTimeout : 3;
                     normalized.sync_slaves = Array.isArray(normalized.sync_slaves)
                         ? normalized.sync_slaves.map((slave, index) => ({
                             id: String(slave?.id || `slave_${index + 1}`),
