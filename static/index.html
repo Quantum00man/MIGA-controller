@@ -5049,6 +5049,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     };
                 },
                 getLiveXAxisLabel() {
+                    if (this.config.mode === 'phase_noise') return 'Science shot index';
                     return this.config.mode === 'ramsey_interferometer' ? 'Δf (MHz)' : 'Parameter P0';
                 },
                 build1DLayout(channel, metric) {
@@ -5897,7 +5898,10 @@ finishScheduledRun(finalStatus = 'IDLE') {
                             ? data.sync_parameters
                             : (Array.isArray(data.all_parameters) && data.all_parameters.length
                                 ? data.all_parameters : [data.sync_p0]);
-                        const params = rawParams.slice(0, scanDimensions).map(Number);
+                        const phaseNoiseShot = Number(data.phase_noise_repeat ?? data.phase_noise_science_shot);
+                        const params = this.config.mode === 'phase_noise' && Number.isFinite(phaseNoiseShot)
+                            ? [phaseNoiseShot]
+                            : rawParams.slice(0, scanDimensions).map(Number);
                         if (params.length && params.every(Number.isFinite)) {
                             this.accumulateHistoryResult(this.syncHistoryMaps[source], data, params);
                         }
@@ -6555,7 +6559,10 @@ finishScheduledRun(finalStatus = 'IDLE') {
                                 return;
                             }
 
-                            this.accumulateHistoryResult(this.historyMap, data, scannedParams);
+                            const phaseNoiseShot = Number(data.phase_noise_repeat ?? data.phase_noise_science_shot);
+                            const historyParams = this.config.mode === 'phase_noise' && Number.isFinite(phaseNoiseShot)
+                                ? [phaseNoiseShot] : scannedParams;
+                            this.accumulateHistoryResult(this.historyMap, data, historyParams);
                             this.plotRevision++;
                             this.renderMainPlot();
 
