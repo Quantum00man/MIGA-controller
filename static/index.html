@@ -829,7 +829,7 @@
                         :disabled="isRunning || isScheduleActive()">
                     <label class="btn btn-outline-secondary" for="sourceClassic">Classic Placeholders</label>
                     <input type="radio" class="btn-check" id="sourceMarkers" value="markers" v-model="config.parameter_source"
-                        :disabled="isRunning || isScheduleActive() || runMode !== 'live'">
+                        :disabled="isRunning || isScheduleActive() || runMode === 'sync'">
                     <label class="btn btn-outline-primary" for="sourceMarkers">Auto Markers</label>
                 </div>
                 <template v-if="config.parameter_source === 'markers'">
@@ -841,7 +841,7 @@
                             <span v-if="undefinedSequenceMarkers.length" class="badge bg-warning text-dark">{{ undefinedSequenceMarkers.length }} need definitions</span>
                             <a v-if="undefinedSequenceMarkers.length" href="/settings.html" target="_blank" class="ms-auto">Open Settings</a>
                         </div>
-                        <div class="form-text">Live scans only. Marker defaults are loaded when selected and can be overridden within Hard Limits.</div>
+                        <div class="form-text">Available for Live and Scheduled scans. Marker defaults are loaded when selected and can be overridden within Hard Limits.</div>
                         <button type="button" class="btn btn-outline-secondary btn-sm w-100 mt-2" @click="previewAutoMarkers"
                             :disabled="!autoMarkerSelectionReady || sequenceMarkerBusy">
                             <i class="bi bi-eye me-1"></i>Preview Current Values
@@ -852,6 +852,14 @@
                     </div>
                 </template>
                 <div v-else class="form-text mt-2">Uses the existing &lt;PARAMETER0,1,2&gt; replacement workflow.</div>
+            </div>
+            <div v-if="config.mode === 'standard'" class="card p-3 mb-3 border-info">
+                <div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="standardIntfAlphaCalibration" v-model="config.intf_alpha_calibration_enabled"><label class="form-check-label fw-bold" for="standardIntfAlphaCalibration">Periodic I_alpha calibration</label></div>
+                <div v-if="config.intf_alpha_calibration_enabled" class="row g-2 mt-1">
+                    <div class="col-6"><label class="form-label small mb-1">Interval</label><div class="input-group input-group-sm"><input type="number" min="0.01" max="1440" step="any" class="form-control" v-model.number="config.intf_alpha_calibration_interval_minutes"><span class="input-group-text">min</span></div></div>
+                    <div class="col-6"><label class="form-label small mb-1">Shots per block</label><input type="number" min="2" max="1000" step="1" class="form-control form-control-sm" v-model.number="config.intf_alpha_calibration_shots"></div>
+                    <div class="col-12 form-text">1D non-randomized scans only. Calibrates before the scan, then checks the interval after each science shot. No final calibration is run.</div>
+                </div>
             </div>
             <div class="d-flex align-items-center justify-content-between mt-3 mb-2">
                 <span class="section-label" style="margin:0;">Repeat Previous Run</span>
@@ -1862,7 +1870,7 @@
                 <div class="card-header bg-white fw-bold"><i class="bi bi-lightning-charge me-2 text-warning"></i>PM100A power after each shot</div>
                 <div id="powerMeterPlot" style="height:320px"></div>
             </div>
-            <div v-if="['transfer_function','bragg_fringe_calibration','phase_noise'].includes(config.mode) && config.intf_alpha_calibration_enabled" class="card mb-4 border-0 shadow-sm">
+            <div v-if="['standard','transfer_function','bragg_fringe_calibration','phase_noise'].includes(config.mode) && config.intf_alpha_calibration_enabled" class="card mb-4 border-0 shadow-sm">
                 <div class="card-header bg-white fw-bold">Interferometer I_alpha calibration</div>
                 <div id="intfAlphaPlot" style="height:320px"></div>
             </div>
@@ -2158,7 +2166,7 @@
                     }
                 },
                 'config.mode'(mode) {
-                    const alphaCalibrationModes = ['transfer_function', 'transfer_burst_time_scan', 'bragg_fringe_calibration', 'phase_noise'];
+                    const alphaCalibrationModes = ['standard', 'transfer_function', 'transfer_burst_time_scan', 'bragg_fringe_calibration', 'phase_noise'];
                     if (!alphaCalibrationModes.includes(String(mode || '').trim().toLowerCase())) {
                         this.config.intf_alpha_calibration_enabled = false;
                     }
@@ -2217,7 +2225,7 @@
                     }
                 },
                 runMode(value) {
-                    if (value !== 'live' && this.config.parameter_source === 'markers') this.config.parameter_source = 'classic';
+                    if (value === 'sync' && this.config.parameter_source === 'markers') this.config.parameter_source = 'classic';
                     if (value === 'sync') {
                         if (['lock_in', 'ac_stark', 'ramsey_interferometer'].includes(this.config.mode)) this.config.mode = 'standard';
                         this.fetchSyncConfig();
@@ -2233,7 +2241,7 @@
                 'config.parameter_source'(source) {
                     if (source !== 'classic') this.syncIndependentP0Enabled = false;
                     if (source === 'markers') {
-                        if (this.runMode !== 'live') this.runMode = 'live';
+                        if (this.runMode === 'sync') this.runMode = 'live';
                         this.config.mode = 'standard';
                         this.fetchSequenceMarkers();
                     } else {
@@ -4358,7 +4366,7 @@ prepareScanPayload(sourceConfig = this.config, sequenceNameOverride = null) {
     payload.dim3_enabled = payload.scan_dimensions >= 3;
     if (payload.parameter_source === 'markers') {
         const axes = (payload.marker_axes || []).slice(0, payload.scan_dimensions).filter(Boolean);
-        if (this.runMode !== 'live') throw new Error('Auto Markers are available in Live only.');
+        if (this.runMode === 'sync') throw new Error('Auto Markers are not available in SYNC mode.');
         if (axes.length !== payload.scan_dimensions || new Set(axes).size !== payload.scan_dimensions) {
             throw new Error(`Select ${payload.scan_dimensions} unique marker axis${payload.scan_dimensions === 1 ? '' : 'es'}.`);
         }
@@ -4616,9 +4624,13 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     const scanDimensions = Math.max(1, Math.min(3, Number(payload.scan_dimensions || this.resolveScanDimensionsFromConfig(payload)) || 1));
                     payload.run_label = String(payload.run_label || '').trim();
                     payload.sequence_name = String(sequenceNameOverride || payload.sequence_name || this.currentSequenceName || 'sequence.mot').trim();
-                    const alphaCalibrationModes = ['transfer_function', 'transfer_burst_time_scan', 'bragg_fringe_calibration', 'phase_noise'];
+                    const alphaCalibrationModes = ['standard', 'transfer_function', 'transfer_burst_time_scan', 'bragg_fringe_calibration', 'phase_noise'];
                     if (!alphaCalibrationModes.includes(String(payload.mode || '').trim().toLowerCase())) {
                         payload.intf_alpha_calibration_enabled = false;
+                    }
+                    if (payload.mode === 'standard' && payload.intf_alpha_calibration_enabled) {
+                        if (scanDimensions !== 1) throw new Error('Standard I_alpha calibration only supports 1D scans.');
+                        if (payload.randomize) throw new Error('Standard I_alpha calibration does not support Randomize.');
                     }
                     if (this.isTransferFunctionMode(payload.mode)) {
                         const burst = this.isTransferBurstTimeScan(payload.mode);

@@ -253,8 +253,6 @@ class ScheduleManager:
             config_payload = ScanConfig(**(task.get("config") or {})).dict()
             if config_payload.get("mode") == "transfer_burst_time_scan":
                 raise ValueError("Transfer function Burst time scan is not available in the scheduled queue")
-            if config_payload.get("parameter_source") == "markers":
-                raise ValueError("Auto Markers are available in Live only")
             if config_payload.get("mode") == "ac_stark":
                 raise ValueError("AC Stark Centering is available in Live Mode only")
             execution_mode = str(task.get("execution_mode") or "scan").strip().lower()

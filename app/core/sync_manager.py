@@ -669,6 +669,12 @@ class SyncManager:
             raise ValueError("At least one enabled Sync slave is required")
         scan_config = dict(payload.get("scan_config") or {})
         independent_p0 = bool(payload.get("independent_p0_enabled"))
+        if (
+            scan_config.get("intf_alpha_calibration_enabled")
+            and str(scan_config.get("mode") or "standard").strip().lower() == "standard"
+            and str(scan_config.get("parameter_source") or "classic").strip().lower() == "markers"
+        ):
+            raise ValueError("SYNC Standard I_alpha calibration requires Classic Placeholders")
         if independent_p0:
             if str(scan_config.get("mode") or "standard").strip().lower() != "standard":
                 raise ValueError("Independent P0 is only available for Standard scans")
@@ -689,7 +695,10 @@ class SyncManager:
         expected_shots = int(
             scan_config.get(
                 "_bragg_calibration_expected_total_shots",
-                scan_config.get("_phase_noise_expected_science_shots", len(shot_plan)),
+                scan_config.get(
+                    "_phase_noise_expected_science_shots",
+                    sum(1 for item in shot_plan if self._is_sync_science_item(item)),
+                ),
             )
         )
         sync_run_id = f"sync_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid4().hex[:8]}"

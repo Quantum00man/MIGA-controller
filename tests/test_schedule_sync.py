@@ -201,6 +201,21 @@ def test_existing_schedule_task_defaults_to_regular_scan():
     assert scheduler.manager.started[0]["sequence_name"] == "master.mot"
 
 
+def test_scheduled_standard_accepts_auto_markers():
+    scheduler = make_scheduler()
+    task = sync_task()
+    task["execution_mode"] = "scan"
+    task.pop("sync", None)
+    task["config"].update({
+        "mode": "standard", "parameter_source": "markers", "marker_axes": ["TEST"],
+        "scan_dimensions": 1, "randomize": False,
+    })
+
+    status = scheduler.start({"timingMode": "sequential", "tasks": [task]})
+
+    assert status["tasks"][0]["config"]["parameter_source"] == "markers"
+
+
 def test_temporary_sequence_does_not_install_over_active_template():
     scheduler = make_scheduler()
     task = sync_task()

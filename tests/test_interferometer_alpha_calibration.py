@@ -133,14 +133,45 @@ class InterferometerAlphaPlanTests(unittest.TestCase):
         self.assertFalse(config.intf_alpha_calibration_enabled)
         self.assertEqual(config.intf_alpha_calibration_shots, 10)
 
-    def test_index_and_backend_clear_stale_alpha_flag_for_standard_mode(self):
+    def test_index_and_backend_allow_alpha_for_standard_mode(self):
         root = Path(__file__).resolve().parents[1]
         index = (root / "static" / "index.html").read_text(encoding="utf-8")
         manager = (root / "app" / "core" / "experiment_manager.py").read_text(encoding="utf-8")
-        self.assertIn("if (!alphaCalibrationModes.includes(String(mode || '').trim().toLowerCase()))", index)
-        self.assertIn("if (!alphaCalibrationModes.includes(String(payload.mode || '').trim().toLowerCase()))", index)
-        self.assertIn("payload.intf_alpha_calibration_enabled = false", index)
-        self.assertIn('scan_config["intf_alpha_calibration_enabled"] = False', manager)
+        self.assertIn("['standard', 'transfer_function'", index)
+        self.assertIn("Standard I_alpha calibration only supports 1D scans", index)
+        self.assertIn('"bragg_fringe_calibration", "phase_noise", "standard"', manager)
+
+    def test_standard_plan_checks_after_each_science_shot_without_final_boundary(self):
+        self.manager.settings["intf_alpha_calibration_sequence_content_base64"] = "YQ=="
+        config = {
+            "mode": "standard", "scan_dimensions": 1, "parameter_source": "classic",
+            "dim1_type": "list", "custom_list": "10,20,30", "param_type": "float",
+            "averages": 1, "randomize": False, "intf_alpha_calibration_enabled": True,
+        }
+
+        plan = self.manager._build_standard_execution(config)
+        boundaries = [
+            (item.get("metadata") or {}).get("intf_alpha_calibration_boundary")
+            for item in plan
+            if (item.get("metadata") or {}).get("intf_alpha_calibration_boundary")
+        ]
+        science = [item for item in plan if not (item.get("metadata") or {}).get("intf_alpha_calibration_boundary")]
+
+        self.assertEqual(boundaries, ["start", "periodic", "periodic"])
+        self.assertEqual([item["sequence_parameters"] for item in science], [[10.0], [20.0], [30.0]])
+        self.assertIsNone((plan[-1].get("metadata") or {}).get("intf_alpha_calibration_boundary"))
+
+    def test_standard_alpha_rejects_multidimensional_and_randomized_scans(self):
+        self.manager.settings["intf_alpha_calibration_sequence_content_base64"] = "YQ=="
+        base = {
+            "mode": "standard", "parameter_source": "classic", "dim1_type": "list",
+            "custom_list": "1,2", "param_type": "float", "averages": 1,
+            "intf_alpha_calibration_enabled": True,
+        }
+        with self.assertRaisesRegex(ValueError, "one-dimensional"):
+            self.manager._build_standard_execution({**base, "scan_dimensions": 2, "dim2_enabled": True})
+        with self.assertRaisesRegex(ValueError, "Randomize"):
+            self.manager._build_standard_execution({**base, "scan_dimensions": 1, "randomize": True})
 
     def test_local_settings_own_the_calibration_mot(self):
         self.manager.settings["intf_alpha_calibration_sequence_name"] = "slave-alpha.mot"

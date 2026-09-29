@@ -1798,6 +1798,36 @@ class ExperimentManager:
         validate_auto_marker_scan(template_content, axes, parameters, definitions)
         scan_config["marker_axes"] = axes
 
+    def _build_standard_execution(self, scan_config: Dict[str, Any]) -> List[Any]:
+        """Build Standard shots with optional local I_alpha checkpoints."""
+        parameters = self._generate_parameters(scan_config)
+        if not scan_config.get("intf_alpha_calibration_enabled"):
+            return parameters
+        if self._resolve_scan_dimensions(scan_config) != 1:
+            raise ValueError("Standard I_alpha calibration only supports one-dimensional scans")
+        if bool(scan_config.get("randomize", False)):
+            raise ValueError("Standard I_alpha calibration does not support Randomize")
+        source = str(scan_config.get("parameter_source") or "classic").strip().lower()
+        if source not in {"classic", "markers"}:
+            raise ValueError("Standard I_alpha calibration requires Classic Placeholders or Auto Markers")
+        if not str(self.settings.get("intf_alpha_calibration_sequence_content_base64") or ""):
+            raise ValueError("Periodic I_alpha calibration requires a local calibration MOT in Settings")
+
+        bounded: List[Dict[str, Any]] = [
+            {"sequence_parameters": [], "metadata": {"intf_alpha_calibration_boundary": "start"}}
+        ]
+        for index, item in enumerate(parameters):
+            if isinstance(item, dict) and "sequence_parameters" in item:
+                bounded.append(item)
+            else:
+                bounded.append({"sequence_parameters": item, "metadata": {}})
+            if index + 1 < len(parameters):
+                bounded.append({
+                    "sequence_parameters": [],
+                    "metadata": {"intf_alpha_calibration_boundary": "periodic"},
+                })
+        return bounded
+
     def build_scan_parameter_plan(self, scan_config: Dict[str, Any]) -> List[Any]:
         payload = dict(scan_config or {})
         mode = str(payload.get('mode') or 'standard').strip().lower()
@@ -1814,6 +1844,8 @@ class ExperimentManager:
             return self._build_transfer_function_execution(scan_config)
         if mode == 'phase_noise':
             return self._build_phase_noise_execution(scan_config)
+        if mode == 'standard':
+            return self._build_standard_execution(scan_config)
         return self._generate_parameters(payload)
 
     def _build_phase_noise_execution(self, scan_config: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -2021,7 +2053,7 @@ class ExperimentManager:
         try:
             alpha_calibration_modes = {
                 "transfer_function", "transfer_burst_time_scan",
-                "bragg_fringe_calibration", "phase_noise",
+                "bragg_fringe_calibration", "phase_noise", "standard",
             }
             if (
                 scan_config.get("intf_alpha_calibration_enabled")
@@ -2045,6 +2077,8 @@ class ExperimentManager:
                 parameters = self._build_phase_noise_execution(scan_config)
             elif scan_config.get('mode') == 'bragg_fringe_calibration':
                 parameters = self._build_bragg_calibration_execution(scan_config)
+            elif scan_config.get('mode') == 'standard':
+                parameters = self._build_standard_execution(scan_config)
             else:
                 parameters = self._generate_parameters(scan_config)
             if parameters_override is None or not scan_config.get('_sync_slave'):
@@ -2053,6 +2087,10 @@ class ExperimentManager:
                     if isinstance(item, dict) and "sequence_parameters" in item
                     else item
                     for item in parameters
+                    if not (
+                        isinstance(item, dict)
+                        and (item.get("metadata") or {}).get("intf_alpha_calibration_boundary")
+                    )
                 ]
                 self._validate_auto_marker_execution(scan_config, validation_parameters)
         except Exception as exc:
