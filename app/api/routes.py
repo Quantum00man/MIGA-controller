@@ -2037,6 +2037,23 @@ async def download_merged_sync_run_log(year: str, month: str, day: str, run_id: 
         raise HTTPException(500, str(exc))
 
 
+@router.get("/archive/run-log/{year}/{month}/{day}/{run_id}/view")
+async def view_archived_run_log(
+    year: str, month: str, day: str, run_id: str,
+    node_id: str = "", merged: bool = False,
+):
+    try:
+        return data_loader.get_archived_run_log_view(
+            year, month, day, run_id, node_id=node_id or None, merged=merged,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
 @router.get("/archive/bragg-fringe-calibration/{year}/{month}/{day}/{run_id}/mot")
 async def download_bragg_fringe_calibration_mot(year: str, month: str, day: str, run_id: str):
     try:

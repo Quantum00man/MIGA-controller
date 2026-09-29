@@ -39,13 +39,38 @@ class RunLoggingTests(unittest.TestCase):
         self.assertEqual([record["event"] for record in records], ["slave", "master"])
         self.assertEqual([record["source_node"] for record in records], ["slave-a", "master"])
 
+    def test_loader_builds_human_readable_log_view_and_focuses_pause_reason(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "2026" / "09" / "29" / "run16_20260929"
+            slave = root / "sync_nodes" / "slave-a"
+            slave.mkdir(parents=True)
+            (root / "run.log").write_text(
+                json.dumps({"timestamp_unix_ms": 10, "timestamp": "t1", "event": "run.initialized"}) + "\n"
+            )
+            (slave / "run.log").write_text("\n".join([
+                json.dumps({"timestamp_unix_ms": 20, "timestamp": "t2", "event": "shot.started", "step": 12}),
+                json.dumps({"timestamp_unix_ms": 30, "timestamp": "t3", "event": "run.paused", "message": "Paused between shots", "reason": "intf_alpha_calibration_failed"}),
+            ]) + "\n")
+            with patch("config.DATA_BASE_DIR", Path(temporary)):
+                payload = DataLoader().get_archived_run_log_view(
+                    "2026", "09", "29", "run16_20260929", merged=True
+                )
+        self.assertEqual(payload["event_count"], 3)
+        self.assertEqual(payload["anomaly_count"], 1)
+        self.assertEqual(payload["summary"]["reason"], "intf_alpha_calibration_failed")
+        self.assertEqual(payload["summary"]["source_node"], "slave-a")
+        self.assertTrue(payload["events"][payload["focus_index"]]["is_anomaly"])
+        self.assertEqual(payload["events"][1]["display_step"], 12)
+
     def test_run_log_download_routes_and_archive_controls_exist(self):
         paths = {route.path for route in router.routes}
         self.assertIn("/archive/run-log/{year}/{month}/{day}/{run_id}", paths)
         self.assertIn("/archive/run-log/{year}/{month}/{day}/{run_id}/merged", paths)
+        self.assertIn("/archive/run-log/{year}/{month}/{day}/{run_id}/view", paths)
         archive_html = Path("static/archive.html").read_text(encoding="utf-8")
         self.assertIn("Download Run Log", archive_html)
         self.assertIn("Merged run log", archive_html)
+        self.assertIn("Open Log Viewer", archive_html)
 
 
 if __name__ == "__main__":

@@ -467,6 +467,115 @@ class DataLoader:
         payload = "".join(json.dumps(item, ensure_ascii=False) + "\n" for item in events).encode("utf-8")
         return payload, f"{run_id}_merged_run.log"
 
+    @staticmethod
+    def _read_run_log_records(path: Path, source_node: str) -> List[Dict[str, Any]]:
+        records: List[Dict[str, Any]] = []
+        for line_number, raw_line in enumerate(
+            path.read_text(encoding="utf-8", errors="replace").splitlines(), start=1
+        ):
+            if not raw_line.strip():
+                continue
+            try:
+                record = json.loads(raw_line)
+                if not isinstance(record, dict):
+                    record = {"event": "legacy.line", "message": raw_line}
+            except ValueError:
+                record = {"event": "legacy.line", "message": raw_line}
+            record.setdefault("timestamp_unix_ms", 0)
+            record.setdefault("level", "INFO")
+            record.setdefault("event", "log.entry")
+            record.setdefault("message", "")
+            record["source_node"] = source_node
+            record["source_line"] = line_number
+            records.append(record)
+        return records
+
+    def get_archived_run_log_view(
+        self, year: str, month: str, day: str, run_id: str,
+        node_id: Optional[str] = None, merged: bool = False,
+    ) -> Dict[str, Any]:
+        """Return structured run-log events and a concise diagnostic focus for the Archive UI."""
+        root = self._get_run_dir(year, month, day, run_id)
+        sources: List[Tuple[str, Path]]
+        if merged:
+            sources = [("master", root / "run.log")]
+            sync_root = root / "sync_nodes"
+            if sync_root.is_dir():
+                sources.extend(
+                    (path.name, path / "run.log")
+                    for path in sorted(sync_root.iterdir()) if path.is_dir()
+                )
+        else:
+            run_dir = self._resolve_archive_node_dir(root, node_id)
+            sources = [(str(node_id).strip() if node_id else "master", run_dir / "run.log")]
+
+        events: List[Dict[str, Any]] = []
+        for source_node, path in sources:
+            if path.is_file():
+                events.extend(self._read_run_log_records(path, source_node))
+        if not events:
+            raise FileNotFoundError(f"Run logs not found for run {run_id}")
+        events.sort(key=lambda item: (
+            int(item.get("timestamp_unix_ms") or 0),
+            str(item.get("source_node") or ""), int(item.get("source_line") or 0),
+        ))
+
+        first_timestamp = next(
+            (int(item.get("timestamp_unix_ms") or 0) for item in events if item.get("timestamp_unix_ms")), 0
+        )
+        anomaly_indexes: List[int] = []
+        for index, item in enumerate(events):
+            level = str(item.get("level") or "INFO").upper()
+            event_name = str(item.get("event") or "")
+            status = str(item.get("status") or "").lower()
+            reason = str(item.get("reason") or item.get("pause_reason") or "").strip()
+            is_anomaly = (
+                level in {"WARNING", "WARN", "ERROR", "CRITICAL", "FATAL"}
+                or event_name == "run.paused"
+                or (event_name == "sync.run.finished" and status not in {"", "completed", "success"})
+                or bool(reason)
+            )
+            item["elapsed_ms"] = max(0, int(item.get("timestamp_unix_ms") or 0) - first_timestamp)
+            item["is_anomaly"] = is_anomaly
+            item["display_step"] = item.get("logical_step", item.get("step", item.get("current_step")))
+            if is_anomaly:
+                anomaly_indexes.append(index)
+
+        root_cause_candidates = [
+            index for index in anomaly_indexes
+            if str(events[index].get("reason") or events[index].get("pause_reason") or "").strip()
+            or events[index].get("event") == "run.paused"
+        ]
+        focus_index = root_cause_candidates[0] if root_cause_candidates else (
+            anomaly_indexes[0] if anomaly_indexes else len(events) - 1
+        )
+        focus = events[focus_index]
+        focus_reason = str(focus.get("reason") or focus.get("pause_reason") or "").strip()
+        focus_message = str(focus.get("status_message") or focus.get("message") or "").strip()
+        summary_text = focus_message or focus_reason or str(focus.get("event") or "Run log completed")
+        if focus_reason and focus_reason.lower() not in summary_text.lower():
+            summary_text = f"{summary_text} ({focus_reason})"
+
+        return {
+            "run_id": run_id,
+            "merged": bool(merged),
+            "event_count": len(events),
+            "anomaly_count": len(anomaly_indexes),
+            "nodes": sorted({str(item.get("source_node") or "master") for item in events}),
+            "levels": sorted({str(item.get("level") or "INFO").upper() for item in events}),
+            "event_names": sorted({str(item.get("event") or "") for item in events}),
+            "focus_index": focus_index,
+            "summary": {
+                "text": summary_text,
+                "reason": focus_reason,
+                "timestamp": focus.get("timestamp"),
+                "source_node": focus.get("source_node"),
+                "level": focus.get("level"),
+                "event": focus.get("event"),
+            },
+            "events": events,
+        }
+
     def get_archive_tree(self) -> Dict[str, Any]:
         """Build the legacy full tree using only canonical archive directories."""
         tree = {}

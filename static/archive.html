@@ -839,6 +839,59 @@
         .collection-batch-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 14px; border-top: 1px solid #b6d4fe; border-bottom: 1px solid #b6d4fe; background: #e7f1ff; }
         .collection-dialog-backdrop { position: fixed; inset: 0; z-index: 1080; display: grid; place-items: center; padding: 18px; background: rgba(20,31,48,.45); }
         .collection-dialog { width: min(560px,100%); max-height: calc(100vh - 36px); overflow-y: auto; border-radius: 9px; background: #fff; box-shadow: 0 24px 70px rgba(20,31,48,.28); }
+
+        .run-log-dialog {
+            display: grid;
+            grid-template-rows: auto auto auto minmax(0, 1fr);
+            width: min(1480px, 100%);
+            height: min(900px, calc(100dvh - 36px));
+            overflow: hidden;
+            border-radius: 9px;
+            background: var(--archive-surface);
+            box-shadow: 0 24px 70px rgba(20,31,48,.28);
+        }
+        .run-log-summary { padding: 12px 16px; border-bottom: 1px solid var(--archive-border); background: #f7f9fc; }
+        .run-log-summary.has-anomaly { border-left: 4px solid var(--archive-danger); background: #fff7f7; }
+        .run-log-summary-title { font-size: .9rem; font-weight: 750; color: var(--archive-text); }
+        .run-log-summary-meta { margin-top: 3px; color: var(--archive-text-muted); font-size: .76rem; }
+        .run-log-toolbar {
+            display: grid;
+            grid-template-columns: minmax(220px, 2fr) repeat(3, minmax(135px, 1fr)) auto;
+            gap: 8px;
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--archive-border);
+            background: var(--archive-surface);
+        }
+        .run-log-body { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 390px; min-height: 0; }
+        .run-log-list { overflow: auto; background: var(--archive-surface); }
+        .run-log-table { width: 100%; margin: 0; font-size: .78rem; border-collapse: separate; border-spacing: 0; }
+        .run-log-table thead th { position: sticky; top: 0; z-index: 1; padding: 8px 10px; background: #edf2f7; color: #3d4a5d; white-space: nowrap; }
+        .run-log-row { cursor: pointer; }
+        .run-log-row td { padding: 7px 10px; border-bottom: 1px solid var(--archive-border-soft); vertical-align: top; }
+        .run-log-row:hover td, .run-log-row.is-selected td { background: var(--archive-accent-soft); }
+        .run-log-row.is-anomaly td:first-child { box-shadow: inset 4px 0 0 var(--archive-danger); }
+        .run-log-time { white-space: nowrap; font-variant-numeric: tabular-nums; }
+        .run-log-event { color: #334155; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+        .run-log-message { max-width: 480px; overflow-wrap: anywhere; color: var(--archive-text-muted); }
+        .run-log-detail { min-width: 0; overflow: auto; padding: 14px; border-left: 1px solid var(--archive-border); background: #f8fafc; }
+        .run-log-detail-grid { display: grid; grid-template-columns: 105px minmax(0, 1fr); gap: 7px 10px; font-size: .8rem; }
+        .run-log-detail-label { color: var(--archive-text-muted); font-weight: 650; }
+        .run-log-detail-value { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+        .run-log-context { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--archive-border); }
+        .run-log-context pre { max-height: 300px; margin: 8px 0 0; padding: 10px; overflow: auto; border: 1px solid var(--archive-border); border-radius: 6px; background: #fff; font-size: .72rem; white-space: pre-wrap; }
+        .run-log-level { display: inline-block; min-width: 58px; padding: 2px 6px; border-radius: 4px; text-align: center; font-size: .68rem; font-weight: 750; }
+        .run-log-level-info { background: #e9eef5; color: #35445a; }
+        .run-log-level-warning, .run-log-level-warn { background: #fff2cc; color: #6b4d00; }
+        .run-log-level-error, .run-log-level-critical, .run-log-level-fatal { background: #fbd8dc; color: #8b1e2d; }
+        .run-log-empty { padding: 48px 20px; color: var(--archive-text-muted); text-align: center; }
+        @media (max-width: 900px) {
+            .run-log-dialog { height: calc(100dvh - 20px); }
+            .run-log-toolbar { grid-template-columns: 1fr 1fr; }
+            .run-log-toolbar .run-log-search { grid-column: 1 / -1; }
+            .run-log-body { grid-template-columns: minmax(0, 1fr); }
+            .run-log-detail { position: absolute; inset: 74px 10px 10px; border: 1px solid var(--archive-border); border-radius: 8px; box-shadow: var(--archive-shadow); }
+            .run-log-hide-mobile { display: none; }
+        }
         .labplot-dialog { width: min(680px,100%); }
         .labplot-metric-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px 18px; padding: 12px; border: 1px solid var(--archive-border); border-radius: 7px; background: var(--archive-surface-subtle); }
         .labplot-summary { padding: 10px 12px; border-left: 3px solid var(--archive-accent); background: var(--archive-accent-soft); color: #084298; font-size: .78rem; }
@@ -993,6 +1046,10 @@
                             <button class="btn btn-outline-primary btn-sm w-100 mt-2 fw-bold" @click="copyLoadedRunShareLink"
                                 :disabled="!loadedRunRef">
                                 <i class="bi bi-link-45deg me-1"></i>Share Run Link
+                            </button>
+                            <button class="btn btn-dark btn-sm w-100 mt-2 fw-bold" @click="openRunLogViewer"
+                                :disabled="!loadedRunRef || (!syncManifest && !loadedRunEntry?.has_run_log)">
+                                <i class="bi bi-list-check me-1"></i>Open Log Viewer
                             </button>
                             <div v-if="shareLinkMessage" class="small mt-1"
                                 :class="shareLinkError ? 'text-danger' : 'text-success'">{{ shareLinkMessage }}</div>
@@ -2650,6 +2707,89 @@
             </div>
         </div>
 
+        <div v-if="runLogViewer.open" class="collection-dialog-backdrop" @click.self="closeRunLogViewer">
+            <section class="run-log-dialog" role="dialog" aria-modal="true" aria-labelledby="run-log-viewer-title">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span id="run-log-viewer-title"><i class="bi bi-list-check me-2"></i>Run Log Timeline</span>
+                    <div class="d-flex align-items-center gap-2">
+                        <span class="small text-muted">{{ filteredRunLogEvents.length }} / {{ runLogViewer.events.length }} events</span>
+                        <button class="btn btn-sm btn-light" aria-label="Close run log viewer" @click="closeRunLogViewer"><i class="bi bi-x-lg"></i></button>
+                    </div>
+                </div>
+                <div class="run-log-summary" :class="{'has-anomaly': runLogViewer.anomalyCount > 0}">
+                    <div v-if="runLogViewer.loading" class="placeholder-glow" aria-live="polite">
+                        <span class="placeholder col-7"></span>
+                    </div>
+                    <template v-else-if="runLogViewer.error">
+                        <div class="run-log-summary-title text-danger">{{ runLogViewer.error }}</div>
+                    </template>
+                    <template v-else>
+                        <div class="run-log-summary-title">
+                            <i class="bi me-2" :class="runLogViewer.anomalyCount ? 'bi-exclamation-triangle-fill text-danger' : 'bi-check-circle-fill text-success'"></i>
+                            {{ runLogViewer.summary?.text || 'No explicit failure was recorded.' }}
+                        </div>
+                        <div class="run-log-summary-meta">
+                            {{ runLogViewer.summary?.timestamp ? formatRunLogTimestamp(runLogViewer.summary.timestamp, true) : '' }}
+                            <span v-if="runLogViewer.summary?.source_node"> | {{ runLogViewer.summary.source_node }}</span>
+                            <span v-if="runLogViewer.summary?.event"> | {{ runLogViewer.summary.event }}</span>
+                            <span> | {{ runLogViewer.anomalyCount }} flagged events</span>
+                        </div>
+                    </template>
+                </div>
+                <div class="run-log-toolbar">
+                    <input class="form-control form-control-sm run-log-search" v-model.trim="runLogViewer.search" aria-label="Search run log" placeholder="Search message, event, reason or parameter">
+                    <select class="form-select form-select-sm" v-model="runLogViewer.node" aria-label="Filter by node">
+                        <option value="">All nodes</option><option v-for="node in runLogViewer.nodes" :key="node" :value="node">{{ node }}</option>
+                    </select>
+                    <select class="form-select form-select-sm" v-model="runLogViewer.level" aria-label="Filter by level">
+                        <option value="">All levels</option><option v-for="level in runLogViewer.levels" :key="level" :value="level">{{ level }}</option>
+                    </select>
+                    <select class="form-select form-select-sm" v-model="runLogViewer.event" aria-label="Filter by event">
+                        <option value="">All events</option><option v-for="event in runLogViewer.eventNames" :key="event" :value="event">{{ event }}</option>
+                    </select>
+                    <div class="btn-group btn-group-sm" role="group" aria-label="Log focus controls">
+                        <button class="btn" :class="runLogViewer.anomaliesOnly ? 'btn-danger' : 'btn-outline-danger'" @click="toggleRunLogAnomalies">Only issues</button>
+                        <button class="btn btn-outline-secondary" @click="resetRunLogFilters" title="Clear filters"><i class="bi bi-arrow-counterclockwise"></i></button>
+                    </div>
+                </div>
+                <div class="run-log-body" v-if="!runLogViewer.loading && !runLogViewer.error">
+                    <div class="run-log-list" ref="runLogList" tabindex="0">
+                        <table class="run-log-table">
+                            <thead><tr><th>Time</th><th>Node</th><th>Level</th><th>Event</th><th>Step</th><th>Message</th></tr></thead>
+                            <tbody>
+                                <tr v-for="item in filteredRunLogEvents" :key="item._key" class="run-log-row"
+                                    :class="{'is-anomaly': item.is_anomaly, 'is-selected': runLogViewer.selected?._key === item._key}"
+                                    :data-log-key="item._key" @click="selectRunLogEvent(item)">
+                                    <td class="run-log-time">{{ formatRunLogTimestamp(item.timestamp) }}</td>
+                                    <td>{{ item.source_node }}</td>
+                                    <td><span class="run-log-level" :class="`run-log-level-${String(item.level || 'INFO').toLowerCase()}`">{{ item.level || 'INFO' }}</span></td>
+                                    <td class="run-log-event">{{ item.event }}</td>
+                                    <td>{{ item.display_step ?? '' }}</td>
+                                    <td class="run-log-message">{{ runLogEventSummary(item) }}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        <div v-if="!filteredRunLogEvents.length" class="run-log-empty">No events match the current filters.</div>
+                    </div>
+                    <aside v-if="runLogViewer.selected" class="run-log-detail">
+                        <div class="d-flex justify-content-between align-items-start gap-2 mb-3">
+                            <strong>{{ runLogViewer.selected.event }}</strong>
+                            <button class="btn btn-sm btn-light d-lg-none" aria-label="Close event details" @click="runLogViewer.selected = null"><i class="bi bi-x-lg"></i></button>
+                        </div>
+                        <div class="run-log-detail-grid">
+                            <template v-for="field in runLogDetailFields(runLogViewer.selected)" :key="field.label">
+                                <div class="run-log-detail-label">{{ field.label }}</div><div class="run-log-detail-value">{{ field.value }}</div>
+                            </template>
+                        </div>
+                        <div class="run-log-context">
+                            <strong>Technical details</strong>
+                            <pre>{{ runLogTechnicalDetails(runLogViewer.selected) }}</pre>
+                        </div>
+                    </aside>
+                </div>
+            </section>
+        </div>
+
         <div v-if="labPlotExport.open" class="collection-dialog-backdrop" @click.self="closeLabPlotExport">
             <section class="collection-dialog labplot-dialog" role="dialog" aria-modal="true" aria-labelledby="labplot-export-title">
                 <div class="card-header d-flex justify-content-between align-items-center">
@@ -2812,6 +2952,7 @@
                     collectionBatchDialog: { action: '', folder_id: null, error: '' },
                     isLoading: false, isLoadingAllan: false, isLoadingWaveforms: false, isSaving: false,
                     loadedRunId: '', loadedRunEntry: null, loadedRunRef: null, isExportingSequence: false, isExportingRunLog: false, errorMsg: '', dataCount: 0, selectedPointKey: '', selectedPointKeys: [], selectedPointLabel: '', selectedCount: 0,
+                    runLogViewer: { open: false, loading: false, error: '', events: [], selected: null, summary: null, anomalyCount: 0, focusIndex: -1, nodes: [], levels: [], eventNames: [], search: '', node: '', level: '', event: '', anomaliesOnly: false },
                     shareLinkMessage: '', shareLinkError: false,
                     labPlotExport: { open: false, metrics: [], source: 'fit', includeFits: true, includeDifferential: true, busy: false, error: '' },
                     currentWaveforms: [],
@@ -2944,6 +3085,18 @@
             computed: {
                 latestArchiveAudit() {
                     return this.archiveAuditReports.length ? this.archiveAuditReports[0] : null;
+                },
+                filteredRunLogEvents() {
+                    const viewer = this.runLogViewer;
+                    const search = String(viewer.search || '').toLowerCase();
+                    return (viewer.events || []).filter(item => {
+                        if (viewer.anomaliesOnly && !item.is_anomaly) return false;
+                        if (viewer.node && item.source_node !== viewer.node) return false;
+                        if (viewer.level && String(item.level || '').toUpperCase() !== viewer.level) return false;
+                        if (viewer.event && item.event !== viewer.event) return false;
+                        if (!search) return true;
+                        return JSON.stringify(item).toLowerCase().includes(search);
+                    });
                 }
             },
             watch: {
@@ -5381,6 +5534,101 @@
                     } finally {
                         this.isExportingRunLog = false;
                     }
+                },
+                async openRunLogViewer() {
+                    const ref = this.loadedRunRef;
+                    if (!ref?.run_id) return;
+                    this.runLogViewer = {
+                        open: true, loading: true, error: '', events: [], selected: null, summary: null,
+                        anomalyCount: 0, focusIndex: -1, nodes: [], levels: [], eventNames: [],
+                        search: '', node: '', level: '', event: '', anomaliesOnly: false,
+                    };
+                    try {
+                        const query = new URLSearchParams();
+                        if (this.syncManifest) query.set('merged', 'true');
+                        else if (this.loadedSyncNode) query.set('node_id', this.loadedSyncNode);
+                        const suffix = query.toString() ? `?${query.toString()}` : '';
+                        const response = await axios.get(`/archive/run-log/${ref.year}/${ref.month}/${ref.day}/${ref.run_id}/view${suffix}`);
+                        const payload = response.data || {};
+                        const events = (Array.isArray(payload.events) ? payload.events : []).map((item, index) => ({
+                            ...item,
+                            _index: index,
+                            _key: `${item.source_node || 'master'}:${item.source_line || index}:${item.timestamp_unix_ms || 0}`,
+                        }));
+                        const focusIndex = Number.isInteger(payload.focus_index) ? payload.focus_index : Math.max(events.length - 1, 0);
+                        this.runLogViewer.events = events;
+                        this.runLogViewer.summary = payload.summary || null;
+                        this.runLogViewer.anomalyCount = Number(payload.anomaly_count || 0);
+                        this.runLogViewer.focusIndex = focusIndex;
+                        this.runLogViewer.nodes = Array.isArray(payload.nodes) ? payload.nodes : [];
+                        this.runLogViewer.levels = Array.isArray(payload.levels) ? payload.levels : [];
+                        this.runLogViewer.eventNames = Array.isArray(payload.event_names) ? payload.event_names : [];
+                        this.runLogViewer.selected = events[focusIndex] || events[events.length - 1] || null;
+                        this.runLogViewer.loading = false;
+                        await this.$nextTick();
+                        this.scrollToRunLogEvent(this.runLogViewer.selected);
+                    } catch (error) {
+                        this.runLogViewer.loading = false;
+                        this.runLogViewer.error = error.response?.data?.detail || error.message || 'Unable to load this run log.';
+                    }
+                },
+                closeRunLogViewer() {
+                    this.runLogViewer.open = false;
+                    this.runLogViewer.selected = null;
+                },
+                resetRunLogFilters() {
+                    Object.assign(this.runLogViewer, { search: '', node: '', level: '', event: '', anomaliesOnly: false });
+                    this.$nextTick(() => this.scrollToRunLogEvent(this.runLogViewer.selected));
+                },
+                toggleRunLogAnomalies() {
+                    this.runLogViewer.anomaliesOnly = !this.runLogViewer.anomaliesOnly;
+                    if (this.runLogViewer.anomaliesOnly) {
+                        const selected = this.runLogViewer.selected;
+                        if (!selected?.is_anomaly) {
+                            this.runLogViewer.selected = this.runLogViewer.events.find(item => item.is_anomaly) || null;
+                        }
+                    }
+                    this.$nextTick(() => this.scrollToRunLogEvent(this.runLogViewer.selected));
+                },
+                selectRunLogEvent(item) {
+                    this.runLogViewer.selected = item;
+                },
+                scrollToRunLogEvent(item) {
+                    if (!item?._key || !this.$refs.runLogList) return;
+                    const escaped = window.CSS?.escape ? window.CSS.escape(item._key) : item._key.replace(/([:\.])/g, '\\$1');
+                    const row = this.$refs.runLogList.querySelector(`[data-log-key="${escaped}"]`);
+                    row?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+                },
+                formatRunLogTimestamp(value, includeDate = false) {
+                    if (!value) return '';
+                    const date = new Date(value);
+                    if (Number.isNaN(date.getTime())) return String(value);
+                    const options = includeDate
+                        ? { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 }
+                        : { hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 };
+                    return new Intl.DateTimeFormat(undefined, options).format(date);
+                },
+                runLogEventSummary(item) {
+                    return String(item?.status_message || item?.message || item?.reason || item?.pause_reason || '').trim();
+                },
+                runLogDetailFields(item) {
+                    if (!item) return [];
+                    const fields = [
+                        ['Time', this.formatRunLogTimestamp(item.timestamp, true)],
+                        ['Elapsed', `${(Number(item.elapsed_ms || 0) / 1000).toFixed(3)} s`],
+                        ['Node', item.source_node], ['Level', item.level], ['Event', item.event],
+                        ['Step', item.display_step], ['Run', item.run_id],
+                        ['Message', item.status_message || item.message],
+                        ['Reason', item.reason || item.pause_reason],
+                    ];
+                    return fields.filter(([, value]) => value !== undefined && value !== null && String(value) !== '')
+                        .map(([label, value]) => ({ label, value: typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value) }));
+                },
+                runLogTechnicalDetails(item) {
+                    if (!item) return '';
+                    const hidden = new Set(['_index', '_key', 'timestamp', 'timestamp_unix_ms', 'elapsed_ms', 'source_node', 'source_line', 'level', 'event', 'message', 'status_message', 'reason', 'pause_reason', 'display_step', 'run_id', 'is_anomaly']);
+                    const details = Object.fromEntries(Object.entries(item).filter(([key]) => !hidden.has(key)));
+                    return Object.keys(details).length ? JSON.stringify(details, null, 2) : 'No additional technical fields.';
                 },
                 getWaveformChannelSamples(waveform, channel) {
                     const timeAxis = Array.isArray(waveform?.time_axis) ? waveform.time_axis : [];
