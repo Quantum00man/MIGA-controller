@@ -61,6 +61,9 @@ class ScheduleManager:
             "scheduleId": None,
             "timingMode": "sequential", "sequentialGapSec": 0,
             "tasks": [], "statusMessage": "IDLE", "error": None, "errorAtMs": None,
+            "paused": False, "pauseReason": None, "decisionRequired": False,
+            "waitingForCurrentRun": False, "retryTaskId": None,
+            "continueAfterStoppedCurrent": False,
         }
 
     def _load(self) -> Dict[str, Any]:
@@ -300,23 +303,84 @@ class ScheduleManager:
         timing = str(payload.get("timingMode") or "sequential").lower()
         if timing not in {"sequential", "specific"}:
             raise ValueError("Invalid timing mode")
+        append_mode = str(payload.get("appendMode") or "next_batch").strip().lower()
+        if append_mode not in {"next_batch", "append"}:
+            raise ValueError("Invalid schedule append mode")
+        start_after_current = bool(payload.get("startAfterCurrentRun"))
         with self._lock:
             if self._state.get("active"):
-                raise ValueError("A scheduled queue is already active")
-            if self.manager.get_active_mode():
-                raise ValueError("Hardware is currently busy")
-            if self.sync_manager is not None and self.sync_manager.status().get("active"):
-                raise ValueError("A Sync run is currently active")
+                existing_ids = {str(task.get("id")) for task in self._state.get("tasks", [])}
+                additions = [task for task in normalized if str(task.get("id")) not in existing_ids]
+                batch_id = uuid4().hex if append_mode == "next_batch" else self._state.get("scheduleId")
+                for task in additions:
+                    task["batchId"] = batch_id
+                self._state["tasks"].extend(additions)
+                self._save_locked()
+                self._log_event("schedule_tasks_appended", task_count=len(additions))
+                self._wake.set()
+                return self.get_status()
+            busy = bool(self.manager.get_active_mode()) or bool(
+                self.sync_manager is not None and self.sync_manager.status().get("active")
+            )
+            if busy and not start_after_current:
+                raise ValueError("Hardware is currently busy; arm the queue to start after the current run")
             self._state = self._default_state()
             self._state.update({
                 "active": True, "tasks": normalized, "timingMode": timing,
                 "sequentialGapSec": max(0.0, float(payload.get("sequentialGapSec") or 0)),
                 "scheduleStartedAtMs": int(time.time() * 1000), "scheduleId": uuid4().hex,
-                "statusMessage": "SCHEDULE READY",
+                "waitingForCurrentRun": busy,
+                "statusMessage": "WAITING FOR CURRENT RUN" if busy else "SCHEDULE READY",
             })
             self._save_locked()
         self._log_event("schedule_started", task_count=len(normalized), timing_mode=timing,
                         sequential_gap_sec=self._state.get("sequentialGapSec"))
+        self._wake.set()
+        return self.get_status()
+
+    def pause(self, reason: str = "Paused by user") -> Dict[str, Any]:
+        with self._lock:
+            if not self._state.get("active"):
+                raise ValueError("No scheduled queue is active")
+            self._state.update(paused=True, pauseReason=str(reason), decisionRequired=True,
+                               statusMessage="PAUSED")
+            self._save_locked()
+        self._log_event("schedule_paused", detail=str(reason))
+        self._wake.set()
+        return self.get_status()
+
+    def resume(self) -> Dict[str, Any]:
+        with self._lock:
+            if not self._state.get("active"):
+                raise ValueError("No scheduled queue is active")
+            self._state.update(paused=False, pauseReason=None, decisionRequired=False,
+                               error=None, statusMessage="SCHEDULE READY")
+            self._save_locked()
+        self._log_event("schedule_resumed")
+        self._wake.set()
+        return self.get_status()
+
+    def continue_after_current_stop(self) -> Dict[str, Any]:
+        with self._lock:
+            if not self._state.get("active") or not self._state.get("waitingForCurrentRun"):
+                raise ValueError("No armed queue is waiting for the current run")
+            self._state["continueAfterStoppedCurrent"] = True
+            self._save_locked()
+        self._log_event("current_stop_continue_confirmed")
+        return self.get_status()
+
+    def skip_failed_task(self) -> Dict[str, Any]:
+        with self._lock:
+            task_id = self._state.get("retryTaskId") or self._state.get("activeTaskId")
+            if not self._state.get("active") or not task_id:
+                raise ValueError("No failed scheduled task is available to skip")
+            completed = set(self._state.get("completedTaskIds") or [])
+            completed.add(task_id)
+            self._state.update(completedTaskIds=list(completed), retryTaskId=None,
+                               paused=False, pauseReason=None, decisionRequired=False,
+                               error=None, statusMessage="SCHEDULE READY")
+            self._save_locked()
+        self._log_event("task_skipped", detail=f"Skipped task {task_id}")
         self._wake.set()
         return self.get_status()
 
@@ -346,6 +410,56 @@ class ScheduleManager:
     def _should_stop(self) -> bool:
         with self._lock:
             return bool(self._state.get("stopRequested"))
+
+    def _wait_while_paused(self) -> bool:
+        while True:
+            with self._lock:
+                paused = bool(self._state.get("paused"))
+                stopped = bool(self._state.get("stopRequested"))
+            if stopped:
+                return False
+            if not paused:
+                return True
+            self._wake.wait(1.0)
+            self._wake.clear()
+
+    def _hardware_busy(self) -> bool:
+        return bool(self.manager.get_active_mode()) or bool(
+            self.sync_manager is not None and self.sync_manager.status().get("active")
+        )
+
+    def _wait_for_current_run(self) -> bool:
+        announced = False
+        while self._hardware_busy():
+            if self._should_stop() or not self._wait_while_paused():
+                return False
+            if not announced:
+                self._set(waitingForCurrentRun=True, waiting=True,
+                          statusMessage="WAITING FOR CURRENT RUN")
+                announced = True
+            self._wake.wait(0.5)
+            self._wake.clear()
+        if announced:
+            sync_status = self.sync_manager.status() if self.sync_manager is not None else {}
+            manager_error = str(getattr(self.manager, "_scan_finalize_error", "") or "").strip()
+            manager_message = str(getattr(getattr(self.manager, "status", None), "message", "") or "").strip()
+            sync_state = str(sync_status.get("status") or "").strip().lower()
+            with self._lock:
+                allow_stopped = bool(self._state.get("continueAfterStoppedCurrent"))
+            external_problem = manager_error or (
+                str(sync_status.get("message") or sync_state)
+                if sync_state == "error" or (sync_state == "stopped" and not allow_stopped) else ""
+            ) or (manager_message if manager_message.lower() == "stopped" and not allow_stopped else "")
+            if external_problem:
+                self._set(paused=True, decisionRequired=True, pauseReason=str(external_problem),
+                          waitingForCurrentRun=False, waiting=False,
+                          statusMessage="PAUSED AFTER CURRENT RUN")
+                self._log_event("schedule_paused", detail=str(external_problem))
+                if not self._wait_while_paused():
+                    return False
+        self._set(waitingForCurrentRun=False, waiting=False, continueAfterStoppedCurrent=False,
+                  statusMessage="SCHEDULE READY")
+        return not self._should_stop()
 
     def _wait_until(self, target_ms: int) -> bool:
         self._set(waiting=True, waitUntilMs=target_ms, statusMessage="WAITING")
@@ -414,6 +528,9 @@ class ScheduleManager:
                 if self._should_stop():
                     self.manager.stop_scan()
                 time.sleep(0.5)
+            finalize_error = str(getattr(self.manager, "_scan_finalize_error", "") or "").strip()
+            if finalize_error:
+                raise RuntimeError(finalize_error)
         finally:
             if temporary_path is not None:
                 temporary_path.unlink(missing_ok=True)
@@ -476,10 +593,14 @@ class ScheduleManager:
                 timing = self._state.get("timingMode")
                 gap_sec = float(self._state.get("sequentialGapSec") or 0)
             try:
+                if not self._wait_for_current_run():
+                    continue
                 for index, task in enumerate(tasks):
                     if task["id"] in completed:
                         continue
                     if self._should_stop():
+                        break
+                    if not self._wait_while_paused():
                         break
                     self._set(activeTaskIndex=index, activeTaskId=task["id"], currentTaskStep=0,
                               currentTaskTotalSteps=task.get("estimated_points", 0))
@@ -503,7 +624,18 @@ class ScheduleManager:
                             break
                     except Exception as exc:
                         self._log_event("task_failed", task=task, detail=str(exc), task_index=index + 1)
-                        raise
+                        self._set(paused=True, decisionRequired=True, retryTaskId=task["id"],
+                                  pauseReason=str(exc), statusMessage="PAUSED AFTER ERROR",
+                                  error=str(exc), errorAtMs=int(time.time() * 1000))
+                        if not self._wait_while_paused():
+                            break
+                        with self._lock:
+                            skipped = task["id"] in set(self._state.get("completedTaskIds") or [])
+                        if skipped:
+                            completed.add(task["id"])
+                            continue
+                        # Resume without skipping means retry this task on the next scheduler pass.
+                        break
                     if self._should_stop():
                         self._log_event("task_stopped", task=task, detail="Schedule stop requested", task_index=index + 1)
                         break
@@ -513,9 +645,15 @@ class ScheduleManager:
                 if self._should_stop():
                     self._set(active=False, waiting=False, waitUntilMs=None, statusMessage="STOPPED")
                     self._log_event("schedule_stopped", detail="Schedule stopped before all tasks completed")
-                else:
-                    self._set(active=False, waiting=False, waitUntilMs=None, statusMessage="IDLE")
-                    self._log_event("schedule_completed", completed_task_count=len(completed), task_count=len(tasks))
+                elif not self._state.get("paused"):
+                    with self._lock:
+                        current_task_count = len(self._state.get("tasks") or [])
+                    if len(completed) >= current_task_count:
+                        self._set(active=False, waiting=False, waitUntilMs=None, statusMessage="IDLE")
+                        self._log_event("schedule_completed", completed_task_count=len(completed), task_count=current_task_count)
+                    else:
+                        self._set(statusMessage="SCHEDULE READY")
+                        self._wake.set()
             except Exception as exc:
                 self._set(
                     active=False,

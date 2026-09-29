@@ -15,12 +15,14 @@ class FakeExperimentManager:
         self.started = []
         self.stopped = False
         self.settings = {"sync_slaves": []}
+        self.active_mode = None
+        self._scan_finalize_error = None
 
     def get_settings(self):
         return self.settings
 
     def get_active_mode(self):
-        return None
+        return self.active_mode
 
     def start_scan(self, config):
         self.started.append(config)
@@ -308,3 +310,76 @@ def test_task_start_retries_three_times_before_the_fourth_attempt_succeeds():
     assert len([event for event, _kwargs in events if event == "task_start_failed"]) == 3
     assert len([event for event, _kwargs in events if event == "task_start_retry"]) == 3
     assert events[-1][1]["retry_delay_s"] == 5
+
+
+def test_busy_hardware_can_arm_queue_for_after_current_run():
+    scheduler = make_scheduler()
+    scheduler.manager.active_mode = "scan"
+
+    status = scheduler.start({
+        "timingMode": "sequential",
+        "startAfterCurrentRun": True,
+        "tasks": [sync_task()],
+    })
+
+    assert status["active"] is True
+    assert status["waitingForCurrentRun"] is True
+    assert status["statusMessage"] == "WAITING FOR CURRENT RUN"
+
+
+def test_busy_hardware_requires_explicit_after_current_arm():
+    scheduler = make_scheduler()
+    scheduler.manager.active_mode = "scan"
+
+    try:
+        scheduler.start({"timingMode": "sequential", "tasks": [sync_task()]})
+    except ValueError as exc:
+        assert "start after the current run" in str(exc)
+    else:
+        raise AssertionError("busy hardware must not accept an unarmed queue")
+
+
+def test_active_queue_accepts_mixed_mode_next_batch():
+    scheduler = make_scheduler()
+    scheduler.start({"timingMode": "sequential", "tasks": [sync_task()]})
+    regular = sync_task()
+    regular.update(id="scan_2", name="Regular scan", execution_mode="scan")
+    regular.pop("sync")
+
+    status = scheduler.start({
+        "timingMode": "sequential",
+        "appendMode": "next_batch",
+        "tasks": [regular],
+    })
+
+    assert [task["execution_mode"] for task in scheduler._state["tasks"]] == ["sync", "scan"]
+    assert status["tasks"][1]["batchId"]
+
+
+def test_pause_resume_and_skip_are_persistent_queue_decisions():
+    scheduler = make_scheduler()
+    scheduler.start({"timingMode": "sequential", "tasks": [sync_task()]})
+    paused = scheduler.pause("Current run stopped")
+    assert paused["paused"] is True
+    assert paused["decisionRequired"] is True
+
+    resumed = scheduler.resume()
+    assert resumed["paused"] is False
+    scheduler._state.update(activeTaskId="sync_1", retryTaskId="sync_1", paused=True)
+    skipped = scheduler.skip_failed_task()
+    assert "sync_1" in skipped["completedTaskIds"]
+    assert skipped["paused"] is False
+
+
+def test_user_can_confirm_queue_continues_after_stopping_current_run():
+    scheduler = make_scheduler()
+    scheduler.manager.active_mode = "scan"
+    scheduler.start({
+        "timingMode": "sequential",
+        "startAfterCurrentRun": True,
+        "tasks": [sync_task()],
+    })
+
+    status = scheduler.continue_after_current_stop()
+
+    assert status["continueAfterStoppedCurrent"] is True

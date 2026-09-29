@@ -700,6 +700,39 @@ async def stop_schedule():
     return ExperimentResponse(status="success", message="Schedule stop requested", data=schedule_manager.stop())
 
 
+@router.post("/schedule/pause", response_model=ExperimentResponse)
+async def pause_schedule():
+    try:
+        return ExperimentResponse(status="success", message="Schedule paused", data=schedule_manager.pause())
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.post("/schedule/resume", response_model=ExperimentResponse)
+async def resume_schedule():
+    try:
+        return ExperimentResponse(status="success", message="Schedule resumed", data=schedule_manager.resume())
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.post("/schedule/continue-after-current-stop", response_model=ExperimentResponse)
+async def continue_schedule_after_current_stop():
+    try:
+        data = schedule_manager.continue_after_current_stop()
+        return ExperimentResponse(status="success", message="Queue will continue after the current stop", data=data)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.post("/schedule/skip", response_model=ExperimentResponse)
+async def skip_schedule_task():
+    try:
+        return ExperimentResponse(status="success", message="Failed task skipped", data=schedule_manager.skip_failed_task())
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
 @router.get("/schedule/status", response_model=ExperimentResponse)
 async def get_schedule_status():
     return ExperimentResponse(status="success", message="Schedule status loaded", data=schedule_manager.get_status())

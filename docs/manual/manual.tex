@@ -481,6 +481,15 @@ accepted at startup, the scheduler waits \SI{5}{\second} and retries up to three
 after the fourth failed start attempt it stops the queue. This retry policy applies only
 before acquisition begins: an error from a running task stops the queue immediately.
 
+The planner remains available while an ordinary or synchronized experiment is running.
+Its sequence files are retained as private task snapshots and never overwrite the active
+template. A queue may be armed to start after the current run; a scheduled timestamp that
+passes while hardware is occupied is delayed until the current run releases the run slot.
+Ordinary and SYNC tasks may be mixed, although SYNC tasks can only be prepared by a Master.
+An error, an externally stopped run or an unavailable SYNC node pauses the queue for an
+explicit retry, skip or resume decision. New tasks may be appended to the active queue or
+grouped as the next batch.
+
 \chapter{Signal processing and physical quantities}\label{ch:signal}
 
 \section{Pre-processing and validation}

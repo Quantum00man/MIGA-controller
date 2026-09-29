@@ -385,6 +385,8 @@ class BraggPowerCalibration(BaseModel):
 class ScheduleRequest(BaseModel):
     timingMode: str = Field("sequential")
     sequentialGapSec: float = Field(0, ge=0)
+    startAfterCurrentRun: bool = Field(False)
+    appendMode: str = Field("next_batch")
     tasks: List[Dict[str, Any]] = Field(default_factory=list)
 
 

@@ -713,13 +713,13 @@
                     <div class="small text-muted fw-bold" style="font-size: 0.7em;">RUN MODE</div>
                     <div class="btn-group btn-group-sm w-100 mt-2" role="group">
                         <input type="radio" class="btn-check" name="runMode" id="runModeLive" value="live"
-                            v-model="runMode" :disabled="isRunning || isScheduleActive()">
+                            v-model="runMode" :disabled="isScheduleActive()">
                         <label class="btn btn-outline-secondary" for="runModeLive">Live</label>
                         <input type="radio" class="btn-check" name="runMode" id="runModeScheduled" value="scheduled"
-                            v-model="runMode" :disabled="isRunning || isScheduleActive() || ['ac_stark', 'ramsey_interferometer'].includes(config.mode)">
+                            v-model="runMode" :disabled="isScheduleActive() || ['ac_stark', 'ramsey_interferometer'].includes(config.mode)">
                         <label class="btn btn-outline-secondary" for="runModeScheduled">Scheduled</label>
                         <input type="radio" class="btn-check" name="runMode" id="runModeSync" value="sync"
-                            v-model="runMode" :disabled="isRunning || isScheduleActive() || ['lock_in', 'ac_stark', 'ramsey_interferometer'].includes(config.mode)">
+                            v-model="runMode" :disabled="isScheduleActive() || ['lock_in', 'ac_stark', 'ramsey_interferometer'].includes(config.mode)">
                         <label class="btn btn-outline-primary" for="runModeSync">SYNC</label>
                     </div>
                     <div class="form-text mt-2" style="font-size: 0.72rem;">
@@ -737,7 +737,7 @@
                 <div class="input-group input-group-sm">
                     <span class="input-group-text bg-white text-muted"><i class="bi bi-file-code"></i></span>
                     <input type="text" class="form-control bg-white" readonly :value="currentSequenceName">
-                    <button class="btn btn-primary" @click="openSequenceFileDialog" :disabled="isRunning || isScheduleActive()"
+                    <button class="btn btn-primary" @click="openSequenceFileDialog"
                         title="Load .mot file"><i class="bi bi-folder2-open"></i></button>
                     <button class="btn btn-outline-secondary" @click="reloadSequenceFile"
                         :disabled="isRunning || isScheduleActive() || isReloadingSequence || !canReloadSequenceFile()"
@@ -815,7 +815,7 @@
                     </div>
                     <div class="form-check form-switch mt-3 pt-2 border-top">
                         <input class="form-check-input" type="checkbox" role="switch" id="syncScheduleEnabled"
-                            v-model="syncScheduleEnabled" :disabled="isRunning || isScheduleActive()">
+                            v-model="syncScheduleEnabled" :disabled="isScheduleActive()">
                         <label class="form-check-label small fw-bold" for="syncScheduleEnabled">Use scheduled queue</label>
                         <div class="form-text">Queue SYNC runs with separate Master settings and Slave sequence snapshots.</div>
                     </div>
@@ -916,6 +916,9 @@
 <div v-if="isScheduledMode()" class="card p-3 mb-3">
     <div class="small text-muted fw-bold mb-2">{{ isSyncMode() ? 'SYNC SCHEDULE PLANNER' : 'SCHEDULE PLANNER' }}</div>
     <div class="row g-2">
+        <div class="col-12" v-if="isRunning">
+            <div class="alert alert-info py-2 small mb-1">Planning the next batch. Sequence files stay local and cannot change the experiment currently running.</div>
+        </div>
         <div class="col-6">
             <label class="form-label small text-muted mb-1">Shot Time (s, auto-learned)</label>
             <input type="number" class="form-control form-control-sm" v-model.number="scheduleSettings.singlePointDurationSec"
@@ -944,8 +947,8 @@
     </div>
     <div class="row g-2 mt-2">
         <div class="col-6">
-            <button class="btn btn-outline-primary btn-sm w-100 fw-bold" @click="addScheduledTaskFromCurrentSetup"
-                :disabled="isScheduleActive()"><i class="bi bi-plus-circle me-1"></i>Add Current Setup</button>
+            <button class="btn btn-outline-primary btn-sm w-100 fw-bold" @click="addScheduledTaskFromCurrentSetup"><i
+                class="bi bi-plus-circle me-1"></i>Add Current Setup</button>
         </div>
         <div class="col-6">
             <button class="btn btn-outline-secondary btn-sm w-100 fw-bold" @click="updateSelectedScheduledTask"
@@ -1556,6 +1559,26 @@
     <div class="small text-muted mt-2" v-if="scheduledTasks.length">
         {{ scheduledTasks.length }} tasks | {{ getScheduledTaskCountTotal() }} shots | {{ formatDuration(getScheduledMeasurementDurationSeconds()) }} planned measurement time
     </div>
+    <div class="form-check form-switch mt-3" v-if="isRunning">
+        <input class="form-check-input" type="checkbox" id="startAfterCurrentRun" v-model="scheduleSettings.startAfterCurrentRun">
+        <label class="form-check-label small fw-bold" for="startAfterCurrentRun">Start automatically after the current run</label>
+        <div class="form-text">Specific-time tasks that become overdue wait for the current experiment, then run in queue order.</div>
+    </div>
+    <div class="mt-2" v-if="isScheduleActive()">
+        <label class="form-label small text-muted mb-1">Add tasks to</label>
+        <select class="form-select form-select-sm" v-model="scheduleSettings.appendMode">
+            <option value="next_batch">A new batch after this queue</option>
+            <option value="append">The end of the active queue</option>
+        </select>
+    </div>
+    <div class="alert alert-warning py-2 mt-2 mb-0 small" v-if="scheduleRuntime.decisionRequired">
+        <div class="fw-bold">{{ scheduleRuntime.pauseReason || 'The queue needs confirmation.' }}</div>
+        <div class="d-flex gap-2 mt-2 flex-wrap">
+            <button type="button" class="btn btn-warning btn-sm" @click="resumeScheduledRun">Retry / Continue</button>
+            <button type="button" class="btn btn-outline-warning btn-sm" @click="skipFailedScheduledTask" v-if="scheduleRuntime.retryTaskId">Skip task</button>
+            <span class="text-muted align-self-center">Otherwise the queue remains paused.</span>
+        </div>
+    </div>
 </div>
 
                 <span class="section-label">Execution Control</span>
@@ -2077,7 +2100,7 @@
                     syncReplayTimer: null,
                     syncStatusPollTimer: null,
                     syncScheduleEnabled: false,
-                    scheduleSettings: { singlePointDurationSec: 1.615, timingMode: 'sequential', sequentialGapSec: 60 },
+                    scheduleSettings: { singlePointDurationSec: 1.615, timingMode: 'sequential', sequentialGapSec: 60, startAfterCurrentRun: true, appendMode: 'next_batch' },
                     shotTiming: { runId: '', totalDurationSec: 0, sampleCount: 0, lastStep: 0, currentAverageSec: null, active: false },
                     scheduledTasks: [],
                     preparedQueueImportMessage: '',
@@ -2094,7 +2117,9 @@
                         currentTaskStartedAtMs: null,
                         waitUntilMs: null,
                         scheduleStartedAtMs: null,
-                        completedTaskIds: []
+                        completedTaskIds: [],
+                        paused: false, pauseReason: null, decisionRequired: false,
+                        waitingForCurrentRun: false, retryTaskId: null
                     },
                     schedulerClockMs: Date.now(),
                     archiveTree: {}, repeatYear: '', repeatMonth: '', repeatDay: '', repeatRun: '', archiveNavigationBusy: false, isPresetLoading: false, loadedPresetInfo: null, showRepeatLoader: false,
@@ -2588,6 +2613,11 @@
                         waitUntilMs: runtime?.waitUntilMs ?? null,
                         scheduleStartedAtMs: runtime?.scheduleStartedAtMs ?? null,
                         completedTaskIds: Array.isArray(runtime?.completedTaskIds) ? [...runtime.completedTaskIds] : [],
+                        paused: Boolean(runtime?.paused),
+                        pauseReason: runtime?.pauseReason ?? null,
+                        decisionRequired: Boolean(runtime?.decisionRequired),
+                        waitingForCurrentRun: Boolean(runtime?.waitingForCurrentRun),
+                        retryTaskId: runtime?.retryTaskId ?? null,
                     };
                 },
                 buildSharedIndexState() {
@@ -2624,6 +2654,11 @@
                             waitUntilMs: state.waitUntilMs ?? null,
                             scheduleStartedAtMs: state.scheduleStartedAtMs ?? null,
                             completedTaskIds: Array.isArray(state.completedTaskIds) ? state.completedTaskIds : [],
+                            paused: Boolean(state.paused),
+                            pauseReason: state.pauseReason ?? null,
+                            decisionRequired: Boolean(state.decisionRequired),
+                            waitingForCurrentRun: Boolean(state.waitingForCurrentRun),
+                            retryTaskId: state.retryTaskId ?? null,
                         };
                         const isTerminalScheduleStatus = ['STOPPED', 'ERROR'].includes(state.statusMessage);
                         const shouldApplyTerminalStatus = !this.isRunning && this.isScheduledMode() && isTerminalScheduleStatus;
@@ -2758,7 +2793,6 @@
                     return this.isExternalSequenceFile && Boolean(this.seqFileHandle || this.seqFile);
                 },
                 async openSequenceFileDialog() {
-                    if (this.isRunning || this.isScheduleActive()) return;
                     if (window.showOpenFilePicker) {
                         try {
                             const [handle] = await window.showOpenFilePicker({
@@ -2824,6 +2858,13 @@
                 },
                 async uploadSequenceFile() {
                     if (!this.seqFile) return true; // 如果没选文件，视为使用默认，返回成功
+
+                    if (this.isRunning || this.isScheduleActive()) {
+                        this.currentSequenceName = this.seqFile.name;
+                        this.config.sequence_name = this.seqFile.name;
+                        this.addLog(`Sequence staged locally for the next task: ${this.seqFile.name}.`);
+                        return true;
+                    }
 
                     const formData = new FormData();
                     formData.append("file", this.seqFile);
@@ -3366,7 +3407,9 @@ getDefaultScheduleRuntime() {
         currentTaskStartedAtMs: null,
         waitUntilMs: null,
         scheduleStartedAtMs: null,
-        completedTaskIds: []
+        completedTaskIds: [],
+        paused: false, pauseReason: null, decisionRequired: false,
+        waitingForCurrentRun: false, retryTaskId: null
     };
 },
 updateScheduledClock() {
@@ -3488,7 +3531,7 @@ isStartDisabled() {
         || !this.syncSlaves.length
         || this.syncSlaves.some(slave => !String(slave.sequence_content_base64 || slave.sequence_content || '').trim())
     );
-    return this.isRunning || this.isScheduleActive() || acStarkMissingXml || acStarkScheduled || syncInvalid || (this.isScheduledMode() && !this.scheduledTasks.length);
+    return (!this.isScheduledMode() && this.isRunning) || acStarkMissingXml || acStarkScheduled || syncInvalid || (this.isScheduledMode() && !this.scheduledTasks.length);
 },
 getVisibleTabs() {
     if (this.config.mode === 'ac_stark') return this.tabs.filter(tab => ['atoms', 'prob'].includes(tab.id));
@@ -4029,8 +4072,6 @@ async importPreparedQueueFromUrl() {
         const incoming = Array.isArray(payload.tasks) ? payload.tasks : [];
         if (!incoming.length) throw new Error('The prepared queue contains no tasks.');
         const executionMode = payload.execution_mode === 'sync' ? 'sync' : 'scan';
-        const incompatible = this.scheduledTasks.find(task => (task.execution_mode || 'scan') !== executionMode);
-        if (incompatible) throw new Error('Clear the existing incompatible queue before importing this batch.');
         const existingIds = new Set(this.scheduledTasks.map(task => String(task.id)));
         const newTasks = incoming
             .filter(task => task && !existingIds.has(String(task.id)))
@@ -4107,7 +4148,6 @@ captureCurrentSyncSetupForTask() {
     };
 },
 async addScheduledTaskFromCurrentSetup() {
-    if (this.isScheduleActive()) return;
     if (this.isTransferBurstTimeScan()) {
         this.addLog('Transfer function Burst time scan is not available in the scheduled queue.');
         return;
@@ -4121,10 +4161,6 @@ async addScheduledTaskFromCurrentSetup() {
         const sequenceInfo = await this.captureCurrentSequenceForTask();
         const syncSetup = this.captureCurrentSyncSetupForTask();
         const executionMode = syncSetup ? 'sync' : 'scan';
-        const incompatibleTask = this.scheduledTasks.find(task => (task.execution_mode || 'scan') !== executionMode);
-        if (incompatibleTask) {
-            throw new Error('Clear the existing queue before mixing regular and SYNC tasks.');
-        }
         const task = {
             id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
             name: this.buildScheduledTaskName(configSnapshot, sequenceInfo.sequence_file_name),
@@ -4135,6 +4171,7 @@ async addScheduledTaskFromCurrentSetup() {
             sequence_file_name: sequenceInfo.sequence_file_name,
             sequence_source: sequenceInfo.sequence_source,
             sequence_snapshot: sequenceInfo.sequence_snapshot,
+            temporary_sequence: true,
             scheduled_at: this.scheduleSettings.timingMode === 'specific' ? this.getDefaultScheduledTimeValue() : '',
             estimated_points: 0,
             estimated_duration_sec: 0,
@@ -4165,10 +4202,6 @@ async updateSelectedScheduledTask() {
         const sequenceInfo = await this.captureCurrentSequenceForTask();
         const syncSetup = this.captureCurrentSyncSetupForTask();
         const executionMode = syncSetup ? 'sync' : 'scan';
-        const incompatibleTask = this.scheduledTasks.find(item => item.id !== task.id && (item.execution_mode || 'scan') !== executionMode);
-        if (incompatibleTask) {
-            throw new Error('Clear the incompatible queue tasks before changing this task type.');
-        }
         task.config = configSnapshot;
         task.execution_mode = executionMode;
         task.sync = syncSetup;
@@ -4386,11 +4419,6 @@ ensureScheduledTasksValid() {
     const invalidTask = this.scheduledTasks.find((task) => task.validation_error || !task.estimated_points || typeof task.sequence_snapshot !== 'string');
     if (invalidTask) {
         throw new Error(`Task invalid: ${invalidTask.name}.`);
-    }
-    const expectedMode = this.isSyncMode() ? 'sync' : 'scan';
-    const incompatibleTask = this.scheduledTasks.find(task => (task.execution_mode || 'scan') !== expectedMode);
-    if (incompatibleTask) {
-        throw new Error(`Task ${incompatibleTask.name} does not match the current run mode.`);
     }
     if (this.scheduledTasks.some(task => this.isTransferBurstTimeScan(task.config?.mode))) {
         throw new Error('Transfer function Burst time scan is not available in the scheduled queue.');
@@ -6915,7 +6943,6 @@ finishScheduledRun(finalStatus = 'IDLE') {
             return false;
         },
         async startScheduledRun() {
-            if (this.isRunning || this.isScheduleActive()) return;
             try {
                 this.refreshScheduledTaskEstimates();
                 this.ensureScheduledTasksValid();
@@ -6934,6 +6961,8 @@ finishScheduledRun(finalStatus = 'IDLE') {
                 const res = await axios.post('/schedule/start', {
                     timingMode: this.scheduleSettings.timingMode,
                     sequentialGapSec: this.getSequentialGapSec(),
+                    startAfterCurrentRun: Boolean(this.isRunning && this.scheduleSettings.startAfterCurrentRun),
+                    appendMode: this.scheduleSettings.appendMode || 'next_batch',
                     tasks,
                 });
                 const state = res.data?.data || {};
@@ -6945,6 +6974,24 @@ finishScheduledRun(finalStatus = 'IDLE') {
                 this.addLog('Schedule accepted by server; this browser may now be closed.');
             } catch (error) {
                 this.addLog('Schedule start failed: ' + this.formatRequestError(error));
+            }
+        },
+        async resumeScheduledRun() {
+            try {
+                const res = await axios.post('/schedule/resume');
+                this.scheduleRuntime = { ...this.getDefaultScheduleRuntime(), ...(res.data?.data || {}) };
+                this.addLog('Scheduled queue resumed.');
+            } catch (error) {
+                this.addLog('Schedule resume failed: ' + this.formatRequestError(error));
+            }
+        },
+        async skipFailedScheduledTask() {
+            try {
+                const res = await axios.post('/schedule/skip');
+                this.scheduleRuntime = { ...this.getDefaultScheduleRuntime(), ...(res.data?.data || {}) };
+                this.addLog('Failed scheduled task skipped; queue resumed.');
+            } catch (error) {
+                this.addLog('Schedule skip failed: ' + this.formatRequestError(error));
             }
         },
         async runScheduledTaskQueue() {
@@ -6984,6 +7031,29 @@ finishScheduledRun(finalStatus = 'IDLE') {
                 this.addLog('Phase Noise batch stop requested; no later T scans will be created.');
             }
             if (this.isScheduleActive()) {
+                if (this.scheduleRuntime.waitingForCurrentRun && this.isRunning) {
+                    if (!window.confirm('Stop the current experiment? The armed next batch will not be discarded.')) return;
+                    const continueQueue = window.confirm('Start the next batch after the current experiment stops?\n\nOK: continue the queue\nCancel: save and pause the queue');
+                    if (!continueQueue) {
+                        try { await axios.post('/schedule/pause'); } catch (error) {
+                            this.addLog('Schedule pause failed: ' + this.formatRequestError(error));
+                            return;
+                        }
+                    } else {
+                        try { await axios.post('/schedule/continue-after-current-stop'); } catch (error) {
+                            this.addLog('Could not confirm queue continuation: ' + this.formatRequestError(error));
+                            return;
+                        }
+                    }
+                    try {
+                        if (this.syncRuntime?.active) await axios.post('/sync/stop');
+                        else await axios.post('/experiment/stop');
+                        this.statusMessage = continueQueue ? 'STOPPING · NEXT BATCH ARMED' : 'STOPPING · QUEUE PAUSED';
+                    } catch (error) {
+                        this.addLog('Current experiment stop failed: ' + this.formatRequestError(error));
+                    }
+                    return;
+                }
                 this.scheduleRuntime.stopRequested = true;
                 this.statusMessage = this.isRunning ? 'STOPPING' : 'STOPPED';
                 try {
