@@ -2089,7 +2089,7 @@
                                         <div class="col-sm-6 col-lg-3"><label class="form-label-small">I_ALPHA INTERPOLATION</label><select class="form-select form-select-sm" v-model="syncPhaseCalibrationOptimization.intfAlphaInterpolationMethod" @change="clearSyncPhaseCalibrationOptimization"><option value="weighted_smoothing_spline">Weighted smoothing spline</option><option value="linear">Linear</option><option value="nearest">Nearest / constant</option></select></div>
                                         <div class="col-sm-6 col-lg-2"><label class="form-label-small">OBJECTIVE</label><select class="form-select form-select-sm" v-model="syncPhaseCalibrationOptimization.objective"><option value="allan">Allan n=1</option><option value="std">Standard deviation</option><option value="combined">Combined</option></select></div>
                                         <div class="col-sm-6 col-lg-2" v-if="syncPhaseCalibrationOptimization.objective === 'combined'"><label class="form-label-small">ALLAN WEIGHT</label><input type="number" class="form-control form-control-sm" min="0" max="1" step="0.05" v-model.number="syncPhaseCalibrationOptimization.combinedAllanWeight"></div>
-                                        <div class="col-sm-6 col-lg-2"><label class="form-label-small">A/C BOUNDS (%)</label><input type="number" class="form-control form-control-sm" min="0.1" max="50" step="1" v-model.number="syncPhaseCalibrationOptimization.boundPercent"></div>
+                                        <div class="col-sm-6 col-lg-2"><label class="form-label-small">A/C BOUNDS (%)</label><input type="number" class="form-control form-control-sm" min="0.1" max="100" step="1" v-model.number="syncPhaseCalibrationOptimization.boundPercent"></div>
                                         <div class="col-sm-6 col-lg-2"><label class="form-label-small">FRINGE WEIGHT</label><input type="number" class="form-control form-control-sm" min="0" max="1000" step="0.1" v-model.number="syncPhaseCalibrationOptimization.fringeWeight"></div>
                                         <div class="col-sm-6 col-lg-2"><label class="form-label-small">PRIOR WEIGHT</label><input type="number" class="form-control form-control-sm" min="0" max="1000" step="0.01" v-model.number="syncPhaseCalibrationOptimization.priorWeight"></div>
                                         <div class="col-sm-6 col-lg-2"><button class="btn btn-primary btn-sm w-100 fw-bold" @click="runSyncPhaseCalibrationOptimization" :disabled="syncPhaseCalibrationOptimization.loading"><span v-if="syncPhaseCalibrationOptimization.loading" class="spinner-border spinner-border-sm me-1"></span>{{ syncPhaseCalibrationOptimization.loading ? 'Optimizing…' : 'Optimize A/C' }}</button></div>
@@ -7617,7 +7617,7 @@
                     if (this.syncPhaseSelectedNodes.length !== 2 || this.syncPhaseCalibrationOptimization.loading) return;
                     const state = this.syncPhaseCalibrationOptimization;
                     state.loading = true; state.error = ''; state.message = ''; state.result = null;
-                    const boundPercent = Math.max(0.1, Math.min(50, Number(state.boundPercent) || 10));
+                    const boundPercent = Math.max(0.1, Math.min(100, Number(state.boundPercent) || 10));
                     const allanWeight = Math.max(0, Math.min(1, Number(state.combinedAllanWeight) || 0));
                     state.boundPercent = boundPercent; state.combinedAllanWeight = allanWeight;
                     const transferFunction = this.isTransferFunctionArchive();

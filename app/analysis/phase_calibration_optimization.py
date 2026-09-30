@@ -153,9 +153,14 @@ def optimize_sync_phase_calibrations(
     bound_fraction = float(parameter_bound_fraction)
     initial = np.asarray([ref_a0, ref_c0, target_a0, target_c0], dtype=float)
     scales = np.asarray([ref_a0, ref_a0, target_a0, target_a0], dtype=float)
+    # Amplitude must remain strictly positive even when the UI allows a full
+    # 100% search range; a zero lower bound would make phase inversion divide
+    # by zero during the optimizer's boundary evaluations.
+    minimum_ref_amplitude = ref_a0 * 1e-9
+    minimum_target_amplitude = target_a0 * 1e-9
     lower = np.asarray([
-        ref_a0 * (1.0 - bound_fraction), ref_c0 - ref_a0 * bound_fraction,
-        target_a0 * (1.0 - bound_fraction), target_c0 - target_a0 * bound_fraction,
+        max(ref_a0 * (1.0 - bound_fraction), minimum_ref_amplitude), ref_c0 - ref_a0 * bound_fraction,
+        max(target_a0 * (1.0 - bound_fraction), minimum_target_amplitude), target_c0 - target_a0 * bound_fraction,
     ])
     upper = np.asarray([
         ref_a0 * (1.0 + bound_fraction), ref_c0 + ref_a0 * bound_fraction,

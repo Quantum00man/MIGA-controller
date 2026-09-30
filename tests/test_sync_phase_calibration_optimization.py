@@ -56,6 +56,8 @@ class SyncPhaseCalibrationOptimizationTests(unittest.TestCase):
         self.assertIn("transfer_frequency_hz: transferFunction", archive_html)
         self.assertIn("I_ALPHA INTERPOLATION", archive_html)
         self.assertIn("intf_alpha_interpolation_method: state.intfAlphaInterpolationMethod", archive_html)
+        self.assertIn('max="100"', archive_html)
+        self.assertIn("Math.min(100, Number(state.boundPercent)", archive_html)
         self.assertNotIn("Apply A/C to Archive", archive_html)
         self.assertIn("syncArchiveHasPhaseOverrides", archive_html)
 
@@ -97,6 +99,19 @@ class SyncPhaseCalibrationOptimizationTests(unittest.TestCase):
             optimize_sync_phase_calibrations(pairs, calibration(1, 0), calibration(1, 0), objective="rms")
         with self.assertRaisesRegex(ValueError, "At least 8"):
             optimize_sync_phase_calibrations(pairs, calibration(1, 0), calibration(1, 0))
+
+    def test_full_ac_bound_keeps_amplitudes_strictly_positive(self):
+        pairs = [
+            {"shot": index, "p0": 50.0, "reference_signal": 0.1 + math.cos(1.4 + 0.01 * index),
+             "target_signal": 0.2 + 1.2 * math.cos(1.45 + 0.01 * index)}
+            for index in range(16)
+        ]
+        result = optimize_sync_phase_calibrations(
+            pairs, calibration(1.0, 0.1), calibration(1.2, 0.2),
+            parameter_bound_fraction=1.0,
+        )
+        self.assertGreater(result["bounds"]["reference"]["A"][0], 0)
+        self.assertGreater(result["bounds"]["target"]["A"][0], 0)
 
     def test_archive_endpoint_uses_effective_node_calibrations_and_raw_signals(self):
         master_cal = calibration(1.0, 0.1, "master-cal")
