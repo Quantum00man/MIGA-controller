@@ -1012,6 +1012,14 @@ class ArchiveSyncPhaseCalibrationOptimizeRequest(BaseModel):
     transfer_frequency_hz: Optional[float] = Field(None)
     transfer_phase_deg: Optional[float] = Field(None)
     phase_noise_t2_us2: Optional[float] = Field(None, ge=0)
+    intf_alpha_interpolation_method: str = Field("linear")
+
+    @validator("intf_alpha_interpolation_method")
+    def validate_intf_alpha_interpolation_method(cls, value):
+        normalized = str(value or "").strip().lower()
+        if normalized not in {"linear", "weighted_smoothing_spline", "nearest"}:
+            raise ValueError("Unsupported I_alpha interpolation method")
+        return normalized
 
 
 class ArchiveSyncPhaseCalibrationSaveRequest(BaseModel):

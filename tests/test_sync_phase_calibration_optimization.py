@@ -54,6 +54,8 @@ class SyncPhaseCalibrationOptimizationTests(unittest.TestCase):
         self.assertIn("TTI FREQUENCY (HZ)", archive_html)
         self.assertIn("GENERATOR PHASE", archive_html)
         self.assertIn("transfer_frequency_hz: transferFunction", archive_html)
+        self.assertIn("I_ALPHA INTERPOLATION", archive_html)
+        self.assertIn("intf_alpha_interpolation_method: state.intfAlphaInterpolationMethod", archive_html)
         self.assertNotIn("Apply A/C to Archive", archive_html)
         self.assertIn("syncArchiveHasPhaseOverrides", archive_html)
 
@@ -126,6 +128,7 @@ class SyncPhaseCalibrationOptimizationTests(unittest.TestCase):
         self.assertEqual(response["source_fields"], {"reference": "intf_p1", "target": "intf_p1"})
         self.assertEqual(response["settings"]["objective"], "allan")
         self.assertEqual(response["settings"]["parameter_bound_fraction"], 0.1)
+        self.assertEqual(response["settings"]["intf_alpha_interpolation_method"], "linear")
 
     def test_archive_endpoint_filters_inclusive_actual_shot_indices(self):
         master_cal = calibration(1.0, 0.1, "master-cal")

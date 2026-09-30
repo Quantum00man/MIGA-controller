@@ -2677,15 +2677,15 @@ async def optimize_archive_sync_phase_calibrations(req: ArchiveSyncPhaseCalibrat
         # science rows before optimizing A/C.
         reanalyzed_rows: Dict[str, List[Dict[str, Any]]] = {}
         for selected_node_id in {req.reference_node_id, req.target_node_id}:
-            if selected_node_id == str(loaded.get("archive_phase_reference_node_id") or "master"):
-                node_loaded = loaded
-            else:
-                node_loaded = await run_in_threadpool(
-                    data_loader.load_run,
-                    req.year, req.month, req.day, req.run_id,
-                    selected_node_id,
-                    manager.get_active_bragg_phase_calibration(),
-                )
+            node_loaded = await run_in_threadpool(
+                data_loader.load_run,
+                req.year, req.month, req.day, req.run_id,
+                selected_node_id,
+                manager.get_active_bragg_phase_calibration(),
+                None, None, None,
+                None,
+                req.intf_alpha_interpolation_method,
+            )
             node_rows = node_loaded.get("archive_node_data") or node_loaded.get("data") or []
             reanalyzed_rows[selected_node_id] = [row for row in node_rows if isinstance(row, dict)]
 
@@ -2848,6 +2848,7 @@ async def optimize_archive_sync_phase_calibrations(req: ArchiveSyncPhaseCalibrat
             "transfer_frequency_hz": req.transfer_frequency_hz,
             "transfer_phase_deg": req.transfer_phase_deg,
             "phase_noise_t2_us2": req.phase_noise_t2_us2,
+            "intf_alpha_interpolation_method": req.intf_alpha_interpolation_method,
         }
         return result
     except FileNotFoundError as exc:
