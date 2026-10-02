@@ -2629,6 +2629,7 @@ class DataLoader:
         current_phase_calibration: Optional[Dict[str, Any]] = None,
         metric: Optional[str] = None,
         source: Optional[str] = None,
+        intf_alpha_selection: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         root_run_dir = self._get_run_dir(year, month, day, run_id)
         run_dir = self._resolve_archive_node_dir(root_run_dir, node_id)
@@ -2641,7 +2642,12 @@ class DataLoader:
             raise ValueError("Allan deviation is only available for non-random scans")
 
         normalized_mode = "recalculated" if str(display_mode or "saved").strip().lower() == "recalculated" else "saved"
-        all_points = self._load_allan_points(run_dir, config_data, normalized_mode, new_settings=new_settings)
+        # I_alpha-only analysis reuses archived atom results without waveform fits.
+        alpha_only = normalized_mode == "recalculated" and intf_alpha_selection is not None
+        all_points = self._load_allan_points(
+            run_dir, config_data, "saved" if alpha_only else normalized_mode,
+            new_settings=new_settings,
+        )
         if str(config_data.get("mode") or "").strip().lower() in {"transfer_function", "transfer_burst_time_scan"}:
             all_points = self._transfer_response_points(all_points)
         _phase_node_key, phase_context, _phase_contexts = self._archive_phase_reference_context(
@@ -2652,7 +2658,7 @@ class DataLoader:
         phase_calibration = config_data.get("_interferometer_phase_calibration_snapshot")
         if isinstance(phase_context.get("effective_calibration"), dict):
             phase_calibration = phase_context.get("effective_calibration")
-        elif normalized_mode == "recalculated":
+        elif normalized_mode == "recalculated" and not alpha_only:
             phase_calibration = (new_settings or {}).get("_interferometer_phase_calibration") or phase_calibration
         elif not has_phase_snapshot:
             phase_calibration = current_phase_calibration
@@ -2664,6 +2670,22 @@ class DataLoader:
             )
             if str(config_data.get("mode") or "").strip().lower() in {"transfer_function", "transfer_burst_time_scan"}:
                 all_points = self._rebase_converted_transfer_phases(all_points, config_data)
+        if alpha_only:
+            events = json.loads((run_dir / "intf_alpha_calibrations.json").read_text(encoding="utf-8"))
+            accepted = set(intf_alpha_selection["accepted_calibration_ids"])
+            events = [{**event, "accepted": str(event.get("calibration_id") or "") in accepted} for event in events]
+            all_points = self._apply_intf_alpha_history(
+                all_points, events, config_data, phase_calibration,
+                intf_alpha_selection["interpolation_method"],
+            )
+            if int(config_data.get("transfer_baseline_calibration_version") or 0) >= 2:
+                baseline_points = self._apply_intf_alpha_history(
+                    self._read_results_csv(run_dir, max_points=None), events, config_data, phase_calibration,
+                    intf_alpha_selection["interpolation_method"],
+                )
+                all_points = self._transfer_response_points(
+                    self._apply_transfer_zero_phase_reference(baseline_points, config_data, phase_calibration)
+                )
         filtered_points, available_p0_min, available_p0_max, selected_p0_min, selected_p0_max = self._filter_allan_points_by_p0_range(
             all_points,
             p0_min=p0_min,

@@ -2961,7 +2961,7 @@
                     loadedPoints: [], currentCalculatedPoints: [], originalSettings: {}, loadedConfig: {}, currentScanDimensions: 1,
                     intfAlphaCalibrations: [],
                     transferBaselineCalibrations: [],
-                    intfAlphaOriginalCalibrations: [], intfAlphaDraft: {}, intfAlphaAnalysisCopies: [], intfAlphaSelectedCopyId: '', intfAlphaAcceptedMin: 0, intfAlphaAcceptedMax: 1, intfAlphaInterpolationMethod: 'weighted_smoothing_spline', intfAlphaInterpolationCurve: null, intfAlphaAnalysisName: '', intfAlphaAnalysisBusy: false, intfAlphaAnalysisMessage: '', intfAlphaAnalysisError: false,
+                    activeIntfAlphaSelection: null, intfAlphaOriginalCalibrations: [], intfAlphaDraft: {}, intfAlphaAnalysisCopies: [], intfAlphaSelectedCopyId: '', intfAlphaAcceptedMin: 0, intfAlphaAcceptedMax: 1, intfAlphaInterpolationMethod: 'weighted_smoothing_spline', intfAlphaInterpolationCurve: null, intfAlphaAnalysisName: '', intfAlphaAnalysisBusy: false, intfAlphaAnalysisMessage: '', intfAlphaAnalysisError: false,
                     archivePhaseCalibration: null, archivePhaseCalibrationProvenance: 'unavailable',
                     archivePhaseReferenceContexts: {}, archivePhaseReferenceNodeId: '', archivePhaseReferenceDraft: {},
                     archivePhaseReferenceBusy: false, archivePhaseReferenceMessage: '', archivePhaseReferenceError: false,
@@ -4952,7 +4952,8 @@
                 getAllanCacheKey(order = this.allanOrder) {
                     const normalizedOrder = Math.max(1, Math.round(Number(order) || 1));
                     const normalizedRange = this.normalizeAllanP0RangeValues(this.allanP0Min, this.allanP0Max);
-                    const metric = String(this.currentTab || 'atoms');
+                    const selectionKey = this.getAllanCacheMode() === 'recalculated' ? JSON.stringify(this.activeIntfAlphaSelection) : '';
+                    const metric = `${String(this.currentTab || 'atoms')}|${selectionKey}`;
                     const source = this.showRawData ? 'raw' : 'fit';
                     if (!normalizedRange) return `${metric}|${source}|${normalizedOrder}`;
                     return `${metric}|${source}|${normalizedOrder}|${this.formatAllanCacheFloat(normalizedRange.min)}|${this.formatAllanCacheFloat(normalizedRange.max)}`;
@@ -4988,11 +4989,13 @@
                         const res = await axios.post('/archive/allan', this.buildArchivePayload({
                             order: requestedOrder,
                             display_mode: this.displayMode,
+                            intf_alpha_selection: this.activeIntfAlphaSelection,
                             metric: this.currentTab,
                             source: this.showRawData ? 'raw' : 'fit',
                             p0_min: normalizedRange?.min ?? null,
                             p0_max: normalizedRange?.max ?? null,
                         }));
+                        if (bucket !== this.getAllanCacheBucket() || cacheKey !== this.getAllanCacheKey(requestedOrder)) return null;
                         const allanData = res.data || {};
                         const usedMaxOrder = Number(allanData.used_max_order || requestedOrder);
                         bucket[cacheKey] = allanData;
@@ -6115,6 +6118,7 @@
                     this.syncArchiveReplayPlaying = false;
                     this.syncArchiveReplayCount = 0;
                     this.selectedOptimizationStep = null;
+                    this.activeIntfAlphaSelection = null;
                     this.clearAllanCache();
                     this.errorMsg = '';
                     this.shareLinkMessage = '';
@@ -6300,6 +6304,7 @@
                     this.isLoading = true;
                     this.currentAllanData = null;
                     this.selectedAllanWindow = null;
+                    this.activeIntfAlphaSelection = null;
                     this.clearAllanCache('recalculated');
                     this.errorMsg = '';
                     this.scanFitResult = null;
@@ -10343,13 +10348,17 @@
                 async refreshPhaseNoiseAllan() {
                     if (!this.isPhaseNoiseArchive() || !this.loadedRunRef) return;
                     this.phaseNoiseAllanOrders = this.normalizePhaseNoiseAllanOrders();
+                    const selection = this.activeIntfAlphaSelection;
+                    const mode = this.displayMode;
                     this.isLoadingAllan = true;
                     this.errorMsg = '';
                     try {
                         const response = await axios.post('/archive/phase-noise/allan', this.buildArchivePayload({
                             orders: this.phaseNoiseAllanOrders,
                             display_mode: this.displayMode,
+                            intf_alpha_selection: this.activeIntfAlphaSelection,
                         }));
+                        if (selection !== this.activeIntfAlphaSelection || mode !== this.displayMode) return;
                         const summary = Array.isArray(response.data?.phase_noise_summary)
                             ? response.data.phase_noise_summary : [];
                         this.phaseNoiseSummary = summary;
@@ -10840,6 +10849,12 @@
                             name: save ? this.intfAlphaAnalysisName : '', save,
                         });
                         const data = res.data || {};
+                        this.activeIntfAlphaSelection = {
+                            accepted_calibration_ids: [...accepted],
+                            interpolation_method: this.intfAlphaInterpolationMethod,
+                        };
+                        this.clearAllanCache('recalculated');
+                        this.selectedAllanWindow = null;
                         this.intfAlphaCalibrations = Array.isArray(data.intf_alpha_calibrations) ? data.intf_alpha_calibrations : this.intfAlphaCalibrations;
                         this.intfAlphaAnalysisCopies = Array.isArray(data.intf_alpha_analysis_copies) ? data.intf_alpha_analysis_copies : this.intfAlphaAnalysisCopies;
                         this.intfAlphaInterpolationCurve = data.intf_alpha_interpolation_curve || this.intfAlphaInterpolationCurve;

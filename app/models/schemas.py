@@ -896,6 +896,17 @@ class ArchiveWaveformRequest(BaseModel):
     new_settings: ArchiveAnalysisSettings
 
 
+class ArchiveIntfAlphaSelection(BaseModel):
+    accepted_calibration_ids: List[str]
+    interpolation_method: str = "linear"
+
+    @validator("interpolation_method")
+    def validate_interpolation(cls, value):
+        if value not in {"linear", "weighted_smoothing_spline", "nearest"}:
+            raise ValueError("Unsupported I_alpha interpolation method")
+        return value
+
+
 class ArchiveAllanRequest(BaseModel):
     year: str
     month: str
@@ -909,6 +920,7 @@ class ArchiveAllanRequest(BaseModel):
     p0_min: Optional[float] = Field(None)
     p0_max: Optional[float] = Field(None)
     new_settings: ArchiveAnalysisSettings
+    intf_alpha_selection: Optional[ArchiveIntfAlphaSelection] = None
 
 
 class ArchivePhaseNoiseAllanRequest(BaseModel):
@@ -920,6 +932,7 @@ class ArchivePhaseNoiseAllanRequest(BaseModel):
     orders: List[int] = Field(default_factory=lambda: [1], min_length=1, max_length=64)
     display_mode: str = Field("saved")
     new_settings: ArchiveAnalysisSettings
+    intf_alpha_selection: Optional[ArchiveIntfAlphaSelection] = None
 
     @validator("orders")
     def validate_orders(cls, value: List[int]) -> List[int]:

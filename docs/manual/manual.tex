@@ -1420,6 +1420,10 @@ All methods hold the nearest endpoint outside the accepted time span rather than
 extrapolating.  \ui{Save copy} records the Archive range, point selection and interpolation method;
 the saved-copy selector reapplies it later.  Copies are node-local for synchronized runs and
 are analysis metadata rather than replacements for the acquired calibration record.
+After applying a copy or preview, Allan calculations use that node's selected calibration
+points and interpolation method with the complete archived science-shot sequence, without
+refitting raw waveforms. Applying another copy clears the previous recalculated Allan cache.
+
 
 \section{Scan fitting}
 Aggregate curves can be fitted over a selected $x$ range. Built-in scan models are Gaussian,

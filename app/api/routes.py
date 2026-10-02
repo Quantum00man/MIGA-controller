@@ -2369,6 +2369,7 @@ async def calculate_archived_allan(req: ArchiveAllanRequest):
                 manager.get_active_bragg_phase_calibration(),
                 req.metric,
                 req.source,
+                req.intf_alpha_selection.model_dump() if req.intf_alpha_selection else None,
             )
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc))
@@ -2383,7 +2384,15 @@ async def calculate_archived_phase_noise_allan(req: ArchivePhaseNoiseAllanReques
     settings = req.new_settings.model_dump()
     settings["_interferometer_phase_calibration"] = manager.get_active_bragg_phase_calibration()
     try:
-        if str(req.display_mode or "saved").strip().lower() == "recalculated":
+        if req.intf_alpha_selection is not None and req.display_mode == "recalculated":
+            payload = await run_in_threadpool(
+                data_loader.load_run,
+                req.year, req.month, req.day, req.run_id, req.node_id,
+                manager.get_active_bragg_phase_calibration(), req.orders,
+                intf_alpha_accepted_ids=req.intf_alpha_selection.accepted_calibration_ids,
+                intf_alpha_interpolation_method=req.intf_alpha_selection.interpolation_method,
+            )
+        elif str(req.display_mode or "saved").strip().lower() == "recalculated":
             payload = await run_in_threadpool(
                 data_loader.recalculate_run,
                 req.year, req.month, req.day, req.run_id, settings,
