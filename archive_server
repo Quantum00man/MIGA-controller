@@ -12,6 +12,11 @@ if [ ! -x "$PYTHON_BIN" ]; then
 fi
 
 case "${1:-start}" in
+  install-service)
+    cd "$ROOT_DIR"
+    export MIGA_ARCHIVE_CONFIG="$CONFIG_PATH"
+    exec "$PYTHON_BIN" -m app.archive.service_install
+    ;;
   start)
     cd "$ROOT_DIR"
     export MIGA_ARCHIVE_CONFIG="$CONFIG_PATH"
@@ -49,7 +54,7 @@ raise SystemExit(1 if problems else 0)
 PY
     ;;
   *)
-    echo "Usage: ./archive_server [start|check]" >&2
+    echo "Usage: ./archive_server [start|check|install-service]" >&2
     exit 2
     ;;
 esac

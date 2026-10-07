@@ -111,6 +111,59 @@ The controller's Data Archive page also provides a read-only Storage Audit. Audi
 are saved as JSON and HTML under `Data_log/audit_reports/`; run directories are never
 modified by the scan.
 
+Archive Server dependencies and updates:
+
+```bash
+git pull --ff-only
+sudo apt install rsync
+.venv/bin/python -m pip install -r requirements-archive.txt
+MIGA_ARCHIVE_HOST=0.0.0.0 MIGA_ARCHIVE_PORT=8765 ./archive_server start
+```
+
+Open `http://SERVER-IP:8765/` for device management, backup jobs and device-specific
+Timeline/Collections. Existing configuration at `~/.config/miga-archive/config.json`
+is retained. Disable duplicate sources before the first backup. Device IDs are permanent;
+removing registration retains NAS data. SSH uses strict host verification and defaults to
+`~/.ssh/miga_archive_ed25519` on the server.
+
+Start with **Test SSH**, then **Back up**. Once the first job is checked, edit the device
+and enable automatic backup. The server scans every ten minutes; failed runs retry on
+subsequent scans. Transfers retain partial staging data across restarts. A source file-list
+change quarantines staging and restarts that run on the next scan. New controller versions
+write `archive_complete.json`; legacy runs from today are deferred unless the controller
+status endpoint confirms it is idle. All runs also require a sixty-second quiet period.
+Updating controller code supplies completion markers and fixes root-owned SYNC replica
+directory permissions for future runs; existing archives remain readable in their old layout.
+
+Each run is copied to NAS staging, compared against source SHA-256 checksums, and published
+only if the source remained stable. Existing raw archives are never replaced. Changed source
+runs go into `devices/DEVICE/revisions/DATE/RUN/FINGERPRINT`; Timeline currently shows the
+first verified version. **Verify checksums** checks the most recent receipt for each run.
+Jobs marked incomplete expose failed, deferred and incomplete SYNC counts through the API.
+Collection snapshots use SQLite's backup API and remain read-only during the active-controller
+phase, retaining original folders, aliases and notes. New analyses save independent versions
+under `derived/DEVICE/` and can be reopened or downloaded as JSON.
+
+The server's initial viewer supports node selection, scientific metric plots, raw waveforms,
+settings-based recalculation and saved analysis versions. The controller's complete fitting,
+Allan, joint SYNC optimization and LabPlot tool panels have not yet been ported to this viewer.
+
+For a persistent systemd user service:
+
+```bash
+MIGA_ARCHIVE_PORT=8765 ./archive_server install-service
+sudo loginctl enable-linger "$USER"
+# Stop the foreground server before starting the service on the same port.
+systemctl --user start miga-archive
+systemctl --user status miga-archive
+journalctl --user -u miga-archive -f
+```
+
+The service uses the same user's configuration, SSH key and NAS permissions. It must run as
+one process (do not use multiple Uvicorn workers). No hardware manager or control routes are
+loaded. NAS identity is verified before publishing or reading archives. Use only on the
+trusted laboratory LAN; authentication is not included in this version.
+
 The default listener is `0.0.0.0:8000`. It can be changed with environment variables:
 
 ```bash

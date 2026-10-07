@@ -476,6 +476,11 @@ class DataManager:
         if self.csv_handle:
             self.csv_handle.close()
             self.csv_handle = None
+        if self.current_run_dir:
+            marker = self.current_run_dir / "archive_complete.json"
+            temporary = marker.with_suffix(".json.tmp")
+            temporary.write_text(json.dumps({"status": status, "closed_at": datetime.now().isoformat()}), encoding="utf-8")
+            temporary.replace(marker)
         print("[DataManager] Run saved and closed.")
 
     def overwrite_run(

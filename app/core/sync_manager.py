@@ -207,6 +207,11 @@ class SyncManager:
             self._extract_archive_safely(archive_path, staging)
             if not (staging / "results.csv").is_file() or not (staging / "config.json").is_file():
                 raise ValueError("Sync archive is missing results.csv or config.json")
+            # mkdtemp defaults to 0700; controllers launched as root must still
+            # allow the archive SSH user to read the completed node replica.
+            for entry in staging.rglob("*"):
+                entry.chmod(0o755 if entry.is_dir() else 0o644)
+            staging.chmod(0o755)
             if backup.exists():
                 shutil.rmtree(backup)
             if target.exists():
