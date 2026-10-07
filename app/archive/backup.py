@@ -1,6 +1,6 @@
 """Persistent pull jobs. Published archives are immutable; changes become revisions."""
 import base64
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -11,6 +11,7 @@ import shutil
 import sqlite3
 import subprocess
 import threading
+import time
 import uuid
 
 
@@ -37,6 +38,8 @@ class BackupService:
         self.lock = threading.RLock()
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='archive-pull')
         self.stop = threading.Event()
+        self.control_dir = configuration.path.parent / 'ssh-control'
+        self.control_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         for path in self.state_dir.glob('*.json'):
             job = json.loads(path.read_text())
             if job['status'] in {'queued', 'running'}:
@@ -52,6 +55,8 @@ class BackupService:
     def ssh(self, device):
         return ['ssh', '-i', str(Path(device.get('identity_file') or '~/.ssh/miga_archive_ed25519').expanduser()),
                 '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'ConnectTimeout=10',
+                '-o', 'ControlMaster=auto', '-o', 'ControlPersist=60',
+                '-o', 'ControlPath=' + str(self.control_dir / '%C'),
                 device['ssh_user'] + '@' + device['host']]
 
     def read_remote(self, device, operation, **extra):
@@ -87,7 +92,7 @@ class BackupService:
                 if other_id != device_id and other.get('enabled', True) and all(other.get(k) == device.get(k) for k in ('host', 'ssh_user', 'source_path')):
                     raise ValueError('Duplicate enabled source: disable ' + other_id + ' first')
             job = {'id': uuid.uuid4().hex, 'device_id': device_id, 'status': 'queued', 'started_at': now(),
-                   'finished_at': None, 'copied': 0, 'skipped': 0, 'failed': [], 'deferred': [], 'sync_warnings': [], 'total': 0, 'current_run': '', 'error': ''}
+                   'finished_at': None, 'copied': 0, 'skipped': 0, 'failed': [], 'deferred': [], 'sync_warnings': [], 'total': 0, 'current_run': '', 'phase': 'queued', 'phase_started_at': now(), 'verified_files': 0, 'run_files': 0, 'run_bytes': 0, 'error': ''}
             atomic_json(self.state_dir / (job['id'] + '.json'), job)
             self.executor.submit(self.run, job, device, root)
             return job
@@ -99,6 +104,7 @@ class BackupService:
     def run(self, job, device, root):
         try:
             job['status'] = 'running'
+            job.update(phase='scanning', phase_started_at=now())
             self.save_job(job)
             inventory = self.read_remote(device, 'inventory')
             job.update(total=len(inventory['runs']), deferred=inventory['deferred'])
@@ -110,9 +116,16 @@ class BackupService:
                 self.configuration.checked_root()
                 relative = row['path']
                 job['current_run'] = relative
+                job.update(run_files=len(row['files']), run_bytes=sum(f['size'] for f in row['files']), verified_files=0)
                 self.save_job(job)
                 try:
-                    self.copy_run(device, device_root, root, row)
+                    def progress(phase, verified=None):
+                        if job.get('phase') != phase:
+                            job.update(phase=phase, phase_started_at=now())
+                        if verified is not None:
+                            job['verified_files'] = verified
+                        self.save_job(job)
+                    self.copy_run(device, device_root, root, row, progress=progress)
                     job['copied'] += 1
                 except AlreadyArchived:
                     job['skipped'] += 1
@@ -120,6 +133,8 @@ class BackupService:
                     job['failed'].append({'run': relative, 'error': str(exc)})
                 self.save_job(job)
             self.configuration.checked_root()
+            job.update(phase='collections', phase_started_at=now())
+            self.save_job(job)
             snapshot = self.read_remote(device, 'collection')
             if snapshot.get('exists'):
                 content = base64.b64decode(snapshot['data'], validate=True)
@@ -138,10 +153,37 @@ class BackupService:
         except Exception as exc:
             job.update(status='failed', error=str(exc))
         finally:
-            job.update(finished_at=now(), current_run='')
+            job.update(finished_at=now(), current_run='', phase=job['status'])
             self.save_job(job)
 
-    def copy_run(self, device, device_root, root, row):
+    def verify_files(self, directory, manifest, progress=None):
+        def check(item):
+            path = directory / item['path']
+            if path.is_symlink():
+                raise ValueError('Symlink in staging')
+            digest = hashlib.sha256()
+            with path.open('rb') as handle:
+                for chunk in iter(lambda: handle.read(1024 * 1024), b''):
+                    digest.update(chunk)
+            if digest.hexdigest() != item['sha256']:
+                raise ValueError('Checksum mismatch: ' + item['path'])
+        # A few outstanding SMB reads amortize network latency without launching
+        # simultaneous run transfers or overwhelming the experiment hosts.
+        completed = 0
+        last_report = time.monotonic()
+        with ThreadPoolExecutor(max_workers=4, thread_name_prefix='archive-checksum') as workers:
+            futures = [workers.submit(check, item) for item in manifest]
+            for future in as_completed(futures):
+                future.result()
+                completed += 1
+                if progress and (time.monotonic() - last_report >= 2 or completed == len(manifest)):
+                    progress('verifying', completed)
+                    last_report = time.monotonic()
+
+    def copy_run(self, device, device_root, root, row, progress=None):
+        def phase(name):
+            if progress:
+                progress(name)
         relative = Path(row['path'])
         if relative.is_absolute() or '..' in relative.parts or len(relative.parts) != 4:
             raise ValueError('Invalid source run path')
@@ -149,20 +191,44 @@ class BackupService:
         receipt = device_root / 'state' / relative / 'receipt.json'
         if receipt.exists() and json.loads(receipt.read_text()).get('source_fingerprint') == source_fingerprint:
             raise AlreadyArchived()
+        storage = self.configuration.inspect_root(str(root))
+        cifs = storage.get('filesystem') in {'cifs', 'smb3'}
+        original = device_root / 'runs' / relative
+        # Older versions renamed the verified data before chmod and writing the
+        # receipt. Recover such a run by verifying it, without copying it again.
+        if original.exists() and not receipt.exists():
+            phase('source_checksums')
+            recovered = self.read_remote(device, 'manifest', run=relative.as_posix())['files']
+            current = [{k: item[k] for k in ('path', 'size', 'mtime_ns')} for item in recovered]
+            if current != row['files']:
+                raise ValueError('Source changed during recovery; retry later')
+            actual = {p.relative_to(original).as_posix() for p in original.rglob('*') if p.is_file()}
+            if actual != {item['path'] for item in recovered}:
+                raise ValueError('Published run without receipt has a different file list; inspect integrity')
+            phase('verifying')
+            self.verify_files(original, recovered, progress)
+            self.configuration.checked_root()
+            atomic_json(receipt, {'source_fingerprint': source_fingerprint, 'received_at': now(),
+                                  'path': str(original.relative_to(root)), 'files': recovered})
+            return
         staging = root / 'incoming' / device['device_id'] / relative
         if shutil.disk_usage(root).free < sum(item['size'] for item in row['files']) + 1024 * 1024 * 100:
             raise ValueError('Insufficient NAS free space for this run')
         staging.mkdir(parents=True, exist_ok=True)
+        phase('transferring')
         if device.get('transport') == 'local':
             shutil.copytree(Path(device['source_path']) / relative, staging, dirs_exist_ok=True)
         else:
             source = device['ssh_user'] + '@' + device['host'] + ':' + device['source_path'].rstrip('/') + '/' + relative.as_posix() + '/'
             command = ['rsync', '-rlt', '--protect-args', '--partial', '--partial-dir=.rsync-partial',
-                       '--chmod=Du=rwx,Dgo=,Fu=rw,Fgo=', '--exclude=*.tmp', '--exclude=*.part',
+                       '--exclude=*.tmp', '--exclude=*.part',
                        '-e', shlex.join(self.ssh(device)[:-1]), '--', source, str(staging) + '/']
+            if not cifs:
+                command.insert(2, '--chmod=Du=rwx,Dgo=,Fu=rw,Fgo=')
             result = subprocess.run(command, text=True, capture_output=True, timeout=7200)
             if result.returncode:
                 raise ValueError(result.stderr[-2000:])
+        phase('source_checksums')
         manifest = self.read_remote(device, 'manifest', run=relative.as_posix())['files']
         # Source metadata must still agree with the inventory observed before transfer.
         current = [{k: item[k] for k in ('path', 'size', 'mtime_ns')} for item in manifest]
@@ -174,16 +240,8 @@ class BackupService:
             quarantine = root / 'quarantine' / (device['device_id'] + '_' + uuid.uuid4().hex)
             staging.rename(quarantine)
             raise ValueError('Source file list changed. Staging preserved in quarantine; retry will start fresh')
-        for item in manifest:
-            path = staging / item['path']
-            if path.is_symlink():
-                raise ValueError('Symlink in staging')
-            digest = hashlib.sha256()
-            with path.open('rb') as handle:
-                for chunk in iter(lambda: handle.read(1024 * 1024), b''):
-                    digest.update(chunk)
-            if digest.hexdigest() != item['sha256']:
-                raise ValueError('Checksum mismatch: ' + item['path'])
+        phase('verifying')
+        self.verify_files(staging, manifest, progress)
         self.configuration.checked_root()
         target = device_root / 'runs' / relative
         if target.exists():
@@ -192,22 +250,21 @@ class BackupService:
         if target.exists():
             # Publication may have succeeded just before a process crash, with
             # the local receipt still unwritten. Recover without replacing files.
-            for item in manifest:
-                existing = target / item['path']
-                digest = hashlib.sha256()
-                with existing.open('rb') as handle:
-                    for chunk in iter(lambda: handle.read(1024 * 1024), b''):
-                        digest.update(chunk)
-                if digest.hexdigest() != item['sha256']:
-                    raise ValueError('Existing revision checksum mismatch; inspect integrity')
+            self.verify_files(target, manifest, progress)
             atomic_json(receipt, {'source_fingerprint': source_fingerprint, 'received_at': now(),
                                   'path': str(target.relative_to(root)), 'files': manifest})
             return
+        phase('publishing')
         staging.rename(target)
         # Files cannot be modified by analysis code; only new revision directories are published.
-        for path in target.rglob('*'):
-            path.chmod(0o550 if path.is_dir() else 0o440)
-        target.chmod(0o550)
+        # CIFS without Unix extensions obtains permissions from the mount's
+        # file_mode/dir_mode. Per-file chmod cannot enforce raw immutability
+        # there and adds an SMB round trip for every archived waveform.
+        if not cifs:
+            phase('permissions')
+            for path in target.rglob('*'):
+                path.chmod(0o550 if path.is_dir() else 0o440)
+            target.chmod(0o550)
         atomic_json(receipt, {'source_fingerprint': source_fingerprint, 'received_at': now(),
                               'path': str(target.relative_to(root)), 'files': manifest})
 

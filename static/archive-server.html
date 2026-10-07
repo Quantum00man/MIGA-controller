@@ -34,7 +34,26 @@ async function refresh(){const data=await api('/archive-server/devices');devices
 function edit(device){editing=device?.device_id||null;$('editor').classList.remove('d-none');$('device-form').reset();for(const field of ['device_id','name','role','host','ssh_user','source_path','collection_path','identity_file','controller_url']){if(device&&device[field]!==undefined)$(field).value=device[field]}$('device_id').readOnly=!!editing;$('enabled').checked=device?.enabled??true;$('automatic_backup').checked=device?.automatic_backup??false;$('edit-title').textContent=editing?'Edit device':'Add device';$('editor').scrollIntoView({block:'start'})}
 $('add').onclick=()=>edit(null);$('cancel').onclick=()=>$('editor').classList.add('d-none');$('refresh').onclick=()=>refresh().catch(e=>notice(e.message,true));
 $('device-form').onsubmit=async event=>{event.preventDefault();const body={};for(const field of ['device_id','name','role','host','ssh_user','source_path','collection_path','identity_file','controller_url'])body[field]=$(field).value;body.enabled=$('enabled').checked;body.automatic_backup=$('automatic_backup').checked;try{await api('/archive-server/devices'+(editing?'/'+editing:''),editing?'PUT':'POST',body);$('editor').classList.add('d-none');await refresh();notice('Device saved')}catch(e){notice(e.message,true)}};
-async function jobs(){const data=await api('/archive-server/jobs');$('jobs').replaceChildren();for(const job of data.jobs.slice(0,20)){const row=document.createElement('tr');cell(row,new Date(job.started_at).toLocaleString());cell(row,job.device_id);cell(row,job.status);cell(row,`${job.copied} / ${job.skipped} / ${job.total}`);const detail=cell(row,job.current_run||job.error||`${job.failed.length} failed, ${job.deferred.length} deferred`);if(job.failed.length){const details=document.createElement('details'),summary=document.createElement('summary'),pre=document.createElement('pre');summary.textContent='Failures';pre.textContent=JSON.stringify(job.failed,null,2);details.append(summary,pre);detail.append(details)}$('jobs').append(row)}}
+async function jobs(){
+    const data=await api('/archive-server/jobs');$('jobs').replaceChildren();
+    const phases={queued:'Waiting',scanning:'Scanning file inventory',transferring:'Transferring',source_checksums:'Source checksums',verifying:'Verifying NAS files',publishing:'Publishing',permissions:'Applying permissions',collections:'Collection snapshot'};
+    for(const job of data.jobs.slice(0,20)){
+        const row=document.createElement('tr');cell(row,new Date(job.started_at).toLocaleString());cell(row,job.device_id);
+        cell(row,`${job.status}${job.phase&&phases[job.phase]?' / '+phases[job.phase]:''}`);
+        cell(row,`${job.copied} / ${job.skipped} / ${job.total}`);
+        const detail=cell(row,job.current_run||job.error||`${job.failed.length} failed, ${job.deferred.length} deferred`);
+        if(job.current_run&&job.run_files){
+            const stats=document.createElement('div');stats.className='small muted';
+            const elapsed=Math.max(0,Math.floor((Date.now()-new Date(job.phase_started_at||job.started_at).getTime())/1000));
+            stats.textContent=`${job.run_files.toLocaleString()} files / ${(job.run_bytes/1048576).toFixed(1)} MB; phase elapsed ${elapsed}s`;
+            if(job.phase==='verifying')stats.textContent+=`; verified ${job.verified_files||0}/${job.run_files}`;
+            detail.append(stats);
+        }
+        if(job.sync_warnings?.length){const warning=document.createElement('div');warning.className='small text-warning';warning.textContent=`${job.sync_warnings.length} source SYNC archives have incomplete replication`;detail.append(warning)}
+        if(job.failed.length){const details=document.createElement('details'),summary=document.createElement('summary'),pre=document.createElement('pre');summary.textContent='Failures';pre.textContent=JSON.stringify(job.failed,null,2);details.append(summary,pre);detail.append(details)}
+        $('jobs').append(row);
+    }
+}
 function archiveUrl(path){return `/archive-server/archive/${encodeURIComponent(browseDevice)}/${path}`}
 function runButton(label,reference){return button(label,()=>loadRun(reference))}
 async function timeline(){browseDevice=$('browse-device').value;if(!browseDevice)return;selected=null;loaded=null;$('run-title').textContent='Select a run';$('runs').textContent='Loading...';const tree=await api(archiveUrl('tree'));$('runs').replaceChildren();for(const [year,months]of Object.entries(tree).reverse())for(const [month,days]of Object.entries(months).reverse())for(const [day,runs]of Object.entries(days).reverse())for(const run of [...runs].reverse()){const ref=[year,month,day,run.id||run];const line=document.createElement('div');line.className='mb-1';line.append(runButton(`${year}/${month}/${day} ${run.display_name||run.id||run}`,ref));$('runs').append(line)}if(!$('runs').children.length)$('runs').textContent='No backed-up runs yet. Start a backup from Devices.'}

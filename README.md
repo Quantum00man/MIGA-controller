@@ -140,6 +140,13 @@ only if the source remained stable. Existing raw archives are never replaced. Ch
 runs go into `devices/DEVICE/revisions/DATE/RUN/FINGERPRINT`; Timeline currently shows the
 first verified version. **Verify checksums** checks the most recent receipt for each run.
 Jobs marked incomplete expose failed, deferred and incomplete SYNC counts through the API.
+On CIFS storage, permissions come from the OS mount options; the server avoids per-file
+chmod calls that cause one SMB request per waveform. SHA-256 verification uses four bounded
+read workers, and controller SSH connections are reused. Jobs show scanning, transferring,
+source checksums, NAS verification and publication phases with current-run size/file counts.
+When updating during a backup, stop the foreground server and wait for it to exit before
+pulling and restarting. Start a fresh job; completed receipts are skipped, and a verified
+published run missing its receipt is recovered without retransmission.
 Collection snapshots use SQLite's backup API and remain read-only during the active-controller
 phase, retaining original folders, aliases and notes. New analyses save independent versions
 under `derived/DEVICE/` and can be reopened or downloaded as JSON.

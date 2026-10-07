@@ -94,6 +94,37 @@ class ArchiveBackupTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             ArchiveRepository(self.config).reference('master', '2025', '01', '02', 'run../../escape')
 
+    def test_cifs_publication_skips_per_file_chmod_but_checks_contents(self):
+        from unittest.mock import patch
+        row = self.service.read_remote(self.device, 'inventory')['runs'][0]
+        real_inspect = self.config.inspect_root
+        def inspect(value):
+            info = real_inspect(value)
+            info['filesystem'] = 'cifs'
+            return info
+        # Keep checked_root independent of our fake filesystem for this fixture.
+        with patch.object(self.config, 'inspect_root', side_effect=inspect), patch.object(self.config, 'checked_root', return_value=self.storage), patch.object(Path, 'chmod', side_effect=AssertionError('CIFS must not chmod each file')):
+            self.service.copy_run(self.device, self.storage / 'devices/master', self.storage, row)
+        self.assertEqual((self.storage / 'devices/master/runs' / self.relative / 'results.csv').read_bytes(), (self.run / 'results.csv').read_bytes())
+
+    def test_published_run_without_receipt_recovers_without_duplicate(self):
+        from unittest.mock import patch
+        row = self.service.read_remote(self.device, 'inventory')['runs'][0]
+        self.service.copy_run(self.device, self.storage / 'devices/master', self.storage, row)
+        receipt = self.storage / 'devices/master/state' / self.relative / 'receipt.json'
+        receipt.unlink()
+        with patch('app.archive.backup.shutil.copytree', side_effect=AssertionError('Recovery must not retransmit')):
+            self.service.copy_run(self.device, self.storage / 'devices/master', self.storage, row)
+        self.assertTrue(receipt.exists())
+        self.assertFalse((self.storage / 'devices/master/revisions').exists())
+
+    def test_parallel_checksum_verification_rejects_corruption(self):
+        row = self.service.read_remote(self.device, 'inventory')['runs'][0]
+        manifest = self.service.read_remote(self.device, 'manifest', run=self.relative)['files']
+        (self.run / 'results.csv').write_text('corrupted')
+        with self.assertRaisesRegex(ValueError, 'Checksum mismatch'):
+            self.service.verify_files(self.run, manifest)
+
     def test_analysis_versions_never_modify_raw_and_remain_independent(self):
         from unittest.mock import patch, Mock
         row = self.service.read_remote(self.device, 'inventory')['runs'][0]
