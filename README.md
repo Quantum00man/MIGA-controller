@@ -151,9 +151,27 @@ Collection snapshots use SQLite's backup API and remain read-only during the act
 phase, retaining original folders, aliases and notes. New analyses save independent versions
 under `derived/DEVICE/` and can be reopened or downloaded as JSON.
 
-The server's initial viewer supports node selection, scientific metric plots, raw waveforms,
-settings-based recalculation and saved analysis versions. The controller's complete fitting,
-Allan, joint SYNC optimization and LabPlot tool panels have not yet been ported to this viewer.
+**Open archive** opens the original `archive.html` interface in a separate browser tab,
+scoped to the selected device. Timeline, Collections, waveforms, scan fitting, Allan,
+phase-noise analysis, SYNC differential/phase/normalization optimization and LabPlot
+export use the existing scientific analysis engines without initializing hardware.
+Acquisition scheduling, controller parameter application and reverse synchronization
+are unavailable on Archive Server.
+
+Imported Collections appear under **Source Collections (read-only)**. Create ordinary
+folders for server-owned Collections. Their SQLite database stays on local storage
+(`~/.config/miga-archive/ui/DEVICE/`), with immutable consistent snapshots on NAS under
+`derived/DEVICE/collections/`; a fresh server restores the latest snapshot automatically.
+Server scientific preferences/calibrations are device-scoped, not controller settings.
+
+Saving results, phase references or SYNC analysis metadata creates a new server version
+under `derived/DEVICE/RUN-HASH/ui-versions/`. Editable metadata is copied; waveform
+directories remain read-only references to the original backup (no duplicate waveforms).
+The version selector can reopen the original or any committed server version. Removing
+a fit/reference only affects a new version; earlier versions and original backups remain.
+Failed saves do not publish a version. Keep original backups for as long as their derived
+versions are needed. Existing standalone JSON analysis versions remain available through
+the earlier analysis API; they are not converted automatically into full Archive UI versions.
 
 For a persistent systemd user service:
 

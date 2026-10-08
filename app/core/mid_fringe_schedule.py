@@ -12,6 +12,7 @@ from uuid import uuid4
 from app.analysis import interferometer_phase
 from app.core.link_export import format_link_parameter_value, render_link_mot
 from app.models.schemas import ScanConfig
+from app.core.mid_fringe_storage import load_prepared_queue
 
 
 def calibration_at_reference(calibration: Dict[str, Any], reference_t2_us2: float) -> Dict[str, Any]:
@@ -142,19 +143,6 @@ def save_prepared_queue(run_dir: Path, payload: Dict[str, Any]) -> Path:
     temp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     temp.replace(target)
     return target
-
-
-def load_prepared_queue(run_dir: Path, batch_id: str) -> Dict[str, Any]:
-    normalized = str(batch_id or "").strip()
-    if not normalized or any(character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for character in normalized):
-        raise ValueError("Invalid prepared queue id")
-    path = Path(run_dir) / "mid_fringe_schedules" / f"{normalized}.json"
-    if not path.is_file():
-        raise FileNotFoundError("Prepared mid-fringe queue was not found")
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict) or payload.get("batch_id") != normalized:
-        raise ValueError("Prepared mid-fringe queue is invalid")
-    return payload
 
 
 def new_batch_id() -> str:

@@ -20,6 +20,26 @@ configuration = ArchiveServerConfiguration()
 backup = BackupService(configuration)
 repository = ArchiveRepository(configuration)
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+from app.archive.ui_context import configure as configure_archive_ui
+from app.archive.ui_routes import router as archive_ui_router
+configure_archive_ui(repository)
+app.include_router(archive_ui_router, prefix='/archive-server/view/{device_id}')
+
+
+@app.get('/archive-server/view/{device_id}/archive.html')
+async def device_archive_page(device_id: str):
+    repository.device_root(device_id)
+    return FileResponse(STATIC_DIR / 'archive.html')
+
+
+@app.get('/archive-server-ui.js')
+async def archive_ui_script():
+    return FileResponse(STATIC_DIR / 'archive-server-ui.js', media_type='application/javascript')
+
+
+@app.get('/plot-publication.js')
+async def publication_plot_script():
+    return FileResponse(STATIC_DIR / 'plot-publication.js', media_type='application/javascript')
 
 
 class ArchiveRootRequest(BaseModel):

@@ -933,10 +933,24 @@
                 <div class="archive-page-subtitle text-muted small ms-1">Historical Data Browser & Re-Analysis Tool</div>
             </div>
             <a href="/" class="btn btn-white border btn-back shadow-sm text-decoration-none text-dark bg-white px-3">
-                <i class="bi bi-arrow-left"></i><span>Back to Lab</span>
+                <i class="bi bi-arrow-left"></i><span>{{ archiveServerMode ? 'Archive Server' : 'Back to Lab' }}</span>
             </a>
         </div>
 
+        <div v-if="archiveServerMode" class="alert alert-info d-flex flex-wrap align-items-center gap-3" role="status">
+            <strong>{{ serverDeviceName }}</strong>
+            <span>Original backup is read-only. Saves create server-only versions.</span>
+            <label v-if="loadedRunRef" class="d-flex align-items-center gap-2 ms-auto">Analysis version
+                <select class="form-select form-select-sm" style="width:auto" v-model="serverVersion" @change="changeServerVersion">
+                    <option value="latest">Latest server version (or original)</option>
+                    <option value="original">Original backup</option>
+                    <option v-for="version in serverVersions" :key="version.id" :value="version.id">{{ version.created_at }} — {{ version.operation }}</option>
+                </select>
+            </label>
+            <span v-if="serverVersionError" class="text-danger">{{ serverVersionError }}</span>
+            <small v-if="loadedRunRef" class="w-100">{{ serverVersion === 'original' || !serverVersions.length ? 'Displaying the original backup' : 'Displaying a server analysis version' }}</small>
+            <small class="w-100">Source Collections are read-only; your own Collections are stored separately. No reverse synchronization.</small>
+        </div>
         <div class="archive-layout row g-4">
             <div class="archive-sidebar col-md-3 col-xxl-2 d-flex flex-column gap-3">
 
@@ -1023,7 +1037,7 @@
                                 </button>
                             </div>
                             <div v-else class="small text-muted border rounded p-3 text-center">Create your first folder to organize paper data.</div>
-                            <div v-if="selectedCollectionFolderId" class="d-grid gap-1 mt-2">
+                            <div v-if="selectedCollectionFolderId && !(archiveServerMode && selectedCollectionFolderId < 0)" class="d-grid gap-1 mt-2">
                                 <div class="btn-group btn-group-sm">
                                     <button class="btn btn-outline-primary" @click="openFolderDialog('create', selectedCollectionFolderId)">Subfolder</button>
                                     <button class="btn btn-outline-secondary" @click="openFolderDialog('rename', selectedCollectionFolderId)">Rename</button>
@@ -1275,7 +1289,7 @@
                                             <span v-if="betaOptimization.loading" class="spinner-border spinner-border-sm me-1"></span>
                                             <i v-else class="bi bi-bullseye me-1"></i>{{ betaOptimization.loading ? 'Optimizing...' : 'Optimize Parameter' }}
                                         </button>
-                                        <button v-if="betaOptimization.result" class="btn btn-outline-success btn-sm fw-bold"
+                                        <button v-if="!archiveServerMode && betaOptimization.result" class="btn btn-outline-success btn-sm fw-bold"
                                             @click="applyOptimizedBetaToSettings" :disabled="betaOptimization.applying">
                                             <span v-if="betaOptimization.applying" class="spinner-border spinner-border-sm me-1"></span>
                                             <i v-else class="bi bi-gear me-1"></i>{{ betaOptimization.applying ? 'Applying...' : 'Apply Parameter to Settings' }}
@@ -1396,7 +1410,7 @@
                             <button class="btn btn-danger btn-sm fw-bold shadow-sm" @click="saveOverwrite"
                                 :disabled="isSaving"><span v-if="isSaving"
                                     class="spinner-border spinner-border-sm me-1"></span> {{ isSaving ? 'Saving...' :
-                                'Save to Disk' }}</button>
+                                (archiveServerMode ? 'Save New Server Version' : 'Save to Disk') }}</button>
                         </div>
                     </div>
                 </div>
@@ -1763,7 +1777,7 @@
                                             </div>
                                             <div class="col-5 small text-muted pb-1">Averages fixed to 1</div>
                                         </div>
-                                        <button class="btn btn-primary btn-sm w-100 mt-2" @click="prepareMidFringeSchedule"
+                                        <button v-if="!archiveServerMode" class="btn btn-primary btn-sm w-100 mt-2" @click="prepareMidFringeSchedule"
                                             :disabled="midFringeSchedule.busy || !midFringeSchedule.selectedValues.length">
                                             <span v-if="midFringeSchedule.busy" class="spinner-border spinner-border-sm me-1"></span>Add to Scheduled Queue
                                         </button>
@@ -1878,7 +1892,7 @@
                                     <button class="btn btn-primary btn-sm fw-bold" :disabled="selectedCollectionFavorite.integrity === 'missing' || isLoading" @click="loadCollectionFavorite(selectedCollectionFavorite)">
                                         <i class="bi bi-box-arrow-in-down me-1"></i>Load full data
                                     </button>
-                                    <div class="btn-group btn-group-sm">
+                                    <div v-if="!(archiveServerMode && selectedCollectionFavorite.id < 0)" class="btn-group btn-group-sm">
                                         <button class="btn btn-outline-secondary" @click="openFavoriteEditDialog(selectedCollectionFavorite)">Rename and note</button>
                                         <button class="btn btn-outline-danger" @click="removeCollectionFavorite(selectedCollectionFavorite)">Remove</button>
                                     </div>
@@ -1979,7 +1993,7 @@
                         <div v-if="braggFringeCalibration.error" class="alert alert-danger small py-2">{{ braggFringeCalibration.error }}</div>
                         <div v-if="braggFringeCalibration.fine?.calibration_fit" class="border rounded bg-light p-3 mt-3">
                             <div class="small fw-bold mb-1">Save this fringe to this controller</div>
-                            <div class="small text-muted mb-2">Adds the analyzed fringe to Interferometer Phase settings and makes it active on the controller serving this Archive page.</div>
+                            <div class="small text-muted mb-2">{{ archiveServerMode ? 'Saves the analyzed fringe to device-specific server analysis settings. Controllers and original backups are unchanged.' : 'Adds the analyzed fringe to Interferometer Phase settings and makes it active on the controller serving this Archive page.' }}</div>
                             <div class="input-group input-group-sm">
                                 <input class="form-control" v-model.trim="archiveBraggSave.name" placeholder="Calibration name" aria-label="Archived Bragg calibration name">
                                 <button class="btn btn-primary fw-bold" @click="saveAndActivateArchivedBraggCalibration"
@@ -2001,7 +2015,7 @@
                                 <span v-if="syncManifest.archive_replication" class="badge" :class="syncManifest.archive_replication.status === 'complete' ? 'bg-success' : (syncManifest.archive_replication.status === 'incomplete' ? 'bg-warning text-dark' : 'bg-secondary')">
                                     Archive {{ syncManifest.archive_replication.status || 'pending' }}
                                 </span>
-                                <button v-if="canSyncArchive()" type="button" class="btn btn-sm btn-outline-warning" :disabled="syncArchiveRetrying" @click="retrySyncArchive">
+                                <button v-if="!archiveServerMode && canSyncArchive()" type="button" class="btn btn-sm btn-outline-warning" :disabled="syncArchiveRetrying" @click="retrySyncArchive">
                                     {{ syncArchiveRetrying ? 'Syncing…' : (isLegacySyncArchive() ? 'Sync Historical Archive' : 'Retry Sync') }}
                                 </button>
                                 <select v-if="!isBraggRabiArchive() && !syncArchiveIndependentP0()" class="form-select form-select-sm" style="width:auto" v-model="syncArchiveViewMode" @change="handleSyncArchiveViewChange">
@@ -2288,7 +2302,7 @@
                                     <div class="d-grid gap-2">
                                         <button class="btn btn-success" @click="saveArchivePhaseReference" :disabled="archivePhaseReferenceBusy"><span v-if="archivePhaseReferenceBusy" class="spinner-border spinner-border-sm me-1"></span>Apply &amp; recalculate</button>
                                         <button class="btn btn-outline-secondary" @click="restoreArchivePhaseReference" :disabled="archivePhaseReferenceBusy || !archivePhaseReferenceContext()?.has_override">Restore experiment reference</button>
-                                        <button v-if="syncManifest && archivePhaseAnalysis.sync_status === 'pending'" class="btn btn-outline-warning" @click="retryArchivePhaseAnalysisSync" :disabled="archivePhaseReferenceBusy">Retry phase metadata sync</button>
+                                        <button v-if="!archiveServerMode && syncManifest && archivePhaseAnalysis.sync_status === 'pending'" class="btn btn-outline-warning" @click="retryArchivePhaseAnalysisSync" :disabled="archivePhaseReferenceBusy">Retry phase metadata sync</button>
                                     </div>
                                     <div class="form-text mt-2">This override is saved only with this Archive run; raw CSV and global Settings are unchanged.</div>
                                 </div>
@@ -2935,12 +2949,14 @@
     <script src="https://cdn.plot.ly/plotly-2.12.1.min.js"></script>
     <script src="/plot-publication.js"></script>
 
+    <script src="/archive-server-ui.js"></script>
     <script>
         const { createApp } = Vue;
 
         createApp({
             data() {
                 return {
+                    archiveServerMode: false,
                     archiveTree: {}, selectedYear: '', selectedMonth: '', selectedDay: '', selectedRun: '', archiveNavigationBusy: false,
                     archiveSourceMode: 'timeline',
                     archiveAuditJob: null, archiveAuditBusy: false, archiveAuditError: '', archiveAuditReports: [], archiveAuditPollTimer: null,

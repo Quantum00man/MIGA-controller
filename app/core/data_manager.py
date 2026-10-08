@@ -492,8 +492,10 @@ class DataManager:
         new_settings: Dict,
         new_data: List[Dict],
         transfer_function_summary: Optional[List[Dict[str, Any]]] = None,
+        *,
+        target_directory: Optional[Path] = None,
     ):
-        target_dir = Path(config.DATA_BASE_DIR) / year / month / day / run_id
+        target_dir = Path(target_directory) if target_directory is not None else Path(config.DATA_BASE_DIR) / year / month / day / run_id
         if not target_dir.exists(): raise FileNotFoundError(f"Run {run_id} not found")
 
         config_path = target_dir / "config.json"
