@@ -21,7 +21,7 @@ def install():
         '[Service]', 'Type=simple', 'WorkingDirectory=' + quote(project),
         'Environment=' + quote('MIGA_ARCHIVE_CONFIG=' + str(config)),
         'ExecStart=' + quote(sys.executable) + ' -m uvicorn archive_main:app --host ' + host + ' --port ' + str(port),
-        'Restart=on-failure', 'RestartSec=10', 'UMask=0077', '', '[Install]', 'WantedBy=default.target', '',
+        'Restart=on-failure', 'RestartSec=10', 'TimeoutStopSec=infinity', 'KillSignal=SIGINT', 'KillMode=mixed', 'UMask=0077', '', '[Install]', 'WantedBy=default.target', '',
     ])
     if unit.exists():
         unit.with_suffix('.service.previous').write_bytes(unit.read_bytes())

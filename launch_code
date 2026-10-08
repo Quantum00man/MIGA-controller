@@ -7,4 +7,12 @@ if [ -n "${DISPLAY:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then
   exec python3 "$SCRIPT_DIR/launcher_ui.py" "$@"
 fi
 
+if [ "${1:-}" = "--archive" ]; then
+  shift
+  export MIGA_ARCHIVE_HOST="${MIGA_ARCHIVE_HOST:-0.0.0.0}"
+  export MIGA_ARCHIVE_PORT="${MIGA_ARCHIVE_PORT:-8765}"
+  if [ "$#" -eq 0 ]; then set -- start; fi
+  exec "$SCRIPT_DIR/archive_server" "$@"
+fi
+
 exec "$SCRIPT_DIR/start_controller.sh" "$@"

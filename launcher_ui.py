@@ -27,7 +27,7 @@ TAIL_BYTES = 24000
 class LauncherUI(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title('MIGA Controller Launcher')
+        self.title('MIGA Launcher — Controller / Archive Server')
         self.geometry('1260x860')
         self.minsize(1120, 760)
         self.configure(bg='#dfe6ec')
@@ -77,9 +77,16 @@ class LauncherUI(tk.Tk):
         style.configure('Card.TCheckbutton', background='#f8fbfd', foreground='#14293e', font=('Noto Sans', 10))
 
     def _build_layout(self):
-        root = ttk.Frame(self, style='Root.TFrame', padding=16)
-        root.pack(fill='both', expand=True)
-
+        modes = ttk.Notebook(self)
+        modes.pack(fill='both', expand=True)
+        root = ttk.Frame(modes, style='Root.TFrame', padding=16)
+        modes.add(root, text='Controller')
+        from app.archive.launcher_ui import ArchiveLauncherFrame
+        archive = ArchiveLauncherFrame(modes)
+        self.archive_launcher = archive
+        modes.add(archive, text='Archive Server / SSH Guide')
+        if '--archive' in __import__('sys').argv:
+            modes.select(archive)
         header = ttk.Frame(root, style='Root.TFrame')
         header.pack(fill='x')
         ttk.Label(header, text='MIGA Controller Launcher', style='Header.TLabel').pack(anchor='w')
@@ -485,7 +492,7 @@ class LauncherUI(tk.Tk):
         self.after(1500, self._poll_runtime)
 
     def _on_close(self):
-        if self.task_running:
+        if self.task_running or self.archive_launcher.busy:
             if not messagebox.askyesno('Launcher Busy', 'A launcher command is still running. Close the GUI anyway?'):
                 return
         self.destroy()

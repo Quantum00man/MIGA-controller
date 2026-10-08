@@ -55,6 +55,17 @@ class ArchiveServerApiTests(unittest.TestCase):
                 device = {'device_id': 'master', 'role': 'master', 'transport': 'local', 'source_path': str(source)}
                 self.assertEqual(request('/archive-server/devices', 'POST', device)[0], 200)
                 self.assertEqual(request('/archive-server/devices', 'POST', device)[0], 400)
+                original_config = (base / 'config.json').read_bytes()
+                guide = request('/archive-server/setup/progress')[1]
+                self.assertEqual(guide['configuration']['devices']['master']['device_id'], 'master')
+                self.assertEqual(request('/archive-server/setup/devices/master/probe', 'POST')[0], 200)
+                probe = request('/archive-server/setup/progress')[1]['checks']['master']
+                self.assertTrue(probe['source_exists'])
+                self.assertTrue(probe['source_readable'])
+                self.assertIn(str(source),probe['candidates'])
+                self.assertEqual((base / 'config.json').read_bytes(),original_config)
+                self.assertIn(b'LaunchUI',request('/setup')[1])
+                self.assertIn(b'displayStep',request('/archive-setup.js')[1])
                 self.assertEqual(request('/archive-server/devices/master/test', 'POST')[1]['eligible_runs'], 1)
                 self.assertEqual(request('/archive-server/devices/master/backup', 'POST')[0], 200)
                 while True:

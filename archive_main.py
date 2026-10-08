@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
 from pydantic import Field
 from starlette.concurrency import run_in_threadpool
@@ -19,6 +19,8 @@ app = FastAPI(title="MIGA Archive Server")
 configuration = ArchiveServerConfiguration()
 backup = BackupService(configuration)
 repository = ArchiveRepository(configuration)
+from app.archive.setup import SetupGuide
+setup_guide = SetupGuide(configuration, backup)
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 from app.archive.ui_context import configure as configure_archive_ui
 from app.archive.ui_routes import router as archive_ui_router
@@ -35,6 +37,11 @@ async def device_archive_page(device_id: str):
 @app.get('/archive-server-ui.js')
 async def archive_ui_script():
     return FileResponse(STATIC_DIR / 'archive-server-ui.js', media_type='application/javascript')
+
+
+@app.get('/archive-setup.js')
+async def setup_script():
+    return FileResponse(STATIC_DIR / 'archive-setup.js', media_type='application/javascript')
 
 
 @app.get('/plot-publication.js')
@@ -69,6 +76,16 @@ async def archive_server_status():
         "mode": "archive", "configured": bool(root) and not current.get("configuration_error"),
         "configuration": current, "storage": configuration.inspect_root(root) if root else None,
     }
+
+
+@app.get('/archive-server/setup/progress')
+async def setup_progress():
+    return await run_in_threadpool(setup_guide.state)
+
+
+@app.post('/archive-server/setup/devices/{device_id}/probe')
+async def setup_device_probe(device_id: str):
+    return await run_in_threadpool(setup_guide.probe, device_id)
 
 
 @app.post("/archive-server/setup/inspect")
@@ -249,4 +266,6 @@ async def analysis_result(device_id: str, year: str, month: str, day: str, run_i
 
 @app.get('/')
 async def dashboard():
+    if not configuration.load().get('archive_root'):
+        return RedirectResponse('/setup')
     return FileResponse(STATIC_DIR / 'archive-server.html')

@@ -173,7 +173,50 @@ Failed saves do not publish a version. Keep original backups for as long as thei
 versions are needed. Existing standalone JSON analysis versions remain available through
 the earlier analysis API; they are not converted automatically into full Archive UI versions.
 
-For a persistent systemd user service:
+### Desktop launcher and setup Guide
+
+On Ubuntu/Linux with Tk installed, run `./launch_code --archive` (or select the
+**Archive Server / SSH Guide** tab in `./launch_code`). Controller startup remains
+in its own tab. Archive startup uses your normal user, never the controller's root
+launcher, and provides Archive-only environment repair, start/stop, logs and browser
+buttons. Stop is graceful and repeated clicks do not send another interrupt. A server
+started outside LaunchUI is recognized but is not forcibly stopped by the launcher.
+
+**Start server** opens the five-step web Guide: NAS, devices, SSH/folders, full backup
+verification and automatic startup. Existing NAS identity, registrations and working
+SSH connections are reused. Read-only connection checks discover common Data_log paths;
+results are saved locally under `~/.config/miga-archive/setup/`. Revisit `/setup` at any
+time. The backup engine and ten-minute scheduling semantics are unchanged.
+
+For new source computers, open the same launcher on each source and select
+**Prepare this source computer**. Choose its specific Data_log directory, then approve
+installation/enabling of OpenSSH/rsync in the native terminal. Optional recursive read
+ACL repair requires a separate confirmation and never targets a home/project root.
+It also refuses a bulk read-only ACL change if it would remove existing named-user
+write permissions; those exceptional cases require targeted administrator review.
+On the server, register the device in the Guide, then **Reload devices → Pair / reuse
+existing SSH**. Compare a new host fingerprint with the source launcher; changed keys
+are never silently replaced. SSH/sudo passwords are handled by native tools only, not
+the web UI, configuration or launcher logs. Alternatively authorize the server public
+key locally on the source; existing authorized_keys entries are retained.
+
+SSH authorization allows remote commands with the source user's existing permissions;
+it is not an OS-enforced read-only account. The application's backup remains read-only.
+The local public-key authorization option applies OpenSSH `restrict` (no forwarding,
+agent forwarding or PTY); `ssh-copy-id` uses its standard authorization semantics.
+
+**Enable startup service** installs/enables the existing systemd user service without
+interrupting a running server. **Enable before-login startup** optionally approves
+`loginctl enable-linger` in a terminal. A permanent SMB/NFS mount must already be set
+up for unattended operation; the Guide never stores NAS passwords or rewrites fstab.
+Fresh Ubuntu desktops may need `python3-tk`/`python3-venv`; secure prompts require
+`gnome-terminal` or `xterm`. Headless `./archive_server start` remains supported.
+
+For existing configured machines: pull the update, launch as the normal user, open
+the Guide and **Test / discover** each existing device. No reinitialization, key
+generation or source preparation is needed when those checks pass.
+
+### Command-line service installation
 
 ```bash
 MIGA_ARCHIVE_PORT=8765 ./archive_server install-service
