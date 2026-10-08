@@ -209,7 +209,8 @@ agent forwarding or PTY); `ssh-copy-id` uses its standard authorization semantic
 interrupting a running server. **Enable before-login startup** optionally approves
 `loginctl enable-linger` in a terminal. A permanent SMB/NFS mount must already be set
 up for unattended operation; the Guide never stores NAS passwords or rewrites fstab.
-Fresh Ubuntu desktops may need `python3-tk`/`python3-venv`; secure prompts require
+If Tk is missing, `launch_code` offers a separately confirmed Ubuntu installation
+of `python3-tk`/`python3-venv` before opening the UI; secure prompts require
 `gnome-terminal` or `xterm`. Headless `./archive_server start` remains supported.
 
 For existing configured machines: pull the update, launch as the normal user, open

@@ -148,6 +148,13 @@ def server_tools():
     subprocess.run(['sudo', 'apt-get', 'install', '-y', 'python3-venv', 'openssh-client', 'rsync'], check=True)
 
 
+def gui_tools():
+    print('LaunchUI needs Ubuntu Python Tk and venv support. No server, SSH or NAS settings are changed.')
+    if input('Type INSTALL GUI to approve installation: ').strip() != 'INSTALL GUI':
+        raise ValueError('GUI dependency installation cancelled')
+    subprocess.run(['sudo', 'apt-get', 'install', '-y', 'python3-tk', 'python3-venv'], check=True)
+
+
 def start(port=8765):
     if os.geteuid() == 0:
         raise ValueError('Run Archive Server as your normal Linux user, not root')
@@ -351,7 +358,7 @@ def authorize(public_key):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=['start', 'stop', 'status', 'check', 'repair', 'pair', 'source-prepare', 'server-tools', 'authorize', 'public-key', 'service-install', 'service-log', 'linger'])
+    parser.add_argument('action', choices=['start', 'stop', 'status', 'check', 'repair', 'pair', 'source-prepare', 'server-tools', 'gui-tools', 'authorize', 'public-key', 'service-install', 'service-log', 'linger'])
     parser.add_argument('--port', type=int, default=8765)
     parser.add_argument('--device-id'); parser.add_argument('--path'); parser.add_argument('--public-key'); parser.add_argument('--grant-read', action='store_true')
     parser.add_argument('--pause', action='store_true', help='Keep native terminal open until Enter')
@@ -367,6 +374,7 @@ def main():
     elif args.action == 'pair': pair(args.device_id)
     elif args.action == 'source-prepare': source_prepare(args.path or str(ROOT / 'Data_log'), args.grant_read)
     elif args.action == 'server-tools': server_tools()
+    elif args.action == 'gui-tools': gui_tools()
     elif args.action == 'authorize': authorize(args.public_key or '')
     elif args.action == 'public-key': print(ensure_key(Path.home() / '.ssh/miga_archive_ed25519').read_text())
     elif args.action == 'service-install':

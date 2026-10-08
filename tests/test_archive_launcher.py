@@ -11,6 +11,13 @@ from app.archive import launcher_runtime as runtime
 
 
 class ArchiveLauncherTests(unittest.TestCase):
+    def test_first_gui_bootstrap_only_installs_graphical_prerequisites(self):
+        with patch('builtins.input',return_value='INSTALL GUI'), patch.object(runtime.subprocess,'run') as run:
+            runtime.gui_tools()
+            run.assert_called_once_with(['sudo','apt-get','install','-y','python3-tk','python3-venv'],check=True)
+        with patch('builtins.input',return_value=''), patch.object(runtime.subprocess,'run') as run:
+            with self.assertRaises(ValueError):runtime.gui_tools()
+            run.assert_not_called()
     def test_service_detection_is_project_and_config_scoped(self):
         with tempfile.TemporaryDirectory() as directory:
             config=Path(directory)/'with spaces/config.json'
