@@ -81,6 +81,13 @@ class ArchiveServerApiTests(unittest.TestCase):
                 self.assertIn(b'.panel .h5{font-size:18px',readability_css)
                 self.assertEqual(request('/archive-assets/tabler/tabler.min.css')[0],200)
                 self.assertEqual(request('/archive-server/update/status')[0],200)
+                update_status=request('/archive-server/update/status')[1]
+                self.assertIn('origin_url',update_status)
+                self.assertIn('version_status',update_status)
+                self.assertIn('comparison_remote_commit_short',update_status)
+                self.assertIn(b'<select id="update-branch"',request('/')[1])
+                self.assertIn(b'Repository URL',request('/')[1])
+                self.assertIn(b'Current checkout',request('/')[1])
                 unsafe = urllib.request.Request('http://127.0.0.1:' + str(port) + '/archive-server/update/apply',
                     data=json.dumps({'branch':'main'}).encode(),method='POST',
                     headers={'Content-Type':'application/json','Origin':'https://untrusted.example'})

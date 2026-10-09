@@ -132,6 +132,13 @@ LaunchUI Start opens the homepage (uninitialized storage still redirects to Guid
 Dashboard timestamps use `dd/mm/yy HH:mm` in the browser's local timezone.
 The Server update panel fetches origin branches, saves the selected branch in
 Archive configuration, and applies fast-forward-only updates from localhost.
+It includes a branch dropdown (local and known origin branches), read-only
+selection previews, GitHub HTTPS/SSH repository configuration, current/remote
+commit messages, cached ahead/behind comparison, last refresh time, worktree
+changes and pull logs. Selecting a branch does not switch code; Refresh Remote
+fetches metadata and saves the selection, while Update Now applies it. Changing
+repository sources requires confirmation in the page. Remote comparisons are
+cached until refreshed; a missing timestamp is explicitly shown as not recorded.
 Queued/running backups, dirty checkouts and divergent target branches block applying
 updates. No reset/stash or NAS writes are performed. LaunchUI provides **Auto reload
 after successful web update** (opt-in, persisted) and **Reload server safely**.

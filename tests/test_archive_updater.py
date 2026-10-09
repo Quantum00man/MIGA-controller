@@ -42,12 +42,52 @@ class ArchiveUpdaterTests(unittest.TestCase):
         self.assertTrue(result['restart_required'])
         self.assertEqual((self.checkout / 'file').read_text(), 'updated')
         self.assertEqual(self.config.load()['update_branch'], 'main')
+        self.assertEqual(result['version_status'],'latest')
+        self.assertIsNotNone(result['last_remote_fetch'])
+
+    def test_comparison_and_preview_never_switch_branch(self):
+        self.advance()
+        self.updater.run('main')
+        info=self.updater.status()
+        self.assertEqual(info['version_status'],'behind')
+        self.assertEqual(info['comparison_behind'],1)
+        self.git(self.remote,'switch','-c','feature')
+        self.updater.git('fetch','origin')
+        preview=self.updater.status('feature')
+        self.assertEqual(preview['version_status'],'branch_mismatch')
+        self.assertEqual(preview['configured_branch'],'main')
+        self.assertEqual(preview['current_branch'],'main')
+        self.assertEqual(preview['comparison_remote_subject'],'updated')
+        self.assertIn('feature',preview['branches'])
+
+    def test_local_only_branch_is_listed(self):
+        self.git(self.checkout,'branch','local-only')
+        info=self.updater.status('local-only')
+        self.assertIn('local-only',info['branches'])
+        self.assertEqual(info['version_status'],'unknown')
+
+    def test_repository_validation(self):
+        self.assertEqual(self.updater.repository_url('https://github.com/owner/repo.git'),'https://github.com/owner/repo.git')
+        self.assertEqual(self.updater.repository_url('git@github.com:owner/repo.git'),'git@github.com:owner/repo.git')
+        for value in ['file:///tmp/repo','https://github.com/owner/repo?x=1','https://user:pass@github.com/owner/repo','--upload-pack=evil','https://github.com/owner/repo ; command']:
+            with self.assertRaises(ValueError):self.updater.repository_url(value)
 
     def test_dirty_checkout_preserved(self):
         (self.checkout / 'local').write_text('keep')
         with self.assertRaisesRegex(ValueError, 'Local changes'):
             self.updater.run('main', True)
         self.assertEqual((self.checkout / 'local').read_text(), 'keep')
+
+    def test_failed_repository_fetch_restores_origin(self):
+        original=self.updater.git
+        def fail_fetch(*args):
+            if args[0]=='fetch':raise ValueError('Network unavailable')
+            return original(*args)
+        from unittest.mock import patch
+        with patch.object(self.updater,'git',side_effect=fail_fetch):
+            with self.assertRaisesRegex(ValueError,'Network unavailable'):
+                self.updater.run('main',repo_url='https://github.com/owner/repo.git')
+        self.assertEqual(original('remote','get-url','origin'),str(self.remote))
 
     def test_backup_blocks_update(self):
         self.jobs.append({'status':'queued'})
@@ -71,6 +111,7 @@ class ArchiveUpdaterTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.updater.run('main', True)
         self.assertEqual(self.git(self.checkout, 'rev-parse', 'HEAD'), before)
+        self.assertEqual(self.updater.status()['version_status'],'diverged')
 
     def test_fetch_does_not_change_checkout(self):
         before = self.git(self.checkout, 'rev-parse', 'HEAD')

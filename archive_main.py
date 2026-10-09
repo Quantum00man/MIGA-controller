@@ -53,6 +53,7 @@ async def reload_server(request: Request):
 
 class ArchiveUpdateRequest(BaseModel):
     branch: str
+    repo_url: str | None = None
 
 
 def require_local_update(request):
@@ -64,8 +65,8 @@ def require_local_update(request):
 
 
 @app.get('/archive-server/update/status')
-async def archive_update_status():
-    return await run_in_threadpool(updater.status)
+async def archive_update_status(branch: str | None = None):
+    return await run_in_threadpool(updater.status,branch)
 
 
 @app.post('/archive-server/update/{operation}')
@@ -73,7 +74,7 @@ async def archive_update(operation: str, payload: ArchiveUpdateRequest, request:
     require_local_update(request)
     if operation not in {'fetch', 'apply'}:
         raise HTTPException(404, 'Unknown update operation')
-    return await run_in_threadpool(updater.run, payload.branch, operation == 'apply')
+    return await run_in_threadpool(updater.run, payload.branch, operation == 'apply',payload.repo_url)
 
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"

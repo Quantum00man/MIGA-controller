@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MIGA Archive Server — Dashboard</title>
 <link href="/archive-assets/tabler/tabler.min.css" rel="stylesheet">
-<link href="/archive-dashboard.css?v=readability-2" rel="stylesheet">
+<link href="/archive-dashboard.css?v=update-panel-1" rel="stylesheet">
 </head><body>
 <aside class="sidebar"><div class="brand"><span class="brand-mark">M</span><div><h1>MIGA</h1><p>Archive Server</p></div></div>
 <nav aria-label="Archive Server navigation"><a id="nav-dashboard" href="/">Overview</a><a id="nav-devices" href="/devices">Device management</a><a href="/#backup-history">Backup records</a><a href="/#system-update">Server update</a><a href="/setup">Setup Guide</a></nav>
@@ -18,7 +18,22 @@
 <p class="small muted mt-3">Source checks are cached and timestamped. An offline source does not make its NAS archive unavailable.</p>
 <section class="panel mt-4" aria-labelledby="active-title"><div class="tools"><h2 id="active-title" class="h5 me-auto mb-0">Backup activity</h2><span class="small muted">Completed runs only</span></div><div id="active-jobs"></div></section>
 <section id="backup-history" class="panel"><details id="history-details"><summary class="history-toggle">Recent backup records <span class="small muted ms-2">Latest 30 jobs</span></summary><div class="table-responsive mt-3"><table class="table table-sm align-middle"><thead><tr><th>Started</th><th>Device</th><th>Status / phase</th><th>Published / unchanged / eligible</th><th>Details</th></tr></thead><tbody id="jobs"></tbody></table></div></details></section>
-<section id="system-update" class="panel"><details id="update-details"><summary class="history-toggle">Server update</summary><p class="small muted mt-3">Updates this Archive Server only, not source computers or NAS data. Requires a clean checkout and no queued/running backups. Apply from localhost on the server. Enable automatic reload in LaunchUI to reconnect here after updates; otherwise restart manually.</p><div id="update-status" class="small mb-3" role="status">Open to load version information.</div><label for="update-branch" class="form-label">Update branch</label><input id="update-branch" class="form-control mb-3" list="update-branches" placeholder="marker-optimization"><datalist id="update-branches"></datalist><div class="tools"><button id="update-fetch" class="btn btn-outline-secondary btn-sm">Refresh remote / save branch</button><button id="update-apply" class="btn btn-primary btn-sm">Update server</button></div><pre id="update-output" class="small mt-3 mb-0" role="status"></pre></details></section>
+<section id="system-update" class="panel"><details id="update-details">
+<summary class="history-toggle">Server update</summary>
+<p class="small muted mt-3">Update this Archive Server only. Backups must be idle; local changes and divergent history are never overwritten. Apply from localhost. Automatic reload follows your LaunchUI preference.</p>
+<div class="row g-3 mb-3">
+<div class="col-md-8"><label for="update-repository" class="form-label">Repository URL</label><input id="update-repository" class="form-control font-monospace" placeholder="https://github.com/owner/repo.git"></div>
+<div class="col-md-4"><label for="update-branch" class="form-label">Branch</label><select id="update-branch" class="form-select font-monospace" aria-describedby="update-preview-help"></select></div>
+</div>
+<p id="update-preview-help" class="small muted">Selecting a branch previews cached metadata without changing code. Refresh Remote discovers branches and saves your source selection.</p>
+<div class="tools mb-3"><button id="update-fetch" class="btn btn-outline-secondary btn-sm">Refresh Remote</button><button id="update-apply" class="btn btn-primary btn-sm">Update Now</button></div>
+<div id="update-status" class="alert alert-secondary small" role="status">Open to load version information.</div>
+<p id="update-fetch-time" class="small muted"></p>
+<div class="update-comparison"><section class="update-info"><h3>Current checkout</h3><div id="update-current"></div></section><section class="update-info"><h3>Configured source</h3><div id="update-source"></div></section></div>
+<details id="update-dirty" class="d-none mt-3"><summary>Worktree changes — update blocked</summary><pre id="update-dirty-output" class="small mt-2"></pre></details>
+<details id="update-pull" class="d-none mt-3"><summary>Last pull output</summary><pre id="update-pull-output" class="small mt-2"></pre></details>
+<pre id="update-output" class="small mt-3 mb-0" role="status"></pre>
+</details></section>
 </div>
 <div id="management-view" class="d-none"><section class="panel"><div class="tools mb-3"><h2 class="h5 me-auto mb-0">Device management</h2><button id="add" class="btn btn-primary btn-sm">Add device</button></div><p class="small muted">Device IDs are permanent. Removing a registration retains NAS data. SSH credentials are prepared in local LaunchUI, not stored as passwords here.</p><div class="table-responsive"><table class="table align-middle"><thead><tr><th>Device</th><th>Source</th><th>Schedule</th><th>Actions</th></tr></thead><tbody id="devices"></tbody></table></div></section>
 <section id="editor" class="panel d-none"><h2 class="h5" id="edit-title">Add device</h2><form id="device-form"><div class="row g-3">
@@ -35,4 +50,4 @@
 </div><div class="tools mt-3"><button class="btn btn-primary">Save device</button><button type="button" id="cancel" class="btn btn-outline-secondary">Cancel</button></div></form></section>
 </div>
 <footer class="small muted mt-4">Archive-only server • original backups stay immutable • no reverse synchronization</footer>
-</main><script src="/archive-server-dashboard.js?v=tabler-3"></script></body></html>
+</main><script src="/archive-server-dashboard.js?v=update-panel-1"></script></body></html>
