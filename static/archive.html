@@ -1811,6 +1811,7 @@
                                 <option value="">Select saved analysis</option>
                                 <option v-for="record in analysisResults" :key="record.id" :value="record.id">{{ record.name }} · {{ record.kind }} · {{ record.created_at }}</option>
                             </select>
+                            <button class="btn btn-outline-secondary btn-sm" @click="refreshAnalysisResults(true)" :disabled="analysisResultsLoading || analysisResultBusy" title="Reload the saved analysis list"><i class="bi bi-arrow-clockwise me-1"></i>{{ analysisResultsLoading ? 'Refreshing…' : 'Refresh' }}</button>
                             <button class="btn btn-outline-primary btn-sm" @click="restoreAnalysisResult" :disabled="analysisResultBusy || !selectedAnalysisResultId">Restore</button>
                             <button class="btn btn-outline-secondary btn-sm" @click="exportAnalysisResult" :disabled="analysisResultBusy || !selectedAnalysisResultId">Export result + parameters</button>
                         </div>
@@ -3063,7 +3064,7 @@
                     phaseNoiseXAxisScale: 'linear', phaseNoiseYAxisScale: 'linear',
                     phaseNoiseStatistic: 'std', phaseNoiseAllanOrders: [1], phaseNoiseAllanOrderDraft: 2,
                     savedAllanCache: {}, recalculatedAllanCache: {}, currentAllanData: null,
-                    analysisResults: [], analysisCandidateId: '', selectedAnalysisResultId: '',
+                    analysisResults: [], analysisResultsLoading: false, analysisCandidateId: '', selectedAnalysisResultId: '',
                     analysisResultName: '', analysisResultNote: '', analysisResultBusy: false,
                     analysisResultMessage: '', analysisResultKind: '', analysisResultContext: '', analysisSnapshotRestored: false,
                     phaseNoiseAllanSnapshot: null, phaseNoiseAllanPlot: null,
@@ -5053,13 +5054,20 @@
                     this.analysisResultMessage = this.analysisCandidateId ? 'Computed snapshot ready to save.'
                         : 'Allan was computed, but the server did not return a save identifier. Restart the updated service and recompute.';
                 },
-                async refreshAnalysisResults() {
+                async refreshAnalysisResults(showMessage = false) {
                     if (!this.loadedRunRef) return;
                     const ref = this.loadedRunRef;
+                    this.analysisResultsLoading = true;
                     try {
                         const response = await axios.get(`/archive/analysis-results/${ref.year}/${ref.month}/${ref.day}/${ref.run_id}`);
-                        if (ref === this.loadedRunRef) this.analysisResults = response.data.analyses || [];
-                    } catch (error) { this.analysisResults = []; this.analysisResultMessage = error.response?.data?.detail || error.message; }
+                        if (ref === this.loadedRunRef) {
+                            this.analysisResults = response.data.analyses || [];
+                            if (!this.analysisResults.some(record => record.id === this.selectedAnalysisResultId)) this.selectedAnalysisResultId = '';
+                            if (showMessage) this.analysisResultMessage = `Saved analysis list refreshed (${this.analysisResults.length}).`;
+                        }
+                    } catch (error) {
+                        if (ref === this.loadedRunRef) this.analysisResultMessage = error.response?.data?.detail || error.message;
+                    } finally { this.analysisResultsLoading = false; }
                 },
                 analysisResultView() {
                     return {allanYAxisMode: this.allanYAxisMode, allanXAxisMode: this.allanXAxisMode,
