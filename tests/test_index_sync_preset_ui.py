@@ -31,6 +31,7 @@ for (const initial of supported) {
                 dim1_type: 'range', dim2_type: 'range', dim3_type: 'range'},
             syncSlaves: [{id: 'slave-a', name: 'Slave A'}],
             isSyncMode() {return this.runMode === 'sync'},
+            isScheduledMode() {return this.runMode === 'scheduled'},
             normalizeRunEntry(entry) {return entry}, getSelectedRepeatRunEntry() {return null},
             getConfiguredScanDimensions() {return this.config.scan_dimensions},
             renderMainPlot() {}, resetHistory() {}, fetchPhaseNoiseCalibrations() {},
@@ -53,23 +54,23 @@ for (const initial of supported) {
         assert.equal(app.syncMasterDelayMs, 37.5);
         apply.call(app, {...payload, run_mode: 'live', sync_preset: null});
         assert.equal(app.runMode, 'live', 'A Live archive must replace the current run mode');
-        assert.equal(app.syncScheduleEnabled, false);
     }
 }
 }
 // Modes unsupported by SYNC keep the existing Standard fallback.
 for (const mode of ['lock_in', 'ac_stark', 'ramsey_interferometer']) {
-    const app = {runMode: 'sync', config: {mode, parameter_source: 'classic'}};
+    const app = {runMode: 'sync', isSyncMode() {return true}, config: {mode, parameter_source: 'classic'}};
     watch['config.mode'].call(app, mode);
     assert.equal(app.runMode, 'sync');
     assert.equal(app.config.mode, 'standard');
 }
-// Single-node Bragg calibration still uses Live rather than Scheduled.
+// Bragg calibration preserves the selected immediate or scheduled entry point.
 for (const runMode of ['live', 'scheduled']) {
     const app = {runMode, isRunning: true, currentTab: 'atoms',
+        isSyncMode() {return false}, isScheduledMode() {return this.runMode === 'scheduled'},
         config: {mode: 'bragg_fringe_calibration', parameter_source: 'classic'}};
     watch['config.mode'].call(app, app.config.mode);
-    assert.equal(app.runMode, 'live');
+    assert.equal(app.runMode, runMode);
 }
 """
         root = Path(__file__).resolve().parents[1]

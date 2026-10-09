@@ -724,10 +724,18 @@
                     </div>
                     <div class="form-text mt-2" style="font-size: 0.72rem;">
                         {{ runMode === 'scheduled'
-                        ? 'Scheduled mode lets you queue multiple sequence-specific scans, reorder them, and run them sequentially or at specific times.'
+                        ? 'Queue ordinary Scan and SYNC tasks together, then run them sequentially or at specific times.'
                         : (runMode === 'sync'
                             ? 'SYNC uses one Master-generated P0 shot plan and starts every Slave before the Master.'
                             : 'Live mode runs the current sequence and scan settings immediately on the main control page.') }}
+                    </div>
+                    <div v-if="isScheduledMode()" class="mt-3">
+                        <label class="form-label small fw-bold">Task type</label>
+                        <select class="form-select form-select-sm" v-model="scheduledExecutionMode">
+                            <option value="scan">Scan (local controller)</option>
+                            <option value="sync">SYNC (Master + Slaves)</option>
+                        </select>
+                        <div class="form-text">Applies to the task being edited. Queued tasks keep their own type and sequence snapshots.</div>
                     </div>
                 </div>
             </div>
@@ -813,12 +821,6 @@
                             <div class="form-text">Averages: {{ config.averages }} (shared with Master).</div>
                         </div>
                     </div>
-                    <div class="form-check form-switch mt-3 pt-2 border-top">
-                        <input class="form-check-input" type="checkbox" role="switch" id="syncScheduleEnabled"
-                            v-model="syncScheduleEnabled" :disabled="isScheduleActive()">
-                        <label class="form-check-label small fw-bold" for="syncScheduleEnabled">Use scheduled queue</label>
-                        <div class="form-text">Queue SYNC runs with separate Master settings and Slave sequence snapshots.</div>
-                    </div>
                 </div>
             </template>
 
@@ -829,7 +831,7 @@
                         :disabled="isRunning || isScheduleActive()">
                     <label class="btn btn-outline-secondary" for="sourceClassic">Classic Placeholders</label>
                     <input type="radio" class="btn-check" id="sourceMarkers" value="markers" v-model="config.parameter_source"
-                        :disabled="isRunning || isScheduleActive() || runMode === 'sync'">
+                        :disabled="isRunning || isScheduleActive() || isSyncMode()">
                     <label class="btn btn-outline-primary" for="sourceMarkers">Auto Markers</label>
                 </div>
                 <template v-if="config.parameter_source === 'markers'">
@@ -914,7 +916,7 @@
 
 
 <div v-if="isScheduledMode()" class="card p-3 mb-3">
-    <div class="small text-muted fw-bold mb-2">{{ isSyncMode() ? 'SYNC SCHEDULE PLANNER' : 'SCHEDULE PLANNER' }}</div>
+    <div class="small text-muted fw-bold mb-2">SCHEDULE PLANNER</div>
     <div class="row g-2">
         <div class="col-12" v-if="isRunning">
             <div class="alert alert-info py-2 small mb-1">Planning the next batch. Sequence files stay local and cannot change the experiment currently running.</div>
@@ -1092,7 +1094,7 @@
                             <option value="rabi">Rabi (Tot-P0/2)</option>
                             <option value="half">Half (P0/2)</option>
                             <option value="link">Link (Custom Formula)</option>
-                            <option value="bragg_fringe_calibration" :disabled="isScheduledMode()">Bragg Fringes Calibration</option>
+                            <option value="bragg_fringe_calibration">Bragg Fringes Calibration</option>
                             <option value="phase_noise">Phase Noise Analyze</option>
                             <option value="bragg_rabi">Bragg Rabi</option>
                             <option value="lock_in" :disabled="isSyncMode()">Lock-in Measurement</option>
@@ -1691,7 +1693,7 @@
         <div class="sidebar-resizer" @pointerdown.prevent="startSidebarResize" title="Drag to resize panels"></div>
 
         <main class="main-content">
-            <div v-if="isSyncMode()" class="card mb-4 border-0 shadow-sm">
+            <div v-if="isSyncAcquisition()" class="card mb-4 border-0 shadow-sm">
                 <div class="analysis-header card-header bg-white">
                     <div class="analysis-header-top">
                         <div class="analysis-header-title"><i class="bi bi-bounding-box-circles fs-5 me-2"></i><span>SYNC Analysis</span></div>
@@ -2099,7 +2101,7 @@
                     syncReplayPlaying: false,
                     syncReplayTimer: null,
                     syncStatusPollTimer: null,
-                    syncScheduleEnabled: false,
+                    scheduledExecutionMode: 'scan',
                     scheduleSettings: { singlePointDurationSec: 1.615, timingMode: 'sequential', sequentialGapSec: 60, startAfterCurrentRun: true, appendMode: 'next_batch' },
                     shotTiming: { runId: '', totalDurationSec: 0, sampleCount: 0, lastStep: 0, currentAverageSec: null, active: false },
                     scheduledTasks: [],
@@ -2171,14 +2173,14 @@
                     this.renderMainPlot();
                 },
                 phaseUnit() {
-                    const syncPhaseAxis = this.isSyncMode() && this.syncViewMode === 'lissajous'
+                    const syncPhaseAxis = this.isSyncAcquisition() && this.syncViewMode === 'lissajous'
                         && (this.syncAxisX.metric === 'phase' || this.syncAxisY.metric === 'phase');
                     if (this.currentTab === 'phase' || syncPhaseAxis) {
                         this.plotRevision++;
                         this.renderMainPlot();
                     }
                 },
-                showRawData() { this.plotRevision++; this.isSyncMode() ? this.renderSyncPlot() : this.renderMainPlot(); },
+                showRawData() { this.plotRevision++; this.renderMainPlot(); },
                 useList1(val) { this.config.dim1_type = val ? 'list' : 'range'; this.saveState(); },
                 useList2(val) { this.config.dim2_type = val ? 'list' : 'range'; this.saveState(); },
                 useList3(val) { this.config.dim3_type = val ? 'list' : 'range'; this.saveState(); },
@@ -2196,7 +2198,7 @@
                         this.config.intf_alpha_calibration_enabled = false;
                     }
                     if (mode !== 'standard') this.syncIndependentP0Enabled = false;
-                    if (this.runMode === 'sync' && ['lock_in', 'ac_stark', 'ramsey_interferometer'].includes(mode)) {
+                    if (this.isSyncMode() && ['lock_in', 'ac_stark', 'ramsey_interferometer'].includes(mode)) {
                         this.config.mode = 'standard';
                         return;
                     }
@@ -2231,7 +2233,7 @@
                         }
                         if (mode === 'bragg_fringe_calibration') {
                             // Bragg calibration supports both Live and SYNC acquisition.
-                            if (this.runMode !== 'sync') this.runMode = 'live';
+                            if (!this.isSyncMode() && !this.isScheduledMode()) this.runMode = 'live';
                             this.config.parameter_source = 'classic';
                             this.config.averages = 1;
                             this.currentTab = 'intf';
@@ -2251,8 +2253,8 @@
                     }
                 },
                 runMode(value) {
-                    if (value === 'sync' && this.config.parameter_source === 'markers') this.config.parameter_source = 'classic';
-                    if (value === 'sync') {
+                    if (this.isSyncMode() && this.config.parameter_source === 'markers') this.config.parameter_source = 'classic';
+                    if (this.isSyncMode()) {
                         if (['lock_in', 'ac_stark', 'ramsey_interferometer'].includes(this.config.mode)) this.config.mode = 'standard';
                         this.fetchSyncConfig();
                         this.$nextTick(() => this.syncViewMode === 'node' ? this.initPlots() : this.renderSyncPlot());
@@ -2260,14 +2262,22 @@
                     this.saveState();
                     this.requestPlotResize();
                 },
-                syncScheduleEnabled() {
+                scheduledExecutionMode() {
+                    if (this.isScheduledMode() && this.isSyncMode()) {
+                        this.config.parameter_source = 'classic';
+                        if (['lock_in', 'ac_stark', 'ramsey_interferometer'].includes(this.config.mode)) this.config.mode = 'standard';
+                        this.fetchSyncConfig();
+                    }
                     this.saveState();
                     this.requestPlotResize();
                 },
                 'config.parameter_source'(source) {
                     if (source !== 'classic') this.syncIndependentP0Enabled = false;
                     if (source === 'markers') {
-                        if (this.runMode === 'sync') this.runMode = 'live';
+                        if (this.isSyncMode()) {
+                            if (this.isScheduledMode()) this.scheduledExecutionMode = 'scan';
+                            else this.runMode = 'live';
+                        }
                         this.config.mode = 'standard';
                         this.fetchSequenceMarkers();
                     } else {
@@ -2471,7 +2481,7 @@
                         } else if (this.isRunning && serverMessage) {
                             this.statusMessage = serverMessage;
                         }
-                        if (this.phaseNoiseBatch.active && wasRunning && !d.is_running && !this.isSyncMode()) {
+                        if (this.phaseNoiseBatch.active && wasRunning && !d.is_running && this.phaseNoiseBatch.mode === 'live') {
                             const failed = /failed|error|stopped|aborted/i.test(serverMessage);
                             this.advancePhaseNoiseBatch(failed ? 'error' : 'done', serverMessage);
                         }
@@ -2559,7 +2569,7 @@
                     return 'bg-secondary';
                 },
                 async fetchSyncStatus() {
-                    if (!this.isSyncMode() && !this.syncRuntime.active) return;
+                    if (!this.isSyncMode() && !this.syncRuntime.active && !this.isScheduledMode()) return;
                     try {
                         const wasActive = Boolean(this.syncRuntime.active);
                         const res = await axios.get('/sync/status');
@@ -2575,7 +2585,7 @@
                             this.currentStep = Number(this.syncRuntime.master_step) || 0;
                             const total = Number(this.syncRuntime.expected_shots) || 1;
                             this.progressPercent = Math.round(100 * this.currentStep / total);
-                        } else if (this.isRunning && this.isSyncMode() && ['done', 'error', 'stopped'].includes(this.syncRuntime.status)) {
+                        } else if (this.isRunning && wasActive && ['done', 'error', 'stopped'].includes(this.syncRuntime.status)) {
                             this.isRunning = false;
                             if (!this.isScheduleActive()) {
                                 this.statusMessage = this.syncRuntime.status === 'error' ? this.syncRuntime.message : 'IDLE';
@@ -2624,6 +2634,7 @@
                 buildSharedIndexState() {
                     return {
                         runMode: this.runMode,
+                        scheduledExecutionMode: this.scheduledExecutionMode,
                         currentSequenceName: this.currentSequenceName,
                         currentDdsXmlName: this.currentDdsXmlName,
                         config: this.cloneConfig(this.config),
@@ -2705,6 +2716,7 @@
                             Object.entries(state.config || {}).filter(([key]) => knownConfigKeys.includes(key))
                         );
                         this.runMode = ['live', 'scheduled', 'sync'].includes(state.runMode) ? state.runMode : 'live';
+                        this.scheduledExecutionMode = state.scheduledExecutionMode === 'sync' ? 'sync' : 'scan';
                         this.config = { ...this.config, ...restoredConfig };
                             this.config.parameter_source = this.config.parameter_source === 'markers' ? 'markers' : 'classic';
                             this.config.marker_axes = Array.isArray(this.config.marker_axes)
@@ -3111,7 +3123,7 @@
                         currentDdsXmlName: this.currentDdsXmlName,
                         sidebarWidth: this.sidebarWidth,
                         runMode: this.runMode,
-                        syncScheduleEnabled: this.syncScheduleEnabled,
+                        scheduledExecutionMode: this.scheduledExecutionMode,
                         syncIndependentP0Enabled: this.syncIndependentP0Enabled,
                         syncP0Configs: Object.fromEntries(this.syncSlaves.map(slave => [String(slave.id), this.cloneConfig(slave.p0_scan_config || {})])),
                         scheduleSettings: this.scheduleSettings,
@@ -3156,7 +3168,8 @@
                             if (['live', 'scheduled', 'sync'].includes(state.runMode)) {
                                 this.runMode = state.runMode;
                             }
-                            this.syncScheduleEnabled = Boolean(state.syncScheduleEnabled);
+                            this.scheduledExecutionMode = state.scheduledExecutionMode === 'sync' || state.syncScheduleEnabled ? 'sync' : 'scan';
+                            if (this.runMode === 'sync' && state.syncScheduleEnabled) this.runMode = 'scheduled';
                             this.syncIndependentP0Enabled = Boolean(state.syncIndependentP0Enabled);
                             this.syncSavedP0Configs = state.syncP0Configs && typeof state.syncP0Configs === 'object' ? state.syncP0Configs : {};
                             if (state.scheduleSettings && typeof state.scheduleSettings === 'object') {
@@ -3334,7 +3347,6 @@
                     );
                     this.config = { ...this.config, ...restoredConfig };
                     this.runMode = restoredRunMode;
-                    this.syncScheduleEnabled = false;
                     this.config.scan_dimensions = Number(this.config.scan_dimensions || (this.config.dim3_enabled ? 3 : (this.config.dim2_enabled ? 2 : 1))) || 1;
                     this.config.dim2_enabled = this.config.scan_dimensions >= 2;
                     this.config.dim3_enabled = this.config.scan_dimensions >= 3;
@@ -3515,10 +3527,19 @@ handleWindowResize() {
     this.requestPlotResize();
 },
 isScheduledMode() {
-    return this.runMode === 'scheduled' || (this.runMode === 'sync' && this.syncScheduleEnabled);
+    return this.runMode === 'scheduled';
 },
 isSyncMode() {
-    return this.runMode === 'sync';
+    return this.runMode === 'sync' || (this.isScheduledMode() && this.scheduledExecutionMode === 'sync');
+},
+isSyncAcquisition() {
+    if (this.syncRuntime?.active) return true;
+    if (this.isScheduleActive() && !this.scheduleRuntime.waitingForCurrentRun) {
+        const task = this.getRuntimeTask();
+        if (task) return task.execution_mode === 'sync';
+    }
+    if (this.isRunning) return false;
+    return this.isSyncMode();
 },
 isScheduleActive() {
     return Boolean(this.scheduleRuntime?.active);
@@ -4080,8 +4101,8 @@ async importPreparedQueueFromUrl() {
             .filter(task => task && !existingIds.has(String(task.id)))
             .map(task => this.cloneConfig(task));
         if (newTasks.length) this.scheduledTasks.push(...newTasks);
-        this.runMode = executionMode === 'sync' ? 'sync' : 'scheduled';
-        this.syncScheduleEnabled = executionMode === 'sync';
+        this.scheduledExecutionMode = executionMode;
+        this.runMode = 'scheduled';
         this.scheduleSettings.timingMode = 'sequential';
         this.scheduleSettings.sequentialGapSec = Math.max(0, Number(payload.gap_seconds) || 0);
         this.selectedScheduledTaskId = (newTasks[0] || incoming[0])?.id || null;
@@ -4225,17 +4246,15 @@ loadScheduledTaskIntoEditor(taskId) {
     const task = this.getScheduledTaskById(taskId);
     if (!task || this.isScheduleActive()) return;
     this.selectedScheduledTaskId = task.id;
+    this.scheduledExecutionMode = task.execution_mode === 'sync' ? 'sync' : 'scan';
+    this.runMode = 'scheduled';
     if (task.execution_mode === 'sync') {
-        this.runMode = 'sync';
-        this.syncScheduleEnabled = true;
         this.syncMasterDelayMs = Number(task.sync?.master_delay_ms) || 0;
         this.syncIndependentP0Enabled = Boolean(task.sync?.independent_p0_enabled);
         this.syncSlaves = (task.sync?.slaves || []).map(slave => ({
             ...this.cloneConfig(slave),
             id: slave.node_id,
         }));
-    } else if (this.isSyncMode()) {
-        this.runMode = 'scheduled';
     }
     const restoredConfig = this.cloneConfig(task.config);
                             this.config = { ...this.config, ...restoredConfig };
@@ -4402,7 +4421,7 @@ prepareScanPayload(sourceConfig = this.config, sequenceNameOverride = null) {
     payload.dim3_enabled = payload.scan_dimensions >= 3;
     if (payload.parameter_source === 'markers') {
         const axes = (payload.marker_axes || []).slice(0, payload.scan_dimensions).filter(Boolean);
-        if (this.runMode === 'sync') throw new Error('Auto Markers are not available in SYNC mode.');
+        if (this.isSyncMode()) throw new Error('Auto Markers are not available in SYNC mode.');
         if (axes.length !== payload.scan_dimensions || new Set(axes).size !== payload.scan_dimensions) {
             throw new Error(`Select ${payload.scan_dimensions} unique marker axis${payload.scan_dimensions === 1 ? '' : 'es'}.`);
         }
@@ -4621,7 +4640,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     this.layoutOscDw = { ...commonLayout, margin: { t: 5, b: 30, l: 50, r: 10 }, yaxis: { ...commonLayout.yaxis, title: 'DW (V)' }, xaxis: { ...commonLayout.xaxis, title: 'Time (ms)' }, title: { text: 'DOWN Signal', font: { size: 10 }, x: 0.05, y: 0.85 }, paper_bgcolor: 'white', plot_bgcolor: 'white' };
                     if (document.getElementById('waveformPlotUp')) Plotly.newPlot('waveformPlotUp', [], this.layoutOscUp);
                     if (document.getElementById('waveformPlotDw')) Plotly.newPlot('waveformPlotDw', [], this.layoutOscDw);
-                    if (this.isSyncMode()) this.renderSyncPlot(); else this.renderMainPlot();
+                    this.renderMainPlot();
                 },
                 setPublicationColumn(column) {
                     this.publicationColumn = window.MigaPlotStyle?.setColumn(column) || (column === 'single' ? 'single' : 'double');
@@ -5920,7 +5939,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     Plotly.react('resultsPlotDw', down.traces, down.layout);
                 },
                 renderMainPlot() {
-                    if (this.isSyncMode()) {
+                    if (this.isSyncAcquisition()) {
                         this.renderSyncPlot();
                         return;
                     }
@@ -6238,7 +6257,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     }
                 },
                 isBraggRabiSync() {
-                    return this.isSyncMode() && String(this.config.mode || '').toLowerCase() === 'bragg_rabi';
+                    return this.isSyncAcquisition() && String(this.getActiveParameterDisplayConfig().mode || '').toLowerCase() === 'bragg_rabi';
                 },
                 isBraggRabiSyncComparison() {
                     return this.isBraggRabiSync() && ['prob', 'intf'].includes(this.currentTab);
@@ -6596,7 +6615,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                             axios.post('/experiment/power-recovery/stop');
                         }
                     }
-                    if (this.isSyncMode() && data?.sync_run_id) {
+                    if (data?.sync_run_id) {
                         const source = this.handleSyncNodeData(data);
                         if (source === 'master') this.recordShotDuration(data);
                         const waveformSource = this.syncDisplaySource === 'master' ? 'master' : this.syncDisplaySource;
@@ -6620,7 +6639,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                     // ordinary scan point as a 0 Hz Transfer Function point.
                     const isTransferFunctionPoint = this.hasFiniteNumericValue(data.transfer_frequency_hz);
                     const isRamseyPoint = this.hasFiniteNumericValue(data.ramsey_delta_f_mhz);
-                    const isFinalImmediateStep = !this.isScheduleActive() && !this.isSyncMode() && total > 0 && this.currentStep >= total;
+                    const isFinalImmediateStep = !this.isScheduleActive() && !this.isSyncAcquisition() && total > 0 && this.currentStep >= total;
                     this.currentScanDimensions = scanDimensions;
                     this.statusMessage = isTransferFunctionPoint
                         ? `${this.isTransferBurstTimeScan() ? 'Transfer function Burst time scan' : 'Transfer Function'}: ${String(data.transfer_generator_model || 'TTI')} CH${Number(data.transfer_generator_channel || 1)} | ${Number(data.transfer_phase_deg).toPrecision(6)}° | ${this.isTransferBurstTimeScan() ? `P0=${Number(data.transfer_frequency_hz).toPrecision(8)}` : `${Number(data.transfer_frequency_hz).toPrecision(8)} Hz`} | ${Number(data.transfer_repeat)}/${Number(this.config.transfer_repeats)}`
@@ -7066,7 +7085,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                 }
                 return;
             }
-            if (this.isSyncMode() || this.syncRuntime?.active) {
+            if (this.isSyncAcquisition()) {
                 try {
                     await axios.post('/sync/stop');
                     this.statusMessage = 'SYNC STOPPING';
@@ -7086,7 +7105,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
             if (!this.isRunning || this.isScheduledMode()) return;
             try {
                 const endpoint = this.isPaused ? '/experiment/resume' : '/experiment/pause';
-                const effectiveEndpoint = this.isSyncMode() ? (this.isPaused ? '/sync/resume' : '/sync/pause') : endpoint;
+                const effectiveEndpoint = this.isSyncAcquisition() ? (this.isPaused ? '/sync/resume' : '/sync/pause') : endpoint;
                 const res = await axios.post(effectiveEndpoint);
                 this.isPaused = !this.isPaused;
                 this.statusMessage = res.data?.message || (this.isPaused ? 'PAUSED' : 'RUNNING');

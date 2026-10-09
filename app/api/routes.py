@@ -191,6 +191,7 @@ def _attachment_response(payload: bytes, filename: str, media_type: str) -> Resp
 def _default_index_ui_state() -> Dict[str, Any]:
     return {
         "runMode": "live",
+        "scheduledExecutionMode": "scan",
         "currentSequenceName": "Default (seq0.mot)",
         "currentDdsXmlName": "",
         "config": ScanConfig().dict(),
@@ -225,6 +226,7 @@ def _sanitize_index_ui_state(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     run_mode = str(payload.get("runMode") or defaults["runMode"]).strip().lower()
     sanitized["runMode"] = run_mode if run_mode in {"live", "scheduled", "sync"} else defaults["runMode"]
+    sanitized["scheduledExecutionMode"] = "sync" if payload.get("scheduledExecutionMode") == "sync" else "scan"
 
     current_sequence_name = str(payload.get("currentSequenceName") or defaults["currentSequenceName"]).strip()
     sanitized["currentSequenceName"] = current_sequence_name or defaults["currentSequenceName"]

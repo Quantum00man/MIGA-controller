@@ -4,6 +4,12 @@ MIGA Controller is a browser-based control, data-acquisition and analysis applic
 
 The main-page planner can be used during an active Live or SYNC run. It snapshots future Master and Slave sequences without touching the active template, supports mixed regular/SYNC queues, can start automatically after the current run, and delays overdue fixed-time tasks until hardware is free. Stops and execution errors preserve and pause the queue for an explicit continue, retry or skip decision.
 
+All queues are managed in the Scheduled run mode. Its Task type selector switches
+the editor between ordinary Scan and SYNC setups; each added task keeps its own
+type, settings and sequence snapshots, so both types can share one queue. Live and
+SYNC remain immediate-run modes. Older saved SYNC queue setups migrate to Scheduled
+with the SYNC task type selected.
+
 Transfer Function scans can optionally read a Thorlabs PM100A from the authenticated Hardware-controller after every normal shot. The first successful reading is the power baseline. A non-zero relative-change threshold pauses between shots, invalidates the complete 0°/90° frequency attempt, runs the prepared Bragg Fringes Calibration as a separately archived recovery run, applies its generated target-fringe MOT, resets the baseline and rescans that frequency. The recovery MOT and complete calibration parameter set can be loaded directly from a previous Bragg Fringes Calibration archive run or supplied manually. Zero-phase baseline shots are never sampled. All non-scheduled scans also support manual shot-boundary Pause/Resume.
 
 Transfer Function, Bragg Fringes Calibration and eligible Standard scans can also run a user-supplied periodic interferometer-labeling MOT. Standard support covers 1D non-randomized Live and Scheduled scans using Classic Placeholders or Auto Markers, plus Classic SYNC scans (including Independent P0). Standard scans calibrate before the first science shot, check the configured minute interval after each completed science shot, and do not add an endpoint block. The MOT is stored locally in Settings on each controller and is never copied through SYNC, so Master and every Slave execute their own file. Each block derives $I_\alpha$ from fitted `Prob_UP_F2`, archives its uncertainty and validity, and updates the live monitor. Final analysis uses piecewise-linear time interpolation of accepted calibration points independently on every node.
