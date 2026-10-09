@@ -157,9 +157,20 @@ is retained. Disable duplicate sources before the first backup. Device IDs are p
 removing registration retains NAS data. SSH uses strict host verification and defaults to
 `~/.ssh/miga_archive_ed25519` on the server.
 
-Start with **Check source**, then **Back up**. Once the first job is checked, edit the device
-and enable automatic backup. The server scans every ten minutes; failed runs retry on
-subsequent scans. Transfers retain partial staging data across restarts. A source file-list
+Start with **Check source**, then **Pull now**. **Pull all sources** queues all enabled
+devices sequentially, skips existing queued/running jobs, and reports each result.
+The **Backup settings** menu configures global defaults and per-device overrides:
+pull interval, optional startup pull, file quiet period (at least 60 seconds), initial
+and maximum failure retry delays, and whether Collections are pulled before runs.
+Automatic backup remains a per-device switch. Defaults are 10-minute pulls, no immediate
+startup pull, 60-second quiet time, retry delay 10 minutes doubling up to 60 minutes,
+and Collections first. The next scheduled pull appears on each device card; queued
+and running tasks have no new due time. Schedules use the most recent job's start
+time, including manual pulls. Settings affect future jobs only. Scheduling is checked
+every five seconds; the serial queue may delay actual execution. Filesystem/queue
+rejections wait the initial retry delay; completed task failures use exponential backoff.
+Neither manual pull action changes saved automatic backup settings.
+Transfers retain partial staging data across restarts. A source file-list
 change quarantines staging and restarts that run on the next scan. New controller versions
 write `archive_complete.json`; legacy runs from today are deferred unless the controller
 status endpoint confirms it is idle. All runs also require a sixty-second quiet period.

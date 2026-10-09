@@ -87,7 +87,7 @@ def main():
         closed = (run / 'archive_complete.json').is_file()
         # Old controllers have no completion marker. Avoid today's archives
         # unless their status endpoint confirms the experiment is idle.
-        if time.time() - latest < 60 or (not closed and relative.startswith(today) and running is not False):
+        if time.time() - latest < max(60,int(request.get('quiet_seconds',60))) or (not closed and relative.startswith(today) and running is not False):
             deferred.append(relative)
             continue
         if not (run / 'config.json').is_file() or not (run / 'results.csv').is_file():

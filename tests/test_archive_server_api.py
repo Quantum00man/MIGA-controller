@@ -95,7 +95,10 @@ class ArchiveServerApiTests(unittest.TestCase):
                     urllib.request.urlopen(unsafe,timeout=10)
                 self.assertEqual(rejected.exception.code,403)
                 self.assertEqual(request('/archive-server/devices/master/test', 'POST')[1]['eligible_runs'], 1)
-                self.assertEqual(request('/archive-server/devices/master/backup', 'POST')[0], 200)
+                queued=request('/archive-server/devices/master/backup','POST')
+                self.assertEqual(queued[0],200)
+                self.assertEqual(queued[1]['backup_policy']['quiet_seconds'],60)
+                self.assertTrue(queued[1]['backup_policy']['collections_first'])
                 while True:
                     jobs = request('/archive-server/jobs')[1]['jobs']
                     if jobs[0]['status'] not in {'queued', 'running'}:
@@ -157,6 +160,21 @@ class ArchiveServerApiTests(unittest.TestCase):
                 self.assertEqual(request('/experiment/start', 'POST', {})[0], 404)
                 self.assertEqual(request('/archive-server/devices/master', 'PATCH', {'enabled': False})[0], 200)
                 self.assertEqual(request('/archive-server/devices/master/backup', 'POST')[0], 400)
+                self.assertEqual(request('/backup-settings')[0],200)
+                settings=request('/archive-server/backup-settings')[1]
+                self.assertEqual(settings['defaults']['interval_minutes'],10)
+                settings_body={'defaults':{**settings['defaults'],'interval_minutes':15},'devices':{
+                    'master':{'automatic_backup':False,'overrides':{'interval_minutes':2}}}}
+                saved=request('/archive-server/backup-settings','PUT',settings_body)
+                self.assertEqual(saved[0],200)
+                self.assertEqual(next(d for d in saved[1]['devices'] if d['device_id']=='master')['effective']['interval_minutes'],2)
+                self.assertEqual(request('/archive-server/backup-settings','PUT',{'defaults':{'quiet_seconds':1},'devices':{}})[0],400)
+                bulk=request('/archive-server/backup-all','POST')[1]
+                self.assertEqual([row['status'] for row in bulk['devices']],['disabled','queued'])
+                deadline=time.monotonic()+10
+                while any(j['status'] in {'queued','running'} for j in request('/archive-server/jobs')[1]['jobs']):
+                    if time.monotonic()>deadline:self.fail('Bulk pull did not finish')
+                    time.sleep(.1)
                 self.assertEqual(request('/archive-server/devices/master', 'DELETE')[0], 200)
                 self.assertTrue((storage / 'devices/master/runs/2025/01/02/run00_20250102').is_dir())
             finally:

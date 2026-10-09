@@ -108,6 +108,7 @@ class ArchiveServerConfiguration:
                 if other_id != device_id and other.get('enabled', True) and all(other.get(key) == record.get(key) for key in ('host', 'ssh_user', 'source_path')):
                     raise ValueError('Disable duplicate source ' + other_id + ' before enabling automatic backup')
         previous = devices.get(device_id) or {}
+        record['backup_overrides'] = previous.get('backup_overrides',{})
         record["registered_at"] = previous.get("registered_at") or record["registered_at"]
         devices[device_id] = record
         payload["devices"] = devices

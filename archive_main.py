@@ -154,6 +154,11 @@ async def setup_progress():
 async def dashboard_snapshot():
     result = await run_in_threadpool(dashboard_state.snapshot)
     result.update(process_id=os.getpid(),reload_state=reload_controller.state())
+    from app.archive.backup_policy import next_pull,effective
+    config=configuration.load()
+    for device in result['devices']:
+        device['backup_policy']=effective(config,device)
+        device['next_pull_at']=next_pull(config,device,backup.jobs(),backup.boot_time,backup.schedule_blocked_until.get(device['device_id'],0))
     return result
 
 
@@ -170,6 +175,56 @@ async def dashboard_script():
 @app.get('/devices')
 async def device_management_page():
     return FileResponse(STATIC_DIR / 'archive-server.html')
+
+
+@app.get('/backup-settings')
+async def backup_settings_page():
+    return FileResponse(STATIC_DIR / 'archive-server.html')
+
+
+@app.get('/archive-server/backup-settings')
+async def backup_settings():
+    from app.archive.backup_policy import DEFAULTS,effective
+    config=configuration.load()
+    return {'defaults':{**DEFAULTS,**config.get('backup_settings',{})},'devices':[
+        {'device_id':key,'name':device['name'],'automatic_backup':device.get('automatic_backup',False),
+         'overrides':device.get('backup_overrides',{}),'effective':effective(config,device)}
+        for key,device in config.get('devices',{}).items()]}
+
+
+class BackupSettingsRequest(BaseModel):
+    defaults: dict
+    devices: dict
+
+
+@app.put('/archive-server/backup-settings')
+async def save_backup_settings(payload: BackupSettingsRequest):
+    from app.archive.backup_policy import validate,effective
+    import copy
+    with backup.lock,configuration.lock:
+        if backup.maintenance:raise ValueError('Server is reloading')
+        config=copy.deepcopy(configuration.load())
+        config['backup_settings']=validate(payload.defaults)
+        for key,setting in payload.devices.items():
+            if key not in config.get('devices',{}):raise ValueError('Unknown device: '+key)
+            if set(setting)-{'automatic_backup','overrides'}:raise ValueError('Unknown device setting')
+            if type(setting.get('automatic_backup')) is not bool:raise ValueError('Automatic backup must be true/false')
+            config['devices'][key]['automatic_backup']=setting['automatic_backup']
+            config['devices'][key]['backup_overrides']=validate(setting.get('overrides',{}))
+        effective(config,{})
+        for device in config.get('devices',{}).values():effective(config,device)
+        for key,device in config.get('devices',{}).items():
+            if device.get('enabled',True) and device.get('automatic_backup',False):
+                for other_key,other in config['devices'].items():
+                    if other_key!=key and other.get('enabled',True) and all(other.get(k)==device.get(k) for k in ('host','ssh_user','source_path')):
+                        raise ValueError('Disable duplicate source '+other_key+' before enabling automatic pulls')
+        configuration._save(config)
+    return await backup_settings()
+
+
+@app.post('/archive-server/backup-all')
+async def backup_all():
+    return await run_in_threadpool(backup.start_all)
 
 
 @app.post('/archive-server/setup/devices/{device_id}/probe')

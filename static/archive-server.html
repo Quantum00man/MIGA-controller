@@ -1,20 +1,22 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MIGA Archive Server — Dashboard</title>
 <link href="/archive-assets/tabler/tabler.min.css" rel="stylesheet">
-<link href="/archive-dashboard.css?v=update-panel-1" rel="stylesheet">
+<link href="/archive-dashboard.css?v=backup-settings-1" rel="stylesheet">
 </head><body>
 <aside class="sidebar"><div class="brand"><span class="brand-mark">M</span><div><h1>MIGA</h1><p>Archive Server</p></div></div>
-<nav aria-label="Archive Server navigation"><a id="nav-dashboard" href="/">Overview</a><a id="nav-devices" href="/devices">Device management</a><a href="/#backup-history">Backup records</a><a href="/#system-update">Server update</a><a href="/setup">Setup Guide</a></nav>
+<nav aria-label="Archive Server navigation"><a id="nav-dashboard" href="/">Overview</a><a id="nav-devices" href="/devices">Device management</a><a id="nav-backup-settings" href="/backup-settings">Backup settings</a><a href="/#backup-history">Backup records</a><a href="/#system-update">Server update</a><a href="/setup">Setup Guide</a></nav>
 <div class="sidebar-label">DEVICE ARCHIVES</div><nav id="archive-links" aria-label="Device archives"></nav>
 <div class="sidebar-footer">Original data preserved.<br>No reverse synchronization.</div></aside>
 <main>
 <header class="page-header"><div><div class="page-pretitle">MIGA ARCHIVE SERVER</div><h1 id="page-title" class="page-title">Your device archives</h1><p id="page-description" class="muted mb-0 mt-2">Explore backed-up data, even when source computers are offline.</p></div><div class="text-end"><button id="refresh" class="btn btn-outline-secondary btn-sm">Refresh status</button><div id="updated" class="muted mt-2">Loading dashboard…</div></div></header>
 <div id="notice" class="alert alert-info d-none" role="status"></div>
+<section id="pull-all-confirmation" class="alert alert-info d-none" aria-label="Confirm all source pulls"><p>Queue one pull for every enabled source? Sources are processed sequentially. Unchanged runs are skipped; existing jobs are not duplicated.</p><div class="tools"><button id="confirm-pull-all" class="btn btn-primary">Confirm pull all</button><button id="cancel-pull-all" class="btn btn-outline-secondary">Cancel</button></div></section>
+<section id="backup-settings-view" class="panel d-none"><h2 class="h5">Backup settings</h2><p class="small muted">Global defaults apply unless a device has overrides. Changes affect future pulls, not jobs already queued or running. Transfer and checksum verification remain mandatory.</p><form id="backup-settings-form"><h3 class="h5">Global defaults</h3><div id="backup-global-fields" class="row g-3 mb-4"></div><h3 class="h5">Device schedules and overrides</h3><div id="backup-device-fields"></div><button id="save-backup-settings" class="btn btn-primary mt-3">Save backup settings</button></form></section>
 <div id="dashboard-view">
 <div class="summary-strip" aria-label="Server overview"><span>NAS <strong id="metric-storage">—</strong></span><span><strong id="metric-devices">—</strong> devices</span><span><strong id="metric-jobs">—</strong> active jobs</span><span><strong id="metric-alerts">—</strong> reminders</span><button class="storage-toggle" id="storage-toggle" aria-expanded="false" aria-controls="storage-disclosure">Storage details</button></div>
 <section id="storage-disclosure" class="panel d-none" aria-labelledby="storage-title"><div class="tools mb-3"><h2 id="storage-title" class="h5 me-auto mb-0">NAS storage</h2><a href="/setup" class="small">Inspect in Guide</a></div><div id="storage"></div></section>
 <section aria-label="Reminders"><div id="alerts" class="alerts"></div><p id="no-alerts" class="d-none">No current fault reminders.</p></section>
-<div class="section-heading"><h2>Device archives</h2><a class="small" href="/devices">Manage devices</a></div><section id="device-cards" class="devices-grid" aria-label="Device archive status"><div class="empty">Loading your devices…</div></section>
+<div class="section-heading"><h2>Device archives</h2><div class="tools"><button id="pull-all" class="btn btn-primary btn-sm">Pull all sources</button><a class="small" href="/devices">Manage devices</a></div></div><section id="device-cards" class="devices-grid" aria-label="Device archive status"><div class="empty">Loading your devices…</div></section>
 <p class="small muted mt-3">Source checks are cached and timestamped. An offline source does not make its NAS archive unavailable.</p>
 <section class="panel mt-4" aria-labelledby="active-title"><div class="tools"><h2 id="active-title" class="h5 me-auto mb-0">Backup activity</h2><span class="small muted">Completed runs only</span></div><div id="active-jobs"></div></section>
 <section id="backup-history" class="panel"><details id="history-details"><summary class="history-toggle">Recent backup records <span class="small muted ms-2">Latest 30 jobs</span></summary><div class="table-responsive mt-3"><table class="table table-sm align-middle"><thead><tr><th>Started</th><th>Device</th><th>Status / phase</th><th>Published / unchanged / eligible</th><th>Details</th></tr></thead><tbody id="jobs"></tbody></table></div></details></section>
@@ -46,8 +48,8 @@
 <div class="col-md-8"><label class="form-label" for="source_path">Data_log absolute path</label><input id="source_path" class="form-control" required></div>
 <div class="col-md-4"><label class="form-label" for="controller_url">Controller URL on source host</label><input id="controller_url" class="form-control" value="http://127.0.0.1:8000"></div>
 <div class="col-12"><label class="form-label" for="collection_path">Collection database path (blank uses Data_log default)</label><input id="collection_path" class="form-control"></div>
-<div class="col-12"><label class="me-3"><input id="enabled" type="checkbox" checked> Enabled</label><label><input id="automatic_backup" type="checkbox"> Automatic backup every 10 minutes</label><p class="small muted mt-2">Enable scheduling after a successful connection test. Completed runs are checked on each scan; failed transfers retry on subsequent scans.</p></div>
+<div class="col-12"><label class="me-3"><input id="enabled" type="checkbox" checked> Enabled</label><label><input id="automatic_backup" type="checkbox"> Automatic backup (interval in Backup settings)</label><p class="small muted mt-2">Enable scheduling after a successful connection test. Completed runs are checked on each scan; failed transfers retry on subsequent scans.</p></div>
 </div><div class="tools mt-3"><button class="btn btn-primary">Save device</button><button type="button" id="cancel" class="btn btn-outline-secondary">Cancel</button></div></form></section>
 </div>
 <footer class="small muted mt-4">Archive-only server • original backups stay immutable • no reverse synchronization</footer>
-</main><script src="/archive-server-dashboard.js?v=update-panel-1"></script></body></html>
+</main><script src="/archive-server-dashboard.js?v=backup-settings-2"></script></body></html>

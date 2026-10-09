@@ -37,6 +37,8 @@ class BackupService:
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self.lock = threading.RLock()
         self.maintenance = False
+        self.boot_time = time.time()
+        self.schedule_blocked_until = {}
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='archive-pull')
         self.stop = threading.Event()
         self.control_dir = configuration.path.parent / 'ssh-control'
@@ -96,9 +98,28 @@ class BackupService:
                     raise ValueError('Duplicate enabled source: disable ' + other_id + ' first')
             job = {'id': uuid.uuid4().hex, 'device_id': device_id, 'status': 'queued', 'started_at': now(),
                    'finished_at': None, 'copied': 0, 'skipped': 0, 'failed': [], 'deferred': [], 'sync_warnings': [], 'total': 0, 'current_run': '', 'phase': 'queued', 'phase_started_at': now(), 'verified_files': 0, 'run_files': 0, 'run_bytes': 0, 'error': ''}
+            from app.archive.backup_policy import effective
+            job['backup_policy']=effective(self.configuration.load(),device)
             atomic_json(self.state_dir / (job['id'] + '.json'), job)
             self.executor.submit(self.run, job, device, root)
             return job
+
+    def start_all(self):
+        with self.lock:
+            if self.maintenance:raise ValueError('Server is reloading')
+            self.configuration.checked_root()
+            result=[]
+            for device_id,device in self.configuration.load().get('devices',{}).items():
+                if not device.get('enabled',True):
+                    result.append({'device_id':device_id,'status':'disabled'});continue
+                if any(j['device_id']==device_id and j['status'] in {'queued','running'} for j in self.jobs()):
+                    result.append({'device_id':device_id,'status':'already_queued'});continue
+                try:
+                    job=self.start(device_id)
+                    result.append({'device_id':device_id,'status':'queued','job_id':job['id']})
+                except (ValueError,FileNotFoundError,OSError) as exc:
+                    result.append({'device_id':device_id,'status':'failed','error':str(exc)})
+            return {'devices':result}
 
     def save_job(self, job):
         with self.lock:
@@ -108,6 +129,15 @@ class BackupService:
         try:
             job['status'] = 'running'
             job.update(phase='scanning', phase_started_at=now())
+            self.save_job(job)
+            from app.archive.backup_policy import effective
+            policy=job.get('backup_policy') or effective(self.configuration.load(),device)
+            device={**device,'quiet_seconds':policy['quiet_seconds']}
+            device_root = root / 'devices' / device['device_id']
+            if policy['collections_first']:
+                try:self.copy_collection(device,device_root,job)
+                except Exception as exc:job['collection_error']=str(exc)
+            job.update(phase='scanning',phase_started_at=now())
             self.save_job(job)
             inventory = self.read_remote(device, 'inventory')
             job.update(total=len(inventory['runs']), deferred=inventory['deferred'])
@@ -138,26 +168,35 @@ class BackupService:
             self.configuration.checked_root()
             job.update(phase='collections', phase_started_at=now())
             self.save_job(job)
-            snapshot = self.read_remote(device, 'collection')
-            if snapshot.get('exists'):
-                content = base64.b64decode(snapshot['data'], validate=True)
-                digest = hashlib.sha256(content).hexdigest()
-                path = device_root / 'collection-imports' / (digest + '.sqlite3')
-                if not path.exists():
-                    path.parent.mkdir(parents=True, exist_ok=True)
-                    temp = path.with_suffix('.part')
-                    temp.write_bytes(content)
-                    with sqlite3.connect(temp.as_uri() + '?mode=ro', uri=True) as db:
-                        if db.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
-                            raise ValueError('Collection snapshot integrity check failed')
-                    temp.replace(path)
-                atomic_json(device_root / 'collection-imports' / 'latest.json', {'file': path.name, 'received_at': now()})
+            if not policy['collections_first']:
+                self.copy_collection(device,device_root,job)
+            if job.get('collection_error'):raise ValueError('Collections snapshot failed: '+job['collection_error'])
             job['status'] = 'incomplete' if job['failed'] or job['deferred'] or job['sync_warnings'] else 'complete'
         except Exception as exc:
             job.update(status='failed', error=str(exc))
         finally:
             job.update(finished_at=now(), current_run='', phase=job['status'])
             self.save_job(job)
+
+    def copy_collection(self,device,device_root,job):
+        self.configuration.checked_root()
+        job.update(phase='collections',phase_started_at=now())
+        self.save_job(job)
+        snapshot = self.read_remote(device, 'collection')
+        if snapshot.get('exists'):
+            self.configuration.checked_root()
+            content = base64.b64decode(snapshot['data'], validate=True)
+            digest = hashlib.sha256(content).hexdigest()
+            path = device_root / 'collection-imports' / (digest + '.sqlite3')
+            if not path.exists():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                temp = path.with_suffix('.part')
+                temp.write_bytes(content)
+                with sqlite3.connect(temp.as_uri() + '?mode=ro', uri=True) as db:
+                    if db.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
+                        raise ValueError('Collection snapshot integrity check failed')
+                temp.replace(path)
+            atomic_json(device_root / 'collection-imports' / 'latest.json', {'file': path.name, 'received_at': now()})
 
     def verify_files(self, directory, manifest, progress=None):
         def check(item):
@@ -272,13 +311,16 @@ class BackupService:
                               'path': str(target.relative_to(root)), 'files': manifest})
 
     def schedule_loop(self):
-        while not self.stop.wait(600):
-            for device_id, device in self.configuration.load().get('devices', {}).items():
-                if device.get('enabled', True) and device.get('automatic_backup', False):
+        from app.archive.backup_policy import next_pull,effective
+        while not self.stop.wait(5):
+            with self.lock:
+                config=self.configuration.load()
+                for device_id,device in config.get('devices',{}).items():
                     try:
-                        self.start(device_id)
-                    except (ValueError, FileNotFoundError):
-                        pass
+                        due=next_pull(config,device,self.jobs(),self.boot_time,self.schedule_blocked_until.get(device_id,0))
+                        if due and datetime.fromisoformat(due).timestamp()<=time.time():self.start(device_id)
+                    except (ValueError,FileNotFoundError,OSError):
+                        self.schedule_blocked_until[device_id]=time.time()+effective(config,device)['retry_minutes']*60
 
     def verify(self, device_id):
         device_root = self.configuration.checked_root() / 'devices' / self.device(device_id)['device_id']
