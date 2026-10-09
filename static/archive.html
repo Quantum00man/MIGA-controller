@@ -1806,7 +1806,7 @@
                         <div class="d-flex flex-wrap gap-2 align-items-center">
                             <input class="form-control form-control-sm" style="max-width:220px" v-model="analysisResultName" placeholder="Analysis name" aria-label="Analysis name">
                             <input class="form-control form-control-sm" style="max-width:280px" v-model="analysisResultNote" placeholder="Note (optional)" aria-label="Analysis note">
-                            <button class="btn btn-success btn-sm" @click="saveAnalysisResult" :disabled="analysisResultBusy || !analysisCandidateId || !analysisResultName.trim() || isLoadingAllan || analysisResultContext !== analysisContextKey(analysisResultKind)">Save Allan result</button>
+                            <button class="btn btn-success btn-sm" @click="saveAnalysisResult" :disabled="!canSaveAnalysisResult">Save Allan result</button>
                             <select class="form-select form-select-sm" style="max-width:360px" v-model="selectedAnalysisResultId" aria-label="Saved analysis result">
                                 <option value="">Select saved analysis</option>
                                 <option v-for="record in analysisResults" :key="record.id" :value="record.id">{{ record.name }} · {{ record.kind }} · {{ record.created_at }}</option>
@@ -1814,9 +1814,9 @@
                             <button class="btn btn-outline-primary btn-sm" @click="restoreAnalysisResult" :disabled="analysisResultBusy || !selectedAnalysisResultId">Restore</button>
                             <button class="btn btn-outline-secondary btn-sm" @click="exportAnalysisResult" :disabled="analysisResultBusy || !selectedAnalysisResultId">Export result + parameters</button>
                         </div>
-                        <div class="small text-muted mt-2" v-if="!analysisCandidateId">Compute Allan or restore a saved result to begin. Restoring reads saved values without recalculation.</div>
+                        <div class="small text-muted mt-2" v-if="!hasAnalysisResult">Compute Allan or restore a saved result to begin. Restoring reads saved values without recalculation.</div>
                         <div class="small mt-2" v-if="analysisResultMessage" role="status">{{ analysisResultMessage }}</div>
-                        <div class="small text-warning mt-2" v-if="analysisCandidateId && analysisResultContext !== analysisContextKey(analysisResultKind)">Analysis conditions have changed. This snapshot still uses its recorded inputs; compute again for the current conditions.</div>
+                        <div class="small text-warning mt-2" v-if="hasAnalysisResult && analysisResultIsStale">Analysis conditions have changed. This snapshot still uses its recorded inputs; compute again for the current conditions.</div>
                     </div>
                 </section>
                 <section v-if="archiveSourceMode === 'collections'" class="card collections-browser mb-4 border-0 shadow-sm" aria-labelledby="collections-title">
@@ -2080,10 +2080,10 @@
                                 <span v-if="syncPhasePlotMode === 'series' && isTransferFunctionArchive()" class="badge bg-light text-dark border">Averaged by frequency and generator phase</span>
                                 <span v-else-if="syncPhasePlotMode === 'series' && isPhaseNoiseArchive()" class="badge bg-light text-dark border">Selected T · shot sequence</span>
                                 <select v-else-if="syncPhasePlotMode === 'series'" class="form-select form-select-sm" style="width:auto" v-model="syncPhaseAggregation" @change="renderSyncArchiveNodePlots"><option value="shots">Every shot</option><option value="average">Averaged by P0</option></select>
-                                <button class="btn btn-outline-success btn-sm" @click="downloadSyncPhaseCSV" :disabled="!syncPhaseExportRows().length"><i class="bi bi-download me-1"></i>Phase CSV</button>
+                                <button class="btn btn-outline-success btn-sm" @click="downloadSyncPhaseCSV" :disabled="!syncPhaseExportData.length"><i class="bi bi-download me-1"></i>Phase CSV</button>
                             </div>
                             <div v-if="syncPhasePlotMode === 'allan'" class="col-12 d-flex flex-wrap align-items-center gap-2">
-                                <label class="form-label-small mb-0">MAX N</label><input type="number" class="form-control form-control-sm" style="width:88px" min="1" :max="syncPhaseMaxAllanOrder()" v-model.number="syncPhaseAllanOrder" @change="normalizeAndRenderSyncPhaseAllan">
+                                <label class="form-label-small mb-0">MAX N</label><input type="number" class="form-control form-control-sm" style="width:88px" min="1" :max="syncPhaseMaxOrder" v-model.number="syncPhaseAllanOrder" @change="normalizeAndRenderSyncPhaseAllan">
                                 <div class="btn-group btn-group-sm"><button class="btn" :class="syncPhaseAllanScale === 'absolute' ? 'btn-primary' : 'btn-outline-primary'" @click="syncPhaseAllanScale='absolute'; renderSyncArchiveNodePlots()">Absolute</button><button class="btn" :class="syncPhaseAllanScale === 'relative' ? 'btn-primary' : 'btn-outline-primary'" @click="syncPhaseAllanScale='relative'; renderSyncArchiveNodePlots()">Relative</button></div>
                                 <div class="btn-group btn-group-sm"><button class="btn" :class="syncPhaseAllanXAxis === 'linear' ? 'btn-secondary' : 'btn-outline-secondary'" @click="syncPhaseAllanXAxis='linear'; renderSyncArchiveNodePlots()">Linear X</button><button class="btn" :class="syncPhaseAllanXAxis === 'log' ? 'btn-secondary' : 'btn-outline-secondary'" @click="syncPhaseAllanXAxis='log'; renderSyncArchiveNodePlots()">Log X</button></div>
                                 <div class="btn-group btn-group-sm"><button class="btn" :class="syncPhaseAllanYAxis === 'linear' ? 'btn-secondary' : 'btn-outline-secondary'" @click="syncPhaseAllanYAxis='linear'; renderSyncArchiveNodePlots()">Linear Y</button><button class="btn" :class="syncPhaseAllanYAxis === 'log' ? 'btn-secondary' : 'btn-outline-secondary'" @click="syncPhaseAllanYAxis='log'; renderSyncArchiveNodePlots()" title="Log Y displays positive values only">Log Y</button></div>
@@ -3067,6 +3067,7 @@
                     analysisResultName: '', analysisResultNote: '', analysisResultBusy: false,
                     analysisResultMessage: '', analysisResultKind: '', analysisResultContext: '', analysisSnapshotRestored: false,
                     phaseNoiseAllanSnapshot: null, phaseNoiseAllanPlot: null,
+                    syncPhaseAllanSnapshot: null, restoredSyncPhaseAllan: null, loadedArchiveInputStamp: '',
                     betaOptimization: {
                         parameter: 'intf_beta', metric: 'intf', statistic: 'mean', allanOrder: 1, source: 'fit', channel: 'up', targetMean: 0,
                         alphaMin: 0, alphaMax: 1, betaMin: 0, betaMax: 1,
@@ -3124,6 +3125,39 @@
                 }
             },
             computed: {
+                currentAnalysisContext() {
+                    return this.analysisContextKey(this.analysisResultKind);
+                },
+                analysisResultIsStale() {
+                    return this.analysisResultContext !== this.currentAnalysisContext;
+                },
+                hasAnalysisResult() {
+                    return Boolean(this.analysisCandidateId || (this.analysisResultKind === 'sync_phase_allan' && this.syncPhaseAllanSnapshot));
+                },
+                canSaveAnalysisResult() {
+                    return this.hasAnalysisResult && !this.analysisResultBusy && !this.isLoadingAllan
+                        && Boolean(this.analysisResultName.trim()) && !this.analysisResultIsStale;
+                },
+                syncPhaseMaxOrder() {
+                    return this.syncPhaseMaxAllanOrder();
+                },
+                syncPhaseAllanResults() {
+                    if (!this.syncManifest || this.syncPhasePlotMode !== 'allan') return [];
+                    const restored = this.restoredSyncPhaseAllan;
+                    if (restored && restored.context === this.analysisContextKey('sync_phase_allan')) return restored.result.curves;
+                    return this.syncPhaseAllanDefinitions().map(({rows, ...definition}) => ({...definition, curve: this.syncPhaseAllanCurve(rows)}));
+                },
+                syncPhaseOptimizationIndex() {
+                    const index = new Map();
+                    for (const record of this.syncPhaseCalibrationOptimization.result?.series || []) {
+                        const shot = Number(record.shot);
+                        if (!index.has(shot)) index.set(shot, record);
+                    }
+                    return index;
+                },
+                syncPhaseExportData() {
+                    return this.syncManifest ? this.syncPhaseExportRows() : [];
+                },
                 latestArchiveAudit() {
                     return this.archiveAuditReports.length ? this.archiveAuditReports[0] : null;
                 },
@@ -4975,6 +5009,9 @@
                     return this.show3DControls() && this.dim3DisplayMode === 'slice';
                 },
                 analysisContextKey(kind) {
+                    if (kind === 'sync_phase_allan') return JSON.stringify({ref: this.loadedRunRef,
+                        version: this.serverVersion || 'original', input: this.loadedArchiveInputStamp,
+                        parameters: this.syncPhaseAnalysisParameters()});
                     const range = this.normalizeAllanP0RangeValues(this.allanP0Min, this.allanP0Max);
                     return JSON.stringify({ref: this.loadedRunRef, node: this.loadedSyncNode || '',
                         version: this.serverVersion || 'original', settings: this.normalizeAnalysis(this.analysis),
@@ -4985,12 +5022,36 @@
                         detail: kind === 'phase_noise_allan' ? [this.phaseNoiseView, this.phaseNoiseSelectedT2, this.phaseNoiseXAxis, this.phaseNoiseXAxisScale, this.phaseNoiseYAxisScale, this.syncPhaseCalibrationOptimization?.selectedId, this.syncPhaseCalibrationOptimization?.result] : null,
                         range: kind === 'allan' ? range : null});
                 },
+                syncPhaseAnalysisParameters() {
+                    return {selected_nodes: [...this.syncPhaseSelectedNodes], reference_node: this.syncPhaseReferenceNode,
+                        target_node: this.syncPhaseTargetNode, order: this.syncPhaseAllanOrder,
+                        p0_min: this.syncPhaseP0Min, p0_max: this.syncPhaseP0Max,
+                        shot_min: this.syncPhaseShotMin, shot_max: this.syncPhaseShotMax,
+                        selected_t2: this.isPhaseNoiseArchive() ? this.phaseNoiseSelectedT2 : null,
+                        calibration_optimization: this.syncPhaseCalibrationOptimization.result,
+                        analysis_copy_id: this.syncAnalysisCopy.selectedId || '',
+                        phase_references: this.archivePhaseReferenceContexts,
+                        intf_alpha_selection: this.activeIntfAlphaSelection};
+                },
+                rememberSyncPhaseAllan(curves, traces, layout) {
+                    const context = this.analysisContextKey('sync_phase_allan');
+                    const restored = this.restoredSyncPhaseAllan;
+                    this.syncPhaseAllanSnapshot = Vue.markRaw({context, result: {curves, plot: {traces, layout}},
+                        parameters: this.syncPhaseAnalysisParameters(), input_stamp: this.loadedArchiveInputStamp});
+                    this.analysisResultKind = 'sync_phase_allan';
+                    this.analysisResultContext = context;
+                    this.analysisSnapshotRestored = Boolean(restored && restored.context === context);
+                    this.analysisCandidateId = this.analysisSnapshotRestored ? restored.id : '';
+                    this.analysisResultMessage = this.analysisSnapshotRestored
+                        ? `Restored “${restored.name}” without recalculation.` : 'SYNC phase Allan snapshot ready to save.';
+                },
                 rememberAnalysisResult(result, kind) {
                     this.analysisSnapshotRestored = Boolean(result._saved_snapshot);
                     this.analysisCandidateId = result.analysis_candidate_id || '';
                     this.analysisResultKind = kind;
                     this.analysisResultContext = this.analysisContextKey(kind);
-                    this.analysisResultMessage = 'Computed snapshot ready to save.';
+                    this.analysisResultMessage = this.analysisCandidateId ? 'Computed snapshot ready to save.'
+                        : 'Allan was computed, but the server did not return a save identifier. Restart the updated service and recompute.';
                 },
                 async refreshAnalysisResults() {
                     if (!this.loadedRunRef) return;
@@ -5009,12 +5070,19 @@
                         phaseNoiseOptimization: this.syncPhaseCalibrationOptimization?.result || this.selectedSavedSyncPhaseCalibrationOptimization?.() || null};
                 },
                 async saveAnalysisResult() {
-                    if (!this.analysisCandidateId || !this.loadedRunRef) return;
+                    if (!this.hasAnalysisResult || !this.loadedRunRef || this.analysisResultIsStale) return;
                     this.analysisResultBusy = true;
                     try {
-                        const response = await axios.post('/archive/analysis-results/save', {...this.loadedRunRef,
-                            candidate_id: this.analysisCandidateId, name: this.analysisResultName,
-                            note: this.analysisResultNote, view: this.analysisResultView()});
+                        const syncSnapshot = this.analysisResultKind === 'sync_phase_allan' && !this.analysisSnapshotRestored ? this.syncPhaseAllanSnapshot : null;
+                        const response = syncSnapshot
+                            ? await axios.post('/archive/analysis-results/sync-phase/save', {...this.buildArchivePayload(),
+                                display_mode: this.displayMode, input_stamp: syncSnapshot.input_stamp, sync_parameters: syncSnapshot.parameters,
+                                result: syncSnapshot.result, name: this.analysisResultName, note: this.analysisResultNote,
+                                view: {syncPhaseAllanScale: this.syncPhaseAllanScale, syncPhaseAllanXAxis: this.syncPhaseAllanXAxis,
+                                    syncPhaseAllanYAxis: this.syncPhaseAllanYAxis, phaseUnit: this.phaseUnit}})
+                            : await axios.post('/archive/analysis-results/save', {...this.loadedRunRef,
+                                candidate_id: this.analysisCandidateId, name: this.analysisResultName,
+                                note: this.analysisResultNote, view: this.analysisResultView()});
                         await this.refreshAnalysisResults();
                         this.selectedAnalysisResultId = response.data.id;
                         this.analysisResultMessage = `Saved “${response.data.name}”. Original data is unchanged.`;
@@ -5029,17 +5097,37 @@
                         const response = await axios.get(`/archive/analysis-results/${ref.year}/${ref.month}/${ref.day}/${ref.run_id}/${this.selectedAnalysisResultId}`);
                         const record = response.data;
                         const params = record.parameters;
-                        if ((params.node_id || '') !== (this.loadedSyncNode || '')) {
+                        if (record.kind !== 'sync_phase_allan' && (params.node_id || '') !== (this.loadedSyncNode || '')) {
                             this.analysisResultMessage = 'Select the recorded SYNC node before restoring this result.';
                             return;
                         }
                         this.analysis = this.normalizeAnalysis(params.new_settings);
-                        this.displayMode = params.display_mode;
+                        this.displayMode = params.display_mode || 'saved';
                         this.activeIntfAlphaSelection = params.intf_alpha_selection || null;
                         for (const [key, value] of Object.entries(record.view || {})) {
-                            if (['allanYAxisMode', 'allanXAxisMode', 'allanScaleMode', 'phaseUnit', 'phaseNoiseView', 'phaseNoiseSelectedT2', 'phaseNoiseYAxisScale', 'phaseNoiseXAxis', 'phaseNoiseXAxisScale'].includes(key)) this[key] = value;
+                            if (['allanYAxisMode', 'allanXAxisMode', 'allanScaleMode', 'phaseUnit', 'phaseNoiseView', 'phaseNoiseSelectedT2', 'phaseNoiseYAxisScale', 'phaseNoiseXAxis', 'phaseNoiseXAxisScale', 'syncPhaseAllanScale', 'syncPhaseAllanXAxis', 'syncPhaseAllanYAxis'].includes(key)) this[key] = value;
                         }
-                        if (record.kind === 'allan') {
+                        if (record.kind === 'sync_phase_allan') {
+                            if (!this.syncManifest) throw new Error('Load the SYNC archive before restoring this result.');
+                            const selected = params.sync_parameters;
+                            this.syncPhaseSelectedNodes = [...selected.selected_nodes];
+                            this.syncPhaseReferenceNode = selected.reference_node;
+                            this.syncPhaseTargetNode = selected.target_node;
+                            this.syncPhaseAllanOrder = selected.order;
+                            this.syncPhaseP0Min = selected.p0_min; this.syncPhaseP0Max = selected.p0_max;
+                            this.syncPhaseShotMin = selected.shot_min; this.syncPhaseShotMax = selected.shot_max;
+                            this.syncPhaseP0MinInput = selected.p0_min == null ? '' : String(selected.p0_min);
+                            this.syncPhaseP0MaxInput = selected.p0_max == null ? '' : String(selected.p0_max);
+                            this.syncPhaseShotMinInput = selected.shot_min == null ? '' : String(selected.shot_min);
+                            this.syncPhaseShotMaxInput = selected.shot_max == null ? '' : String(selected.shot_max);
+                            if (selected.selected_t2 != null) this.phaseNoiseSelectedT2 = selected.selected_t2;
+                            this.syncPhaseCalibrationOptimization.result = selected.calibration_optimization || null;
+                            this.syncArchiveViewMode = 'node'; this.syncArchiveTab = 'phase'; this.syncPhasePlotMode = 'allan';
+                            this.restoredSyncPhaseAllan = Vue.markRaw({id: record.id, name: record.name, result: record.result,
+                                context: this.analysisContextKey('sync_phase_allan')});
+                            await this.$nextTick();
+                            this.renderSyncArchiveNodePlots();
+                        } else if (record.kind === 'allan') {
                             this.currentTab = params.metric || 'atoms';
                             this.showRawData = params.source === 'raw';
                             this.allanOrder = record.result.used_max_order || params.order;
@@ -6383,6 +6471,9 @@
                         this.originalSettings = this.normalizeAnalysis({ ...snap, ...transferNormalization });
                         this.analysis = this.normalizeAnalysis({ ...this.analysis, ...snap, ...transferNormalization });
 
+                        this.loadedArchiveInputStamp = res.data.archive_input_stamp || '';
+                        this.syncPhaseAllanSnapshot = null;
+                        this.restoredSyncPhaseAllan = null;
                         this.loadedPoints = res.data.data;
                         this.loadedSyncNodeData = Array.isArray(res.data.archive_node_data)
                             ? res.data.archive_node_data : this.loadedPoints;
@@ -7397,7 +7488,7 @@
                     if (String(nodeId) === String(result.reference_node_id)) field = 'reference_after_rad';
                     else if (String(nodeId) === String(result.target_node_id)) field = 'target_after_rad';
                     if (!field) return null;
-                    const record = result.series.find(item => Number(item.shot) === Number(previewShot));
+                    const record = this.syncPhaseOptimizationIndex.get(Number(previewShot));
                     if (!record || record[field] == null || !Number.isFinite(Number(record[field]))) return null;
                     return { matched: true, value: Number(record[field]) };
                 },
@@ -7612,8 +7703,8 @@
                     const mean = values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
                     const orders = []; const deviations = []; const validWindowCounts = [];
                     const edfWhite = []; const ciLower = []; const ciUpper = []; const errorMinus = []; const errorPlus = [];
+                    const prefix = [0]; values.forEach((value, index) => prefix.push(prefix[index] + value));
                     for (let order = 1; order <= maxOrder; order += 1) {
-                        const prefix = [0]; values.forEach((value, index) => prefix.push(prefix[index] + value));
                         let sumSquares = 0; let count = 0; const validStarts = [];
                         for (let start = 0; start <= values.length - 2 * order; start += 1) {
                             const split = start + order; const end = split + order;
@@ -7668,6 +7759,13 @@
                     if (!starts.length) return null;
                     const overlap = offset => Math.max(0, n - Math.abs(offset)); const diagonal = 1 / n;
                     let gramSquares = starts.length * diagonal * diagonal;
+                    if (starts[starts.length - 1] - starts[0] === starts.length - 1) {
+                        for (let offset = 1; offset < Math.min(2 * n, starts.length); offset += 1) {
+                            const dot = (2 * overlap(offset) - overlap(offset + n) - overlap(offset - n)) / (2 * n * n);
+                            gramSquares += 2 * (starts.length - offset) * dot * dot;
+                        }
+                        const trace = starts.length * diagonal; return trace * trace / gramSquares;
+                    }
                     for (let left = 0; left < starts.length - 1; left += 1) for (let right = left + 1; right < starts.length; right += 1) {
                         const offset = starts[right] - starts[left]; if (offset >= 2 * n) break;
                         const dot = (2 * overlap(offset) - overlap(offset + n) - overlap(offset - n)) / (2 * n * n);
@@ -7683,8 +7781,8 @@
                     return { edf: nu, ciLower: lower, ciUpper: upper, errorMinus: sigma - lower, errorPlus: upper - sigma };
                 },
                 syncPhaseAllanStatisticsRows() {
-                    return this.syncPhaseAllanDefinitions().map(definition => {
-                        const curve = this.syncPhaseAllanCurve(definition.rows);
+                    return this.syncPhaseAllanResults.map(definition => {
+                        const curve = definition.curve;
                         return { id: definition.id, label: definition.label, mean: curve.mean, rms: curve.rms, standardDeviation: curve.standardDeviation, sampleCount: curve.count };
                     }).filter(row => row.sampleCount > 0);
                 },
@@ -8151,13 +8249,13 @@
                     if (downElement) downElement.style.display = 'none';
                     if (!element) return;
                     const scale = this.phaseUnit === 'mrad' ? 1000 : 1;
-                    const definitions = this.syncPhasePlotMode === 'allan' ? this.syncPhaseAllanDefinitions() : this.syncPhaseSeriesDefinitions();
+                    const definitions = this.syncPhasePlotMode === 'allan' ? this.syncPhaseAllanResults : this.syncPhaseSeriesDefinitions();
                     let traces;
                     let xTitle;
                     let title;
                     if (this.syncPhasePlotMode === 'allan') {
                         traces = definitions.flatMap(definition => {
-                            const curve = this.syncPhaseAllanCurve(definition.rows);
+                            const curve = definition.curve;
                             const relative = this.syncPhaseAllanScale === 'relative';
                             const denominator = Math.abs(Number(curve.mean));
                             const y = curve.deviations.map(value => {
@@ -8219,15 +8317,20 @@
                         legend: { orientation: 'h', x: 1, xanchor: 'right', y: 1.13 }, hovermode: 'closest', paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
                         uirevision: `sync-phase:${this.syncPhasePlotMode}:${this.syncPhaseSelectedNodes.join('|')}:${this.syncPhaseReferenceNode}:${this.syncPhaseTargetNode}:${this.isPhaseNoiseArchive() ? Number(this.phaseNoiseSelectedT2) : ''}`,
                     };
+                    if (this.syncPhasePlotMode === 'allan') this.rememberSyncPhaseAllan(definitions, traces, layout);
                     Plotly.react(element, traces, layout, { responsive: true, displaylogo: false });
                 },
                 syncPhaseExportRows() {
                     const nodeIds = this.syncPhaseNodeIds();
                     const rowsByNode = Object.fromEntries(nodeIds.map(nodeId => [nodeId, this.syncPhaseRows(nodeId, true)]));
+                    const byShot = Object.fromEntries(nodeIds.map(nodeId => {
+                        const index = new Map(); rowsByNode[nodeId].forEach(item => { if (!index.has(item.shot)) index.set(item.shot, item); });
+                        return [nodeId, index];
+                    }));
                     const shots = [...new Set(nodeIds.flatMap(nodeId => rowsByNode[nodeId].map(item => item.shot)))].sort((a, b) => a - b);
                     return shots.map(shot => {
                         const nodes = {};
-                        nodeIds.forEach(nodeId => { nodes[nodeId] = rowsByNode[nodeId].find(item => item.shot === shot) || null; });
+                        nodeIds.forEach(nodeId => { nodes[nodeId] = byShot[nodeId].get(shot) || null; });
                         const reference = nodes[this.syncPhaseReferenceNode]; const target = nodes[this.syncPhaseTargetNode];
                         let rawDifference = null; let wrappedDifference = null;
                         if (reference?.valid && target?.valid && this.syncPhaseSameP0(reference.p0, target.p0)) {
@@ -8238,7 +8341,7 @@
                     });
                 },
                 async downloadSyncPhaseCSV() {
-                    const exportRows = this.syncPhaseExportRows(); const nodeIds = this.syncPhaseNodeIds();
+                    const exportRows = this.syncPhaseExportData; const nodeIds = this.syncPhaseNodeIds();
                     if (!exportRows.length) return;
                     const nodeHeaders = nodeIds.flatMap(nodeId => {
                         const prefix = this.sanitizeFilenamePart(this.syncArchiveNodeLabel(nodeId), nodeId);
@@ -8254,8 +8357,7 @@
                     await this.downloadCsvContent(csvContent, `sync_interferometer_phase_${runPart}.csv`);
                 },
                 async downloadSyncPhaseAllanCSV() {
-                    const definitions = this.syncPhaseAllanDefinitions();
-                    const curves = definitions.map(definition => ({ ...definition, curve: this.syncPhaseAllanCurve(definition.rows) }));
+                    const curves = this.syncPhaseAllanResults;
                     const orders = curves[0]?.curve?.orders || [];
                     const header = ['allan_order_n', ...curves.flatMap(item => { const prefix = this.sanitizeFilenamePart(item.label); return [`${prefix}_allan_rad`, `${prefix}_error_minus_rad`, `${prefix}_error_plus_rad`, `${prefix}_ci_lower_rad`, `${prefix}_ci_upper_rad`, `${prefix}_edf_white`, `${prefix}_relative_allan`, `${prefix}_relative_error_minus`, `${prefix}_relative_error_plus`, `${prefix}_valid_windows`]; })];
                     const rows = orders.map((order, index) => [order, ...curves.flatMap(item => {

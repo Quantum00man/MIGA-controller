@@ -23,6 +23,10 @@ def input_stamp(directory):
             for path in input_files(directory)]
 
 
+def stamp_digest(stamp):
+    return hashlib.sha256(json.dumps(stamp, separators=(',', ':')).encode()).hexdigest()
+
+
 def fingerprint(directory):
     digest = hashlib.sha256()
     for path in input_files(directory):
@@ -133,7 +137,7 @@ def capture_result(loader, req, result, settings, kind, source):
     directory = source.pop('_directory')
     if stamp != input_stamp(Path(directory)):
         raise ValueError('Input changed during calculation; wait for acquisition/backup to finish and retry')
-    parameters = req.model_dump()
+    parameters = req.model_dump(exclude={'result', 'name', 'note', 'view', 'updated_data'})
     parameters['new_settings'] = settings
     candidate_id = store_for(loader, source['reference']).candidate(kind, result, parameters, source)
     return {**result, 'analysis_candidate_id': candidate_id}

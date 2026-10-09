@@ -920,6 +920,16 @@ class ArchiveAnalysisSaveRequest(ArchiveRunReference):
     view: Dict[str, Any] = Field(default_factory=dict)
 
 
+class ArchiveSyncPhaseAllanSaveRequest(ReAnalysisRequest):
+    display_mode: str = Field("saved")
+    name: str = Field(..., min_length=1, max_length=200)
+    note: str = Field("", max_length=5000)
+    input_stamp: str = Field(..., pattern=r"^[a-f0-9]{64}$")
+    sync_parameters: Dict[str, Any]
+    result: Dict[str, Any]
+    view: Dict[str, Any] = Field(default_factory=dict)
+
+
 class ArchiveAllanRequest(BaseModel):
     year: str
     month: str

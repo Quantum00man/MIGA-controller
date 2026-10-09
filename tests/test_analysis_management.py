@@ -173,3 +173,69 @@ def test_browser_plot_snapshot_preserves_values_and_rejects_changed_inputs(tmp_p
     # An unchanged historical snapshot can be copied even after its input changed.
     copied = store.save(record['id'], 'Historical copy', view={'plot_snapshot': plot}, input_sha256='changed')
     assert copied['result']['plot_snapshot'] == plot
+
+
+def test_sync_browser_allan_can_save_exact_curves_without_recalculation(controller):
+    from app.core.analysis_store import input_stamp, stamp_digest
+    client, loader, raw = controller
+    (raw / 'sync_manifest.json').write_text('{}')
+    before = fingerprint(raw)
+    curve = {'orders': [1, 2], 'deviations': [.12, .08], 'validWindowCounts': [10, 8],
+             'edfWhite': [8, 5], 'ciLower': [.1, .06], 'ciUpper': [.15, .11],
+             'errorMinus': [.02, .02], 'errorPlus': [.03, .03], 'mean': 0, 'rms': .2, 'standardDeviation': .2, 'count': 12}
+    result = {'curves': [{'id': 'difference:slave-master', 'label': 'Slave − Master', 'curve': curve}],
+              'plot': {'traces': [{'x': [1, 2], 'y': [.12, .08]}], 'layout': {}}}
+    body = {**REFERENCE, 'new_settings': SETTINGS, 'name': 'op allan', 'note': '1',
+            'input_stamp': stamp_digest(input_stamp(raw)), 'sync_parameters': {'selected_nodes': ['master', 'slave'], 'order': 2}, 'result': result}
+    with patch.object(loader, 'calculate_allan_run', side_effect=AssertionError('Do not recalculate')), \
+         patch.object(loader, 'recalculate_run', side_effect=AssertionError('Do not refit')):
+        saved = client.post('/archive/analysis-results/sync-phase/save', json=body)
+        assert saved.status_code == 200, saved.text
+        record = saved.json()
+        assert record['kind'] == 'sync_phase_allan'
+        assert record['result']['curves'] == result['curves']
+        assert record['parameters']['sync_parameters']['order'] == 2
+        url = '/archive/analysis-results/' + '/'.join(REF) + '/' + record['id']
+        assert client.get(url).json()['result']['curves'] == result['curves']
+        assert client.get(url + '?download=true').json()['result']['curves'] == result['curves']
+    assert fingerprint(raw) == before
+    (raw / 'results.csv').write_text('externally changed')
+    rejected = client.post('/archive/analysis-results/sync-phase/save', json=body)
+    assert rejected.status_code == 400
+    assert 'changed since loading' in rejected.json()['detail']
+    assert len(client.get('/archive/analysis-results/' + '/'.join(REF)).json()['analyses']) == 1
+
+
+def test_archive_server_saves_sync_browser_result_in_device_store(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from app.archive.repository import ArchiveRepository
+    from app.archive import ui_context, ui_routes
+    from app.core.analysis_store import input_stamp, stamp_digest
+    storage = tmp_path / 'nas'
+    raw = storage / 'devices/master/runs'
+    run = raw.joinpath(*REF)
+    run.mkdir(parents=True)
+    (run / 'config.json').write_text('{"mode":"standard","scan_dimensions":1}')
+    (run / 'results.csv').write_text('Step,Timestamp,Parameter_P0,Atom_UP,Atom_DW\n0,0,1,100,110\n1,1,1,101,109\n')
+    (run / 'sync_manifest.json').write_text('{}')
+    configuration = SimpleNamespace(path=tmp_path / 'configuration.json',
+        checked_root=lambda: storage, load=lambda: {'devices': {'master': {}}, 'archive_uuid': 'test'})
+    monkeypatch.setattr(ui_context, '_repository', ArchiveRepository(configuration))
+    app = FastAPI()
+    app.include_router(ui_routes.router, prefix='/archive-server/view/{device_id}')
+    curve = {'orders': [1], 'deviations': [.1], 'validWindowCounts': [1], 'edfWhite': [1],
+             'ciLower': [.05], 'ciUpper': [.2], 'errorMinus': [.05], 'errorPlus': [.1], 'mean': 0, 'rms': .2, 'standardDeviation': .2, 'count': 2}
+    before = fingerprint(run)
+    with TestClient(app) as client:
+        response = client.post('/archive-server/view/master/archive/analysis-results/sync-phase/save',
+            json={**REFERENCE, 'new_settings': SETTINGS, 'name': 'op allan', 'input_stamp': stamp_digest(input_stamp(run)),
+                  'sync_parameters': {'selected_nodes': ['master']}, 'result': {'curves': [{'id': 'master', 'curve': curve}]}})
+        assert response.status_code == 200, response.text
+        saved = response.json()
+        assert saved['source']['device_id'] == 'master'
+        assert saved['parameters']['display_mode'] == 'saved'
+        assert 'result' not in saved['parameters']
+        path = '/archive-server/view/master/archive/analysis-results/' + '/'.join(REF) + '/' + saved['id']
+        assert client.get(path).json()['result']['curves'][0]['curve'] == curve
+    assert fingerprint(run) == before
+    assert list((storage / 'derived/master').glob('*/results/saved/*.json'))

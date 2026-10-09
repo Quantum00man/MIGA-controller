@@ -77,3 +77,76 @@ const app = Object.assign({
 })().catch(error => {console.error(error); process.exitCode = 1});
 """
     subprocess.run([node, '-e', script], cwd=Path(__file__).resolve().parents[1], check=True, capture_output=True, text=True)
+
+
+def test_sync_allan_save_readiness_cached_statistics_and_restored_curves():
+    node = shutil.which('node')
+    if not node:
+        pytest.skip('Node.js is required')
+    script = r"""
+const fs = require('node:fs');
+const vm = require('node:vm');
+const assert = require('node:assert/strict');
+const html = fs.readFileSync('static/archive.html', 'utf8');
+const computedStart = html.indexOf('            computed: {');
+const computedEnd = html.indexOf('            watch:', computedStart);
+const computed = vm.runInThisContext('({' + html.slice(computedStart, computedEnd) + '})').computed;
+const methodStart = html.indexOf('                analysisContextKey(kind) {');
+const methodEnd = html.indexOf('                getAllanCacheMode() {', methodStart);
+const management = vm.runInThisContext('({' + html.slice(methodStart, methodEnd) + '})');
+const curveStart = html.indexOf('                syncPhaseAllanCurve(rows) {');
+const curveEnd = html.indexOf('                formatSyncPhaseStatistic(value)', curveStart);
+const scientific = vm.runInThisContext('({' + html.slice(curveStart, curveEnd) + '})');
+global.Vue = {markRaw: value => value};
+const stored = [{id:'master', label:'Master', curve:{orders:[1], deviations:[.1], mean:.2, rms:.3, standardDeviation:.1, count:300}}];
+const app = Object.assign({
+    syncManifest:{}, syncPhasePlotMode:'allan', analysisResultBusy:false, isLoadingAllan:false,
+    analysisResultName:'', analysisCandidateId:'', analysisResultKind:'sync_phase_allan',
+    analysisContextKey: () => 'context', syncPhaseAnalysisParameters: () => ({order:1}),
+    loadedArchiveInputStamp:'receipt',
+    syncPhaseAllanDefinitions: () => {throw Error('Saved result must not rebuild input rows')},
+    syncPhaseAllanCurve: () => {throw Error('Saved result must not calculate curves')},
+    restoredSyncPhaseAllan:{context:'context', id:'saved', name:'op allan', result:{curves:stored}}
+}, management);
+// Reuse a stored curve and record readiness with no backend candidate id.
+app.analysisContextKey = () => 'context';
+app.syncPhaseAnalysisParameters = () => ({order:1});
+app.syncPhaseAllanDefinitions = () => {throw Error('Unexpected definitions calculation')};
+app.syncPhaseAllanCurve = () => {throw Error('Unexpected Allan calculation')};
+app.syncPhaseAllanResults = computed.syncPhaseAllanResults.call(app);
+assert.equal(app.syncPhaseAllanResults, stored);
+app.restoredSyncPhaseAllan = null;
+app.rememberSyncPhaseAllan(stored, [{x:[1], y:[.1]}], {});
+assert.equal(app.analysisCandidateId, '');
+app.hasAnalysisResult = computed.hasAnalysisResult.call(app);
+app.analysisResultIsStale = false;
+assert.equal(computed.canSaveAnalysisResult.call(app), false);
+app.analysisResultName = 'op allan';
+assert.equal(computed.canSaveAnalysisResult.call(app), true);
+for (const letter of 'op allan') {
+    app.analysisResultName += letter;
+    const rows = scientific.syncPhaseAllanStatisticsRows.call(app);
+    assert.equal(rows[0].sampleCount, 300);
+    assert.equal(rows[0].mean, .2);
+}
+app.analysisResultIsStale = true;
+assert.equal(computed.canSaveAnalysisResult.call(app), false);
+// Verify the contiguous-window EDF shortcut against the original pairwise formula.
+function originalEdf(starts,n) {
+    const overlap = d => Math.max(0,n-Math.abs(d));
+    let squares=starts.length/(n*n);
+    for(let i=0;i<starts.length;i++) for(let j=i+1;j<starts.length;j++) {
+        const d=starts[j]-starts[i]; if(d>=2*n) break;
+        const dot=(2*overlap(d)-overlap(d+n)-overlap(d-n))/(2*n*n);
+        squares+=2*dot*dot;
+    }
+    return (starts.length/n)**2/squares;
+}
+for (const starts of [[0], [0,1,2,3,4,5,6], [3,4,5,6], [0,2,3,6,8]]) {
+    for(const order of [1,2,3,5]) {
+        const actual = scientific.allanWhiteNoiseEdf(starts, order);
+        assert.ok(Math.abs(actual-originalEdf(starts,order))<1e-10);
+    }
+}
+"""
+    subprocess.run([node, '-e', script], cwd=Path(__file__).resolve().parents[1], check=True, capture_output=True, text=True)

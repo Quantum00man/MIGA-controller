@@ -2094,7 +2094,9 @@ class DataLoader:
         intf_alpha_accepted_ids: Optional[List[str]] = None,
         intf_alpha_interpolation_method: str = "linear",
     ) -> Dict[str, Any]:
+        from app.core.analysis_store import input_stamp, stamp_digest
         root_run_dir = self._get_run_dir(year, month, day, run_id)
+        archive_input_stamp = input_stamp(root_run_dir)
         run_dir, archive_node_identity = self._resolve_archive_node_identity(root_run_dir, node_id)
         config_data = self._load_config_data(run_dir)
         scan_dimensions = self._resolve_scan_dimensions(config_data)
@@ -2266,7 +2268,8 @@ class DataLoader:
                     node_result = self._reanalyze_archived_bragg_calibration(node_points, node_config)
                 if isinstance(node_result, dict):
                     bragg_calibration_nodes[str(node_id)] = node_result
-        return {
+        loaded = {
+            "archive_input_stamp": stamp_digest(archive_input_stamp),
             "config": config_data,
             "run_entry": self._build_run_entry(root_run_dir),
             "scan_dimensions": scan_dimensions,
@@ -2324,6 +2327,10 @@ class DataLoader:
             "archive_phase_reference_contexts": phase_contexts,
             "archive_phase_analysis": self.archive_phase_analysis_metadata(year, month, day, run_id),
         }
+
+        if archive_input_stamp != input_stamp(root_run_dir):
+            raise ValueError('Archive input changed while loading; reload the run before analysis')
+        return loaded
 
     def get_bragg_fringe_calibration_mot(
         self, year: str, month: str, day: str, run_id: str

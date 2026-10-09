@@ -242,7 +242,7 @@ reopen any saved version. Controller versions live beside the data directory in
 Keep the original run while its derived versions are needed. Historical files are not
 rewritten or automatically restored from `.bak` files.
 
-**Analysis management** supports ordinary Allan and Phase Noise Allan results. Compute
+**Analysis management** supports ordinary Allan, Phase Noise Allan, and SYNC phase Allan results. Compute
 Allan, enter a name and optional note, then choose **Save Allan result**. This saves the
 exact computed numerical snapshot without recalculating. Select a saved result and
 choose **Restore** to display it without waveform fitting or Allan recomputation.
@@ -250,7 +250,10 @@ Existing CSV export works with restored values; **Export result + parameters** d
 a JSON record containing numerical values, calculation parameters, calibration snapshot,
 input version and SHA-256 fingerprints, software commit, and display preferences.
 Phase Noise also retains the displayed numerical plot snapshot, including browser-computed
-single-T or SYNC differential curves, so restoration does not recompute those curves.
+single-T curves, so restoration does not recompute those curves. SYNC phase Allan saves
+all host and difference curves, uncertainty arrays, statistics, ranges, selected hosts,
+and any Joint A/C preview used in the calculation. Its plot, statistics, and CSV export
+share cached numerical results; editing names or notes does not recalculate Allan.
 Changed inputs are reported when restoring; changed analysis conditions are flagged in
 the panel. Saved snapshots are retained independently and are never overwritten.
 
