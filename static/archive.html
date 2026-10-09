@@ -1807,7 +1807,7 @@
                             <input class="form-control form-control-sm" style="max-width:220px" v-model="analysisResultName" placeholder="Analysis name" aria-label="Analysis name">
                             <input class="form-control form-control-sm" style="max-width:280px" v-model="analysisResultNote" placeholder="Note (optional)" aria-label="Analysis note">
                             <button class="btn btn-success btn-sm" @click="saveAnalysisResult" :disabled="!canSaveAnalysisResult">Save Allan result</button>
-                            <select class="form-select form-select-sm" style="max-width:360px" v-model="selectedAnalysisResultId" aria-label="Saved analysis result">
+                            <select class="form-select form-select-sm" style="max-width:360px" v-model="selectedAnalysisResultId" @change="restoreAnalysisResult" :disabled="analysisResultBusy || isLoading || analysisResultsLoading" aria-label="Saved analysis result">
                                 <option value="">Select saved analysis</option>
                                 <option v-for="record in analysisResults" :key="record.id" :value="record.id">{{ record.name }} · {{ record.kind }} · {{ record.created_at }}</option>
                             </select>
@@ -5135,11 +5135,12 @@
                     finally { this.analysisResultBusy = false; }
                 },
                 async restoreAnalysisResult() {
-                    if (!this.selectedAnalysisResultId || !this.loadedRunRef) return;
+                    if (!this.selectedAnalysisResultId || !this.loadedRunRef || this.analysisResultBusy) return;
                     this.analysisResultBusy = true;
                     try {
                         const ref = this.loadedRunRef;
                         const response = await axios.get(`/archive/analysis-results/${ref.year}/${ref.month}/${ref.day}/${ref.run_id}/${this.selectedAnalysisResultId}`);
+                        if (ref !== this.loadedRunRef) return;
                         const record = response.data;
                         const params = record.parameters;
                         if (record.kind !== 'sync_phase_allan' && (params.node_id || '') !== (this.loadedSyncNode || '')) {
@@ -5175,8 +5176,6 @@
                             this.syncArchiveViewMode = 'node'; this.syncArchiveTab = 'phase'; this.syncPhasePlotMode = 'allan';
                             this.restoredSyncPhaseAllan = Vue.markRaw({id: record.id, name: record.name, result: record.result,
                                 context: this.analysisContextKey('sync_phase_allan')});
-                            await this.$nextTick();
-                            this.renderSyncArchiveNodePlots();
                         } else if (record.kind === 'allan') {
                             this.currentTab = params.metric || 'atoms';
                             this.showRawData = params.source === 'raw';
@@ -5189,7 +5188,6 @@
                             this.getAllanCacheBucket()[this.getAllanCacheKey()] = result;
                             this.currentAllanData = result;
                             this.rememberAnalysisResult(result, record.kind);
-                            this.renderMainPlot();
                         } else if (record.kind === 'phase_noise_allan') {
                             this.phaseNoiseAllanOrders = record.result.orders;
                             this.phaseNoiseSummary = record.result.phase_noise_summary;
@@ -5198,9 +5196,12 @@
                             this.phaseNoiseAllanSnapshot = {...record.result, analysis_candidate_id: record.id, _saved_snapshot: true};
                             this.rememberAnalysisResult(this.phaseNoiseAllanSnapshot, record.kind);
                             this.phaseNoiseAllanPlot = record.result.plot_snapshot || null;
-                            this.renderPhaseNoiseArchivePlot();
                         }
                         await this.$nextTick();
+                        // Render after Vue has mounted the plot container for the restored mode.
+                        if (record.kind === 'sync_phase_allan') this.renderSyncArchiveNodePlots();
+                        else if (record.kind === 'phase_noise_allan') this.renderPhaseNoiseArchivePlot();
+                        else this.renderMainPlot();
                         this.analysisResultName = record.name;
                         this.analysisResultNote = record.note || '';
                         this.restoredAnalysisParameters = {source: record.source, parameters: record.parameters, view: record.view};

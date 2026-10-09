@@ -86,9 +86,9 @@ const app = Object.assign({
     normalizeAllanP0RangeValues: () => null,
     syncAllanP0RangeFromPayload() {}, getAllanCacheKey: () => 'current',
     getAllanCacheBucket: () => bucket,
-    renderMainPlot() {this.rendered = this.currentAllanData},
-    renderPhaseNoiseArchivePlot() {this.rendered = this.phaseNoiseSummary},
-    $nextTick: async () => {},
+    renderMainPlot() {assert.equal(this.plotContainerMounted, true); this.rendered = this.currentAllanData},
+    renderPhaseNoiseArchivePlot() {assert.equal(this.plotContainerMounted, true); this.rendered = this.phaseNoiseSummary},
+    async $nextTick() {this.plotContainerMounted = true},
 }, methods);
 (async () => {
     await app.restoreAnalysisResult();
@@ -103,6 +103,7 @@ const app = Object.assign({
     assert.notEqual(app.analysisResultContext, app.analysisContextKey('allan'));
     record = {...record, kind: 'phase_noise_allan', input_matches_current: false,
         result: {orders: [1, 3], phase_noise_summary: [{allan_deviations: [{order: 1, measured_phase_noise_rad: .1}]}], phase_noise_series: [1, 2, 3]}};
+    app.plotContainerMounted = false;
     await app.restoreAnalysisResult();
     assert.equal(calls.length, 2);
     assert.deepEqual(app.rendered, record.result.phase_noise_summary);
@@ -136,7 +137,8 @@ const app = Object.assign({
         view:{syncPhaseAllanScale:'relative', syncPhaseAllanXAxis:'log', syncPhaseAllanYAxis:'log'}};
     app.syncManifest = {}; app.syncAnalysisCopy = {}; app.syncPhaseCalibrationOptimization = {};
     app.analysisContextKey = () => 'restored-context';
-    app.renderSyncArchiveNodePlots = () => {};
+    app.plotContainerMounted = false;
+    app.renderSyncArchiveNodePlots = () => {assert.equal(app.plotContainerMounted, true)};
     await app.restoreAnalysisResult();
     assert.equal(app.syncPhaseShotMin, 20); assert.equal(app.syncPhaseShotMaxInput, '200');
     assert.equal(app.syncPhaseP0Min, .2); assert.equal(app.syncPhaseAllanOrder, 4);
