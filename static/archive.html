@@ -918,6 +918,59 @@
             .labplot-metric-grid { grid-template-columns: 1fr; }
         }
 
+        .collection-tree-toggle, button.collection-tree-name { border: 0; background: transparent; color: inherit; padding: 4px 0; text-align: left; }
+        .collection-tree-toggle { width: 24px; text-align: center; }
+        .collection-tree-toggle:disabled { opacity: .45; }
+        .collection-tree-toggle:focus-visible, button.collection-tree-name:focus-visible { outline: 2px solid var(--archive-accent); outline-offset: 1px; }
+        .collection-breadcrumb { overflow-wrap: anywhere; }
+        .collections-workspace { display: grid; grid-template-columns: var(--collection-sidebar-width) 10px minmax(0,1fr); gap: 0; margin: 0; height: var(--collection-workspace-height); min-height: 420px; }
+        .collections-workspace > .archive-sidebar, .collections-workspace > .archive-main { width: auto; min-width: 0; min-height: 0; padding: 0; margin: 0; }
+        .collections-workspace > .archive-sidebar { display: flex !important; overflow: auto; padding-right: 4px; }
+        .collections-workspace .collection-source-card { flex-shrink: 0; }
+        .collection-browsing .collection-source-card { display: flex; flex: 1; min-height: 0; }
+        .collection-browsing .collection-source-card > .card-body { display: flex; flex-direction: column; min-height: 0; }
+        .collection-browsing .collection-navigation { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+        .collections-workspace .collection-tree { max-height: none; height: 38vh; overflow: auto; }
+        .collection-browsing .collection-tree { flex: 1; height: auto; min-height: 120px; }
+        .collection-browsing > .archive-sidebar > .card:not(:first-child) { display: none; }
+        .collection-resizer { cursor: col-resize; touch-action: none; position: relative; min-width: 0; width: auto; max-width: none; padding: 0; margin: 0 !important; }
+        .collection-resizer::after { content: ''; position: absolute; top: 0; bottom: 0; left: 4px; width: 2px; background: var(--archive-border); }
+        .collection-resizer:hover::after, .collection-resizer:focus-visible::after { background: var(--archive-accent); }
+        .collections-workspace > .archive-main { display: flex; flex-direction: column; overflow: hidden; }
+        .collections-workspace .mobile-archive-note { display: none; }
+        .collection-workspace-toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 10px 12px; background: #fff; border: 1px solid var(--archive-border-soft); border-radius: 7px; margin-bottom: 10px; flex-shrink: 0; }
+        .collection-workspace-toolbar > .text-truncate { min-width: 0; flex: 1; }
+        .collections-workspace .collections-browser { flex: 1; min-height: 0; overflow: hidden; margin: 0; }
+        .collections-workspace .collections-browser > .card-header { flex-shrink: 0; }
+        .collections-workspace .collections-content { flex: 1; min-height: 0; overflow: hidden; }
+        .collections-workspace .collections-content.preview-hidden { grid-template-columns: minmax(0,1fr); }
+        .collections-workspace .collection-results, .collections-workspace .collection-preview-panel { overflow: auto; min-height: 0; }
+        .collections-workspace .collection-grid:not(.list-view) .collection-mini-plot { height: 128px; }
+        .collections-workspace .collection-grid.list-view .collection-item { grid-template-columns: 22px minmax(100px,1fr) 150px auto; gap: 8px; }
+        .collections-workspace .archive-analysis-workspace { flex: 1; min-height: 0; overflow: auto; padding-right: 4px; }
+        .collections-workspace [aria-label="Analysis management"] input { max-width: 170px !important; }
+        .collections-workspace [aria-label="Analysis management"] select { max-width: 260px !important; }
+        @media (min-width: 768px) and (max-width: 1199.98px) {
+            .collections-workspace { grid-template-columns: min(var(--collection-sidebar-width), 30vw) 10px minmax(0,1fr); }
+            .collections-workspace .collections-content:not(.preview-hidden) { grid-template-columns: minmax(0,1fr) 220px; }
+            .collections-workspace .collections-toolbar { grid-template-columns: minmax(0,1fr) auto; }
+            .collections-workspace .collections-toolbar .collection-search { grid-column: 1 / -1; }
+            .collections-workspace .collection-grid.list-view .collection-item { display: block; }
+            .collections-workspace .collection-grid.list-view .collection-item-check { position: absolute; }
+        }
+        @media (max-width: 767.98px) {
+            .collections-workspace { display: flex; flex-direction: column; height: auto; }
+            .collections-workspace > .archive-sidebar { max-height: 340px; margin-bottom: 12px; }
+            .collections-workspace .collection-tree { height: 180px; flex: none; }
+            .collection-resizer { display: none; }
+            .collections-workspace > .archive-main { min-height: 520px; }
+            .collections-workspace .collections-browser { min-height: 460px; max-height: 75dvh; }
+            .collections-workspace .collections-content:not(.preview-hidden) { display: flex; flex-direction: column; overflow: auto; }
+            .collections-workspace .collection-results, .collections-workspace .collection-preview-panel { overflow: visible; }
+            .collections-workspace .archive-analysis-workspace { overflow: visible; }
+            .collection-workspace-toolbar > .text-truncate { flex-basis: 100%; }
+        }
+
     </style>
 </head>
 
@@ -951,10 +1004,10 @@
             <small v-if="loadedRunRef" class="w-100">{{ serverVersion === 'original' || !serverVersions.length ? 'Displaying acquisition data' : 'Displaying an analysis version' }}</small>
             <small v-if="archiveServerMode" class="w-100">Source Collections are read-only; your own Collections are stored separately. No reverse synchronization.</small>
         </div>
-        <div class="archive-layout row g-4">
+        <div ref="archiveWorkspace" class="archive-layout row g-4" :class="{'collections-workspace': archiveSourceMode === 'collections', 'collection-browsing': archiveSourceMode === 'collections' && collectionWorkspaceMode === 'browse'}" :style="archiveSourceMode === 'collections' ? {'--collection-sidebar-width': collectionSidebarWidth + 'px', '--collection-workspace-height': collectionWorkspaceHeight + 'px'} : {}">
             <div class="archive-sidebar col-md-3 col-xxl-2 d-flex flex-column gap-3">
 
-                <div class="card">
+                <div class="card collection-source-card">
                     <div class="card-header"><i class="bi bi-hdd-stack me-2"></i>Archive Source</div>
                     <div class="card-body p-3">
                         <div class="archive-source-switch mb-3" role="group" aria-label="Archive source">
@@ -1019,22 +1072,25 @@
                         </button>
                         </div>
 
-                        <div v-else>
+                        <div v-else class="collection-navigation">
                             <div class="d-flex gap-1 mb-2">
                                 <button class="btn btn-primary btn-sm flex-grow-1 fw-bold" @click="openFolderDialog('create')"><i class="bi bi-folder-plus me-1"></i>New folder</button>
                                 <button class="btn btn-outline-secondary btn-sm" title="Refresh collections" aria-label="Refresh collections" @click="fetchCollections"><i class="bi bi-arrow-clockwise"></i></button>
                             </div>
                             <div v-if="collectionError" class="alert alert-danger small py-2">{{ collectionError }}</div>
                             <div v-if="collectionFolders.length" class="collection-tree" role="tree" aria-label="Collection folders">
-                                <button v-for="folder in visibleCollectionFolders()" :key="folder.id" class="collection-tree-row"
+                                <div v-for="folder in visibleCollectionFolders()" :key="folder.id" class="collection-tree-row" role="treeitem"
+                                    :aria-level="folder.depth + 1" :aria-expanded="folder.has_children ? !collapsedCollectionFolderIds.includes(Number(folder.id)) : undefined"
+                                    :aria-selected="Number(selectedCollectionFolderId) === Number(folder.id)"
                                     :class="{active: Number(selectedCollectionFolderId) === Number(folder.id)}"
-                                    :style="{paddingLeft: (7 + folder.depth * 14) + 'px'}" @click="selectCollectionFolder(folder.id)">
-                                    <span @click.stop="toggleCollectionFolder(folder.id)">
-                                        <i class="bi" :class="folder.has_children && !collapsedCollectionFolderIds.includes(folder.id) ? 'bi-chevron-down' : (folder.has_children ? 'bi-chevron-right' : 'bi-dot')"></i>
-                                    </span>
-                                    <span class="collection-tree-name"><i class="bi bi-folder2 me-1"></i>{{ folder.name }}</span>
+                                    :style="{paddingLeft: (7 + folder.depth * 14) + 'px'}">
+                                    <button class="collection-tree-toggle" :disabled="!folder.has_children" @click="toggleCollectionFolder(folder.id)"
+                                        :aria-label="(collapsedCollectionFolderIds.includes(Number(folder.id)) ? 'Expand ' : 'Collapse ') + folder.name">
+                                        <i class="bi" :class="folder.has_children && !collapsedCollectionFolderIds.includes(Number(folder.id)) ? 'bi-chevron-down' : (folder.has_children ? 'bi-chevron-right' : 'bi-dot')"></i>
+                                    </button>
+                                    <button class="collection-tree-name" :title="collectionPathForFolder(folder.id)" @click="selectCollectionFolder(folder.id)"><i class="bi bi-folder2 me-1"></i>{{ folder.name }}</button>
                                     <span class="badge bg-light text-dark border">{{ folder.item_count }}</span>
-                                </button>
+                                </div>
                             </div>
                             <div v-else class="small text-muted border rounded p-3 text-center">Create your first folder to organize paper data.</div>
                             <div v-if="selectedCollectionFolderId && !(archiveServerMode && selectedCollectionFolderId < 0)" class="d-grid gap-1 mt-2">
@@ -1046,7 +1102,7 @@
                             </div>
                         </div>
 
-                        <div v-if="loadedRunId" class="mt-3 p-2 bg-light rounded border text-center">
+                        <div v-if="loadedRunId" v-show="archiveSourceMode !== 'collections' || collectionWorkspaceMode === 'analyze'" class="mt-3 p-2 bg-light rounded border text-center">
                             <div class="text-success fw-bold small mb-1"><i
                                     class="bi bi-check-circle-fill me-1"></i>Loaded</div>
                             <div class="small text-muted font-monospace">{{ loadedRunId }}</div>
@@ -1796,38 +1852,28 @@
 
             </div>
 
+            <div v-if="archiveSourceMode === 'collections'" class="collection-resizer" role="separator" aria-label="Resize collection navigation" aria-orientation="vertical" tabindex="0"
+                :aria-valuenow="collectionSidebarWidth" aria-valuemin="240" aria-valuemax="520"
+                @pointerdown="startCollectionResize" @pointermove="moveCollectionResize" @pointerup="finishCollectionResize" @pointercancel="finishCollectionResize"
+                @keydown.left.prevent="adjustCollectionSidebar(-20)" @keydown.right.prevent="adjustCollectionSidebar(20)"></div>
             <div class="archive-main col-md-9 col-xxl-10">
                 <div class="mobile-archive-note alert alert-info py-2 mb-2">
                     Phone view supports run selection, 1D plots and Allan analysis. Re-analysis and fitting controls are available on iPad or desktop.
                 </div>
-                <section v-if="loadedRunRef" class="card mb-3 border-primary" aria-label="Analysis management">
-                    <div class="card-header bg-white fw-bold">Analysis management <span class="small text-muted fw-normal ms-2">Original data is preserved</span></div>
-                    <div class="card-body py-2">
-                        <div class="d-flex flex-wrap gap-2 align-items-center">
-                            <input class="form-control form-control-sm" style="max-width:220px" v-model="analysisResultName" placeholder="Analysis name" aria-label="Analysis name">
-                            <input class="form-control form-control-sm" style="max-width:280px" v-model="analysisResultNote" placeholder="Note (optional)" aria-label="Analysis note">
-                            <button class="btn btn-success btn-sm" @click="saveAnalysisResult" :disabled="!canSaveAnalysisResult">Save Allan result</button>
-                            <select class="form-select form-select-sm" style="max-width:360px" v-model="selectedAnalysisResultId" @change="restoreAnalysisResult" :disabled="analysisResultBusy || isLoading || analysisResultsLoading" aria-label="Saved analysis result">
-                                <option value="">Select saved analysis</option>
-                                <option v-for="record in analysisResults" :key="record.id" :value="record.id">{{ record.name }} · {{ record.kind }} · {{ record.created_at }}</option>
-                            </select>
-                            <button class="btn btn-outline-secondary btn-sm" @click="refreshAnalysisResults(true)" :disabled="analysisResultsLoading || analysisResultBusy" title="Reload the saved analysis list"><i class="bi bi-arrow-clockwise me-1"></i>{{ analysisResultsLoading ? 'Refreshing…' : 'Refresh' }}</button>
-                            <button class="btn btn-outline-primary btn-sm" @click="restoreAnalysisResult" :disabled="analysisResultBusy || !selectedAnalysisResultId">Restore</button>
-                            <button class="btn btn-outline-primary btn-sm" @click="reloadOriginalAllan" :disabled="analysisResultBusy || isLoading || isLoadingAllan">Reload original Allan</button>
-                            <button class="btn btn-outline-secondary btn-sm" @click="exportAnalysisResult" :disabled="analysisResultBusy || !selectedAnalysisResultId">Export result + parameters</button>
-                        </div>
-                        <div class="small text-muted mt-2" v-if="!hasAnalysisResult">Compute Allan or restore a saved result to begin. Restoring reads saved values without recalculation.</div>
-                        <div class="small mt-2" v-if="analysisResultMessage" role="status">{{ analysisResultMessage }}</div>
-                        <details v-if="restoredAnalysisParameters" class="small mt-2"><summary>Saved analysis parameters</summary><pre class="mt-2 mb-0" style="max-height:240px;overflow:auto">{{ JSON.stringify(restoredAnalysisParameters, null, 2) }}</pre></details>
-                        <div class="small text-warning mt-2" v-if="hasAnalysisResult && analysisResultIsStale">Analysis conditions have changed. This snapshot still uses its recorded inputs; compute again for the current conditions.</div>
+                <div v-if="archiveSourceMode === 'collections'" class="collection-workspace-toolbar">
+                    <div class="btn-group btn-group-sm" role="group" aria-label="Collection workspace view">
+                        <button class="btn" :class="collectionWorkspaceMode === 'browse' ? 'btn-primary' : 'btn-outline-primary'" :aria-pressed="collectionWorkspaceMode === 'browse'" @click="setCollectionWorkspaceMode('browse')"><i class="bi bi-grid me-1"></i>Browse</button>
+                        <button class="btn" :class="collectionWorkspaceMode === 'analyze' ? 'btn-primary' : 'btn-outline-primary'" :aria-pressed="collectionWorkspaceMode === 'analyze'" :disabled="!loadedRunRef || isLoading" @click="setCollectionWorkspaceMode('analyze')"><i class="bi bi-graph-up me-1"></i>Analyze</button>
                     </div>
-                </section>
-                <section v-if="archiveSourceMode === 'collections'" class="card collections-browser mb-4 border-0 shadow-sm" aria-labelledby="collections-title">
+                    <span class="small text-muted text-truncate" :title="loadedRunEntry?.run_label || loadedRunId">{{ collectionWorkspaceMode === 'analyze' ? (loadedRunEntry?.run_label || loadedRunId) : 'Select a run to preview; double-click to analyze' }}</span>
+                    <span v-if="isLoading || collectionRunLoading" class="small text-primary ms-auto" role="status"><span class="spinner-border spinner-border-sm me-1"></span>Loading run</span>
+                </div>
+                <section v-show="archiveSourceMode === 'collections' && collectionWorkspaceMode === 'browse'" class="card collections-browser border-0 shadow-sm" aria-labelledby="collections-title">
                     <div class="card-header bg-white">
                         <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
                             <div>
                                 <div id="collections-title" class="fw-bold text-primary"><i class="bi bi-stars me-2"></i>{{ selectedCollectionFolder()?.name || 'Collections' }}</div>
-                                <div class="small text-muted text-lowercase">{{ collectionBreadcrumb() }}</div>
+                                <div class="small text-muted collection-breadcrumb">{{ collectionBreadcrumb() }}</div>
                             </div>
                             <div class="d-flex gap-2">
                                 <button class="btn btn-sm btn-outline-primary fw-bold" :disabled="!loadedRunRef" @click="copyLoadedRunShareLink">
@@ -1849,9 +1895,12 @@
                             <select class="form-select form-select-sm" v-model="collectionIntegrityFilter" aria-label="Integrity">
                                 <option value="all">All states</option><option value="ok">OK</option><option value="modified">Modified</option><option value="missing">Missing</option>
                             </select>
+                            <div class="d-flex gap-1">
+                            <button class="btn btn-sm btn-outline-secondary" :class="{active: collectionPreviewVisible}" @click="collectionPreviewVisible = !collectionPreviewVisible" :aria-pressed="collectionPreviewVisible" title="Toggle details" aria-label="Toggle collection details"><i class="bi bi-layout-sidebar-reverse"></i></button>
                             <div class="btn-group btn-group-sm" role="group" aria-label="Collection layout">
                                 <button class="btn" :class="collectionViewMode === 'grid' ? 'btn-primary' : 'btn-outline-secondary'" @click="setCollectionViewMode('grid')" title="Grid view"><i class="bi bi-grid"></i></button>
                                 <button class="btn" :class="collectionViewMode === 'list' ? 'btn-primary' : 'btn-outline-secondary'" @click="setCollectionViewMode('list')" title="List view"><i class="bi bi-list"></i></button>
+                            </div>
                             </div>
                         </div>
                     </div>
@@ -1862,20 +1911,20 @@
                         <button class="btn btn-outline-danger btn-sm" @click="runCollectionBatch('remove')">Remove</button>
                         <button class="btn btn-link btn-sm text-decoration-none ms-auto" @click="selectedCollectionFavoriteIds = []">Clear</button>
                     </div>
-                    <div class="collections-content">
-                        <div class="collection-results">
+                    <div class="collections-content" :class="{'preview-hidden': !collectionPreviewVisible}">
+                        <div class="collection-results" ref="collectionResults">
                             <div v-if="isLoadingCollections" class="collection-empty"><div><span class="spinner-border spinner-border-sm text-primary me-2"></span>Loading collections</div></div>
                             <div v-else-if="!selectedCollectionFolderId" class="collection-empty"><div><i class="bi bi-folder2-open fs-2 d-block mb-2"></i>Select or create a folder</div></div>
                             <div v-else-if="!filteredCollectionFavorites().length" class="collection-empty"><div><i class="bi bi-search fs-2 d-block mb-2"></i>No matching results</div></div>
                             <div v-else class="collection-grid" :class="{'list-view': collectionViewMode === 'list'}">
-                                <article v-for="favorite in filteredCollectionFavorites()" :key="favorite.id" class="collection-item"
+                                <article v-for="favorite in filteredCollectionFavorites()" :key="favorite.id" class="collection-item" tabindex="0" @keydown.enter.prevent="loadCollectionFavorite(favorite)"
                                     :class="{active: selectedCollectionFavorite?.id === favorite.id}" @click="selectedCollectionFavorite = favorite" @dblclick="loadCollectionFavorite(favorite)">
                                     <input class="form-check-input collection-item-check" type="checkbox" :checked="selectedCollectionFavoriteIds.includes(favorite.id)"
-                                        :aria-label="'Select ' + favorite.display_name" @click.stop @change="toggleFavoriteSelection(favorite.id)">
+                                        :aria-label="'Select ' + favorite.display_name" @click.stop @dblclick.stop @change="toggleFavoriteSelection(favorite.id)">
                                     <div class="min-w-0">
                                         <div class="d-flex align-items-center gap-2 pe-4">
                                             <i class="bi" :class="favorite.source_type === 'optimization' ? 'bi-diagram-3 text-primary' : 'bi-graph-up text-secondary'"></i>
-                                            <strong class="text-truncate">{{ favorite.display_name }}</strong>
+                                            <strong class="text-truncate" :title="favorite.display_name">{{ favorite.display_name }}</strong>
                                         </div>
                                         <div class="small text-muted mt-1 font-monospace">{{ favorite.day }}/{{ favorite.run_id }}</div>
                                         <div class="small text-primary text-truncate" v-if="collectionSearch"><i class="bi bi-folder2 me-1"></i>{{ collectionPathForFolder(favorite.folder_id) }}</div>
@@ -1893,7 +1942,7 @@
                                 </article>
                             </div>
                         </div>
-                        <aside class="collection-preview-panel" aria-label="Quick preview">
+                        <aside v-show="collectionPreviewVisible" class="collection-preview-panel" aria-label="Quick preview">
                             <template v-if="selectedCollectionFavorite">
                                 <div class="form-label-small mb-1">Quick preview</div>
                                 <h6 class="fw-bold mb-1">{{ selectedCollectionFavorite.display_name }}</h6>
@@ -1922,6 +1971,30 @@
                             </template>
                             <div v-else class="collection-empty" style="min-height:250px"><div><i class="bi bi-cursor fs-3 d-block mb-2"></i>Select a result for quick preview</div></div>
                         </aside>
+                    </div>
+                </section>
+
+                <div class="archive-analysis-workspace" v-show="archiveSourceMode !== 'collections' || collectionWorkspaceMode === 'analyze'" ref="collectionAnalysisWorkspace">
+                <section v-if="loadedRunRef" class="card mb-3 border-primary" aria-label="Analysis management">
+                    <div class="card-header bg-white fw-bold">Analysis management <span class="small text-muted fw-normal ms-2">Original data is preserved</span></div>
+                    <div class="card-body py-2">
+                        <div class="d-flex flex-wrap gap-2 align-items-center">
+                            <input class="form-control form-control-sm" style="max-width:220px" v-model="analysisResultName" placeholder="Analysis name" aria-label="Analysis name">
+                            <input class="form-control form-control-sm" style="max-width:280px" v-model="analysisResultNote" placeholder="Note (optional)" aria-label="Analysis note">
+                            <button class="btn btn-success btn-sm" @click="saveAnalysisResult" :disabled="!canSaveAnalysisResult">Save Allan result</button>
+                            <select class="form-select form-select-sm" style="max-width:360px" v-model="selectedAnalysisResultId" @change="restoreAnalysisResult" :disabled="analysisResultBusy || isLoading || analysisResultsLoading" aria-label="Saved analysis result">
+                                <option value="">Select saved analysis</option>
+                                <option v-for="record in analysisResults" :key="record.id" :value="record.id">{{ record.name }} · {{ record.kind }} · {{ record.created_at }}</option>
+                            </select>
+                            <button class="btn btn-outline-secondary btn-sm" @click="refreshAnalysisResults(true)" :disabled="analysisResultsLoading || analysisResultBusy" title="Reload the saved analysis list"><i class="bi bi-arrow-clockwise me-1"></i>{{ analysisResultsLoading ? 'Refreshing…' : 'Refresh' }}</button>
+                            <button class="btn btn-outline-primary btn-sm" @click="restoreAnalysisResult" :disabled="analysisResultBusy || !selectedAnalysisResultId">Restore</button>
+                            <button class="btn btn-outline-primary btn-sm" @click="reloadOriginalAllan" :disabled="analysisResultBusy || isLoading || isLoadingAllan">Reload original Allan</button>
+                            <button class="btn btn-outline-secondary btn-sm" @click="exportAnalysisResult" :disabled="analysisResultBusy || !selectedAnalysisResultId">Export result + parameters</button>
+                        </div>
+                        <div class="small text-muted mt-2" v-if="!hasAnalysisResult">Compute Allan or restore a saved result to begin. Restoring reads saved values without recalculation.</div>
+                        <div class="small mt-2" v-if="analysisResultMessage" role="status">{{ analysisResultMessage }}</div>
+                        <details v-if="restoredAnalysisParameters" class="small mt-2"><summary>Saved analysis parameters</summary><pre class="mt-2 mb-0" style="max-height:240px;overflow:auto">{{ JSON.stringify(restoredAnalysisParameters, null, 2) }}</pre></details>
+                        <div class="small text-warning mt-2" v-if="hasAnalysisResult && analysisResultIsStale">Analysis conditions have changed. This snapshot still uses its recorded inputs; compute again for the current conditions.</div>
                     </div>
                 </section>
 
@@ -2741,6 +2814,7 @@
                             :style="{height: maximizedView === 'scope' ? 'calc(50vh - 40px)' : '250px'}"></div>
                     </div>
                 </div>
+                </div>
             </div>
         </div>
 
@@ -2981,6 +3055,9 @@
                     archiveServerMode: false, archiveVersionMode: false,
                     archiveTree: {}, selectedYear: '', selectedMonth: '', selectedDay: '', selectedRun: '', archiveNavigationBusy: false,
                     archiveSourceMode: 'timeline',
+                    collectionWorkspaceMode: 'browse', collectionPreviewVisible: false, collectionWorkspaceHeight: 620, collectionRunLoading: false,
+                    collectionSidebarWidth: Math.max(240, Math.min(520, Number(localStorage.getItem('migaCollectionSidebarWidth')) || 320)),
+                    collectionResizeStart: null,
                     archiveAuditJob: null, archiveAuditBusy: false, archiveAuditError: '', archiveAuditReports: [], archiveAuditPollTimer: null,
                     collectionFolders: [], collectionFavorites: [], isLoadingCollections: false, collectionError: '',
                     selectedCollectionFolderId: null, collapsedCollectionFolderIds: [],
@@ -3178,6 +3255,13 @@
                 }
             },
             watch: {
+                archiveSourceMode() {
+                    this.$nextTick(() => {
+                        this.updateCollectionWorkspaceHeight();
+                        this.resizeAnalysisPlots();
+                        this.resizeCollectionAnalysisPlots();
+                    });
+                },
                 currentTab(value) {
                     if (value !== 'phase' && ['s2', 'phase2'].includes(this.transferFunctionStatistic)) {
                         this.transferFunctionStatistic = 'std';
@@ -3295,6 +3379,8 @@
                     }
                 },
                 handleArchiveWindowResize() {
+                    this.updateCollectionWorkspaceHeight();
+                    if (this.archiveSourceMode === 'collections') this.resizeCollectionAnalysisPlots();
                     if (this.syncArchiveViewMode === 'differential') {
                         this.resizePlot('syncArchivePlot');
                         if (this.isTransferFunctionArchive()) {
@@ -3329,7 +3415,47 @@
                 },
                 async openCollections() {
                     this.archiveSourceMode = 'collections';
+                    await this.setCollectionWorkspaceMode('browse');
                     await this.fetchCollections();
+                },
+                updateCollectionWorkspaceHeight() {
+                    if (this.archiveSourceMode !== 'collections' || !this.$refs.archiveWorkspace) return;
+                    this.collectionWorkspaceHeight = Math.max(420, window.innerHeight - this.$refs.archiveWorkspace.getBoundingClientRect().top - 20);
+                },
+                async setCollectionWorkspaceMode(mode) {
+                    if (mode === 'analyze' && !this.loadedRunRef) return;
+                    this.collectionWorkspaceMode = mode === 'analyze' ? 'analyze' : 'browse';
+                    await this.$nextTick();
+                    this.updateCollectionWorkspaceHeight();
+                    if (this.collectionWorkspaceMode === 'analyze') {
+                        this.resizeCollectionAnalysisPlots();
+                    }
+                },
+                resizeCollectionAnalysisPlots() {
+                    if (typeof Plotly === 'undefined') return;
+                    for (const plot of document.querySelectorAll('.archive-analysis-workspace .js-plotly-plot')) {
+                        const bounds = plot.getBoundingClientRect();
+                        if (plot.data && bounds.width > 0 && bounds.height > 0) Plotly.Plots.resize(plot);
+                    }
+                },
+                adjustCollectionSidebar(delta) {
+                    this.collectionSidebarWidth = Math.max(240, Math.min(520, this.collectionSidebarWidth + delta));
+                    localStorage.setItem('migaCollectionSidebarWidth', String(this.collectionSidebarWidth));
+                },
+                startCollectionResize(event) {
+                    if (event.button !== 0) return;
+                    this.collectionResizeStart = {x: event.clientX, width: this.collectionSidebarWidth};
+                    event.currentTarget.setPointerCapture(event.pointerId);
+                },
+                moveCollectionResize(event) {
+                    if (!this.collectionResizeStart) return;
+                    this.collectionSidebarWidth = Math.max(240, Math.min(520, this.collectionResizeStart.width + event.clientX - this.collectionResizeStart.x));
+                },
+                finishCollectionResize() {
+                    if (!this.collectionResizeStart) return;
+                    this.collectionResizeStart = null;
+                    localStorage.setItem('migaCollectionSidebarWidth', String(this.collectionSidebarWidth));
+                    this.$nextTick(() => this.resizeCollectionAnalysisPlots());
                 },
                 collectionFolderRows() {
                     const folders = Array.isArray(this.collectionFolders) ? this.collectionFolders : [];
@@ -3385,6 +3511,8 @@
                 },
                 selectCollectionFolder(folderId) {
                     this.selectedCollectionFolderId = Number(folderId);
+                    this.setCollectionWorkspaceMode('browse');
+                    if (this.$refs.collectionResults) this.$refs.collectionResults.scrollTop = 0;
                     this.selectedCollectionFavorite = null;
                     this.selectedCollectionFavoriteIds = [];
                 },
@@ -3579,15 +3707,21 @@
                     }
                 },
                 async loadCollectionFavorite(favorite) {
-                    if (!favorite || favorite.integrity === 'missing') return;
-                    this.selectedYear = favorite.year;
-                    await this.fetchArchiveMonths(favorite.year);
-                    this.selectedMonth = favorite.month;
-                    await this.fetchArchiveDays(favorite.year, favorite.month);
-                    this.selectedDay = favorite.day;
-                    await this.fetchArchiveRuns(favorite.year, favorite.month, favorite.day);
-                    this.selectedRun = favorite.run_id;
-                    await this.loadRun();
+                    if (!favorite || favorite.integrity === 'missing' || this.isLoading || this.collectionRunLoading) return;
+                    this.collectionRunLoading = true;
+                    this.selectedCollectionFavorite = favorite;
+                    try {
+                        this.selectedYear = favorite.year;
+                        await this.fetchArchiveMonths(favorite.year);
+                        this.selectedMonth = favorite.month;
+                        await this.fetchArchiveDays(favorite.year, favorite.month);
+                        this.selectedDay = favorite.day;
+                        await this.fetchArchiveRuns(favorite.year, favorite.month, favorite.day);
+                        this.selectedRun = favorite.run_id;
+                        if (await this.loadRun()) await this.setCollectionWorkspaceMode('analyze');
+                    } catch (error) {
+                        this.collectionError = error.response?.data?.detail || error.message || 'Unable to load collection run';
+                    } finally { this.collectionRunLoading = false; }
                 },
                 openBatchDialog(action) {
                     this.collectionBatchDialog = { action, folder_id: Number(this.selectedCollectionFolderId || 0), error: '' };

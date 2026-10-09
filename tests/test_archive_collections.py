@@ -86,7 +86,7 @@ class ArchiveCollectionStoreTests(unittest.TestCase):
         self.assertIn("Share loaded run", archive_html)
         self.assertIn("loadSharedRunFromUrl", archive_html)
         self.assertIn("url.searchParams.set('run', String(reference.run_id))", archive_html)
-        self.assertIn("this.fetchArchiveTree().then(() => this.loadSharedRunFromUrl())", archive_html)
+        self.assertIn("this.fetchArchiveYears().then(() => this.loadSharedRunFromUrl())", archive_html)
         self.assertIn("document.execCommand('copy')", archive_html)
 
 

@@ -222,6 +222,15 @@ folders for server-owned Collections. Their SQLite database stays on local stora
 `derived/DEVICE/collections/`; a fresh server restores the latest snapshot automatically.
 Server scientific preferences/calibrations are device-scoped, not controller settings.
 
+Collections uses a separate **Browse / Analyze** workspace on both Controller and Archive
+Server. Expand folders with their arrows and select a folder to browse its saved runs.
+Single-click a run for selection; double-click (or press Enter) to open the full analysis
+interface. Browse and Analyze retain their selection, filters and scroll positions when
+switching views. The folder tree and results scroll independently; drag the divider (or
+use its Left/Right keys) to resize navigation. The details panel can be toggled in Browse.
+Timeline retains its existing navigation and layout. Browsing and switching views do not
+recompute analyses or change acquisition files.
+
 Saving results, phase references or SYNC analysis metadata creates a new server version
 under `derived/DEVICE/RUN-HASH/ui-versions/`. Editable metadata is copied; waveform
 directories remain read-only references to the original backup (no duplicate waveforms).
