@@ -231,6 +231,42 @@ Failed saves do not publish a version. Keep original backups for as long as thei
 versions are needed. Existing standalone JSON analysis versions remain available through
 the earlier analysis API; they are not converted automatically into full Archive UI versions.
 
+### Archive analysis management (Controller and Archive Server)
+
+Acquisition runs are read-only inputs to Archive analysis. **Save New Analysis Version**
+creates an independent version instead of overwriting acquisition `config.json` or
+`results.csv`. The version selector starts at **Original backup** on a new run and can
+reopen any saved version. Controller versions live beside the data directory in
+`Data_log_analysis/RUN-HASH/ui-versions/`; Server versions remain under
+`derived/DEVICE/RUN-HASH/ui-versions/`. Waveforms are referenced, not duplicated.
+Keep the original run while its derived versions are needed. Historical files are not
+rewritten or automatically restored from `.bak` files.
+
+**Analysis management** supports ordinary Allan and Phase Noise Allan results. Compute
+Allan, enter a name and optional note, then choose **Save Allan result**. This saves the
+exact computed numerical snapshot without recalculating. Select a saved result and
+choose **Restore** to display it without waveform fitting or Allan recomputation.
+Existing CSV export works with restored values; **Export result + parameters** downloads
+a JSON record containing numerical values, calculation parameters, calibration snapshot,
+input version and SHA-256 fingerprints, software commit, and display preferences.
+Phase Noise also retains the displayed numerical plot snapshot, including browser-computed
+single-T or SYNC differential curves, so restoration does not recompute those curves.
+Changed inputs are reported when restoring; changed analysis conditions are flagged in
+the panel. Saved snapshots are retained independently and are never overwritten.
+
+Named result records live in `results/saved/` beneath each run's analysis directory.
+Unsaved calculations live in `results/drafts/` and expire after seven days (cleanup on
+subsequent calculations). A saved record can always be saved again as a new snapshot.
+Input checksums read the archived files, including waveforms; the first calculation or
+restoration can therefore take longer on large runs or network storage. If acquisition
+changes an input during calculation, the result is rejected and should be recomputed
+once acquisition has finished. Archive analysis phase metadata is now local to the
+analysis version and is not distributed back into acquisition runs.
+
+Iα and SYNC analysis copies remain readable in their existing format. Their writes are
+isolated into versions on both hosts; integration into the unified result/dependency
+manager is the next stage.
+
 ### Desktop launcher and setup Guide
 
 On Ubuntu/Linux with Tk installed, run `./launch_code --archive` (or select the

@@ -1,3 +1,5 @@
+from app.core.analysis_store import capture_result, capture_inputs
+from app.api.analysis_routes import build_analysis_router
 import asyncio
 import base64
 import ipaddress
@@ -144,7 +146,9 @@ from app.models.schemas import (
 import config
 
 
-router = APIRouter()
+from app.archive.controller_context import ControllerArchiveRoute, ControllerRepository
+from app.archive.ui_context import versions
+router = APIRouter(route_class=ControllerArchiveRoute)
 MANUAL_PDF_PATH = Path(__file__).resolve().parents[2] / "docs" / "manual" / "miga_controller_manual.pdf"
 
 
@@ -394,52 +398,10 @@ async def _synchronize_archive_phase_metadata(
     run_id: str,
     request: Request,
 ) -> Dict[str, Any]:
-    run_dir = data_loader.get_run_dir(year, month, day, run_id)
-    manifest = _sync_manifest_for_run(run_dir)
-    if not manifest:
-        return {"status": "local", "message": ""}
-    metadata = data_loader.archive_phase_analysis_metadata(year, month, day, run_id)
-    local_node = sync_manager.archive_local_node_id(run_dir)
-    sync_run_id = str((manifest.get("runtime") or {}).get("sync_run_id") or "")
-    if local_node == "master":
-        coordinator_url = sync_manager.advertised_phase_coordinator_url(run_dir, str(request.base_url))
-        result = await run_in_threadpool(
-            sync_manager.distribute_phase_analysis_metadata,
-            run_dir,
-            metadata,
-            coordinator_url,
-        )
-        data_loader.update_archive_phase_analysis_sync_state(
-            year,
-            month,
-            day,
-            run_id,
-            sync_status=result.get("status") or "pending",
-            sync_message=result.get("message") or "",
-            coordinator_url=coordinator_url,
-        )
-        return result
-    coordinator_url = str(metadata.get("coordinator_url") or "").rstrip("/")
-    if not sync_run_id or not coordinator_url:
-        message = "Master coordinator URL is unavailable; apply or synchronize this Archive once from the Master"
-        data_loader.update_archive_phase_analysis_sync_state(
-            year, month, day, run_id, sync_status="pending", sync_message=message
-        )
-        return {"status": "pending", "message": message}
-    try:
-        result = await run_in_threadpool(
-            sync_manager.forward_phase_analysis_metadata,
-            sync_run_id,
-            metadata,
-            coordinator_url,
-        )
-        return result
-    except Exception as exc:
-        message = str(exc)
-        data_loader.update_archive_phase_analysis_sync_state(
-            year, month, day, run_id, sync_status="pending", sync_message=message
-        )
-        return {"status": "pending", "message": message}
+    data_loader.update_archive_phase_analysis_sync_state(
+        year, month, day, run_id, sync_status='local',
+        sync_message='Independent analysis version; acquisition data unchanged', coordinator_url='')
+    return {'status': 'local', 'message': 'Independent analysis; no acquisition metadata synchronization'}
 
 
 @router.get("/sync/config", response_model=ExperimentResponse)
@@ -2372,13 +2334,14 @@ async def reanalyze_archive_intf_alpha(req: ArchiveIntfAlphaReanalysisRequest):
 @router.post("/archive/allan")
 async def calculate_archived_allan(req: ArchiveAllanRequest):
     try:
+        inputs = await run_in_threadpool(capture_inputs, data_loader, req)
         settings = req.new_settings.dict()
-        settings["_interferometer_phase_calibration"] = manager.get_active_bragg_phase_calibration()
+        settings["_interferometer_phase_calibration"] = deepcopy(manager.get_active_bragg_phase_calibration())
         # Allan reanalysis can be CPU- and I/O-intensive.  Keep it off the
         # event loop so live WebSocket updates continue, and serialize these
         # jobs to avoid competing with active acquisition for resources.
         async with archive_allan_lock:
-            return await run_in_threadpool(
+            result = await run_in_threadpool(
                 data_loader.calculate_allan_run,
                 req.year,
                 req.month,
@@ -2390,11 +2353,12 @@ async def calculate_archived_allan(req: ArchiveAllanRequest):
                 req.p0_min,
                 req.p0_max,
                 req.node_id,
-                manager.get_active_bragg_phase_calibration(),
+                settings["_interferometer_phase_calibration"],
                 req.metric,
                 req.source,
                 req.intf_alpha_selection.model_dump() if req.intf_alpha_selection else None,
             )
+        return await run_in_threadpool(capture_result, data_loader, req, result, settings, 'allan', inputs)
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc))
     except ValueError as exc:
@@ -2406,13 +2370,14 @@ async def calculate_archived_allan(req: ArchiveAllanRequest):
 @router.post("/archive/phase-noise/allan")
 async def calculate_archived_phase_noise_allan(req: ArchivePhaseNoiseAllanRequest):
     settings = req.new_settings.model_dump()
-    settings["_interferometer_phase_calibration"] = manager.get_active_bragg_phase_calibration()
+    settings["_interferometer_phase_calibration"] = deepcopy(manager.get_active_bragg_phase_calibration())
     try:
+        inputs = await run_in_threadpool(capture_inputs, data_loader, req)
         if req.intf_alpha_selection is not None and req.display_mode == "recalculated":
             payload = await run_in_threadpool(
                 data_loader.load_run,
                 req.year, req.month, req.day, req.run_id, req.node_id,
-                manager.get_active_bragg_phase_calibration(), req.orders,
+                settings["_interferometer_phase_calibration"], req.orders,
                 intf_alpha_accepted_ids=req.intf_alpha_selection.accepted_calibration_ids,
                 intf_alpha_interpolation_method=req.intf_alpha_selection.interpolation_method,
             )
@@ -2426,11 +2391,13 @@ async def calculate_archived_phase_noise_allan(req: ArchivePhaseNoiseAllanReques
             payload = await run_in_threadpool(
                 data_loader.load_run,
                 req.year, req.month, req.day, req.run_id, req.node_id,
-                manager.get_active_bragg_phase_calibration(), req.orders,
+                settings["_interferometer_phase_calibration"], req.orders,
             )
         if str((payload.get("config") or {}).get("mode") or "").strip().lower() != "phase_noise":
             raise ValueError("Selected archive is not a Phase Noise Analyze run")
-        return {"orders": req.orders, "phase_noise_summary": payload.get("phase_noise_summary") or []}
+        result = {"orders": req.orders, "phase_noise_summary": payload.get("phase_noise_summary") or [],
+                  "phase_noise_series": payload.get("phase_noise_series") or []}
+        return await run_in_threadpool(capture_result, data_loader, req, result, settings, 'phase_noise_allan', inputs)
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc))
     except ValueError as exc:
@@ -3086,26 +3053,21 @@ async def delete_archive_bragg_phase_calibration(calibration_id: str):
 @router.post("/archive/overwrite", response_model=ExperimentResponse)
 async def overwrite_archived_run(req: ReAnalysisRequest):
     try:
-        # Use a fresh DataManager instance for overwrite ops to avoid state conflict
-        dm = DataManager()
-        recalculated = data_loader.recalculate_run(
-            req.year,
-            req.month,
-            req.day,
-            req.run_id,
-            req.new_settings.dict(),
-            max_points=None,
-        )
-        dm.overwrite_run(
-            req.year, req.month, req.day, req.run_id,
-            req.new_settings.dict(),
-            recalculated["data"],
-            (
-                recalculated.get("transfer_function_summary")
-                if str(recalculated.get("config", {}).get("mode") or "").strip().lower() in {"transfer_function", "transfer_burst_time_scan"}
-                else None
-            ),
-        )
-        return ExperimentResponse(status="success", message="Run overwritten successfully")
+        settings = req.new_settings.model_dump()
+        settings['_interferometer_phase_calibration'] = manager.get_active_bragg_phase_calibration()
+        recalculated = await run_in_threadpool(data_loader.recalculate_run,
+            req.year, req.month, req.day, req.run_id, settings, max_points=None, node_id=req.node_id)
+        root = data_loader.get_run_dir(req.year, req.month, req.day, req.run_id)
+        target = data_loader._resolve_archive_node_dir(root, req.node_id)
+        await run_in_threadpool(DataManager().overwrite_run, req.year, req.month, req.day, req.run_id,
+            settings, recalculated['data'], recalculated.get('transfer_function_summary'), target_directory=target)
+        return ExperimentResponse(status="success", message="New analysis version saved; acquisition data unchanged")
     except Exception as e:
         raise HTTPException(500, f"Overwrite failed: {str(e)}")
+
+
+@router.get('/archive/versions/{year}/{month}/{day}/{run_id}')
+async def list_controller_analysis_versions(year: str, month: str, day: str, run_id: str):
+    return {'versions': versions(ControllerRepository(data_loader.base_dir), 'controller', [year, month, day, run_id])}
+
+router.include_router(build_analysis_router(lambda: data_loader, ControllerArchiveRoute))

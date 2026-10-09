@@ -495,7 +495,12 @@ class DataManager:
         *,
         target_directory: Optional[Path] = None,
     ):
-        target_dir = Path(target_directory) if target_directory is not None else Path(config.DATA_BASE_DIR) / year / month / day / run_id
+        if target_directory is None:
+            raise ValueError("Analysis must be saved to an independent version, never an acquisition run")
+        target_dir = Path(target_directory)
+        raw_root = Path(config.DATA_BASE_DIR).resolve()
+        if target_dir.resolve().is_relative_to(raw_root):
+            raise ValueError("Analysis destination cannot be inside acquisition storage")
         if not target_dir.exists(): raise FileNotFoundError(f"Run {run_id} not found")
 
         config_path = target_dir / "config.json"

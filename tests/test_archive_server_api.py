@@ -132,6 +132,22 @@ class ArchiveServerApiTests(unittest.TestCase):
                 self.assertIn(request(ui + '/archive/collections/folders', 'POST', {'name': 'Unsafe', 'parent_id': imported['id']})[0], (403, 422))
                 self.assertEqual(request(ui + '/archive/sync/retry/2025/01/02/run00_20250102', 'POST')[0], 403)
                 reference = {'year': '2025', 'month': '01', 'day': '02', 'run_id': 'run00_20250102'}
+                # The full Archive API persists the exact Allan calculation independently.
+                settings = dict(alpha=.2, beta=.1, R=1, K=1, z_up=0, z_dw=0,
+                                launch_velocity=1, chan_launch='0', chan_trigger='1', gain_up=1, gain_dw=1)
+                before = {p.name: p.read_bytes() for p in (storage / 'devices/master/runs/2025/01/02/run00_20250102').iterdir() if p.is_file()}
+                allan = request(ui + '/archive/allan', 'POST', {**reference, 'order': 1, 'metric': 'atoms', 'source': 'fit', 'new_settings': settings})
+                self.assertEqual(allan[0], 200, allan)
+                record = request(ui + '/archive/analysis-results/save', 'POST', {**reference, 'candidate_id': allan[1]['analysis_candidate_id'], 'name': 'Saved Allan'})
+                self.assertEqual(record[0], 200, record)
+                result_url = ui + '/archive/analysis-results/2025/01/02/run00_20250102/' + record[1]['id']
+                restored = request(result_url)[1]
+                self.assertEqual(restored['result'], {k: v for k, v in allan[1].items() if k != 'analysis_candidate_id'})
+                self.assertEqual(restored['source']['device_id'], 'master')
+                self.assertTrue(restored['input_matches_current'])
+                self.assertEqual(request(result_url + '?download=true')[1]['result'], restored['result'])
+                self.assertEqual(len(request(ui + '/archive/analysis-results/2025/01/02/run00_20250102')[1]['analyses']), 1)
+                self.assertEqual(before, {p.name: p.read_bytes() for p in (storage / 'devices/master/runs/2025/01/02/run00_20250102').iterdir() if p.is_file()})
                 saved = request(ui + '/archive/intf-alpha/reanalyze', 'POST', {**reference, 'save': True, 'name': 'Version one'})
                 self.assertEqual(saved[0], 200, saved)
                 version_list = request(ui + '/archive/versions/2025/01/02/run00_20250102')[1]['versions']

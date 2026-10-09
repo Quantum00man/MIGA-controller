@@ -184,7 +184,7 @@ def writable_operation(request, body):
     if request.method == 'GET':
         return False
     return any(key in path for key in (
-        '/archive/overwrite', '/archive/phase-reference-override', '/archive/sync-differential-fit',
+        '/archive/overwrite', '/archive/phase-reference-override', '/archive/phase-analysis/sync/', '/archive/sync-differential-fit',
         '/archive/sync-phase-calibration-optimization/', '/archive/sync-analysis-copies/save',
     )) or ('/archive/intf-alpha/reanalyze' in path and body.get('save', False))
 
@@ -202,6 +202,7 @@ async def request_context(request: Request):
     if request.method != 'GET':
         await lock.acquire()
     token = None
+    directory = None
     try:
         loader = repository.loader(device_id)
         loader._get_run_dir = lambda *ref: resolve(repository, device_id, list(ref), selection)
@@ -233,6 +234,8 @@ async def request_context(request: Request):
                 'software_commit': software.stdout.strip() if software.returncode == 0 else 'unknown'})
             atomic_json(directory.parent / 'latest.json', {'id': version_id})
     finally:
+        if directory is not None and not (directory / 'provenance.json').exists():
+            await run_in_threadpool(shutil.rmtree, directory, True)
         if token is not None:
             _scope.reset(token)
         if request.method != 'GET':

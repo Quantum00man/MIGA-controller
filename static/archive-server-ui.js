@@ -1,9 +1,9 @@
 /* Optional adapter: the controller serves the same page without this script. */
 (() => {
     const match = location.pathname.match(/^\/archive-server\/view\/([a-z0-9._-]+)\/archive\.html$/);
-    if (!match) return;
-    const device = match[1];
-    const prefix = `/archive-server/view/${device}`;
+    const server = Boolean(match);
+    const device = server ? match[1] : 'controller';
+    const prefix = server ? `/archive-server/view/${device}` : '';
     let app;
     axios.defaults.baseURL = prefix;
     axios.interceptors.request.use(request => {
@@ -22,8 +22,8 @@
     Vue.createApp = function(options, ...args) {
         const originalData = options.data;
         options.data = function() {
-            return {...originalData.call(this), archiveServerMode: true, serverDeviceName: device,
-                serverVersion: new URLSearchParams(location.search).get('server_version') || 'latest', serverVersions: [], serverVersionError: ''};
+            return {...originalData.call(this), archiveServerMode: server, archiveVersionMode: true, serverDeviceName: device,
+                serverVersion: new URLSearchParams(location.search).get('server_version') || 'original', serverVersions: [], serverVersionError: ''};
         };
         const methods = options.methods;
         const shareUrl = methods.loadedRunShareUrl;
@@ -55,7 +55,7 @@
         const load = methods.loadRun;
         methods.loadRun = async function(...values) {
             const key = [this.selectedYear, this.selectedMonth, this.selectedDay, this.selectedRun].join('/');
-            if (this._serverReferenceKey && key !== this._serverReferenceKey) this.serverVersion = 'latest';
+            if (this._serverReferenceKey && key !== this._serverReferenceKey) this.serverVersion = 'original';
             this._serverReferenceKey = key;
             const loaded = await load.apply(this, values);
             await this.refreshServerVersions();
@@ -64,7 +64,7 @@
         };
         methods.changeServerVersion = async function() { await this.loadRun(); };
         methods.saveOverwrite = async function() {
-            if (!this.loadedRunRef || !confirm('Save a NEW server analysis version? The original backup will remain unchanged.')) return;
+            if (!this.loadedRunRef || !confirm('Save a NEW analysis version? The original backup will remain unchanged.')) return;
             this.isSaving = true;
             try {
                 await axios.post('/archive/overwrite', this.buildArchivePayload());
@@ -75,7 +75,7 @@
         };
         // These actions concern acquisition/controller state, not archive analysis.
         for (const name of ['applyOptimizedBetaToSettings', 'prepareMidFringeSchedule', 'retrySyncArchive', 'retryArchivePhaseAnalysisSync', 'openPreparedMidFringeQueue']) {
-            if (methods[name]) methods[name] = function() { alert('Controller actions are disabled on Archive Server. No data is written back.'); };
+            if (server && methods[name]) methods[name] = function() { alert('Controller actions are disabled on Archive Server. No data is written back.'); };
         }
         for (const name of ['openFolderDialog', 'openFavoriteEditDialog', 'deleteCollectionFolder', 'removeCollectionFavorite', 'runCollectionBatch']) {
             const original = methods[name];
@@ -103,8 +103,10 @@
         const mounted = options.mounted;
         options.mounted = function() {
             app = this;
-            document.title = `${device} — MIGA Archive`;
-            axios.get('/archive/device').then(response => { this.serverDeviceName = response.data.name; });
+            if (server) {
+                document.title = `${device} — MIGA Archive`;
+                axios.get('/archive/device').then(response => { this.serverDeviceName = response.data.name; });
+            }
             mounted.call(this);
         };
         return create.call(this, options, ...args);

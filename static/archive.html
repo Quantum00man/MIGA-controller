@@ -937,19 +937,19 @@
             </a>
         </div>
 
-        <div v-if="archiveServerMode" class="alert alert-info d-flex flex-wrap align-items-center gap-3" role="status">
+        <div v-if="archiveVersionMode" class="alert alert-info d-flex flex-wrap align-items-center gap-3" role="status">
             <strong>{{ serverDeviceName }}</strong>
-            <span>Original backup is read-only. Saves create server-only versions.</span>
+            <span>Acquisition data is read-only. Saves create independent analysis versions.</span>
             <label v-if="loadedRunRef" class="d-flex align-items-center gap-2 ms-auto">Analysis version
                 <select class="form-select form-select-sm" style="width:auto" v-model="serverVersion" @change="changeServerVersion">
-                    <option value="latest">Latest server version (or original)</option>
+                    <option value="latest">Latest analysis version (or original)</option>
                     <option value="original">Original backup</option>
                     <option v-for="version in serverVersions" :key="version.id" :value="version.id">{{ version.created_at }} — {{ version.operation }}</option>
                 </select>
             </label>
             <span v-if="serverVersionError" class="text-danger">{{ serverVersionError }}</span>
-            <small v-if="loadedRunRef" class="w-100">{{ serverVersion === 'original' || !serverVersions.length ? 'Displaying the original backup' : 'Displaying a server analysis version' }}</small>
-            <small class="w-100">Source Collections are read-only; your own Collections are stored separately. No reverse synchronization.</small>
+            <small v-if="loadedRunRef" class="w-100">{{ serverVersion === 'original' || !serverVersions.length ? 'Displaying acquisition data' : 'Displaying an analysis version' }}</small>
+            <small v-if="archiveServerMode" class="w-100">Source Collections are read-only; your own Collections are stored separately. No reverse synchronization.</small>
         </div>
         <div class="archive-layout row g-4">
             <div class="archive-sidebar col-md-3 col-xxl-2 d-flex flex-column gap-3">
@@ -1410,7 +1410,7 @@
                             <button class="btn btn-danger btn-sm fw-bold shadow-sm" @click="saveOverwrite"
                                 :disabled="isSaving"><span v-if="isSaving"
                                     class="spinner-border spinner-border-sm me-1"></span> {{ isSaving ? 'Saving...' :
-                                (archiveServerMode ? 'Save New Server Version' : 'Save to Disk') }}</button>
+                                'Save New Analysis Version' }}</button>
                         </div>
                     </div>
                 </div>
@@ -1800,6 +1800,25 @@
                 <div class="mobile-archive-note alert alert-info py-2 mb-2">
                     Phone view supports run selection, 1D plots and Allan analysis. Re-analysis and fitting controls are available on iPad or desktop.
                 </div>
+                <section v-if="loadedRunRef" class="card mb-3 border-primary" aria-label="Analysis management">
+                    <div class="card-header bg-white fw-bold">Analysis management <span class="small text-muted fw-normal ms-2">Original data is preserved</span></div>
+                    <div class="card-body py-2">
+                        <div class="d-flex flex-wrap gap-2 align-items-center">
+                            <input class="form-control form-control-sm" style="max-width:220px" v-model="analysisResultName" placeholder="Analysis name" aria-label="Analysis name">
+                            <input class="form-control form-control-sm" style="max-width:280px" v-model="analysisResultNote" placeholder="Note (optional)" aria-label="Analysis note">
+                            <button class="btn btn-success btn-sm" @click="saveAnalysisResult" :disabled="analysisResultBusy || !analysisCandidateId || !analysisResultName.trim() || isLoadingAllan || analysisResultContext !== analysisContextKey(analysisResultKind)">Save Allan result</button>
+                            <select class="form-select form-select-sm" style="max-width:360px" v-model="selectedAnalysisResultId" aria-label="Saved analysis result">
+                                <option value="">Select saved analysis</option>
+                                <option v-for="record in analysisResults" :key="record.id" :value="record.id">{{ record.name }} · {{ record.kind }} · {{ record.created_at }}</option>
+                            </select>
+                            <button class="btn btn-outline-primary btn-sm" @click="restoreAnalysisResult" :disabled="analysisResultBusy || !selectedAnalysisResultId">Restore</button>
+                            <button class="btn btn-outline-secondary btn-sm" @click="exportAnalysisResult" :disabled="analysisResultBusy || !selectedAnalysisResultId">Export result + parameters</button>
+                        </div>
+                        <div class="small text-muted mt-2" v-if="!analysisCandidateId">Compute Allan or restore a saved result to begin. Restoring reads saved values without recalculation.</div>
+                        <div class="small mt-2" v-if="analysisResultMessage" role="status">{{ analysisResultMessage }}</div>
+                        <div class="small text-warning mt-2" v-if="analysisCandidateId && analysisResultContext !== analysisContextKey(analysisResultKind)">Analysis conditions have changed. This snapshot still uses its recorded inputs; compute again for the current conditions.</div>
+                    </div>
+                </section>
                 <section v-if="archiveSourceMode === 'collections'" class="card collections-browser mb-4 border-0 shadow-sm" aria-labelledby="collections-title">
                     <div class="card-header bg-white">
                         <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
@@ -2338,7 +2357,7 @@
                                         :class="maximizedView === 'analysis' ? 'bi-fullscreen-exit' : 'bi-fullscreen'"></i>
                                 </button>
                                 <span v-if="loadedRunId" class="badge" :class="displayMode === 'saved' ? 'bg-secondary' : 'bg-warning text-dark'">
-                                    {{ displayMode === 'saved' ? 'Saved Results' : 'Recalculated' }}
+                                    {{ analysisSnapshotRestored && (plotMode === 'allan' || phaseNoiseStatistic === 'allan') ? 'Saved analysis snapshot' : (displayMode === 'saved' ? 'Saved Results' : 'Recalculated') }}
                                 </span>
                                 <span v-if="syncManifest" class="badge bg-primary">Node: {{ syncArchiveNodeLabel(loadedSyncNode || 'master') }}</span>
                                 <div class="btn-group btn-group-sm">
@@ -2956,7 +2975,7 @@
         createApp({
             data() {
                 return {
-                    archiveServerMode: false,
+                    archiveServerMode: false, archiveVersionMode: false,
                     archiveTree: {}, selectedYear: '', selectedMonth: '', selectedDay: '', selectedRun: '', archiveNavigationBusy: false,
                     archiveSourceMode: 'timeline',
                     archiveAuditJob: null, archiveAuditBusy: false, archiveAuditError: '', archiveAuditReports: [], archiveAuditPollTimer: null,
@@ -3044,6 +3063,10 @@
                     phaseNoiseXAxisScale: 'linear', phaseNoiseYAxisScale: 'linear',
                     phaseNoiseStatistic: 'std', phaseNoiseAllanOrders: [1], phaseNoiseAllanOrderDraft: 2,
                     savedAllanCache: {}, recalculatedAllanCache: {}, currentAllanData: null,
+                    analysisResults: [], analysisCandidateId: '', selectedAnalysisResultId: '',
+                    analysisResultName: '', analysisResultNote: '', analysisResultBusy: false,
+                    analysisResultMessage: '', analysisResultKind: '', analysisResultContext: '', analysisSnapshotRestored: false,
+                    phaseNoiseAllanSnapshot: null, phaseNoiseAllanPlot: null,
                     betaOptimization: {
                         parameter: 'intf_beta', metric: 'intf', statistic: 'mean', allanOrder: 1, source: 'fit', channel: 'up', targetMean: 0,
                         alphaMin: 0, alphaMax: 1, betaMin: 0, betaMax: 1,
@@ -3680,6 +3703,7 @@
                     return this.scanFit.model_key === 'bragg_fringes';
                 },
                 async handlePlotContextChange() {
+                    if (this.analysisResultBusy) return;
                     if (this.scanFit.active) {
                         this.scanFitResult = null;
                     }
@@ -4950,6 +4974,115 @@
                 is3DSliceMode() {
                     return this.show3DControls() && this.dim3DisplayMode === 'slice';
                 },
+                analysisContextKey(kind) {
+                    const range = this.normalizeAllanP0RangeValues(this.allanP0Min, this.allanP0Max);
+                    return JSON.stringify({ref: this.loadedRunRef, node: this.loadedSyncNode || '',
+                        version: this.serverVersion || 'original', settings: this.normalizeAnalysis(this.analysis),
+                        mode: this.displayMode, selection: this.activeIntfAlphaSelection,
+                        kind, metric: kind === 'allan' ? this.currentTab : 'phase',
+                        source: this.showRawData ? 'raw' : 'fit',
+                        orders: kind === 'allan' ? this.allanOrder : this.phaseNoiseAllanOrders,
+                        detail: kind === 'phase_noise_allan' ? [this.phaseNoiseView, this.phaseNoiseSelectedT2, this.phaseNoiseXAxis, this.phaseNoiseXAxisScale, this.phaseNoiseYAxisScale, this.syncPhaseCalibrationOptimization?.selectedId, this.syncPhaseCalibrationOptimization?.result] : null,
+                        range: kind === 'allan' ? range : null});
+                },
+                rememberAnalysisResult(result, kind) {
+                    this.analysisSnapshotRestored = Boolean(result._saved_snapshot);
+                    this.analysisCandidateId = result.analysis_candidate_id || '';
+                    this.analysisResultKind = kind;
+                    this.analysisResultContext = this.analysisContextKey(kind);
+                    this.analysisResultMessage = 'Computed snapshot ready to save.';
+                },
+                async refreshAnalysisResults() {
+                    if (!this.loadedRunRef) return;
+                    const ref = this.loadedRunRef;
+                    try {
+                        const response = await axios.get(`/archive/analysis-results/${ref.year}/${ref.month}/${ref.day}/${ref.run_id}`);
+                        if (ref === this.loadedRunRef) this.analysisResults = response.data.analyses || [];
+                    } catch (error) { this.analysisResults = []; this.analysisResultMessage = error.response?.data?.detail || error.message; }
+                },
+                analysisResultView() {
+                    return {allanYAxisMode: this.allanYAxisMode, allanXAxisMode: this.allanXAxisMode,
+                        allanScaleMode: this.allanScaleMode, phaseUnit: this.phaseUnit,
+                        phaseNoiseView: this.phaseNoiseView, phaseNoiseSelectedT2: this.phaseNoiseSelectedT2,
+                        phaseNoiseYAxisScale: this.phaseNoiseYAxisScale, phaseNoiseXAxis: this.phaseNoiseXAxis, phaseNoiseXAxisScale: this.phaseNoiseXAxisScale,
+                        ...(this.analysisResultKind === 'phase_noise_allan' && this.phaseNoiseAllanPlot ? {plot_snapshot: this.phaseNoiseAllanPlot} : {}),
+                        phaseNoiseOptimization: this.syncPhaseCalibrationOptimization?.result || this.selectedSavedSyncPhaseCalibrationOptimization?.() || null};
+                },
+                async saveAnalysisResult() {
+                    if (!this.analysisCandidateId || !this.loadedRunRef) return;
+                    this.analysisResultBusy = true;
+                    try {
+                        const response = await axios.post('/archive/analysis-results/save', {...this.loadedRunRef,
+                            candidate_id: this.analysisCandidateId, name: this.analysisResultName,
+                            note: this.analysisResultNote, view: this.analysisResultView()});
+                        await this.refreshAnalysisResults();
+                        this.selectedAnalysisResultId = response.data.id;
+                        this.analysisResultMessage = `Saved “${response.data.name}”. Original data is unchanged.`;
+                    } catch (error) { this.analysisResultMessage = error.response?.data?.detail || error.message; }
+                    finally { this.analysisResultBusy = false; }
+                },
+                async restoreAnalysisResult() {
+                    if (!this.selectedAnalysisResultId || !this.loadedRunRef) return;
+                    this.analysisResultBusy = true;
+                    try {
+                        const ref = this.loadedRunRef;
+                        const response = await axios.get(`/archive/analysis-results/${ref.year}/${ref.month}/${ref.day}/${ref.run_id}/${this.selectedAnalysisResultId}`);
+                        const record = response.data;
+                        const params = record.parameters;
+                        if ((params.node_id || '') !== (this.loadedSyncNode || '')) {
+                            this.analysisResultMessage = 'Select the recorded SYNC node before restoring this result.';
+                            return;
+                        }
+                        this.analysis = this.normalizeAnalysis(params.new_settings);
+                        this.displayMode = params.display_mode;
+                        this.activeIntfAlphaSelection = params.intf_alpha_selection || null;
+                        for (const [key, value] of Object.entries(record.view || {})) {
+                            if (['allanYAxisMode', 'allanXAxisMode', 'allanScaleMode', 'phaseUnit', 'phaseNoiseView', 'phaseNoiseSelectedT2', 'phaseNoiseYAxisScale', 'phaseNoiseXAxis', 'phaseNoiseXAxisScale'].includes(key)) this[key] = value;
+                        }
+                        if (record.kind === 'allan') {
+                            this.currentTab = params.metric || 'atoms';
+                            this.showRawData = params.source === 'raw';
+                            this.allanOrder = record.result.used_max_order || params.order;
+                            this.allanP0Min = params.p0_min;
+                            this.allanP0Max = params.p0_max;
+                            this.syncAllanP0RangeFromPayload(record.result);
+                            this.plotMode = 'allan';
+                            const result = {...record.result, analysis_candidate_id: record.id, _saved_snapshot: true};
+                            this.getAllanCacheBucket()[this.getAllanCacheKey()] = result;
+                            this.currentAllanData = result;
+                            this.rememberAnalysisResult(result, record.kind);
+                            this.renderMainPlot();
+                        } else if (record.kind === 'phase_noise_allan') {
+                            this.phaseNoiseAllanOrders = record.result.orders;
+                            this.phaseNoiseSummary = record.result.phase_noise_summary;
+                            this.phaseNoiseSeries = record.result.phase_noise_series || [];
+                            this.phaseNoiseStatistic = 'allan';
+                            this.phaseNoiseAllanSnapshot = {...record.result, analysis_candidate_id: record.id, _saved_snapshot: true};
+                            this.rememberAnalysisResult(this.phaseNoiseAllanSnapshot, record.kind);
+                            this.phaseNoiseAllanPlot = record.result.plot_snapshot || null;
+                            this.renderPhaseNoiseArchivePlot();
+                        }
+                        await this.$nextTick();
+                        this.analysisResultName = record.name;
+                        this.analysisResultNote = record.note || '';
+                        this.analysisResultMessage = `Restored “${record.name}” without recalculation. Input version: ${record.source.version}.`
+                            + (record.input_matches_current ? '' : ' Current input differs; displaying the saved snapshot.');
+                    } catch (error) { this.analysisResultMessage = error.response?.data?.detail || error.message; }
+                    finally { this.analysisResultBusy = false; }
+                },
+                async exportAnalysisResult() {
+                    if (!this.selectedAnalysisResultId || !this.loadedRunRef) return;
+                    this.analysisResultBusy = true;
+                    try {
+                        const ref = this.loadedRunRef;
+                        const response = await axios.get(`/archive/analysis-results/${ref.year}/${ref.month}/${ref.day}/${ref.run_id}/${this.selectedAnalysisResultId}?download=true`, {responseType: 'blob'});
+                        const url = URL.createObjectURL(response.data);
+                        const link = document.createElement('a'); link.href = url;
+                        link.download = `analysis_${this.selectedAnalysisResultId}.json`; link.click();
+                        setTimeout(() => URL.revokeObjectURL(url), 1000);
+                    } catch (error) { this.analysisResultMessage = error.message; }
+                    finally { this.analysisResultBusy = false; }
+                },
                 getAllanCacheMode() {
                     return this.displayMode === 'recalculated' ? 'recalculated' : 'saved';
                 },
@@ -4968,7 +5101,7 @@
                 getAllanCacheKey(order = this.allanOrder) {
                     const normalizedOrder = Math.max(1, Math.round(Number(order) || 1));
                     const normalizedRange = this.normalizeAllanP0RangeValues(this.allanP0Min, this.allanP0Max);
-                    const selectionKey = this.getAllanCacheMode() === 'recalculated' ? JSON.stringify(this.activeIntfAlphaSelection) : '';
+                    const selectionKey = this.getAllanCacheMode() === 'recalculated' ? JSON.stringify([this.activeIntfAlphaSelection, this.normalizeAnalysis(this.analysis)]) : '';
                     const metric = `${String(this.currentTab || 'atoms')}|${selectionKey}`;
                     const source = this.showRawData ? 'raw' : 'fit';
                     if (!normalizedRange) return `${metric}|${source}|${normalizedOrder}`;
@@ -4995,6 +5128,7 @@
                         this.currentAllanData = bucket[cacheKey];
                         this.syncAllanP0RangeFromPayload(this.currentAllanData);
                         this.allanOrder = Number(this.currentAllanData?.used_max_order || requestedOrder);
+                        this.rememberAnalysisResult(this.currentAllanData, 'allan');
                         return this.currentAllanData;
                     }
 
@@ -5019,6 +5153,7 @@
                         bucket[this.getAllanCacheKey(usedMaxOrder)] = allanData;
                         this.currentAllanData = allanData;
                         this.allanOrder = usedMaxOrder;
+                        this.rememberAnalysisResult(allanData, 'allan');
                         return allanData;
                     } catch (e) {
                         console.error(e);
@@ -6277,6 +6412,14 @@
                         };
                         this.loadedRunEntry = this.normalizeRunEntry(res.data.run_entry || this.getSelectedRunEntry() || this.selectedRun);
                         this.displayMode = 'saved';
+                        this.analysisCandidateId = '';
+                        this.selectedAnalysisResultId = '';
+                        this.analysisResultMessage = '';
+                        this.phaseNoiseAllanSnapshot = null;
+                        this.phaseNoiseAllanPlot = null;
+                        this.analysisSnapshotRestored = false;
+                        await this.refreshAnalysisResults();
+                        if (this.analysisResults.length && this.plotMode === 'allan') this.plotMode = 'series';
                         if (!this.canUseAllanMode() && this.plotMode === 'allan') {
                             this.plotMode = 'series';
                         }
@@ -9969,24 +10112,15 @@
                 },
 
                 async saveOverwrite() {
-                    if (!this.selectedRun) return;
-                    const selectedNodeEntry = this.loadedSyncNode ? this.syncManifest?.archive_nodes?.[this.loadedSyncNode] : null;
-                    if (selectedNodeEntry && selectedNodeEntry.local === false) {
-                        alert("Replicated node archives are read-only on this controller. Overwrite them on their originating controller.");
-                        return;
-                    }
-                    if (!confirm("OVERWRITE results?")) return;
+                    if (!this.loadedRunRef || !confirm('Save a new analysis version? Original acquisition data will remain unchanged.')) return;
                     this.isSaving = true;
                     try {
                         this.analysis = this.normalizeAnalysis(this.analysis);
                         await axios.post('/archive/overwrite', this.buildArchivePayload());
-                        alert("Saved!");
-                        this.originalSettings = this.normalizeAnalysis(this.analysis);
+                        this.serverVersion = 'latest';
                         await this.loadRun();
-                    } catch (e) {
-                        const detail = e.response?.data?.detail || e.message || 'Unknown error';
-                        alert("Error: " + detail);
-                    } finally { this.isSaving = false; }
+                    } catch (error) { alert(error.response?.data?.detail || error.message); }
+                    finally { this.isSaving = false; }
                 },
 
                 toggleMaximize(view) {
@@ -10365,6 +10499,7 @@
                     if (!this.isPhaseNoiseArchive() || !this.loadedRunRef) return;
                     this.phaseNoiseAllanOrders = this.normalizePhaseNoiseAllanOrders();
                     const selection = this.activeIntfAlphaSelection;
+                    const ref = this.loadedRunRef;
                     const mode = this.displayMode;
                     this.isLoadingAllan = true;
                     this.errorMsg = '';
@@ -10374,10 +10509,12 @@
                             display_mode: this.displayMode,
                             intf_alpha_selection: this.activeIntfAlphaSelection,
                         }));
-                        if (selection !== this.activeIntfAlphaSelection || mode !== this.displayMode) return;
+                        if (ref !== this.loadedRunRef || selection !== this.activeIntfAlphaSelection || mode !== this.displayMode) return;
                         const summary = Array.isArray(response.data?.phase_noise_summary)
                             ? response.data.phase_noise_summary : [];
                         this.phaseNoiseSummary = summary;
+                        this.phaseNoiseAllanSnapshot = response.data;
+                        this.rememberAnalysisResult(response.data, 'phase_noise_allan');
                         if (this.displayMode === 'recalculated') this.recalculatedPhaseNoiseSummary = summary;
                         else this.savedPhaseNoiseSummary = summary;
                         this.renderPhaseNoiseArchivePlot();
@@ -10389,7 +10526,10 @@
                 },
                 async setPhaseNoiseStatistic(statistic) {
                     this.phaseNoiseStatistic = statistic === 'allan' ? 'allan' : 'std';
-                    if (this.phaseNoiseStatistic === 'allan') await this.refreshPhaseNoiseAllan();
+                    if (this.phaseNoiseStatistic === 'allan') {
+                        if (this.phaseNoiseAllanSnapshot && this.analysisResultContext === this.analysisContextKey('phase_noise_allan')) this.renderPhaseNoiseArchivePlot();
+                        else await this.refreshPhaseNoiseAllan();
+                    }
                     else this.renderPhaseNoiseArchivePlot();
                 },
                 async addPhaseNoiseAllanOrder() {
@@ -10419,7 +10559,7 @@
                             .every(row => selectedOrders.every(order => (
                                 (row.allan_deviations || []).some(item => Number(item.order) === Number(order))
                             )));
-                        if (!hasAllSelectedOrders) await this.refreshPhaseNoiseAllan();
+                        if (!hasAllSelectedOrders || (this.phaseNoiseAllanSnapshot && this.analysisResultContext !== this.analysisContextKey('phase_noise_allan'))) await this.refreshPhaseNoiseAllan();
 
                         const header = [
                             'T2_us2', 'T_ms', 'n_order', 'averaging_time_s', 'measured_allan_rad', 'measured_error_minus_rad', 'measured_error_plus_rad', 'measured_ci_lower_rad', 'measured_ci_upper_rad', 'measured_edf_white', 'confidence_level', 'edf_noise_model',
@@ -10567,6 +10707,7 @@
                     const cadence = intervals.length ? intervals[Math.floor(intervals.length / 2)] : null;
                     const base = this.buildCommonAnalysisLayout();
                     this.layoutResUp = { ...base, margin: { t: 52, b: 58, l: 78, r: 20 }, title: { text: `T Detail · T²=${Number(this.phaseNoiseSelectedT2).toPrecision(8)} · Allan n=1=${allan == null ? '—' : (allan * 1000).toPrecision(5)} mrad · τ≈${cadence == null ? '—' : cadence.toPrecision(4)} s`, font: { size: 14 }, x: 0.04 }, xaxis: { ...base.xaxis, title: 'Shot number within T' }, yaxis: { ...base.yaxis, title: 'Phase (mrad)' }, legend: { orientation: 'h', x: 0.5, xanchor: 'center', y: 1.15 } };
+                    if (this.phaseNoiseStatistic === 'allan') this.phaseNoiseAllanPlot = JSON.parse(JSON.stringify({traces, layout: this.layoutResUp, origin: 'browser'}));
                     Plotly.react('resultsPlotUp', traces, this.layoutResUp, { responsive: true, displaylogo: false });
                     // PM100A and I_alpha already have full archive sections below the
                     // primary phase plot. Keep this secondary panel empty so the same
@@ -10612,11 +10753,21 @@
                     });
                     const base = this.buildCommonAnalysisLayout();
                     this.layoutResUp = { ...base, margin: { t: 52, b: 58, l: 78, r: 20 }, title: { text: `Single-T Phase Noise · overlapping Allan deviation · T²=${Number(this.phaseNoiseSelectedT2).toPrecision(9)}`, font: { size: 14 }, x: 0.04 }, xaxis: { ...base.xaxis, title: 'Allan order n' }, yaxis: { ...base.yaxis, title: 'Allan deviation (mrad)' }, legend: { orientation: 'h', x: 0.5, xanchor: 'center', y: 1.15 } };
+                    if (this.phaseNoiseStatistic === 'allan') this.phaseNoiseAllanPlot = JSON.parse(JSON.stringify({traces, layout: this.layoutResUp, origin: 'browser'}));
                     Plotly.react('resultsPlotUp', traces, this.layoutResUp, { responsive: true, displaylogo: false });
                     Plotly.react('resultsPlotDw', [], { ...base, title: '' }, { responsive: true, displaylogo: false });
                     Plotly.react('resultsPlotTotal', [], { ...base, title: '' }, { responsive: true, displaylogo: false });
                 },
                 renderPhaseNoiseArchivePlot() {
+                    if (this.analysisSnapshotRestored && this.phaseNoiseAllanPlot && this.phaseNoiseStatistic === 'allan'
+                        && this.analysisResultContext === this.analysisContextKey('phase_noise_allan')) {
+                        const plot = this.phaseNoiseAllanPlot;
+                        this.layoutResUp = plot.layout;
+                        Plotly.react('resultsPlotUp', plot.traces, plot.layout, {responsive: true, displaylogo: false});
+                        Plotly.react('resultsPlotDw', [], {...plot.layout, title: ''}, {responsive: true, displaylogo: false});
+                        Plotly.react('resultsPlotTotal', [], {...plot.layout, title: ''}, {responsive: true, displaylogo: false});
+                        return;
+                    }
                     if (!this.isLegacyMultiTPhaseNoiseArchive()) {
                         if (this.phaseNoiseStatistic === 'allan') this.renderPhaseNoiseSingleAllanPlot();
                         else this.renderPhaseNoiseDetailPlot();
@@ -10706,6 +10857,7 @@
                         yaxis: { ...base.yaxis, type: this.phaseNoiseYAxisScale, title: this.phaseNoiseStatistic === 'allan' ? 'Phase Allan deviation σA (mrad)' : 'Phase noise σφ (mrad)' },
                         legend: { orientation: 'h', x: 0.5, xanchor: 'center', y: 1.16 }
                     };
+                    if (this.phaseNoiseStatistic === 'allan') this.phaseNoiseAllanPlot = JSON.parse(JSON.stringify({traces, layout: this.layoutResUp, origin: 'browser'}));
                     Plotly.react('resultsPlotUp', traces, this.layoutResUp, { responsive: true, displaylogo: false });
                     Plotly.react('resultsPlotDw', [], { ...base, title: '' }, { responsive: true, displaylogo: false });
                     Plotly.react('resultsPlotTotal', [], { ...base, title: '' }, { responsive: true, displaylogo: false });

@@ -3,6 +3,7 @@ import asyncio
 from unittest.mock import patch
 from pathlib import Path
 import unittest
+import tempfile
 
 from app.analysis.phase_noise import (
     build_phase_noise_summary,
@@ -23,7 +24,7 @@ class PhaseNoiseAnalyzeTests(unittest.TestCase):
     def test_alpha_copy_allan_route_skips_waveform_recalculation(self):
         from app.api import routes
         request = ArchivePhaseNoiseAllanRequest(
-            year="2026", month="10", day="02", run_id="run", node_id="master",
+            year="2026", month="10", day="02", run_id="run01", node_id="master",
             orders=[1, 3], display_mode="recalculated", new_settings=ArchiveAnalysisSettings(
                 alpha=0.01, beta=0.02, R=1.0, K=1.0, z_up=0.2, z_dw=0.2,
                 launch_velocity=4.0, chan_launch="60", chan_trigger="68", gain_up=-35.0, gain_dw=-35.0,
@@ -31,9 +32,13 @@ class PhaseNoiseAnalyzeTests(unittest.TestCase):
             intf_alpha_selection={"accepted_calibration_ids": ["a"], "interpolation_method": "nearest"},
         )
         summary = [{"shot_count": 10}]
-        with patch.object(routes.data_loader, "load_run", return_value={"config": {"mode": "phase_noise"}, "phase_noise_summary": summary}) as load, \
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.object(routes.data_loader, "base_dir", Path(directory) / "data"), \
+             patch.object(routes.data_loader, "load_run", return_value={"config": {"mode": "phase_noise"}, "phase_noise_summary": summary}) as load, \
              patch.object(routes.data_loader, "recalculate_run", side_effect=AssertionError("Must not refit")), \
              patch.object(routes.manager, "get_active_bragg_phase_calibration", return_value=None):
+            run = routes.data_loader.base_dir / request.year / request.month / request.day / request.run_id
+            run.mkdir(parents=True)
             result = asyncio.run(routes.calculate_archived_phase_noise_allan(request))
         self.assertEqual(result["phase_noise_summary"], summary)
         self.assertEqual(load.call_args.args[4:7], ("master", None, [1, 3]))

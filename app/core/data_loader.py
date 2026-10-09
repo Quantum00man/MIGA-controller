@@ -667,7 +667,29 @@ class DataLoader:
             return 0.0
         return data
 
+    @staticmethod
+    def _phase_noise_series(points):
+        return [
+            {
+                key: point.get(key)
+                for key in (
+                    "step", "timestamp", "parameter", "phase_noise_t2_us2",
+                    "phase_noise_repeat", "phase_noise_total_repeats",
+                    "phase_noise_t_index", "phase_noise_t_count",
+                    "phase_noise_science_shot", "interferometer_phase",
+                    "interferometer_phase_valid", "intf_p1", "intf_p1_nofit",
+                    "intf_alpha_applied", "power_meter_power_w",
+                    "power_meter_valid", "power_meter_invalid_reason",
+                )
+            }
+            for point in points
+        ]
+
     def _get_run_dir(self, year: str, month: str, day: str, run_id: str) -> Path:
+        from app.archive.controller_context import run_resolver
+        scoped = run_resolver.get()
+        if scoped and Path(self.base_dir).resolve() == scoped[0]:
+            return scoped[1](year, month, day, run_id)
         run_dir = self.base_dir / year / month / day / run_id
         if not run_dir.exists():
             raise FileNotFoundError(f"Run not found: {run_dir}")
@@ -2195,24 +2217,7 @@ class DataLoader:
             )
             if is_phase_noise else []
         )
-        phase_noise_series = (
-            [
-                {
-                    key: point.get(key)
-                    for key in (
-                        "step", "timestamp", "parameter", "phase_noise_t2_us2",
-                        "phase_noise_repeat", "phase_noise_total_repeats",
-                        "phase_noise_t_index", "phase_noise_t_count",
-                        "phase_noise_science_shot", "interferometer_phase",
-                        "interferometer_phase_valid", "intf_p1", "intf_p1_nofit",
-                        "intf_alpha_applied", "power_meter_power_w",
-                        "power_meter_valid", "power_meter_invalid_reason",
-                    )
-                }
-                for point in science_points
-            ]
-            if is_phase_noise else []
-        )
+        phase_noise_series = self._phase_noise_series(science_points) if is_phase_noise else []
         sync_manifest = self._apply_sync_phase_reference_overrides(sync_manifest, phase_contexts)
         bragg_calibration_result = None
         bragg_calibration_path = run_dir / "bragg_fringe_calibration.json"
@@ -3714,6 +3719,7 @@ class DataLoader:
             "lock_in_analysis": lock_in_analysis,
             "transfer_function_summary": transfer_function_summary,
             "phase_noise_summary": phase_noise_summary,
+            "phase_noise_series": self._phase_noise_series(recalculated_points) if is_phase_noise else [],
             "preview_map": self._build_preview_map(
                 self._transfer_response_points(recalculated_points) if is_transfer_function else recalculated_points,
                 scan_dimensions=scan_dimensions,

@@ -913,6 +913,13 @@ class ArchiveIntfAlphaSelection(BaseModel):
         return value
 
 
+class ArchiveAnalysisSaveRequest(ArchiveRunReference):
+    candidate_id: str
+    name: str = Field(..., min_length=1, max_length=200)
+    note: str = Field("", max_length=5000)
+    view: Dict[str, Any] = Field(default_factory=dict)
+
+
 class ArchiveAllanRequest(BaseModel):
     year: str
     month: str

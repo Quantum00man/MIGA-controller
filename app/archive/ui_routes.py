@@ -1,3 +1,6 @@
+from copy import deepcopy
+from app.core.analysis_store import capture_result, capture_inputs
+from app.api.analysis_routes import build_analysis_router
 """Archive UI compatibility endpoints; no controller or hardware initialization.
 
 Science handlers follow the controller API and use request-scoped dependencies.
@@ -526,13 +529,14 @@ async def reanalyze_archive_intf_alpha(req: ArchiveIntfAlphaReanalysisRequest):
 @router.post("/archive/allan")
 async def calculate_archived_allan(req: ArchiveAllanRequest):
     try:
+        inputs = await run_in_threadpool(capture_inputs, data_loader, req)
         settings = req.new_settings.dict()
-        settings["_interferometer_phase_calibration"] = manager.get_active_bragg_phase_calibration()
+        settings["_interferometer_phase_calibration"] = deepcopy(manager.get_active_bragg_phase_calibration())
         # Allan reanalysis can be CPU- and I/O-intensive.  Keep it off the
         # event loop so live WebSocket updates continue, and serialize these
         # jobs to avoid competing with active acquisition for resources.
         async with archive_allan_lock:
-            return await run_in_threadpool(
+            result = await run_in_threadpool(
                 data_loader.calculate_allan_run,
                 req.year,
                 req.month,
@@ -544,11 +548,12 @@ async def calculate_archived_allan(req: ArchiveAllanRequest):
                 req.p0_min,
                 req.p0_max,
                 req.node_id,
-                manager.get_active_bragg_phase_calibration(),
+                settings["_interferometer_phase_calibration"],
                 req.metric,
                 req.source,
                 req.intf_alpha_selection.model_dump() if req.intf_alpha_selection else None,
             )
+        return await run_in_threadpool(capture_result, data_loader, req, result, settings, 'allan', inputs)
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc))
     except ValueError as exc:
@@ -559,13 +564,14 @@ async def calculate_archived_allan(req: ArchiveAllanRequest):
 @router.post("/archive/phase-noise/allan")
 async def calculate_archived_phase_noise_allan(req: ArchivePhaseNoiseAllanRequest):
     settings = req.new_settings.model_dump()
-    settings["_interferometer_phase_calibration"] = manager.get_active_bragg_phase_calibration()
+    settings["_interferometer_phase_calibration"] = deepcopy(manager.get_active_bragg_phase_calibration())
     try:
+        inputs = await run_in_threadpool(capture_inputs, data_loader, req)
         if req.intf_alpha_selection is not None and req.display_mode == "recalculated":
             payload = await run_in_threadpool(
                 data_loader.load_run,
                 req.year, req.month, req.day, req.run_id, req.node_id,
-                manager.get_active_bragg_phase_calibration(), req.orders,
+                settings["_interferometer_phase_calibration"], req.orders,
                 intf_alpha_accepted_ids=req.intf_alpha_selection.accepted_calibration_ids,
                 intf_alpha_interpolation_method=req.intf_alpha_selection.interpolation_method,
             )
@@ -579,11 +585,13 @@ async def calculate_archived_phase_noise_allan(req: ArchivePhaseNoiseAllanReques
             payload = await run_in_threadpool(
                 data_loader.load_run,
                 req.year, req.month, req.day, req.run_id, req.node_id,
-                manager.get_active_bragg_phase_calibration(), req.orders,
+                settings["_interferometer_phase_calibration"], req.orders,
             )
         if str((payload.get("config") or {}).get("mode") or "").strip().lower() != "phase_noise":
             raise ValueError("Selected archive is not a Phase Noise Analyze run")
-        return {"orders": req.orders, "phase_noise_summary": payload.get("phase_noise_summary") or []}
+        result = {"orders": req.orders, "phase_noise_summary": payload.get("phase_noise_summary") or [],
+                  "phase_noise_series": payload.get("phase_noise_series") or []}
+        return await run_in_threadpool(capture_result, data_loader, req, result, settings, 'phase_noise_allan', inputs)
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc))
     except ValueError as exc:
@@ -1219,3 +1227,6 @@ async def delete_archive_bragg_phase_calibration(calibration_id: str):
     if not manager.delete_bragg_phase_calibration(calibration_id):
         raise HTTPException(404, "Bragg phase calibration not found")
     return {"status": "deleted", "id": calibration_id}
+
+
+router.include_router(build_analysis_router(lambda: data_loader, DeviceRoute))

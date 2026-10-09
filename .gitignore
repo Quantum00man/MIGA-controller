@@ -9,6 +9,7 @@ __pycache__/
 
 # Experiment data
 Data_log/
+Data_log_analysis/
 marker_documents/
 .venv/
 .launcher_state/

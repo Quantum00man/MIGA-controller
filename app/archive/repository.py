@@ -22,6 +22,9 @@ class ArchiveRepository:
         from app.core.data_loader import DataLoader
         loader = DataLoader()
         loader.base_dir = self.device_root(device_id) / 'runs'
+        loader.analysis_device_id = device_id
+        loader.analysis_directory = lambda reference: self.analysis_dir(device_id, reference)
+        loader.original_directory = lambda reference: self.reference(device_id, *reference)
         if revision_id:
             if not reference or not re.fullmatch(r'[a-f0-9]{64}', revision_id):
                 raise ValueError('Invalid raw revision')
