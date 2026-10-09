@@ -71,6 +71,10 @@ class ArchiveServerApiTests(unittest.TestCase):
                 self.assertFalse(dashboard['devices'][0]['connection_stale'])
                 self.assertIn(b'Device management',request('/devices')[1])
                 self.assertIn(b'renderCards',request('/archive-server-dashboard.js')[1])
+                self.assertIn(b'Your device archives',request('/')[1])
+                self.assertIn(b'DEVICE ARCHIVES',request('/')[1])
+                self.assertIn(b'Tabler',request('/archive-dashboard.css')[1])
+                self.assertEqual(request('/archive-assets/tabler/tabler.min.css')[0],200)
                 self.assertEqual(request('/archive-server/devices/master/test', 'POST')[1]['eligible_runs'], 1)
                 self.assertEqual(request('/archive-server/devices/master/backup', 'POST')[0], 200)
                 while True:

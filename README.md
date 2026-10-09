@@ -123,7 +123,11 @@ MIGA_ARCHIVE_HOST=0.0.0.0 MIGA_ARCHIVE_PORT=8765 ./archive_server start
 Open `http://SERVER-IP:8765/` for the Dashboard hub: NAS mount/identity status,
 device connection checks, last attempted and successful pulls, publication jobs,
 Collections snapshots, checksum results and recent backup jobs. Source SYNC warnings
-are shown separately from transfer failures. Device Archives open in new tabs;
+are shown separately from transfer failures. Device Archives open in new tabs.
+The English, desktop-first hub uses locally bundled Tabler 1.6.1 styles (MIT),
+with direct device links in the sidebar and Archive-first device cards. Storage
+and connection details are expandable; current jobs stay visible while recent
+records are collapsed by default. Dashboard assets require no external CDN.
 `/devices` provides device management and `/setup` resumes the Guide. Source checks
 are read-only, cached, and refreshed every ten minutes when no backup is active;
 offline sources do not prevent browsing their existing NAS backups.

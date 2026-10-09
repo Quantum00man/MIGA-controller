@@ -24,6 +24,15 @@ setup_guide = SetupGuide(configuration, backup)
 from app.archive.dashboard import ArchiveDashboard
 dashboard_state = ArchiveDashboard(configuration, backup, setup_guide)
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+from fastapi.staticfiles import StaticFiles
+app.mount('/archive-assets', StaticFiles(directory=STATIC_DIR / 'vendor'), name='archive-assets')
+
+
+@app.get('/archive-dashboard.css')
+async def dashboard_styles():
+    return FileResponse(STATIC_DIR / 'archive-dashboard.css', media_type='text/css')
+
+
 from app.archive.ui_context import configure as configure_archive_ui
 from app.archive.ui_routes import router as archive_ui_router
 configure_archive_ui(repository)
