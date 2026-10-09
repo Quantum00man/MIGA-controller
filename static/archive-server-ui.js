@@ -57,8 +57,10 @@
             const key = [this.selectedYear, this.selectedMonth, this.selectedDay, this.selectedRun].join('/');
             if (this._serverReferenceKey && key !== this._serverReferenceKey) this.serverVersion = 'latest';
             this._serverReferenceKey = key;
-            await load.apply(this, values);
+            const loaded = await load.apply(this, values);
             await this.refreshServerVersions();
+            // Node switching uses this result to decide whether to restore the previous node.
+            return loaded;
         };
         methods.changeServerVersion = async function() { await this.loadRun(); };
         methods.saveOverwrite = async function() {
