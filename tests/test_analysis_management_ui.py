@@ -5,6 +5,57 @@ import subprocess
 import pytest
 
 
+def test_reload_original_allan_leaves_saved_snapshot_for_each_analysis_kind():
+    node = shutil.which('node')
+    if not node:
+        pytest.skip('Node.js is required')
+    script = r"""
+const fs = require('node:fs'), vm = require('node:vm'), assert = require('node:assert/strict');
+const html = fs.readFileSync('static/archive.html', 'utf8');
+const start = html.indexOf('                analysisContextKey(kind) {');
+const end = html.indexOf('                getAllanCacheMode() {', start);
+const methods = vm.runInThisContext('({' + html.slice(start, end) + '})');
+(async () => {
+    for (const kind of ['allan', 'phase_noise_allan', 'sync_phase_allan']) {
+        let loads = 0, calculations = 0;
+        const ref = {year:'2026', month:'10', day:'09', run_id:'run01'};
+        const app = Object.assign({
+            loadedRunRef:ref, loadedSyncNode:'master', analysisResultKind:kind,
+            serverVersion:'derived-id', selectedRun:'another-run', analysisSnapshotRestored:true,
+            restoredSyncPhaseAllan:{id:'saved'}, syncPhaseAllanSnapshot:{}, restoredAnalysisParameters:{},
+            syncManifest:kind === 'sync_phase_allan' ? {} : null,
+            async loadRun(node, copy) {
+                loads++;
+                assert.equal(this.serverVersion, 'original');
+                assert.equal(this.selectedRun, ref.run_id);
+                assert.equal(node, 'master'); assert.equal(copy, '');
+                assert.equal(this.restoredSyncPhaseAllan, null);
+                this.analysisSnapshotRestored = false; this.selectedAnalysisResultId = '';
+                return true;
+            },
+            isPhaseNoiseArchive:() => kind === 'phase_noise_allan',
+            async refreshAllanIfNeeded(force) {assert.equal(force, true); calculations++},
+            async refreshAnalysisView() {},
+            async refreshPhaseNoiseAllan() {calculations++},
+            resetSyncPhaseP0Range(render) {assert.equal(render, false); this.syncPhaseP0Min = 0},
+            resetSyncPhaseShotRange(render) {assert.equal(render, false); this.syncPhaseShotMin = 1},
+            normalizeAndRenderSyncPhaseAllan() {
+                assert.equal(this.syncPhasePlotMode, 'allan');
+                assert.equal(this.syncPhaseShotMin, 1); calculations++;
+            }
+        }, methods);
+        await app.reloadOriginalAllan();
+        assert.equal(loads, 1); assert.equal(calculations, 1);
+        assert.equal(app.analysisSnapshotRestored, false);
+        assert.equal(app.analysisResultBusy, false);
+        assert.equal(app.restoredAnalysisParameters, null);
+        assert.match(app.analysisResultMessage, /recomputed Allan/);
+    }
+})().catch(error => {console.error(error); process.exitCode = 1});
+"""
+    subprocess.run([node, '-e', script], cwd=Path(__file__).resolve().parents[1], check=True, capture_output=True, text=True)
+
+
 def test_restore_allan_and_phase_noise_without_recalculation():
     node = shutil.which('node')
     if not node:
@@ -74,6 +125,29 @@ const app = Object.assign({
     renderer.call(app);
     assert.deepEqual(plots[0][1], app.phaseNoiseAllanPlot.traces);
     assert.equal(plots.length, 3);
+    global.Vue = {markRaw:value => value};
+    const selected = {selected_nodes:['master','slave'], reference_node:'master', target_node:'slave',
+        order:4, p0_min:.2, p0_max:.8, shot_min:20, shot_max:200, selected_t2:100,
+        calibration_host:'slave', calibration_optimization_id:'optimization-id',
+        calibration_optimization:{series:[]}, analysis_copy_id:'copy-id',
+        phase_references:{slave:{has_override:true}}, intf_alpha_selection:{id:'alpha-id'}};
+    record = {...record, kind:'sync_phase_allan', parameters:{...record.parameters, sync_parameters:selected},
+        result:{curves:[{curve:{orders:[1,2,3,4]}}]},
+        view:{syncPhaseAllanScale:'relative', syncPhaseAllanXAxis:'log', syncPhaseAllanYAxis:'log'}};
+    app.syncManifest = {}; app.syncAnalysisCopy = {}; app.syncPhaseCalibrationOptimization = {};
+    app.analysisContextKey = () => 'restored-context';
+    app.renderSyncArchiveNodePlots = () => {};
+    await app.restoreAnalysisResult();
+    assert.equal(app.syncPhaseShotMin, 20); assert.equal(app.syncPhaseShotMaxInput, '200');
+    assert.equal(app.syncPhaseP0Min, .2); assert.equal(app.syncPhaseAllanOrder, 4);
+    assert.equal(app.syncArchiveNodeSource, 'slave');
+    assert.equal(app.syncAnalysisCopy.selectedId, 'copy-id');
+    assert.equal(app.syncPhaseCalibrationOptimization.selectedId, 'optimization-id');
+    assert.deepEqual(app.archivePhaseReferenceContexts, selected.phase_references);
+    assert.deepEqual(app.activeIntfAlphaSelection, selected.intf_alpha_selection);
+    assert.equal(app.syncPhaseAllanXAxis, 'log');
+    assert.deepEqual(app.restoredAnalysisParameters.parameters.sync_parameters, selected);
+    assert.equal(app.analysisResultView().syncPhaseAllanYAxis, 'log');
 })().catch(error => {console.error(error); process.exitCode = 1});
 """
     subprocess.run([node, '-e', script], cwd=Path(__file__).resolve().parents[1], check=True, capture_output=True, text=True)
