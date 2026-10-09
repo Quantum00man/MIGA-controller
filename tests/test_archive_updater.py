@@ -4,6 +4,7 @@ import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 from app.archive.configuration import ArchiveServerConfiguration
 from app.archive.updater import ArchiveUpdater
@@ -80,3 +81,32 @@ class ArchiveUpdaterTests(unittest.TestCase):
     def test_invalid_branch(self):
         with self.assertRaises(ValueError):
             self.updater.run('--bad', True)
+
+    def test_auto_reload_is_scheduled_after_success(self):
+        self.config._save({'auto_reload_after_update':True})
+        self.updater.reload_controller=Mock()
+        self.updater.reload_controller.schedule.return_value={'status':'scheduled','old_pid':123}
+        self.advance()
+        result=self.updater.run('main',True)
+        self.assertFalse(result['restart_required'])
+        self.assertEqual(result['reload']['status'],'scheduled')
+        self.updater.reload_controller.available.assert_called_once()
+        self.assertEqual((self.checkout/'file').read_text(),'updated')
+
+    def test_unmanaged_auto_reload_rejects_before_checkout(self):
+        self.config._save({'auto_reload_after_update':True})
+        self.updater.reload_controller=Mock()
+        self.updater.reload_controller.available.side_effect=ValueError('unknown server')
+        self.advance()
+        with self.assertRaisesRegex(ValueError,'unknown server'):self.updater.run('main',True)
+        self.assertEqual((self.checkout/'file').read_text(),'initial')
+
+    def test_failed_reload_preserves_successful_code_update(self):
+        self.config._save({'auto_reload_after_update':True})
+        self.updater.reload_controller=Mock()
+        self.updater.reload_controller.schedule.side_effect=ValueError('helper failed')
+        self.advance()
+        result=self.updater.run('main',True)
+        self.assertTrue(result['restart_required'])
+        self.assertIn('Restart manually',result['message'])
+        self.assertEqual((self.checkout/'file').read_text(),'updated')

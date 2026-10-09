@@ -9,6 +9,7 @@ from pydantic import Field
 from starlette.concurrency import run_in_threadpool
 import threading
 import re
+import os
 from app.archive.backup import BackupService
 from app.archive.repository import ArchiveRepository
 
@@ -25,6 +26,29 @@ from app.archive.dashboard import ArchiveDashboard
 dashboard_state = ArchiveDashboard(configuration, backup, setup_guide)
 from app.archive.updater import ArchiveUpdater
 updater = ArchiveUpdater(configuration, backup)
+from app.archive.reload import ArchiveReload
+reload_controller = ArchiveReload(configuration, backup)
+updater.reload_controller = reload_controller
+
+
+class ReloadPreference(BaseModel):
+    enabled: bool
+
+
+@app.post('/archive-server/reload/preference')
+async def reload_preference(payload: ReloadPreference, request: Request):
+    require_local_update(request)
+    with configuration.lock:
+        current = configuration.load()
+        current['auto_reload_after_update'] = payload.enabled
+        configuration._save(current)
+    return {'auto_reload_after_update':payload.enabled}
+
+
+@app.post('/archive-server/reload')
+async def reload_server(request: Request):
+    require_local_update(request)
+    return await run_in_threadpool(reload_controller.schedule)
 
 
 class ArchiveUpdateRequest(BaseModel):
@@ -114,6 +138,8 @@ async def archive_server_status():
     root = current.get("archive_root")
     return {
         "mode": "archive", "configured": bool(root) and not current.get("configuration_error"),
+        "process_id": os.getpid(), "auto_reload_after_update":current.get('auto_reload_after_update',False),
+        "reload_state":reload_controller.state(),
         "configuration": current, "storage": configuration.inspect_root(root) if root else None,
     }
 
@@ -125,7 +151,9 @@ async def setup_progress():
 
 @app.get('/archive-server/dashboard')
 async def dashboard_snapshot():
-    return await run_in_threadpool(dashboard_state.snapshot)
+    result = await run_in_threadpool(dashboard_state.snapshot)
+    result.update(process_id=os.getpid(),reload_state=reload_controller.state())
+    return result
 
 
 @app.post('/archive-server/devices/{device_id}/connection-check')

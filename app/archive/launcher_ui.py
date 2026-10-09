@@ -30,6 +30,9 @@ class ArchiveLauncherFrame(ttk.Frame):
         self.port = tk.StringVar(value=str(preferences.get('port', 8765)))
         self.device = tk.StringVar(); self.source_path = tk.StringVar(value=str(ROOT / 'Data_log'))
         self.grant_read = tk.BooleanVar(value=False)
+        try: auto_reload = read_json(CONFIG).get('auto_reload_after_update',False)
+        except (OSError,ValueError): auto_reload = False
+        self.auto_reload = tk.BooleanVar(value=auto_reload)
         self.status_text = tk.StringVar(value='Ready. Existing configuration will be reused.')
         ttk.Label(self, text='Archive Server — no hardware or root startup', font=('', 16, 'bold')).pack(anchor='w')
         ttk.Label(self, text='Reuse existing NAS/devices/SSH keys. The backup engine is unchanged.').pack(anchor='w', pady=(4, 12))
@@ -39,12 +42,15 @@ class ArchiveLauncherFrame(ttk.Frame):
         row = ttk.Frame(server); row.pack(fill='x')
         ttk.Label(row, text='Port').pack(side='left'); ttk.Entry(row, textvariable=self.port, width=8).pack(side='left', padx=8)
         ttk.Label(row, text='Lab LAN bind: 0.0.0.0 • normal Linux user').pack(side='left')
+        ttk.Checkbutton(server,text='Auto reload after successful web update',variable=self.auto_reload,
+            command=lambda:self.run('reload-preference','--enabled','1' if self.auto_reload.get() else '0')).pack(anchor='w',pady=(10,0))
+        ttk.Label(server,text='Explicit updates only; no file watching. Backups must be idle. The browser reconnects after a short interruption.').pack(anchor='w')
         ttk.Label(server, textvariable=self.status_text, wraplength=1050).pack(anchor='w', pady=12)
         actions = ttk.Frame(server); actions.pack(fill='x')
         for index, (label, command) in enumerate([
             ('Check environment', lambda: self.run('check')),
             ('Repair environment', self.repair), ('Start server', lambda: self.run('start', open_guide=True)),
-            ('Stop gracefully', self.stop), ('Open setup Guide', lambda: self.open_page('setup')),
+            ('Stop gracefully', self.stop), ('Reload server safely', self.reload_server), ('Open setup Guide', lambda: self.open_page('setup')),
             ('Open management', lambda: self.open_page('')), ('Refresh status', self.refresh),
             ('Enable startup service', self.service), ('Enable before-login startup', self.linger),
             ('Install Linux prerequisites', lambda: self.run('server-tools', native=True)),
@@ -123,6 +129,12 @@ class ArchiveLauncherFrame(ttk.Frame):
                     f" • port {state.get('port', self.port.get())} • " + ('existing setup found' if state.get('configured') else 'setup needed') +
                     (' • systemd service' if state.get('service') else ''))
                 if state.get('running'): self.port.set(str(state['port']))
+                if state.get('responding') and not self.busy:
+                    self.auto_reload.set(state.get('auto_reload_after_update',False))
+                if state.get('reload_state',{}).get('status') in {'scheduled','restarting'}:
+                    self.status_text.set('Reloading safely — wait for the server to reconnect')
+                elif state.get('reload_state',{}).get('status') == 'failed':
+                    self.status_text.set(self.status_text.get()+' • Reload failed; inspect launcher/reload.log or service journal')
                 if self.open_when_ready and state.get('responding'):
                     self.open_when_ready = False; self.open_page('')
             elif item[0] == 'done':
@@ -157,6 +169,10 @@ class ArchiveLauncherFrame(ttk.Frame):
     def stop(self):
         if messagebox.askyesno('Stop Archive Server', 'Request graceful shutdown? The current run may take time to finish. Do not start another server until it exits.'):
             self.run('stop')
+
+    def reload_server(self):
+        if messagebox.askyesno('Reload Archive Server','Reload code through a graceful restart? Queued/running backups block this action. No forced kill or duplicate server will be used.'):
+            self.run('reload')
 
     def service(self):
         if messagebox.askyesno('Enable startup service', 'Install/enable a systemd USER service for this project and port? This preserves current backups and replaces an existing unit with a .previous copy. It does not stop/start the currently running server.'):

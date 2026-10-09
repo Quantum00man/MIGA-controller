@@ -66,6 +66,35 @@ class ArchiveLauncherTests(unittest.TestCase):
                 generate.assert_not_called()
             self.assertEqual(config.read_bytes(), before)
 
+    @unittest.skipIf(runtime.os.geteuid() == 0, 'Archive Server rejects root')
+    def test_real_reload_changes_pid_and_keeps_preference(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config=Path(directory)/'config.json'
+            with socket.socket() as sock:
+                sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
+            with patch.object(runtime,'CONFIG',config),patch.object(runtime,'service_info',return_value={}):
+                try:
+                    runtime.start(port)
+                    first=runtime.status(port)
+                    runtime.reload_preference(port,True)
+                    runtime.reload_server(port)
+                    deadline=time.monotonic()+25
+                    while True:
+                        state=runtime.read_json(config.parent/'launcher/reload.json')
+                        if state.get('status')=='failed':self.fail(state['error'])
+                        if state.get('status')=='complete':break
+                        if time.monotonic()>deadline:self.fail('Reload did not complete')
+                        time.sleep(.2)
+                    second=runtime.status(port)
+                    self.assertTrue(second['responding'])
+                    self.assertNotEqual(first['pid'],second['pid'])
+                    self.assertTrue(second['auto_reload_after_update'])
+                finally:
+                    runtime.stop(port)
+                    deadline=time.monotonic()+10
+                    while runtime.managed_process(runtime.read_json(config.parent/'launcher/runtime.json')) and time.monotonic()<deadline:
+                        time.sleep(.1)
+
     def test_stop_sends_only_one_graceful_signal(self):
         with tempfile.TemporaryDirectory() as directory:
             config = Path(directory) / 'config.json'

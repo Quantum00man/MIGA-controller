@@ -10,6 +10,7 @@ class ArchiveUpdater:
         self.configuration, self.backup = configuration, backup
         self.root = Path(root) if root else Path(__file__).resolve().parents[2]
         self.lock = threading.Lock()
+        self.reload_controller = None
 
     def git(self, *args):
         env = {**os.environ, 'GIT_TERMINAL_PROMPT': '0', 'GIT_SSH_COMMAND': 'ssh -o BatchMode=yes -o ConnectTimeout=10'}
@@ -38,6 +39,7 @@ class ArchiveUpdater:
                 'current_commit': self.git('rev-parse', '--short', 'HEAD'),
                 'branches': sorted(set([current, branch, *[r for r in refs if r != 'HEAD']]) - {''}),
                 'dirty': bool(dirty), 'dirty_entries': dirty.splitlines(),
+                'auto_reload_after_update':self.configuration.load().get('auto_reload_after_update',False),
                 'restart_required': False}
 
     def save_branch(self, branch):
@@ -53,10 +55,17 @@ class ArchiveUpdater:
             branch = self.branch(branch)
             # Prevent a queued/manual/scheduled backup from starting during checkout.
             with self.backup.lock:
+                if getattr(self.backup,'maintenance',False):
+                    raise ValueError('Reload pending; wait for the new server')
                 if any(job['status'] in {'running', 'queued'} for job in self.backup.jobs()):
                     raise ValueError('Wait for all queued/running backups before updating')
                 if apply and self.git('status', '--porcelain'):
                     raise ValueError('Local changes detected. Commit or preserve them before updating; nothing was overwritten')
+                auto_reload = apply and self.configuration.load().get('auto_reload_after_update',False)
+                if auto_reload:
+                    if not self.reload_controller:
+                        raise ValueError('Automatic reload is unavailable')
+                    self.reload_controller.available()
                 self.git('fetch', '--prune', 'origin')
                 remote = 'refs/remotes/origin/' + branch
                 try:
@@ -88,6 +97,12 @@ class ArchiveUpdater:
                 result = self.status()
                 result.update(restart_required=True, pull_output=output,
                               message='Code updated. Restart via LaunchUI to load it. NAS data and SSH configuration were not changed.')
+                if auto_reload:
+                    try:
+                        result['reload'] = self.reload_controller.schedule()
+                        result.update(restart_required=False,message='Code updated. Safe reload scheduled; this page will reconnect automatically.')
+                    except ValueError as exc:
+                        result['message'] = 'Code updated but reload could not start: '+str(exc)+' Restart manually via LaunchUI.'
                 return result
         finally:
             self.lock.release()

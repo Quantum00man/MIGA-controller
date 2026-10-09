@@ -133,8 +133,15 @@ Dashboard timestamps use `dd/mm/yy HH:mm` in the browser's local timezone.
 The Server update panel fetches origin branches, saves the selected branch in
 Archive configuration, and applies fast-forward-only updates from localhost.
 Queued/running backups, dirty checkouts and divergent target branches block applying
-updates. No reset/stash, NAS writes or automatic restart is performed. After success,
-restart normally through LaunchUI; dependency changes may require Repair environment.
+updates. No reset/stash or NAS writes are performed. LaunchUI provides **Auto reload
+after successful web update** (opt-in, persisted) and **Reload server safely**.
+When enabled, a successful update gracefully restarts the detached server or its
+matching systemd user service. No filesystem watching or forced kill is used;
+new backup requests are blocked while reload is pending. Dashboard pages reconnect
+and reload when a new process responds. Unknown foreground processes are never
+stopped. With auto reload disabled, restart normally through LaunchUI; dependency
+changes may require Repair environment. Failures appear in `launcher/reload.json`,
+`launcher/reload.log` (detached mode), or the user service journal (systemd mode).
 `/devices` provides device management and `/setup` resumes the Guide. Source checks
 are read-only, cached, and refreshed every ten minutes when no backup is active;
 offline sources do not prevent browsing their existing NAS backups.

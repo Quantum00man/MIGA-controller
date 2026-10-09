@@ -36,6 +36,7 @@ class BackupService:
         self.state_dir = configuration.path.parent / 'jobs'
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self.lock = threading.RLock()
+        self.maintenance = False
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='archive-pull')
         self.stop = threading.Event()
         self.control_dir = configuration.path.parent / 'ssh-control'
@@ -82,6 +83,8 @@ class BackupService:
 
     def start(self, device_id):
         with self.lock:
+            if self.maintenance:
+                raise ValueError('Server is reloading; wait for it to reconnect before starting backups')
             device = self.device(device_id)
             if not device.get('enabled', True):
                 raise ValueError('Enable this device before starting a backup')

@@ -65,14 +65,15 @@ def service_info():
     if not shutil.which('systemctl'):
         return {}
     try:
-        result = subprocess.run(['systemctl', '--user', 'show', 'miga-archive.service', '--property=ActiveState', '--property=WorkingDirectory', '--property=Environment', '--property=LoadState', '--property=ExecStart'], capture_output=True, text=True, timeout=3)
+        result = subprocess.run(['systemctl', '--user', 'show', 'miga-archive.service', '--property=ActiveState', '--property=WorkingDirectory', '--property=Environment', '--property=LoadState', '--property=ExecStart', '--property=MainPID'], capture_output=True, text=True, timeout=3)
         fields = dict(line.split('=', 1) for line in result.stdout.splitlines() if '=' in line)
         environment = shlex.split(fields.get('Environment', ''))
         configured = next((value.split('=',1)[1] for value in environment if value.startswith('MIGA_ARCHIVE_CONFIG=')), str(Path.home()/'.config/miga-archive/config.json'))
         if fields.get('LoadState') != 'loaded' or fields.get('WorkingDirectory') != str(ROOT) or Path(configured).expanduser().resolve() != CONFIG.resolve() or 'archive_main:app' not in fields.get('ExecStart', ''):
             return {}
         port = re.search(r'--port\s+(\d+)', fields.get('ExecStart', ''))
-        return {'state':fields.get('ActiveState'), 'port':int(port.group(1)) if port else 8765}
+        return {'state':fields.get('ActiveState'), 'port':int(port.group(1)) if port else 8765,
+                'main_pid':int(fields.get('MainPID') or 0)}
     except (OSError, ValueError, subprocess.TimeoutExpired):
         return {}
 
@@ -122,7 +123,9 @@ def status(port=8765):
         with urllib.request.urlopen('http://127.0.0.1:' + str(result['port']) + '/archive-server/status', timeout=2) as response:
             info = json.load(response)
             if info.get('mode') == 'archive':
-                result.update(running=True, responding=True, configured=info['configured'])
+                result.update(running=True, responding=True, configured=info['configured'],
+                              auto_reload_after_update=info.get('auto_reload_after_update',False),
+                              reload_state=info.get('reload_state',{}))
     except (OSError, ValueError):
         pass
     return result
@@ -179,6 +182,8 @@ def start(port=8765):
                 time.sleep(.2)
             raise ValueError('User service is not responding yet. Check its journal in LaunchUI; do not start a second process.')
         with socket.socket() as sock:
+            # Match uvicorn's reusable socket; recently closed connections may be in TIME_WAIT.
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             sock.bind(('0.0.0.0', port))
         with (directory / 'server.log').open('ab') as output:
             process = subprocess.Popen([python(), '-m', 'uvicorn', 'archive_main:app', '--host', '0.0.0.0', '--port', str(port)], cwd=ROOT,
@@ -244,6 +249,90 @@ def ensure_key(path):
     else:
         public.write_text(derived + '\n')
     return public
+
+
+def local_api(port, path, body):
+    request = urllib.request.Request(f'http://127.0.0.1:{port}/archive-server/'+path,
+        data=json.dumps(body).encode(),headers={'Content-Type':'application/json'},method='POST')
+    try:
+        with urllib.request.urlopen(request,timeout=15) as response:
+            return json.load(response)
+    except urllib.error.HTTPError as exc:
+        raise ValueError(json.load(exc).get('detail','Reload request failed')) from exc
+
+
+def reload_preference(port, enabled):
+    current = status(port)
+    if current['responding']:
+        local_api(current['port'],'reload/preference',{'enabled':enabled})
+    elif current['running'] or current['service']:
+        raise ValueError('Wait for the server to respond before changing reload settings')
+    else:
+        from app.archive.configuration import ArchiveServerConfiguration
+        configuration = ArchiveServerConfiguration(CONFIG)
+        with configuration.lock:
+            config = configuration.load()
+            config['auto_reload_after_update'] = enabled
+            configuration._save(config)
+    print('Auto reload after update:', 'enabled' if enabled else 'disabled')
+
+
+def reload_server(port):
+    current = status(port)
+    if not current['responding']:
+        raise ValueError('Start the server and wait for it to respond before reloading')
+    print(json.dumps(local_api(current['port'],'reload',{})))
+
+
+def reload_worker(port, expected_pid, request_id):
+    path = CONFIG.parent / 'launcher/reload.json'
+    record = read_json(path)
+    if record.get('id') != request_id or record.get('old_pid') != expected_pid:
+        raise ValueError('Reload request identity changed; no process touched')
+    def report(state, **extra):
+        save_json(path,{**record,'status':state,**extra})
+    try:
+        # Let the apply/reload HTTP response finish before graceful shutdown.
+        time.sleep(2)
+        with (path.parent/'runtime.lock').open('a') as lock:
+            fcntl.flock(lock,fcntl.LOCK_EX)
+            service = service_info()
+            state = read_json(path.parent/'runtime.json')
+            if record['mode'] == 'service':
+                if service.get('main_pid') != expected_pid or service.get('state') != 'active':
+                    raise ValueError('Service identity changed; no restart issued')
+                report('restarting')
+                subprocess.run(['systemctl','--user','restart','--no-block','miga-archive.service'],check=True)
+            else:
+                if service.get('state') in {'active','activating','deactivating'}:
+                    raise ValueError('A service appeared during reload; no managed process was stopped')
+                if state.get('pid') != expected_pid or not managed_process(state) or state.get('stop_requested'):
+                    raise ValueError('Managed server identity changed; no signal sent')
+                report('restarting')
+                _stop_unlocked(port)
+                deadline = time.monotonic()+60
+                while managed_process(state):
+                    if time.monotonic() > deadline:
+                        raise ValueError('Graceful shutdown has not finished. No forced kill or second server started; inspect reload.log')
+                    time.sleep(.2)
+        if record['mode'] == 'managed':
+            start(port)
+        deadline = time.monotonic()+60
+        while time.monotonic() < deadline:
+            try:
+                with urllib.request.urlopen(f'http://127.0.0.1:{port}/archive-server/status',timeout=2) as response:
+                    info = json.load(response)
+                if info.get('mode') == 'archive' and info.get('process_id') != expected_pid and info.get('process_id'):
+                    report('complete',new_pid=info['process_id'],finished_at=time.time())
+                    print('Reload complete; server is responding on port',port)
+                    return
+            except (OSError,ValueError):
+                pass
+            time.sleep(.3)
+        raise ValueError('New server did not respond in time. Inspect server.log or systemd journal; no forced kill was used')
+    except (OSError,ValueError,subprocess.SubprocessError) as exc:
+        report('failed',error=str(exc))
+        raise
 
 
 def pair(device_id):
@@ -358,10 +447,12 @@ def authorize(public_key):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=['start', 'stop', 'status', 'check', 'repair', 'pair', 'source-prepare', 'server-tools', 'gui-tools', 'authorize', 'public-key', 'service-install', 'service-log', 'linger'])
+    parser.add_argument('action', choices=['start', 'stop', 'reload', 'reload-preference', 'reload-worker', 'status', 'check', 'repair', 'pair', 'source-prepare', 'server-tools', 'gui-tools', 'authorize', 'public-key', 'service-install', 'service-log', 'linger'])
     parser.add_argument('--port', type=int, default=8765)
     parser.add_argument('--device-id'); parser.add_argument('--path'); parser.add_argument('--public-key'); parser.add_argument('--grant-read', action='store_true')
     parser.add_argument('--pause', action='store_true', help='Keep native terminal open until Enter')
+    parser.add_argument('--enabled',type=int,choices=[0,1],default=0)
+    parser.add_argument('--expected-pid',type=int); parser.add_argument('--request-id')
     args = parser.parse_args()
     if not 1 <= args.port <= 65535:
         parser.error('Port must be between 1 and 65535')
@@ -371,6 +462,9 @@ def main():
         result = globals()[args.action](args.port)
         if result: print(json.dumps(result))
     elif args.action in {'check', 'repair'}: globals()[args.action]()
+    elif args.action == 'reload': reload_server(args.port)
+    elif args.action == 'reload-preference': reload_preference(args.port,bool(args.enabled))
+    elif args.action == 'reload-worker': reload_worker(args.port,args.expected_pid,args.request_id)
     elif args.action == 'pair': pair(args.device_id)
     elif args.action == 'source-prepare': source_prepare(args.path or str(ROOT / 'Data_log'), args.grant_read)
     elif args.action == 'server-tools': server_tools()
