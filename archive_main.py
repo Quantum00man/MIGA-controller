@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
 from pydantic import Field
@@ -23,6 +23,35 @@ from app.archive.setup import SetupGuide
 setup_guide = SetupGuide(configuration, backup)
 from app.archive.dashboard import ArchiveDashboard
 dashboard_state = ArchiveDashboard(configuration, backup, setup_guide)
+from app.archive.updater import ArchiveUpdater
+updater = ArchiveUpdater(configuration, backup)
+
+
+class ArchiveUpdateRequest(BaseModel):
+    branch: str
+
+
+def require_local_update(request):
+    if not request.client or request.client.host not in {'127.0.0.1', '::1'}:
+        raise HTTPException(403, 'Open this page on the server using http://127.0.0.1 to update code')
+    origin = request.headers.get('origin')
+    if origin and origin.rstrip('/') != str(request.base_url).rstrip('/'):
+        raise HTTPException(403, 'Updates require a same-origin request')
+
+
+@app.get('/archive-server/update/status')
+async def archive_update_status():
+    return await run_in_threadpool(updater.status)
+
+
+@app.post('/archive-server/update/{operation}')
+async def archive_update(operation: str, payload: ArchiveUpdateRequest, request: Request):
+    require_local_update(request)
+    if operation not in {'fetch', 'apply'}:
+        raise HTTPException(404, 'Unknown update operation')
+    return await run_in_threadpool(updater.run, payload.branch, operation == 'apply')
+
+
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 from fastapi.staticfiles import StaticFiles
 app.mount('/archive-assets', StaticFiles(directory=STATIC_DIR / 'vendor'), name='archive-assets')

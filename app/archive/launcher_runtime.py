@@ -193,7 +193,7 @@ def start(port=8765):
                 # PID existence alone does not imply HTTP readiness.
                 try:
                     with urllib.request.urlopen(f'http://127.0.0.1:{port}/archive-server/status', timeout=1):
-                        print(f'Archive Server ready: http://127.0.0.1:{port}/setup')
+                        print(f'Archive Server ready: http://127.0.0.1:{port}/')
                         return
                 except OSError:
                     pass

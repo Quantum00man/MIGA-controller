@@ -124,7 +124,7 @@ class ArchiveLauncherFrame(ttk.Frame):
                     (' • systemd service' if state.get('service') else ''))
                 if state.get('running'): self.port.set(str(state['port']))
                 if self.open_when_ready and state.get('responding'):
-                    self.open_when_ready = False; self.open_page('setup')
+                    self.open_when_ready = False; self.open_page('')
             elif item[0] == 'done':
                 self.busy = False
                 if item[1] == 0:

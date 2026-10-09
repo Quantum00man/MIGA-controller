@@ -8,7 +8,7 @@ $(management?'nav-devices':'nav-dashboard').classList.add('active');
 document.title='MIGA Archive Server — '+(management?'Devices':'Dashboard');
 if(management){$('page-title').textContent='Device management';$('page-description').textContent='Manage sources and schedules. Existing NAS data stays preserved.';}
 function notice(text,error=false){$('notice').textContent=text;$('notice').className='alert '+(error?'alert-warning':'alert-info');}
-function date(value){return value?new Date(value).toLocaleString():'Not recorded';}
+function date(value){if(!value)return 'Not recorded';const d=new Date(value),pad=n=>String(n).padStart(2,'0');return `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${String(d.getFullYear()).slice(-2)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;}
 function bytes(value){return value==null?'Unknown':(value/1073741824).toFixed(1)+' GiB';}
 function element(tag,text,className){const el=document.createElement(tag);if(text!==undefined)el.textContent=text;if(className)el.className=className;return el;}
 function chip(text,state=''){return element('span',text,'status-chip '+state);}
@@ -21,7 +21,12 @@ function outcome(job){if(!job)return 'No successful pull/check recorded';const d
 function connection(device){const result=device.connection;if(!result)return chip('Source not checked');if(device.connection_stale)return chip('Source check stale');return chip(result.ok?(device.transport==='local'?'Local folder check passed':'SSH / folder check passed'):'Source check failed',result.ok?'good':'warning');}
 function archiveNavigation(devices){const nav=$('archive-links');nav.replaceChildren();for(const device of devices){const item=link(device.name,device.archive_url,true);item.className='archive-shortcut';nav.append(item)}if(!devices.length)nav.append(element('span','No devices yet','small muted px-3'));}
 $('storage-toggle').onclick=()=>{const open=$('storage-disclosure').classList.toggle('d-none')===false;$('storage-toggle').setAttribute('aria-expanded',String(open));};
-function openHistory(){if(location.hash==='#backup-history')$('history-details').open=true;}
+let updateLoaded=false,updateBusy=false;
+function showUpdate(info){$('update-status').textContent=`Current: ${info.current_branch} @ ${info.current_commit}${info.dirty?' · Local changes detected':''}`;if(!$('update-branch').value)$('update-branch').value=info.configured_branch;$('update-branches').replaceChildren(...info.branches.map(branch=>{const option=element('option');option.value=branch;return option}));}
+$('update-details').addEventListener('toggle',async()=>{if(!$('update-details').open||updateLoaded)return;try{showUpdate(await api('/archive-server/update/status'));updateLoaded=true}catch(error){$('update-output').textContent=error.message}});
+async function serverUpdate(operation){if(updateBusy)return;const branch=$('update-branch').value.trim();if(!branch){$('update-output').textContent='Enter an update branch.';return}if(operation==='apply'&&!confirm(`Update this server to origin/${branch}? Code may switch branches. NAS backups stay unchanged. Restart via LaunchUI after success.`))return;updateBusy=true;$('update-fetch').disabled=$('update-apply').disabled=true;$('update-output').textContent='Contacting origin…';try{const info=await api('/archive-server/update/'+operation,'POST',{branch});showUpdate(info);$('update-output').textContent=info.message+(info.pull_output?'\n'+info.pull_output:'')}catch(error){$('update-output').textContent=error.message}finally{updateBusy=false;$('update-fetch').disabled=$('update-apply').disabled=false}}
+$('update-fetch').onclick=()=>serverUpdate('fetch');$('update-apply').onclick=()=>serverUpdate('apply');
+function openHistory(){if(location.hash==='#backup-history')$('history-details').open=true;if(location.hash==='#system-update')$('update-details').open=true;}
 window.addEventListener('hashchange',openHistory);openHistory();
 async function check(device){notice('Checking '+device.name+' (read-only; no inventory scan)…');const result=await api(`/archive-server/devices/${device.device_id}/connection-check`,'POST');notice(device.name+': '+result.message,!result.ok);}
 async function backup(device){if(!confirm('Start/resume a full backup for '+device.name+'? Verified unchanged runs will be skipped.'))return;await api(`/archive-server/devices/${device.device_id}/backup`,'POST');notice('Backup queued for '+device.name+'. Progress appears on Dashboard.');}

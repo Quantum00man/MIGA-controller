@@ -128,6 +128,13 @@ The English, desktop-first hub uses locally bundled Tabler 1.6.1 styles (MIT),
 with direct device links in the sidebar and Archive-first device cards. Storage
 and connection details are expandable; current jobs stay visible while recent
 records are collapsed by default. Dashboard assets require no external CDN.
+LaunchUI Start opens the homepage (uninitialized storage still redirects to Guide).
+Dashboard timestamps use `dd/mm/yy HH:mm` in the browser's local timezone.
+The Server update panel fetches origin branches, saves the selected branch in
+Archive configuration, and applies fast-forward-only updates from localhost.
+Queued/running backups, dirty checkouts and divergent target branches block applying
+updates. No reset/stash, NAS writes or automatic restart is performed. After success,
+restart normally through LaunchUI; dependency changes may require Repair environment.
 `/devices` provides device management and `/setup` resumes the Guide. Source checks
 are read-only, cached, and refreshed every ten minutes when no backup is active;
 offline sources do not prevent browsing their existing NAS backups.

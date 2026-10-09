@@ -4,7 +4,7 @@
 <link href="/archive-dashboard.css?v=tabler-1" rel="stylesheet">
 </head><body>
 <aside class="sidebar"><div class="brand"><span class="brand-mark">M</span><div><h1>MIGA</h1><p>Archive Server</p></div></div>
-<nav aria-label="Archive Server navigation"><a id="nav-dashboard" href="/">Overview</a><a id="nav-devices" href="/devices">Device management</a><a href="/#backup-history">Backup records</a><a href="/setup">Setup Guide</a></nav>
+<nav aria-label="Archive Server navigation"><a id="nav-dashboard" href="/">Overview</a><a id="nav-devices" href="/devices">Device management</a><a href="/#backup-history">Backup records</a><a href="/#system-update">Server update</a><a href="/setup">Setup Guide</a></nav>
 <div class="sidebar-label">DEVICE ARCHIVES</div><nav id="archive-links" aria-label="Device archives"></nav>
 <div class="sidebar-footer">Original data preserved.<br>No reverse synchronization.</div></aside>
 <main>
@@ -18,6 +18,7 @@
 <p class="small muted mt-3">Source checks are cached and timestamped. An offline source does not make its NAS archive unavailable.</p>
 <section class="panel mt-4" aria-labelledby="active-title"><div class="tools"><h2 id="active-title" class="h5 me-auto mb-0">Backup activity</h2><span class="small muted">Completed runs only</span></div><div id="active-jobs"></div></section>
 <section id="backup-history" class="panel"><details id="history-details"><summary class="history-toggle">Recent backup records <span class="small muted ms-2">Latest 30 jobs</span></summary><div class="table-responsive mt-3"><table class="table table-sm align-middle"><thead><tr><th>Started</th><th>Device</th><th>Status / phase</th><th>Published / unchanged / eligible</th><th>Details</th></tr></thead><tbody id="jobs"></tbody></table></div></details></section>
+<section id="system-update" class="panel"><details id="update-details"><summary class="history-toggle">Server update</summary><p class="small muted mt-3">Updates this Archive Server only, not source computers or NAS data. Requires a clean checkout and no queued/running backups. Apply from localhost on the server; restart via LaunchUI afterwards.</p><div id="update-status" class="small mb-3" role="status">Open to load version information.</div><label for="update-branch" class="form-label">Update branch</label><input id="update-branch" class="form-control mb-3" list="update-branches" placeholder="marker-optimization"><datalist id="update-branches"></datalist><div class="tools"><button id="update-fetch" class="btn btn-outline-secondary btn-sm">Refresh remote / save branch</button><button id="update-apply" class="btn btn-primary btn-sm">Update server</button></div><pre id="update-output" class="small mt-3 mb-0" role="status"></pre></details></section>
 </div>
 <div id="management-view" class="d-none"><section class="panel"><div class="tools mb-3"><h2 class="h5 me-auto mb-0">Device management</h2><button id="add" class="btn btn-primary btn-sm">Add device</button></div><p class="small muted">Device IDs are permanent. Removing a registration retains NAS data. SSH credentials are prepared in local LaunchUI, not stored as passwords here.</p><div class="table-responsive"><table class="table align-middle"><thead><tr><th>Device</th><th>Source</th><th>Schedule</th><th>Actions</th></tr></thead><tbody id="devices"></tbody></table></div></section>
 <section id="editor" class="panel d-none"><h2 class="h5" id="edit-title">Add device</h2><form id="device-form"><div class="row g-3">
@@ -34,4 +35,4 @@
 </div><div class="tools mt-3"><button class="btn btn-primary">Save device</button><button type="button" id="cancel" class="btn btn-outline-secondary">Cancel</button></div></form></section>
 </div>
 <footer class="small muted mt-4">Archive-only server • original backups stay immutable • no reverse synchronization</footer>
-</main><script src="/archive-server-dashboard.js?v=tabler-1"></script></body></html>
+</main><script src="/archive-server-dashboard.js?v=tabler-2"></script></body></html>

@@ -75,6 +75,13 @@ class ArchiveServerApiTests(unittest.TestCase):
                 self.assertIn(b'DEVICE ARCHIVES',request('/')[1])
                 self.assertIn(b'Tabler',request('/archive-dashboard.css')[1])
                 self.assertEqual(request('/archive-assets/tabler/tabler.min.css')[0],200)
+                self.assertEqual(request('/archive-server/update/status')[0],200)
+                unsafe = urllib.request.Request('http://127.0.0.1:' + str(port) + '/archive-server/update/apply',
+                    data=json.dumps({'branch':'main'}).encode(),method='POST',
+                    headers={'Content-Type':'application/json','Origin':'https://untrusted.example'})
+                with self.assertRaises(urllib.error.HTTPError) as rejected:
+                    urllib.request.urlopen(unsafe,timeout=10)
+                self.assertEqual(rejected.exception.code,403)
                 self.assertEqual(request('/archive-server/devices/master/test', 'POST')[1]['eligible_runs'], 1)
                 self.assertEqual(request('/archive-server/devices/master/backup', 'POST')[0], 200)
                 while True:
