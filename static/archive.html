@@ -918,6 +918,25 @@
             .labplot-metric-grid { grid-template-columns: 1fr; }
         }
 
+        .archive-header-actions, .archive-context-controls, .archive-version-control { display: flex; align-items: center; gap: 12px; min-width: 0; }
+        .archive-header-actions { margin-left: auto; }
+        .archive-device-name { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .archive-version-control select { width: 240px; }
+        .collections-workspace > .archive-main { position: relative; }
+        .collection-run-loading { position: absolute; inset: 0; z-index: 100; display: grid; place-items: center; background: rgba(247,249,252,.94); cursor: progress; }
+        .collection-run-loading-content { display: flex; flex-direction: column; align-items: center; gap: 16px; max-width: 90%; text-align: center; padding: 32px; }
+        .collection-run-loading-content .spinner-border { width: 3rem; height: 3rem; }
+        .collection-run-loading-content strong { font-size: 1.25rem; }
+        .collection-run-loading-content > .text-muted { overflow-wrap: anywhere; }
+        @media (max-width: 767.98px) {
+            .archive-page-header { display: grid !important; grid-template-columns: minmax(0,1fr) auto; gap: 10px; }
+            .archive-header-actions { display: contents; }
+            .archive-context-controls { grid-column: 1 / -1; grid-row: 2; flex-wrap: wrap; gap: 8px; }
+            .archive-header-actions > .btn-back { grid-column: 2; grid-row: 1; }
+            .archive-version-control { gap: 6px; }
+            .archive-version-control select { width: 180px; }
+            .archive-device-name { max-width: 120px; }
+        }
         .collection-tree-toggle, button.collection-tree-name { border: 0; background: transparent; color: inherit; padding: 4px 0; text-align: left; }
         .collection-tree-toggle { width: 24px; text-align: center; }
         .collection-tree-toggle:disabled { opacity: .45; }
@@ -978,32 +997,23 @@
 
     <div id="app" class="container-fluid">
 
-        <div class="archive-page-header d-flex justify-content-between align-items-center mb-4">
-            <div>
-                <h4 class="fw-bold text-dark mb-0 d-flex align-items-center">
-                    <i class="bi bi-folder2-open me-3 text-primary"></i>Data Archive
-                </h4>
-                <div class="archive-page-subtitle text-muted small ms-1">Historical Data Browser & Re-Analysis Tool</div>
+        <div class="archive-page-header d-flex justify-content-between align-items-center mb-3">
+            <h4 class="fw-bold text-dark mb-0 d-flex align-items-center"><i class="bi bi-folder2-open me-2 text-primary"></i>Data Archive</h4>
+            <div class="archive-header-actions">
+                <div v-if="archiveVersionMode" class="archive-context-controls">
+                    <strong class="small archive-device-name" :title="serverDeviceName">{{ serverDeviceName }}</strong>
+                    <label v-if="loadedRunRef" class="archive-version-control"><span class="small text-muted">Version</span>
+                        <select class="form-select form-select-sm" aria-label="Analysis version" v-model="serverVersion" @change="changeServerVersion">
+                            <option value="latest">Latest analysis version (or original)</option>
+                            <option value="original">Original backup</option>
+                            <option v-for="version in serverVersions" :key="version.id" :value="version.id">{{ version.created_at }} — {{ version.operation }}</option>
+                        </select>
+                    </label>
+                </div>
+                <a href="/" class="btn btn-white border btn-back text-decoration-none text-dark bg-white px-3"><i class="bi bi-arrow-left"></i><span>{{ archiveServerMode ? 'Archive Server' : 'Back to Lab' }}</span></a>
             </div>
-            <a href="/" class="btn btn-white border btn-back shadow-sm text-decoration-none text-dark bg-white px-3">
-                <i class="bi bi-arrow-left"></i><span>{{ archiveServerMode ? 'Archive Server' : 'Back to Lab' }}</span>
-            </a>
         </div>
-
-        <div v-if="archiveVersionMode" class="alert alert-info d-flex flex-wrap align-items-center gap-3" role="status">
-            <strong>{{ serverDeviceName }}</strong>
-            <span>Acquisition data is read-only. Saves create independent analysis versions.</span>
-            <label v-if="loadedRunRef" class="d-flex align-items-center gap-2 ms-auto">Analysis version
-                <select class="form-select form-select-sm" style="width:auto" v-model="serverVersion" @change="changeServerVersion">
-                    <option value="latest">Latest analysis version (or original)</option>
-                    <option value="original">Original backup</option>
-                    <option v-for="version in serverVersions" :key="version.id" :value="version.id">{{ version.created_at }} — {{ version.operation }}</option>
-                </select>
-            </label>
-            <span v-if="serverVersionError" class="text-danger">{{ serverVersionError }}</span>
-            <small v-if="loadedRunRef" class="w-100">{{ serverVersion === 'original' || !serverVersions.length ? 'Displaying acquisition data' : 'Displaying an analysis version' }}</small>
-            <small v-if="archiveServerMode" class="w-100">Source Collections are read-only; your own Collections are stored separately. No reverse synchronization.</small>
-        </div>
+        <div v-if="serverVersionError" class="alert alert-danger py-2 small" role="alert">{{ serverVersionError }}</div>
         <div ref="archiveWorkspace" class="archive-layout row g-4" :class="{'collections-workspace': archiveSourceMode === 'collections', 'collection-browsing': archiveSourceMode === 'collections' && collectionWorkspaceMode === 'browse'}" :style="archiveSourceMode === 'collections' ? {'--collection-sidebar-width': collectionSidebarWidth + 'px', '--collection-workspace-height': collectionWorkspaceHeight + 'px'} : {}">
             <div class="archive-sidebar col-md-3 col-xxl-2 d-flex flex-column gap-3">
 
@@ -1856,7 +1866,14 @@
                 :aria-valuenow="collectionSidebarWidth" aria-valuemin="240" aria-valuemax="520"
                 @pointerdown="startCollectionResize" @pointermove="moveCollectionResize" @pointerup="finishCollectionResize" @pointercancel="finishCollectionResize"
                 @keydown.left.prevent="adjustCollectionSidebar(-20)" @keydown.right.prevent="adjustCollectionSidebar(20)"></div>
-            <div class="archive-main col-md-9 col-xxl-10">
+            <div class="archive-main col-md-9 col-xxl-10" :aria-busy="collectionRunLoading ? 'true' : 'false'">
+                <div v-if="archiveSourceMode === 'collections' && collectionRunLoading" class="collection-run-loading" role="status" aria-live="polite" aria-atomic="true">
+                    <div class="collection-run-loading-content">
+                        <span class="spinner-border text-primary" aria-hidden="true"></span>
+                        <strong>Loading run</strong>
+                        <span class="text-muted">{{ collectionLoadingRunName }}</span>
+                    </div>
+                </div>
                 <div class="mobile-archive-note alert alert-info py-2 mb-2">
                     Phone view supports run selection, 1D plots and Allan analysis. Re-analysis and fitting controls are available on iPad or desktop.
                 </div>
@@ -1866,7 +1883,6 @@
                         <button class="btn" :class="collectionWorkspaceMode === 'analyze' ? 'btn-primary' : 'btn-outline-primary'" :aria-pressed="collectionWorkspaceMode === 'analyze'" :disabled="!loadedRunRef || isLoading" @click="setCollectionWorkspaceMode('analyze')"><i class="bi bi-graph-up me-1"></i>Analyze</button>
                     </div>
                     <span class="small text-muted text-truncate" :title="loadedRunEntry?.run_label || loadedRunId">{{ collectionWorkspaceMode === 'analyze' ? (loadedRunEntry?.run_label || loadedRunId) : 'Select a run to preview; double-click to analyze' }}</span>
-                    <span v-if="isLoading || collectionRunLoading" class="small text-primary ms-auto" role="status"><span class="spinner-border spinner-border-sm me-1"></span>Loading run</span>
                 </div>
                 <section v-show="archiveSourceMode === 'collections' && collectionWorkspaceMode === 'browse'" class="card collections-browser border-0 shadow-sm" aria-labelledby="collections-title">
                     <div class="card-header bg-white">
@@ -3055,7 +3071,7 @@
                     archiveServerMode: false, archiveVersionMode: false,
                     archiveTree: {}, selectedYear: '', selectedMonth: '', selectedDay: '', selectedRun: '', archiveNavigationBusy: false,
                     archiveSourceMode: 'timeline',
-                    collectionWorkspaceMode: 'browse', collectionPreviewVisible: false, collectionWorkspaceHeight: 620, collectionRunLoading: false,
+                    collectionWorkspaceMode: 'browse', collectionPreviewVisible: false, collectionWorkspaceHeight: 620, collectionRunLoading: false, collectionLoadingRunName: '',
                     collectionSidebarWidth: Math.max(240, Math.min(520, Number(localStorage.getItem('migaCollectionSidebarWidth')) || 320)),
                     collectionResizeStart: null,
                     archiveAuditJob: null, archiveAuditBusy: false, archiveAuditError: '', archiveAuditReports: [], archiveAuditPollTimer: null,
@@ -3709,6 +3725,7 @@
                 async loadCollectionFavorite(favorite) {
                     if (!favorite || favorite.integrity === 'missing' || this.isLoading || this.collectionRunLoading) return;
                     this.collectionRunLoading = true;
+                    this.collectionLoadingRunName = favorite.display_name || favorite.run_id;
                     this.selectedCollectionFavorite = favorite;
                     try {
                         this.selectedYear = favorite.year;
