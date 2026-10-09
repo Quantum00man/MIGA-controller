@@ -66,6 +66,11 @@ class ArchiveServerApiTests(unittest.TestCase):
                 self.assertEqual((base / 'config.json').read_bytes(),original_config)
                 self.assertIn(b'LaunchUI',request('/setup')[1])
                 self.assertIn(b'displayStep',request('/archive-setup.js')[1])
+                dashboard = request('/archive-server/dashboard')[1]
+                self.assertTrue(dashboard['storage']['ok'])
+                self.assertFalse(dashboard['devices'][0]['connection_stale'])
+                self.assertIn(b'Device management',request('/devices')[1])
+                self.assertIn(b'renderCards',request('/archive-server-dashboard.js')[1])
                 self.assertEqual(request('/archive-server/devices/master/test', 'POST')[1]['eligible_runs'], 1)
                 self.assertEqual(request('/archive-server/devices/master/backup', 'POST')[0], 200)
                 while True:
@@ -76,6 +81,9 @@ class ArchiveServerApiTests(unittest.TestCase):
                         self.fail('Backup did not finish')
                     time.sleep(.1)
                 self.assertEqual(jobs[0]['status'], 'complete', jobs)
+                dashboard = request('/archive-server/dashboard')[1]
+                self.assertTrue(dashboard['devices'][0]['archive_available'])
+                self.assertIsNotNone(dashboard['devices'][0]['last_successful_check'])
                 self.assertEqual(request('/archive-server/devices/master/verify', 'POST')[1]['checked_files'], 2)
                 tree = request('/archive-server/archive/master/tree')[1]
                 self.assertIn('2025', tree)

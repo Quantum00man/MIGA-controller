@@ -21,6 +21,8 @@ backup = BackupService(configuration)
 repository = ArchiveRepository(configuration)
 from app.archive.setup import SetupGuide
 setup_guide = SetupGuide(configuration, backup)
+from app.archive.dashboard import ArchiveDashboard
+dashboard_state = ArchiveDashboard(configuration, backup, setup_guide)
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 from app.archive.ui_context import configure as configure_archive_ui
 from app.archive.ui_routes import router as archive_ui_router
@@ -83,9 +85,29 @@ async def setup_progress():
     return await run_in_threadpool(setup_guide.state)
 
 
+@app.get('/archive-server/dashboard')
+async def dashboard_snapshot():
+    return await run_in_threadpool(dashboard_state.snapshot)
+
+
+@app.post('/archive-server/devices/{device_id}/connection-check')
+async def dashboard_connection_check(device_id: str):
+    return await run_in_threadpool(dashboard_state.probe, device_id)
+
+
+@app.get('/archive-server-dashboard.js')
+async def dashboard_script():
+    return FileResponse(STATIC_DIR / 'archive-server-dashboard.js', media_type='application/javascript')
+
+
+@app.get('/devices')
+async def device_management_page():
+    return FileResponse(STATIC_DIR / 'archive-server.html')
+
+
 @app.post('/archive-server/setup/devices/{device_id}/probe')
 async def setup_device_probe(device_id: str):
-    return await run_in_threadpool(setup_guide.probe, device_id)
+    return await run_in_threadpool(dashboard_state.probe, device_id)
 
 
 @app.post("/archive-server/setup/inspect")
@@ -128,6 +150,7 @@ async def archive_setup_page():
 @app.on_event('startup')
 def start_scheduler():
     threading.Thread(target=backup.schedule_loop, daemon=True).start()
+    threading.Thread(target=dashboard_state.monitor, daemon=True).start()
 
 
 @app.on_event('shutdown')

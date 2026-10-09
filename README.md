@@ -120,13 +120,19 @@ sudo apt install rsync
 MIGA_ARCHIVE_HOST=0.0.0.0 MIGA_ARCHIVE_PORT=8765 ./archive_server start
 ```
 
-Open `http://SERVER-IP:8765/` for device management, backup jobs and device-specific
-Timeline/Collections. Existing configuration at `~/.config/miga-archive/config.json`
+Open `http://SERVER-IP:8765/` for the Dashboard hub: NAS mount/identity status,
+device connection checks, last attempted and successful pulls, publication jobs,
+Collections snapshots, checksum results and recent backup jobs. Source SYNC warnings
+are shown separately from transfer failures. Device Archives open in new tabs;
+`/devices` provides device management and `/setup` resumes the Guide. Source checks
+are read-only, cached, and refreshed every ten minutes when no backup is active;
+offline sources do not prevent browsing their existing NAS backups.
+Existing configuration at `~/.config/miga-archive/config.json`
 is retained. Disable duplicate sources before the first backup. Device IDs are permanent;
 removing registration retains NAS data. SSH uses strict host verification and defaults to
 `~/.ssh/miga_archive_ed25519` on the server.
 
-Start with **Test SSH**, then **Back up**. Once the first job is checked, edit the device
+Start with **Check source**, then **Back up**. Once the first job is checked, edit the device
 and enable automatic backup. The server scans every ten minutes; failed runs retry on
 subsequent scans. Transfers retain partial staging data across restarts. A source file-list
 change quarantines staging and restarts that run on the next scan. New controller versions
