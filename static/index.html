@@ -2230,7 +2230,8 @@
                             this.config.averages = 1;
                         }
                         if (mode === 'bragg_fringe_calibration') {
-                            this.runMode = 'live';
+                            // Bragg calibration supports both Live and SYNC acquisition.
+                            if (this.runMode !== 'sync') this.runMode = 'live';
                             this.config.parameter_source = 'classic';
                             this.config.averages = 1;
                             this.currentTab = 'intf';
