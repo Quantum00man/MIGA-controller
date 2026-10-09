@@ -74,6 +74,11 @@ class ArchiveServerApiTests(unittest.TestCase):
                 self.assertIn(b'Your device archives',request('/')[1])
                 self.assertIn(b'DEVICE ARCHIVES',request('/')[1])
                 self.assertIn(b'Tabler',request('/archive-dashboard.css')[1])
+                readability_css = request('/archive-dashboard.css')[1]
+                self.assertIn(b'font-size:15px;line-height:1.5',readability_css)
+                self.assertIn(b'.status-chip{font-size:14px',readability_css)
+                self.assertIn(b'.table thead th{font-size:13px}',readability_css)
+                self.assertIn(b'.panel .h5{font-size:18px',readability_css)
                 self.assertEqual(request('/archive-assets/tabler/tabler.min.css')[0],200)
                 self.assertEqual(request('/archive-server/update/status')[0],200)
                 unsafe = urllib.request.Request('http://127.0.0.1:' + str(port) + '/archive-server/update/apply',
