@@ -513,18 +513,21 @@
                     <div v-if="!phaseCalibrations.length" class="alert alert-info">
                         No phase calibration is available. Run a Bragg Fringes fit in Archive, then save the fitted curve as a calibration.
                     </div>
-                    <template v-else>
                         <div class="row g-3 mb-3 align-items-end">
                             <div class="col-lg-7"><label class="form-label small text-muted fw-bold">Calibration</label>
-                                <select class="form-select" v-model="selectedPhaseCalibrationId" @change="selectPhaseCalibration">
-                                    <option v-for="cal in phaseCalibrations" :key="cal.id" :value="cal.id">{{ cal.name }}</option>
-                                </select>
+                                <div class="d-flex gap-2">
+                                    <select class="form-select" v-model="selectedPhaseCalibrationId" @change="selectPhaseCalibration" :disabled="phaseBusy || phaseRefreshing || !phaseCalibrations.length">
+                                        <option v-for="cal in phaseCalibrations" :key="cal.id" :value="cal.id">{{ cal.name }}</option>
+                                    </select>
+                                    <button type="button" class="btn btn-outline-secondary" @click="refreshPhaseCalibrations" :disabled="phaseBusy || phaseRefreshing">Refresh</button>
+                                </div>
                             </div>
-                            <div class="col-lg-5 d-flex gap-2">
+                            <div v-if="phaseCalibrations.length" class="col-lg-5 d-flex gap-2">
                                 <button class="btn btn-primary flex-grow-1" @click="activatePhaseCalibration" :disabled="phaseBusy || isSelectedPhaseCalibrationActive">{{ isSelectedPhaseCalibrationActive ? 'Active calibration' : 'Set active' }}</button>
                                 <button class="btn btn-outline-danger" @click="deletePhaseCalibration" :disabled="phaseBusy">Delete</button>
                             </div>
                         </div>
+                    <template v-if="phaseCalibrations.length">
                         <div v-if="selectedPhaseCalibration" class="row g-3">
                             <div class="col-xl-4"><div class="card border shadow-sm h-100"><div class="card-body">
                                 <h6 class="fw-bold mb-3">Calibration and data source</h6>
@@ -1896,7 +1899,7 @@
                     savedSettingsSnapshot: '', savedMarkerSnapshot: '', beforeUnloadHandler: null,
                     braggPlotError: '',
                     phaseCalibrations: [], activePhaseCalibrationId: '', selectedPhaseCalibrationId: '', phaseDraft: {},
-                    phaseBusy: false, phaseMessage: '', phaseError: false,
+                    phaseBusy: false, phaseRefreshing: false, phaseMessage: '', phaseError: false,
                     tabGroups: [
                         { id: 'analysis', label: 'Analysis' },
                         { id: 'calibration', label: 'Calibration' },
@@ -2541,6 +2544,18 @@
                     } catch (error) {
                         this.phaseError = true;
                         this.phaseMessage = error.response?.data?.detail || error.message || 'Unable to load phase calibrations.';
+                    }
+                },
+                async refreshPhaseCalibrations() {
+                    if (this.phaseBusy || this.phaseRefreshing) return;
+                    this.phaseRefreshing = true;
+                    this.phaseError = false;
+                    this.phaseMessage = '';
+                    try {
+                        await this.fetchPhaseCalibrations();
+                        if (!this.phaseError) this.phaseMessage = 'Calibration list and curve refreshed.';
+                    } finally {
+                        this.phaseRefreshing = false;
                     }
                 },
                 selectPhaseCalibration() {
