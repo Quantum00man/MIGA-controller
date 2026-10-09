@@ -789,7 +789,7 @@
                     <div class="form-check form-switch mb-3">
                         <input class="form-check-input" type="checkbox" id="syncIndependentP0"
                             v-model="syncIndependentP0Enabled" @change="syncIndependentP0Changed"
-                            :disabled="isRunning || isScheduleActive() || config.mode !== 'standard' || Number(config.scan_dimensions) !== 1 || config.parameter_source !== 'classic'">
+                            :disabled="(!isScheduledMode() && (isRunning || isScheduleActive())) || config.mode !== 'standard' || Number(config.scan_dimensions) !== 1 || config.parameter_source !== 'classic'">
                         <label class="form-check-label small fw-bold" for="syncIndependentP0">Independent Master / Slave P0</label>
                         <div class="form-text">Optional. Standard 1D only; both nodes use the shared averages and must contain the same number of P0 points.</div>
                     </div>
@@ -828,10 +828,10 @@
             <div class="card p-3 mb-3" v-if="!['transfer_function', 'transfer_burst_time_scan', 'ramsey_interferometer'].includes(config.mode)">
                 <div class="btn-group btn-group-sm w-100" role="group" aria-label="Parameter source">
                     <input type="radio" class="btn-check" id="sourceClassic" value="classic" v-model="config.parameter_source"
-                        :disabled="isRunning || isScheduleActive()">
+                        :disabled="!isScheduledMode() && (isRunning || isScheduleActive())">
                     <label class="btn btn-outline-secondary" for="sourceClassic">Classic Placeholders</label>
                     <input type="radio" class="btn-check" id="sourceMarkers" value="markers" v-model="config.parameter_source"
-                        :disabled="isRunning || isScheduleActive() || isSyncMode()">
+                        :disabled="(!isScheduledMode() && (isRunning || isScheduleActive())) || isSyncMode()">
                     <label class="btn btn-outline-primary" for="sourceMarkers">Auto Markers</label>
                 </div>
                 <template v-if="config.parameter_source === 'markers'">
@@ -949,12 +949,12 @@
     </div>
     <div class="row g-2 mt-2">
         <div class="col-6">
-            <button class="btn btn-outline-primary btn-sm w-100 fw-bold" @click="addScheduledTaskFromCurrentSetup"><i
+            <button class="btn btn-outline-primary btn-sm w-100 fw-bold" @click="addScheduledTaskFromCurrentSetup" :disabled="scheduledQueueBusy || (isScheduleActive() && (scheduleRuntime.cancelRequested || scheduleRuntime.stopRequested))"><i
                 class="bi bi-plus-circle me-1"></i>Add Current Setup</button>
         </div>
         <div class="col-6">
             <button class="btn btn-outline-secondary btn-sm w-100 fw-bold" @click="updateSelectedScheduledTask"
-                :disabled="isScheduleActive() || !selectedScheduledTaskId"><i class="bi bi-arrow-repeat me-1"></i>Update Selected</button>
+                :disabled="!selectedScheduledTaskId || !isScheduledTaskEditable(getScheduledTaskById(selectedScheduledTaskId))"><i class="bi bi-arrow-repeat me-1"></i>Update Selected</button>
         </div>
     </div>
     <div class="form-text mt-2" style="font-size:0.72rem;">
@@ -1509,7 +1509,18 @@
     <div class="d-flex justify-content-between align-items-center mb-2">
         <div class="small text-muted fw-bold">TASK QUEUE</div>
         <button class="btn btn-outline-danger btn-sm" @click="clearScheduledTasks"
-            :disabled="isScheduleActive() || !scheduledTasks.length">Clear</button>
+            :disabled="!scheduledTasks.some(task => isScheduledTaskEditable(task))">Clear pending</button>
+    </div>
+    <div v-if="isScheduleActive()" class="mb-3">
+        <div class="d-flex gap-2 flex-wrap">
+            <button type="button" class="btn btn-primary btn-sm" @click="applyScheduledQueueChanges" :disabled="!scheduledQueueDirty || scheduledQueueBusy || scheduleRuntime.cancelRequested || scheduleRuntime.stopRequested">Apply Queue Changes</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" @click="reloadScheduledQueue(true)" :disabled="scheduledQueueBusy">Reload Queue</button>
+            <button type="button" class="btn btn-outline-warning btn-sm" @click="toggleScheduledQueuePause" :disabled="scheduledQueueBusy || scheduleRuntime.cancelRequested || scheduleRuntime.stopRequested">{{ scheduleRuntime.paused ? 'Resume Queue' : 'Pause Queue' }}</button>
+            <button type="button" class="btn btn-outline-danger btn-sm" @click="cancelScheduledQueue" :disabled="scheduledQueueBusy || scheduleRuntime.cancelRequested || scheduleRuntime.stopRequested">Cancel Queue</button>
+        </div>
+        <div class="form-text">Started tasks are locked. Edit pending tasks and apply the changes. Pause or cancel the queue keeps the current experiment running.</div>
+        <div v-if="scheduledQueueDirty" class="small text-warning mt-1">Unapplied queue changes</div>
+        <div v-if="scheduledQueueMessage" class="small mt-1" :class="scheduledQueueError ? 'text-danger' : 'text-success'">{{ scheduledQueueMessage }}</div>
     </div>
     <div v-if="!scheduledTasks.length" class="small text-muted">
         No scheduled tasks yet. Load or edit a sequence/config, then snapshot it into the queue.
@@ -1526,7 +1537,7 @@
             <div class="flex-grow-1">
                 <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
                     <input type="text" class="form-control form-control-sm" v-model="task.name"
-                        :disabled="isScheduleActive()">
+                        :disabled="!isScheduledTaskEditable(task)">
                     <span :class="['badge', getScheduledTaskBadgeClass(task, index)]">{{ getScheduledTaskStateLabel(task, index) }}</span>
                     <span class="badge bg-light text-dark border">{{ task.sequence_file_name || task.sequence_name }}</span>
                 </div>
@@ -1542,19 +1553,19 @@
                 <div class="mt-2" v-else>
                     <label class="form-label small text-muted mb-1">Start Time</label>
                     <input type="datetime-local" class="form-control form-control-sm" v-model="task.scheduled_at"
-                        :disabled="isScheduleActive()">
+                        :disabled="!isScheduledTaskEditable(task)">
                 </div>
                 <div class="small text-danger mt-1" v-if="task.validation_error">{{ task.validation_error }}</div>
             </div>
             <div class="btn-group-vertical btn-group-sm">
                 <button class="btn btn-outline-secondary" @click="loadScheduledTaskIntoEditor(task.id)"
-                    :disabled="isScheduleActive()">Load</button>
+                    :disabled="!isScheduledTaskEditable(task)">Load</button>
                 <button class="btn btn-outline-secondary" @click="moveScheduledTask(index, -1)"
-                    :disabled="index === 0 || isScheduleActive()"><i class="bi bi-arrow-up"></i></button>
+                    :disabled="!canMoveScheduledTask(index, -1)"><i class="bi bi-arrow-up"></i></button>
                 <button class="btn btn-outline-secondary" @click="moveScheduledTask(index, 1)"
-                    :disabled="index === scheduledTasks.length - 1 || isScheduleActive()"><i class="bi bi-arrow-down"></i></button>
+                    :disabled="!canMoveScheduledTask(index, 1)"><i class="bi bi-arrow-down"></i></button>
                 <button class="btn btn-outline-danger" @click="removeScheduledTask(task.id)"
-                    :disabled="isScheduleActive()"><i class="bi bi-trash"></i></button>
+                    :disabled="!isScheduledTaskEditable(task)"><i class="bi bi-trash"></i></button>
             </div>
         </div>
     </div>
@@ -1565,13 +1576,6 @@
         <input class="form-check-input" type="checkbox" id="startAfterCurrentRun" v-model="scheduleSettings.startAfterCurrentRun">
         <label class="form-check-label small fw-bold" for="startAfterCurrentRun">Start automatically after the current run</label>
         <div class="form-text">Specific-time tasks that become overdue wait for the current experiment, then run in queue order.</div>
-    </div>
-    <div class="mt-2" v-if="isScheduleActive()">
-        <label class="form-label small text-muted mb-1">Add tasks to</label>
-        <select class="form-select form-select-sm" v-model="scheduleSettings.appendMode">
-            <option value="next_batch">A new batch after this queue</option>
-            <option value="append">The end of the active queue</option>
-        </select>
     </div>
     <div class="alert alert-warning py-2 mt-2 mb-0 small" v-if="scheduleRuntime.decisionRequired">
         <div class="fw-bold">{{ scheduleRuntime.pauseReason || 'The queue needs confirmation.' }}</div>
@@ -1679,10 +1683,10 @@
                     </div>
                     <div class="d-grid gap-2">
                         <button class="btn btn-success py-2 fs-6 fw-bold shadow-sm" @click="startScan"
-                            :disabled="isStartDisabled()"><i class="bi bi-play-fill me-1 fs-5"></i> {{ isScheduledMode() ? 'START SCHEDULE' : (isSyncMode() ? 'START SYNC' : 'START EXPERIMENT') }}</button>
+                            :disabled="isStartDisabled() || scheduledQueueBusy || (isScheduleActive() && (scheduleRuntime.cancelRequested || scheduleRuntime.stopRequested))"><i class="bi bi-play-fill me-1 fs-5"></i> {{ isScheduledMode() ? (isScheduleActive() ? 'APPLY QUEUE CHANGES' : 'START SCHEDULE') : (isSyncMode() ? 'START SYNC' : 'START EXPERIMENT') }}</button>
                         <button v-if="!isScheduledMode()" class="btn btn-warning py-2 fs-6 fw-bold shadow-sm" @click="togglePause" :disabled="!isRunning"><i class="bi me-1" :class="isPaused ? 'bi-play-fill' : 'bi-pause-fill'"></i>{{ isPaused ? 'RESUME' : 'PAUSE' }}</button>
                         <button class="btn btn-danger py-2 fs-6 fw-bold shadow-sm" @click="stopScan"
-                            :disabled="isStopDisabled()"><i class="bi bi-stop-fill me-1 fs-5"></i> {{ isScheduledMode() ? 'STOP SCHEDULE' : (isSyncMode() ? 'STOP SYNC' : 'STOP') }}</button>
+                            :disabled="isStopDisabled()"><i class="bi bi-stop-fill me-1 fs-5"></i> {{ isScheduledMode() ? (isScheduleActive() && !scheduleRuntime.waitingForCurrentRun ? 'STOP CURRENT RUN + QUEUE' : 'STOP CURRENT RUN') : (isSyncMode() ? 'STOP SYNC' : 'STOP') }}</button>
                     </div>
                     <div class="form-text mt-2" style="font-size:0.72rem;" v-if="isScheduledMode()">
                         The header shows current task progress/ETA and total queue progress/ETA after the schedule starts.
@@ -2102,6 +2106,9 @@
                     syncReplayTimer: null,
                     syncStatusPollTimer: null,
                     scheduledExecutionMode: 'scan',
+                    scheduledQueueDirty: false, scheduledQueueBusy: false, scheduledQueueHydrating: false,
+                    scheduledQueueId: null, scheduledQueueRevision: null,
+                    scheduledQueueMessage: '', scheduledQueueError: false,
                     scheduleSettings: { singlePointDurationSec: 1.615, timingMode: 'sequential', sequentialGapSec: 60, startAfterCurrentRun: true, appendMode: 'next_batch' },
                     shotTiming: { runId: '', totalDurationSec: 0, sampleCount: 0, lastStep: 0, currentAverageSec: null, active: false },
                     scheduledTasks: [],
@@ -2295,6 +2302,7 @@
                 },
                 scheduledTasks: {
                     handler() {
+                        if (this.isScheduleActive() && !this.scheduledQueueHydrating) this.scheduledQueueDirty = true;
                         this.saveState();
                     },
                     deep: true
@@ -2655,6 +2663,7 @@
                         const wasScheduleActive = Boolean(this.scheduleRuntime?.active);
                         this.scheduleRuntime = {
                             ...this.getDefaultScheduleRuntime(),
+                            ...state,
                             active: Boolean(state.active),
                             stopRequested: Boolean(state.stopRequested),
                             waiting: Boolean(state.waiting),
@@ -2672,7 +2681,11 @@
                             waitingForCurrentRun: Boolean(state.waitingForCurrentRun),
                             retryTaskId: state.retryTaskId ?? null,
                         };
-                        const isTerminalScheduleStatus = ['STOPPED', 'ERROR'].includes(state.statusMessage);
+                        if (state.active && !this.scheduledQueueDirty && !this.scheduledQueueBusy
+                            && (state.scheduleId !== this.scheduledQueueId || state.revision !== this.scheduledQueueRevision)) {
+                            await this.reloadScheduledQueue(false);
+                        }
+                        const isTerminalScheduleStatus = ['STOPPED', 'CANCELLED', 'ERROR'].includes(state.statusMessage);
                         const shouldApplyTerminalStatus = !this.isRunning && this.isScheduledMode() && isTerminalScheduleStatus;
                         if (state.active || shouldApplyTerminalStatus) {
                             this.statusMessage = state.statusMessage || this.statusMessage;
@@ -4172,6 +4185,7 @@ captureCurrentSyncSetupForTask() {
     };
 },
 async addScheduledTaskFromCurrentSetup() {
+    if (this.scheduledQueueBusy || (this.isScheduleActive() && (this.scheduleRuntime.cancelRequested || this.scheduleRuntime.stopRequested))) return;
     if (this.isTransferBurstTimeScan()) {
         this.addLog('Transfer function Burst time scan is not available in the scheduled queue.');
         return;
@@ -4210,7 +4224,7 @@ async addScheduledTaskFromCurrentSetup() {
     }
 },
 async updateSelectedScheduledTask() {
-    if (this.isScheduleActive() || !this.selectedScheduledTaskId) return;
+    if (!this.selectedScheduledTaskId || !this.isScheduledTaskEditable(this.getScheduledTaskById(this.selectedScheduledTaskId))) return;
     if (this.isTransferBurstTimeScan()) {
         this.addLog('Transfer function Burst time scan is not available in the scheduled queue.');
         return;
@@ -4244,7 +4258,7 @@ async updateSelectedScheduledTask() {
 },
 loadScheduledTaskIntoEditor(taskId) {
     const task = this.getScheduledTaskById(taskId);
-    if (!task || this.isScheduleActive()) return;
+    if (!task || !this.isScheduledTaskEditable(task)) return;
     this.selectedScheduledTaskId = task.id;
     this.scheduledExecutionMode = task.execution_mode === 'sync' ? 'sync' : 'scan';
     this.runMode = 'scheduled';
@@ -4286,21 +4300,123 @@ loadScheduledTaskIntoEditor(taskId) {
     this.addLog(`Loaded scheduled task into editor: ${task.name}.`);
 },
 moveScheduledTask(index, delta) {
-    if (this.isScheduleActive()) return;
+    if (!this.canMoveScheduledTask(index, delta)) return;
     const targetIndex = index + delta;
     if (targetIndex < 0 || targetIndex >= this.scheduledTasks.length) return;
     const [task] = this.scheduledTasks.splice(index, 1);
     this.scheduledTasks.splice(targetIndex, 0, task);
 },
 removeScheduledTask(taskId) {
-    if (this.isScheduleActive()) return;
+    if (!this.isScheduledTaskEditable(this.getScheduledTaskById(taskId))) return;
     this.scheduledTasks = this.scheduledTasks.filter((task) => task.id !== taskId);
     if (this.selectedScheduledTaskId === taskId) this.selectedScheduledTaskId = null;
 },
 clearScheduledTasks() {
-    if (this.isScheduleActive()) return;
-    this.scheduledTasks = [];
+    this.scheduledTasks = this.scheduledTasks.filter(task => !this.isScheduledTaskEditable(task));
     this.selectedScheduledTaskId = null;
+},
+isScheduledTaskEditable(task) {
+    if (!task || this.scheduledQueueBusy) return false;
+    if (!this.isScheduleActive()) return true;
+    if (this.scheduleRuntime.cancelRequested || this.scheduleRuntime.stopRequested) return false;
+    if ((this.scheduleRuntime.completedTaskIds || []).includes(task.id)) return false;
+    return task.id !== this.scheduleRuntime.activeTaskId
+        || !['starting', 'running', 'failed'].includes(this.scheduleRuntime.taskPhase);
+},
+canMoveScheduledTask(index, delta) {
+    const target = index + delta;
+    return target >= 0 && target < this.scheduledTasks.length
+        && this.isScheduledTaskEditable(this.scheduledTasks[index])
+        && this.isScheduledTaskEditable(this.scheduledTasks[target]);
+},
+async reloadScheduledQueue(confirmDiscard = false) {
+    if (this.scheduledQueueBusy) return;
+    if (confirmDiscard && this.scheduledQueueDirty && !window.confirm('Discard unapplied queue changes and reload the server queue?')) return;
+    this.scheduledQueueBusy = true;
+    try {
+        const response = await axios.get('/schedule/queue');
+        const state = response.data?.data || {};
+        this.scheduledQueueHydrating = true;
+        this.scheduleRuntime = {...this.getDefaultScheduleRuntime(), ...state};
+        this.scheduledQueueId = state.scheduleId;
+        this.scheduledQueueRevision = state.revision;
+        this.scheduleSettings.timingMode = state.timingMode || 'sequential';
+        this.scheduleSettings.sequentialGapSec = Number(state.sequentialGapSec) || 0;
+        this.scheduledTasks = (state.tasks || []).map(task => ({...this.cloneConfig(task),
+            scheduled_at: task.scheduledAtMs ? this.toLocalScheduledTime(task.scheduledAtMs) : ''}));
+        this.refreshScheduledTaskEstimates();
+        await this.$nextTick();
+        this.scheduledQueueDirty = false;
+        this.scheduledQueueError = false;
+        if (confirmDiscard) this.scheduledQueueMessage = 'Server queue loaded.';
+    } catch (error) {
+        this.scheduledQueueError = true;
+        this.scheduledQueueMessage = this.formatRequestError(error);
+    } finally {
+        this.scheduledQueueHydrating = false;
+        this.scheduledQueueBusy = false;
+    }
+},
+toLocalScheduledTime(timestamp) {
+    const date = new Date(Number(timestamp));
+    return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+},
+async applyScheduledQueueChanges() {
+    if (this.scheduledQueueBusy || !this.isScheduleActive()) return;
+    try {
+        this.refreshScheduledTaskEstimates();
+        const pending = this.scheduledTasks.filter(task => this.isScheduledTaskEditable(task));
+        if (pending.some(task => task.validation_error || !task.estimated_points || typeof task.sequence_snapshot !== 'string')) {
+            throw new Error('Fix invalid pending task configurations before applying changes.');
+        }
+        const tasks = pending.map(task => ({...this.cloneConfig(task),
+            scheduledAtMs: this.scheduleSettings.timingMode === 'specific'
+                ? this.parseScheduledDateTime(task.scheduled_at) : null}));
+        if (this.scheduleSettings.timingMode === 'specific' && tasks.some(task => !Number.isFinite(task.scheduledAtMs))) {
+            throw new Error('Every pending task needs a valid start time.');
+        }
+        this.scheduledQueueBusy = true;
+        const response = await axios.put('/schedule/queue', {
+            scheduleId: this.scheduledQueueId, revision: this.scheduledQueueRevision, tasks,
+        });
+        this.scheduleRuntime = {...this.getDefaultScheduleRuntime(), ...(response.data?.data || {})};
+        this.scheduledQueueDirty = false;
+        this.scheduledQueueMessage = 'Pending queue changes applied.';
+        this.scheduledQueueError = false;
+        this.scheduledQueueBusy = false;
+        await this.reloadScheduledQueue(false);
+    } catch (error) {
+        this.scheduledQueueError = true;
+        this.scheduledQueueMessage = this.formatRequestError(error);
+        this.addLog('Queue update failed: ' + this.scheduledQueueMessage);
+    } finally { this.scheduledQueueBusy = false; }
+},
+async cancelScheduledQueue() {
+    if (this.scheduledQueueBusy || !this.isScheduleActive()) return;
+    this.scheduledQueueBusy = true;
+    try {
+        const response = await axios.post('/schedule/cancel');
+        this.scheduleRuntime = {...this.getDefaultScheduleRuntime(), ...(response.data?.data || {})};
+        this.scheduledQueueDirty = false;
+        this.scheduledQueueError = false;
+        this.scheduledQueueMessage = 'Queue cancelled. The current experiment continues; no later task will start.';
+        this.addLog(this.scheduledQueueMessage);
+        this.scheduledQueueBusy = false;
+        await this.reloadScheduledQueue(false);
+    } catch (error) {
+        this.scheduledQueueError = true;
+        this.scheduledQueueMessage = this.formatRequestError(error);
+    } finally { this.scheduledQueueBusy = false; }
+},
+async toggleScheduledQueuePause() {
+    if (this.scheduledQueueBusy) return;
+    try {
+        const response = await axios.post(this.scheduleRuntime.paused ? '/schedule/resume' : '/schedule/pause');
+        this.scheduleRuntime = {...this.getDefaultScheduleRuntime(), ...(response.data?.data || {})};
+    } catch (error) {
+        this.scheduledQueueError = true;
+        this.scheduledQueueMessage = this.formatRequestError(error);
+    }
 },
 getScheduledTaskStateLabel(task, index) {
     if (!this.isScheduleActive()) return 'Queued';
@@ -4309,7 +4425,6 @@ getScheduledTaskStateLabel(task, index) {
         if (this.scheduleRuntime.waiting) return 'Waiting';
         return this.isRunning ? 'Running' : 'Next';
     }
-    if (this.scheduleRuntime.activeTaskIndex >= 0 && index < this.scheduleRuntime.activeTaskIndex) return 'Done';
     return 'Queued';
 },
 getScheduledTaskBadgeClass(task, index) {
@@ -4321,7 +4436,8 @@ getScheduledTaskBadgeClass(task, index) {
 },
 getRuntimeTask() {
     if (this.scheduleRuntime.activeTaskId) {
-        return this.getScheduledTaskById(this.scheduleRuntime.activeTaskId);
+        return this.scheduleRuntime.tasks?.find(task => task.id === this.scheduleRuntime.activeTaskId)
+            || this.getScheduledTaskById(this.scheduleRuntime.activeTaskId);
     }
     return this.scheduledTasks[0] || null;
 },
@@ -6965,6 +7081,10 @@ finishScheduledRun(finalStatus = 'IDLE') {
             return false;
         },
         async startScheduledRun() {
+            if (this.isScheduleActive()) {
+                await this.applyScheduledQueueChanges();
+                return;
+            }
             try {
                 this.refreshScheduledTaskEstimates();
                 this.ensureScheduledTasksValid();
@@ -6994,6 +7114,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                 };
                 this.statusMessage = state.statusMessage || 'SCHEDULE READY';
                 this.addLog('Schedule accepted by server; this browser may now be closed.');
+                await this.reloadScheduledQueue(false);
             } catch (error) {
                 this.addLog('Schedule start failed: ' + this.formatRequestError(error));
             }

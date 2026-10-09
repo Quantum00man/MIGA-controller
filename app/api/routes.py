@@ -125,6 +125,7 @@ from app.models.schemas import (
     ReAnalysisRequest,
     ScanConfig,
     ScheduleRequest,
+    ScheduleQueueEdit,
     SystemSettings,
     SystemUpdateRequest,
     TtiConnectionTestRequest,
@@ -700,6 +701,27 @@ async def start_schedule(req: ScheduleRequest):
 @router.post("/schedule/stop", response_model=ExperimentResponse)
 async def stop_schedule():
     return ExperimentResponse(status="success", message="Schedule stop requested", data=schedule_manager.stop())
+
+
+@router.get('/schedule/queue', response_model=ExperimentResponse)
+async def get_schedule_editing_queue():
+    return ExperimentResponse(status='success', message='Queue loaded for editing',
+                              data=schedule_manager.editing_snapshot())
+
+
+@router.put('/schedule/queue', response_model=ExperimentResponse)
+async def update_schedule_queue(req: ScheduleQueueEdit):
+    try:
+        return ExperimentResponse(status='success', message='Pending tasks updated',
+                                  data=schedule_manager.update_pending(req.dict()))
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
+
+
+@router.post('/schedule/cancel', response_model=ExperimentResponse)
+async def cancel_schedule():
+    return ExperimentResponse(status='success', message='Queue cancelled; current run continues',
+                              data=schedule_manager.cancel())
 
 
 @router.post("/schedule/pause", response_model=ExperimentResponse)

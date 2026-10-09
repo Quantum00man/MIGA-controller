@@ -64,6 +64,7 @@ class ScheduleManager:
             "paused": False, "pauseReason": None, "decisionRequired": False,
             "waitingForCurrentRun": False, "retryTaskId": None,
             "continueAfterStoppedCurrent": False,
+            "cancelRequested": False, "revision": 0, "taskPhase": "idle",
         }
 
     def _load(self) -> Dict[str, Any]:
@@ -231,7 +232,7 @@ class ScheduleManager:
             public_tasks.append(public_task)
         result["tasks"] = public_tasks
         active_task = next(
-            (task for task in self._state.get("tasks", []) if task.get("id") == result.get("activeTaskId")),
+            (task for task in result.get("tasks", []) if task.get("id") == result.get("activeTaskId")),
             None,
         )
         if (
@@ -245,10 +246,9 @@ class ScheduleManager:
             result["currentTaskStep"] = int(getattr(self.manager.status, "current_step", 0) or 0)
         return result
 
-    def start(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        tasks = payload.get("tasks")
-        if not isinstance(tasks, list) or not tasks:
-            raise ValueError("No scheduled tasks configured")
+    def _normalize_tasks(self, tasks: Any) -> List[Dict[str, Any]]:
+        if not isinstance(tasks, list):
+            raise ValueError("Scheduled tasks must be a list")
         normalized: List[Dict[str, Any]] = []
         for index, task in enumerate(tasks):
             if not isinstance(task, dict) or not isinstance(task.get("sequence_snapshot"), str):
@@ -300,6 +300,15 @@ class ScheduleManager:
                     "slaves": sync_payload["slaves"],
                 }
             normalized.append(normalized_task)
+        ids = [task['id'] for task in normalized]
+        if len(ids) != len(set(ids)):
+            raise ValueError("Scheduled task IDs must be unique")
+        return normalized
+
+    def start(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        normalized = self._normalize_tasks(payload.get("tasks"))
+        if not normalized:
+            raise ValueError("No scheduled tasks configured")
         timing = str(payload.get("timingMode") or "sequential").lower()
         if timing not in {"sequential", "specific"}:
             raise ValueError("Invalid timing mode")
@@ -309,12 +318,15 @@ class ScheduleManager:
         start_after_current = bool(payload.get("startAfterCurrentRun"))
         with self._lock:
             if self._state.get("active"):
+                if self._should_stop():
+                    raise ValueError("Queue is stopping or cancelling; wait for it to finish")
                 existing_ids = {str(task.get("id")) for task in self._state.get("tasks", [])}
                 additions = [task for task in normalized if str(task.get("id")) not in existing_ids]
                 batch_id = uuid4().hex if append_mode == "next_batch" else self._state.get("scheduleId")
                 for task in additions:
                     task["batchId"] = batch_id
                 self._state["tasks"].extend(additions)
+                self._state['revision'] += 1
                 self._save_locked()
                 self._log_event("schedule_tasks_appended", task_count=len(additions))
                 self._wake.set()
@@ -335,6 +347,59 @@ class ScheduleManager:
             self._save_locked()
         self._log_event("schedule_started", task_count=len(normalized), timing_mode=timing,
                         sequential_gap_sec=self._state.get("sequentialGapSec"))
+        self._wake.set()
+        return self.get_status()
+
+    def editing_snapshot(self) -> Dict[str, Any]:
+        """Explicit editor input; sequence contents stay out of status and logs."""
+        with self._lock:
+            return deepcopy(self._state)
+
+    def _protected_task_ids(self) -> set:
+        protected = set(self._state.get('completedTaskIds') or [])
+        if self._state.get('taskPhase') in {'starting', 'running', 'failed'}:
+            protected.add(self._state.get('activeTaskId'))
+        return protected
+
+    def update_pending(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        normalized = self._normalize_tasks(payload.get('tasks'))
+        with self._lock:
+            if not self._state.get('active') or self._should_stop():
+                raise ValueError('No editable queue is active')
+            if (payload.get('scheduleId') != self._state.get('scheduleId')
+                    or payload.get('revision') != self._state.get('revision')):
+                raise ValueError('Queue changed or a task started. Reload Queue before applying edits')
+            protected = self._protected_task_ids()
+            if any(task['id'] in protected for task in normalized):
+                raise ValueError('Started and completed tasks cannot be edited')
+            existing = {task['id']: task for task in self._state['tasks']}
+            if self._state['timingMode'] == 'specific':
+                for task in normalized:
+                    try:
+                        int(task['scheduledAtMs'])
+                    except (TypeError, ValueError):
+                        raise ValueError(f"Task start time missing: {task['name']}")
+            for task in normalized:
+                if task['id'] in existing and 'batchId' in existing[task['id']]:
+                    task['batchId'] = existing[task['id']]['batchId']
+            fixed = [task for task in self._state['tasks'] if task['id'] in protected]
+            self._state['tasks'] = fixed + normalized
+            self._state['revision'] += 1
+            self._save_locked()
+        self._log_event('schedule_queue_updated', task_count=len(normalized))
+        self._wake.set()
+        return self.get_status()
+
+    def cancel(self) -> Dict[str, Any]:
+        """Cancel future dispatch without aborting an acquisition already accepted."""
+        with self._lock:
+            if not self._state.get('active'):
+                return self.get_status()
+            self._state.update(cancelRequested=True, paused=False, decisionRequired=False,
+                               statusMessage='CANCELLING QUEUE · CURRENT RUN CONTINUES')
+            self._state['revision'] += 1
+            self._save_locked()
+        self._log_event('schedule_cancel_requested', detail='Keep current acquisition running')
         self._wake.set()
         return self.get_status()
 
@@ -393,6 +458,9 @@ class ScheduleManager:
             self._save_locked()
         self._log_event("schedule_stop_requested", detail="Stop requested by user")
         self._wake.set()
+        # A queue armed behind an independent run does not own that acquisition.
+        if self._state.get('taskPhase') not in {'starting', 'running'}:
+            return self.get_status()
         if self.sync_manager is not None and self.sync_manager.status().get("active"):
             try:
                 self.sync_manager.stop_master("Scheduled queue stop requested")
@@ -409,13 +477,17 @@ class ScheduleManager:
 
     def _should_stop(self) -> bool:
         with self._lock:
-            return bool(self._state.get("stopRequested"))
+            return bool(self._state.get("stopRequested") or self._state.get('cancelRequested'))
+
+    def _abort_current_requested(self) -> bool:
+        with self._lock:
+            return bool(self._state.get('stopRequested'))
 
     def _wait_while_paused(self) -> bool:
         while True:
             with self._lock:
                 paused = bool(self._state.get("paused"))
-                stopped = bool(self._state.get("stopRequested"))
+                stopped = self._should_stop()
             if stopped:
                 return False
             if not paused:
@@ -461,9 +533,12 @@ class ScheduleManager:
                   statusMessage="SCHEDULE READY")
         return not self._should_stop()
 
-    def _wait_until(self, target_ms: int) -> bool:
+    def _wait_until(self, target_ms: int, revision: int | None = None) -> bool:
         self._set(waiting=True, waitUntilMs=target_ms, statusMessage="WAITING")
         while int(time.time() * 1000) < target_ms:
+            with self._lock:
+                if revision is not None and self._state['revision'] != revision:
+                    return False
             if self._should_stop():
                 return False
             self._wake.wait(min(1.0, max(0.05, (target_ms - int(time.time() * 1000)) / 1000)))
@@ -513,7 +588,7 @@ class ScheduleManager:
             if task.get("execution_mode") == "sync":
                 stop_sent = False
                 while self.sync_manager.status().get("active"):
-                    if self._should_stop() and not stop_sent:
+                    if self._abort_current_requested() and not stop_sent:
                         try:
                             self.sync_manager.stop_master("Scheduled queue stop requested")
                         except ValueError:
@@ -525,7 +600,7 @@ class ScheduleManager:
                     raise RuntimeError(sync_status.get("message") or "SYNC task failed")
                 return
             while self.manager.status.is_running:
-                if self._should_stop():
+                if self._abort_current_requested():
                     self.manager.stop_scan()
                 time.sleep(0.5)
             finalize_error = str(getattr(self.manager, "_scan_finalize_error", "") or "").strip()
@@ -539,6 +614,8 @@ class ScheduleManager:
         """Retry only controller acceptance failures; never replay an active task."""
         total_attempts = self.TASK_START_RETRY_COUNT + 1
         for attempt in range(1, total_attempts + 1):
+            if self._should_stop():
+                return False
             self._set(
                 waiting=False,
                 waitUntilMs=None,
@@ -581,86 +658,118 @@ class ScheduleManager:
                     return False
         return False
 
+    def _finish_requested_queue(self) -> bool:
+        with self._lock:
+            if not self._should_stop():
+                return False
+            cancelled = bool(self._state.get('cancelRequested'))
+            self._state.update(active=False, waiting=False, waitUntilMs=None,
+                               activeTaskId=None, activeTaskIndex=-1, taskPhase='idle',
+                               waitingForCurrentRun=False,
+                               statusMessage='CANCELLED' if cancelled else 'STOPPED')
+            self._save_locked()
+        self._log_event('schedule_cancelled' if cancelled else 'schedule_stopped')
+        return True
+
+    def _run_once(self) -> None:
+        """Claim only one task at a time, from the latest persisted queue."""
+        with self._lock:
+            if not self._state.get('active'):
+                return
+        if self._finish_requested_queue():
+            return
+        if not self._wait_for_current_run():
+            self._finish_requested_queue()
+            return
+        if not self._wait_while_paused():
+            self._finish_requested_queue()
+            return
+        with self._lock:
+            if self._should_stop():
+                self._finish_requested_queue()
+                return
+            completed = set(self._state.get('completedTaskIds') or [])
+            pending = [(i, task) for i, task in enumerate(self._state['tasks'])
+                       if task['id'] not in completed]
+            if not pending:
+                self._state.update(active=False, waiting=False, waitUntilMs=None,
+                                   activeTaskId=None, activeTaskIndex=-1,
+                                   taskPhase='idle', statusMessage='IDLE')
+                self._save_locked()
+                self._log_event('schedule_completed', task_count=len(completed))
+                return
+            index, next_task = pending[0]
+            task = deepcopy(next_task)
+            revision = self._state['revision']
+            timing = self._state['timingMode']
+            gap_sec = self._state['sequentialGapSec']
+            target_ms = None
+            if timing == 'specific':
+                try:
+                    target_ms = int(task.get('scheduledAtMs'))
+                except (TypeError, ValueError):
+                    raise ValueError(f"Task start time missing: {task['name']}")
+            elif completed and gap_sec > 0:
+                target_ms = int(self._state.get('lastTaskFinishedAtMs', time.time() * 1000)
+                                + gap_sec * 1000)
+            self._state.update(activeTaskIndex=index, activeTaskId=task['id'], taskPhase='waiting',
+                               currentTaskStep=0, currentTaskTotalSteps=task.get('estimated_points', 0))
+            self._save_locked()
+        if target_ms and target_ms > int(time.time() * 1000):
+            self._log_event('task_wait_started', task=task, scheduled_for_ms=target_ms)
+            if not self._wait_until(target_ms, revision):
+                self._finish_requested_queue()
+                self._wake.set()
+                return
+        if not self._wait_while_paused():
+            self._finish_requested_queue()
+            return
+        # Editing and task claim use the same lock. A changed snapshot is never started.
+        with self._lock:
+            if self._should_stop():
+                self._finish_requested_queue()
+                return
+            if self._state['revision'] != revision:
+                self._wake.set()
+                return
+            self._state.update(taskPhase='starting', waiting=False, waitUntilMs=None)
+            self._state['revision'] += 1
+            self._save_locked()
+            task_count = len(self._state['tasks'])
+        self._log_event('task_started', task=task, task_index=index + 1, task_count=task_count)
+        try:
+            self._set(taskPhase='running')
+            executed = self._execute_task_with_start_retries(task, index + 1, task_count)
+        except Exception as exc:
+            self._log_event('task_failed', task=task, detail=str(exc), task_index=index + 1)
+            self._set(taskPhase='failed', paused=True, decisionRequired=True, retryTaskId=task['id'],
+                      pauseReason=str(exc), statusMessage='PAUSED AFTER ERROR',
+                      error=str(exc), errorAtMs=int(time.time() * 1000))
+            self._wait_while_paused()
+            self._finish_requested_queue()
+            self._wake.set()
+            return
+        if executed and not self._abort_current_requested():
+            with self._lock:
+                completed = set(self._state.get('completedTaskIds') or [])
+                completed.add(task['id'])
+                self._state.update(completedTaskIds=list(completed), retryTaskId=None,
+                                   lastTaskFinishedAtMs=int(time.time() * 1000),
+                                   activeTaskId=None, activeTaskIndex=-1, taskPhase='idle',
+                                   currentTaskStep=task.get('estimated_points', 0))
+                self._save_locked()
+            self._log_event('task_completed', task=task, task_index=index + 1)
+        if not self._finish_requested_queue():
+            self._set(statusMessage='PAUSED' if self._state.get('paused') else 'SCHEDULE READY')
+            self._wake.set()
+
     def _run(self) -> None:
         while True:
             self._wake.wait(1.0)
             self._wake.clear()
-            with self._lock:
-                if not self._state.get("active"):
-                    continue
-                tasks = deepcopy(self._state.get("tasks") or [])
-                completed = set(self._state.get("completedTaskIds") or [])
-                timing = self._state.get("timingMode")
-                gap_sec = float(self._state.get("sequentialGapSec") or 0)
             try:
-                if not self._wait_for_current_run():
-                    continue
-                for index, task in enumerate(tasks):
-                    if task["id"] in completed:
-                        continue
-                    if self._should_stop():
-                        break
-                    if not self._wait_while_paused():
-                        break
-                    self._set(activeTaskIndex=index, activeTaskId=task["id"], currentTaskStep=0,
-                              currentTaskTotalSteps=task.get("estimated_points", 0))
-                    target_ms = None
-                    if timing == "specific":
-                        try:
-                            target_ms = int(task.get("scheduledAtMs"))
-                        except (TypeError, ValueError):
-                            raise ValueError(f"Task start time missing: {task['name']}")
-                    elif completed and gap_sec > 0:
-                        target_ms = int(time.time() * 1000 + gap_sec * 1000)
-                    if target_ms and target_ms > int(time.time() * 1000):
-                        self._log_event("task_wait_started", task=task, scheduled_for_ms=target_ms)
-                        if not self._wait_until(target_ms):
-                            break
-                    if target_ms:
-                        self._log_event("task_wait_finished", task=task, scheduled_for_ms=target_ms)
-                    self._log_event("task_started", task=task, task_index=index + 1, task_count=len(tasks))
-                    try:
-                        if not self._execute_task_with_start_retries(task, index + 1, len(tasks)):
-                            break
-                    except Exception as exc:
-                        self._log_event("task_failed", task=task, detail=str(exc), task_index=index + 1)
-                        self._set(paused=True, decisionRequired=True, retryTaskId=task["id"],
-                                  pauseReason=str(exc), statusMessage="PAUSED AFTER ERROR",
-                                  error=str(exc), errorAtMs=int(time.time() * 1000))
-                        if not self._wait_while_paused():
-                            break
-                        with self._lock:
-                            skipped = task["id"] in set(self._state.get("completedTaskIds") or [])
-                        if skipped:
-                            completed.add(task["id"])
-                            continue
-                        # Resume without skipping means retry this task on the next scheduler pass.
-                        break
-                    if self._should_stop():
-                        self._log_event("task_stopped", task=task, detail="Schedule stop requested", task_index=index + 1)
-                        break
-                    completed.add(task["id"])
-                    self._set(completedTaskIds=list(completed), currentTaskStep=task.get("estimated_points", 0))
-                    self._log_event("task_completed", task=task, task_index=index + 1)
-                if self._should_stop():
-                    self._set(active=False, waiting=False, waitUntilMs=None, statusMessage="STOPPED")
-                    self._log_event("schedule_stopped", detail="Schedule stopped before all tasks completed")
-                elif not self._state.get("paused"):
-                    with self._lock:
-                        current_task_count = len(self._state.get("tasks") or [])
-                    if len(completed) >= current_task_count:
-                        self._set(active=False, waiting=False, waitUntilMs=None, statusMessage="IDLE")
-                        self._log_event("schedule_completed", completed_task_count=len(completed), task_count=current_task_count)
-                    else:
-                        self._set(statusMessage="SCHEDULE READY")
-                        self._wake.set()
+                self._run_once()
             except Exception as exc:
-                self._set(
-                    active=False,
-                    waiting=False,
-                    waitUntilMs=None,
-                    statusMessage="ERROR",
-                    error=str(exc),
-                    errorAtMs=int(time.time() * 1000),
-                )
-                self._log_event("schedule_failed", detail=str(exc))
+                self._set(active=False, waiting=False, waitUntilMs=None, statusMessage='ERROR',
+                          error=str(exc), errorAtMs=int(time.time() * 1000))
+                self._log_event('schedule_failed', detail=str(exc))

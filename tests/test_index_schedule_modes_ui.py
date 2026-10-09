@@ -31,7 +31,7 @@ const app = Object.assign(options.data(), options.methods, {
     buildScheduledTaskName() {return 'Task'}, refreshScheduledTaskEstimates() {},
     confirmIndependentP0Placeholders() {return true}, addLog() {}, saveState() {},
     resetHistory() {}, renderMainPlot() {}, initPlots() {}, fetchSequenceMarkers() {},
-    $nextTick(callback) {callback()}, getConfiguredScanDimensions() {return 1},
+    $nextTick(callback) {if (callback) callback(); return Promise.resolve()}, getConfiguredScanDimensions() {return 1},
 });
 (async () => {
     assert(app.isScheduledMode()); assert.equal(app.isSyncMode(), false);
@@ -83,6 +83,53 @@ const app = Object.assign(options.data(), options.methods, {
     app.syncRuntime.active = true;
     await app.stopScan();
     assert.equal(requests.at(-1), '/sync/stop');
+    // Only unstarted tasks are editable; reordering cannot cross a locked task.
+    app.scheduleRuntime = {active: true, activeTaskId: scan.id, taskPhase: 'running',
+        completedTaskIds: [], scheduleId: 'queue-1', revision: 3};
+    assert.equal(app.isScheduledTaskEditable(scan), false);
+    assert.equal(app.isScheduledTaskEditable(sync), true);
+    assert.equal(app.canMoveScheduledTask(1, -1), false);
+    app.removeScheduledTask(scan.id);
+    assert.equal(app.scheduledTasks.length, 2);
+    app.scheduleRuntime.taskPhase = 'waiting';
+    assert.equal(app.isScheduledTaskEditable(scan), true);
+    app.scheduleRuntime.taskPhase = 'running';
+    app.scheduledQueueId = 'queue-1'; app.scheduledQueueRevision = 3;
+    app.scheduledQueueDirty = true;
+    const snapshot = {...app.scheduleRuntime, tasks: JSON.parse(JSON.stringify(app.scheduledTasks)),
+        timingMode: 'sequential', sequentialGapSec: 0};
+    let submitted;
+    context.axios = {
+        get: async () => ({data: {data: snapshot}}),
+        put: async (path, body) => {
+            assert.equal(path, '/schedule/queue'); submitted = body;
+            snapshot.revision = 4;
+            return {data: {data: snapshot}};
+        },
+        post: async path => {
+            requests.push(path);
+            return {data: {data: {...snapshot, cancelRequested: true}}};
+        },
+    };
+    app.scheduledTasks.forEach(task => task.estimated_points = 1);
+    snapshot.tasks.forEach(task => task.estimated_points = 1);
+    await app.applyScheduledQueueChanges();
+    assert.equal(app.scheduledQueueError, false, app.scheduledQueueMessage);
+    assert.equal(JSON.stringify(submitted.tasks.map(task => task.id)), JSON.stringify([sync.id]));
+    assert.equal(submitted.revision, 3);
+    assert.equal(app.scheduledQueueDirty, false);
+    app.scheduledQueueDirty = true;
+    context.axios.put = async () => {throw {response: {data: {detail: 'Queue changed'}}}};
+    app.formatRequestError = error => error.response?.data?.detail || error.message;
+    await app.applyScheduledQueueChanges();
+    assert.equal(app.scheduledQueueDirty, true);
+    assert.equal(app.scheduledQueueError, true);
+    assert.equal(app.scheduledQueueMessage, 'Queue changed');
+    const countBeforeCancel = requests.length;
+    await app.cancelScheduledQueue();
+    assert.equal(requests.length, countBeforeCancel + 1);
+    assert.equal(requests.at(-1), '/schedule/cancel');
+    assert.equal(app.scheduledQueueBusy, false);
 })().catch(error => {console.error(error); process.exitCode = 1});
 """
         result = subprocess.run(['node', '-e', script], cwd=Path(__file__).resolve().parents[1],

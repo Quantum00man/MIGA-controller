@@ -10,6 +10,14 @@ type, settings and sequence snapshots, so both types can share one queue. Live a
 SYNC remain immediate-run modes. Older saved SYNC queue setups migrate to Scheduled
 with the SYNC task type selected.
 
+While a queue is active, pending tasks can be edited, reordered, removed or added.
+Use **Apply Queue Changes** to save the pending queue; **Reload Queue** discards local
+edits and retrieves the server's queue. Started and completed tasks are locked.
+Version checks reject edits if another client changed the queue or a task started.
+**Pause Queue** prevents the next task from starting; **Cancel Queue** prevents all
+later tasks from starting while the current Scan or SYNC finishes normally. The
+execution Stop button remains the explicit control for stopping an acquisition.
+
 Transfer Function scans can optionally read a Thorlabs PM100A from the authenticated Hardware-controller after every normal shot. The first successful reading is the power baseline. A non-zero relative-change threshold pauses between shots, invalidates the complete 0°/90° frequency attempt, runs the prepared Bragg Fringes Calibration as a separately archived recovery run, applies its generated target-fringe MOT, resets the baseline and rescans that frequency. The recovery MOT and complete calibration parameter set can be loaded directly from a previous Bragg Fringes Calibration archive run or supplied manually. Zero-phase baseline shots are never sampled. All non-scheduled scans also support manual shot-boundary Pause/Resume.
 
 Transfer Function, Bragg Fringes Calibration and eligible Standard scans can also run a user-supplied periodic interferometer-labeling MOT. Standard support covers 1D non-randomized Live and Scheduled scans using Classic Placeholders or Auto Markers, plus Classic SYNC scans (including Independent P0). Standard scans calibrate before the first science shot, check the configured minute interval after each completed science shot, and do not add an endpoint block. The MOT is stored locally in Settings on each controller and is never copied through SYNC, so Master and every Slave execute their own file. Each block derives $I_\alpha$ from fitted `Prob_UP_F2`, archives its uncertainty and validity, and updates the live monitor. Final analysis uses piecewise-linear time interpolation of accepted calibration points independently on every node.

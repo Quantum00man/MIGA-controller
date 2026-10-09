@@ -390,6 +390,12 @@ class ScheduleRequest(BaseModel):
     tasks: List[Dict[str, Any]] = Field(default_factory=list)
 
 
+class ScheduleQueueEdit(BaseModel):
+    scheduleId: str
+    revision: int = Field(..., ge=0)
+    tasks: List[Dict[str, Any]] = Field(default_factory=list)
+
+
 class MarkerOptimizationStepConfig(BaseModel):
     marker_id: str
     start: float
