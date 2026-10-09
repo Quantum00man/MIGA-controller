@@ -389,9 +389,11 @@ normal raw-run namespace remains distinct from revision and analysis stores.
 \chapter{Updating, reloading and unattended operation}
 \section{Server update panel}
 \begin{procedure}{Select and apply an update}
-\item On the archive host, open the homepage through \pathcode{http://127.0.0.1:8765/}.
-Write operations for code updates/reload are restricted to localhost and same-origin
-requests. LAN clients can browse the service but cannot apply updates.
+\item Open the homepage locally through \pathcode{http://127.0.0.1:8765/},
+or remotely using the archive host's address and port.
+Remote clients can refresh branches, apply updates and configure or trigger reloads.
+These operations require same-origin browser requests. The dashboard has no login;
+provide access only to trusted clients through the network or an authenticated proxy.
 \item Open \ui{Server update}. Review current checkout, repository source, local
 changes and auto-reload preference.
 \item Choose a branch from the dropdown. Selection previews cached remote metadata

@@ -131,7 +131,9 @@ records are collapsed by default. Dashboard assets require no external CDN.
 LaunchUI Start opens the homepage (uninitialized storage still redirects to Guide).
 Dashboard timestamps use `dd/mm/yy HH:mm` in the browser's local timezone.
 The Server update panel fetches origin branches, saves the selected branch in
-Archive configuration, and applies fast-forward-only updates from localhost.
+Archive configuration, and applies fast-forward-only updates from local or remote
+dashboard clients. Update/reload browser requests must be same-origin. The dashboard
+has no login, so restrict network access to trusted clients or use an authenticated proxy.
 It includes a branch dropdown (local and known origin branches), read-only
 selection previews, GitHub HTTPS/SSH repository configuration, current/remote
 commit messages, cached ahead/behind comparison, last refresh time, worktree

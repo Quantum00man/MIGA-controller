@@ -37,7 +37,7 @@ class ReloadPreference(BaseModel):
 
 @app.post('/archive-server/reload/preference')
 async def reload_preference(payload: ReloadPreference, request: Request):
-    require_local_update(request)
+    require_same_origin_update(request)
     with configuration.lock:
         current = configuration.load()
         current['auto_reload_after_update'] = payload.enabled
@@ -47,7 +47,7 @@ async def reload_preference(payload: ReloadPreference, request: Request):
 
 @app.post('/archive-server/reload')
 async def reload_server(request: Request):
-    require_local_update(request)
+    require_same_origin_update(request)
     return await run_in_threadpool(reload_controller.schedule)
 
 
@@ -56,9 +56,11 @@ class ArchiveUpdateRequest(BaseModel):
     repo_url: str | None = None
 
 
-def require_local_update(request):
-    if not request.client or request.client.host not in {'127.0.0.1', '::1'}:
-        raise HTTPException(403, 'Open this page on the server using http://127.0.0.1 to update code')
+def require_same_origin_update(request):
+    # Remote dashboard clients may administer this server, but other websites
+    # must not be able to trigger code updates or reloads through their browser.
+    if request.headers.get('sec-fetch-site') in {'cross-site', 'same-site'}:
+        raise HTTPException(403, 'Updates require a same-origin request')
     origin = request.headers.get('origin')
     if origin and origin.rstrip('/') != str(request.base_url).rstrip('/'):
         raise HTTPException(403, 'Updates require a same-origin request')
@@ -71,7 +73,7 @@ async def archive_update_status(branch: str | None = None):
 
 @app.post('/archive-server/update/{operation}')
 async def archive_update(operation: str, payload: ArchiveUpdateRequest, request: Request):
-    require_local_update(request)
+    require_same_origin_update(request)
     if operation not in {'fetch', 'apply'}:
         raise HTTPException(404, 'Unknown update operation')
     return await run_in_threadpool(updater.run, payload.branch, operation == 'apply',payload.repo_url)
