@@ -503,7 +503,7 @@ class ExperimentManager:
         }
 
     def load_run_preset(
-        self, year: str, month: str, day: str, run_id: str, include_sync: bool = False
+        self, year: str, month: str, day: str, run_id: str, include_sync: bool | None = None
     ) -> Dict[str, Any]:
         if getattr(self.status, "is_running", False):
             raise ValueError("Cannot load a previous run while an experiment is running")
@@ -513,6 +513,9 @@ class ExperimentManager:
             raise FileNotFoundError(f"Run not found: {run_id}")
 
         restored_config = self._load_run_preset_config(run_dir)
+        is_sync_run = (run_dir / "sync_manifest.json").is_file()
+        if include_sync is None:
+            include_sync = is_sync_run
         source_sequence = run_dir / "sequence.mot"
         if include_sync and not source_sequence.is_file():
             raise ValueError("Archived Master sequence.mot is missing")
@@ -536,6 +539,7 @@ class ExperimentManager:
             "run_label": run_label,
             "display_name": self._build_run_display_name(run_id, run_label),
             "sync_preset": sync_preset,
+            "run_mode": "sync" if is_sync_run else "live",
         }
 
     def _normalize_tmot_settings(self, settings: Dict[str, Any]) -> Dict[str, Any]:

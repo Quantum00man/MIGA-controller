@@ -21,10 +21,11 @@ const applyEnd = page.indexOf('                async loadRunPreset()', applyStar
 const apply = vm.runInThisContext('({' + page.slice(applyStart, applyEnd) + '})').applyLoadedRunPreset;
 const supported = ['standard', 'timing', 'rabi', 'half', 'link', 'bragg_rabi',
     'bragg_fringe_calibration', 'phase_noise', 'transfer_function', 'transfer_burst_time_scan'];
+for (const initialRunMode of ['live', 'sync', 'scheduled']) {
 for (const initial of supported) {
     for (const target of supported) {
         const app = {
-            runMode: 'sync', isRunning: false, currentTab: 'atoms', plotRevision: 0,
+            runMode: initialRunMode, isRunning: false, currentTab: 'atoms', plotRevision: 0,
             config: {mode: initial, parameter_source: 'classic', scan_dimensions: 1,
                 averages: 1, randomize: false, sequence_name: 'old.mot',
                 dim1_type: 'range', dim2_type: 'range', dim3_type: 'range'},
@@ -50,7 +51,11 @@ for (const initial of supported) {
         assert.equal(app.currentSequenceName, 'master.mot');
         assert.equal(app.syncSlaves[0].sequence_content_base64, 'c2xhdmU=');
         assert.equal(app.syncMasterDelayMs, 37.5);
+        apply.call(app, {...payload, run_mode: 'live', sync_preset: null});
+        assert.equal(app.runMode, 'live', 'A Live archive must replace the current run mode');
+        assert.equal(app.syncScheduleEnabled, false);
     }
+}
 }
 // Modes unsupported by SYNC keep the existing Standard fallback.
 for (const mode of ['lock_in', 'ac_stark', 'ramsey_interferometer']) {

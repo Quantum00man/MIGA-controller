@@ -79,6 +79,22 @@ class SyncRunPresetTests(unittest.TestCase):
                 b"\xb5slave-sequence",
             )
 
+    def test_run_mode_is_detected_from_archive_without_include_sync(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run = self._create_run(root)
+            manager = self._manager(["slave_b"])
+            with patch("app.core.experiment_manager.config.DATA_BASE_DIR", root), patch(
+                "app.core.experiment_manager.config.SEQUENCE_TEMPLATE_PATH_LINUX", str(root / "seq0.mot")
+            ):
+                payload = manager.load_run_preset("2026", "08", "25", "run01_20260825")
+                self.assertEqual(payload["run_mode"], "sync")
+                self.assertEqual(len(payload["sync_preset"]["slaves"]), 1)
+                (run / "sync_manifest.json").unlink()
+                payload = manager.load_run_preset("2026", "08", "25", "run01_20260825")
+                self.assertEqual(payload["run_mode"], "live")
+                self.assertIsNone(payload["sync_preset"])
+
     def test_sync_preset_rejects_slave_id_mismatch_before_loading_master(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

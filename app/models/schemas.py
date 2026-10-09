@@ -851,7 +851,7 @@ class ArchiveRunReference(BaseModel):
     month: str
     day: str
     run_id: str
-    include_sync: bool = Field(False)
+    include_sync: bool | None = Field(None)
 
 
 class ArchiveCollectionFolderCreate(BaseModel):

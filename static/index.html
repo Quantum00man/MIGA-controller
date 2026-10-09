@@ -3293,8 +3293,9 @@
                     finally { this.archiveNavigationBusy = false; }
                 },
                 applyLoadedRunPreset(payload = {}) {
+                    const restoredRunMode = payload.run_mode || (payload.sync_preset ? 'sync' : 'live');
                     let restoredSyncSlaves = null;
-                    if (this.isSyncMode()) {
+                    if (restoredRunMode === 'sync') {
                         const syncPreset = payload.sync_preset;
                         if (!syncPreset || !Array.isArray(syncPreset.slaves)) {
                             throw new Error('Selected run does not contain a complete SYNC preset.');
@@ -3332,6 +3333,8 @@
                         Object.entries(payload.config || {}).filter(([key]) => knownConfigKeys.includes(key))
                     );
                     this.config = { ...this.config, ...restoredConfig };
+                    this.runMode = restoredRunMode;
+                    this.syncScheduleEnabled = false;
                     this.config.scan_dimensions = Number(this.config.scan_dimensions || (this.config.dim3_enabled ? 3 : (this.config.dim2_enabled ? 2 : 1))) || 1;
                     this.config.dim2_enabled = this.config.scan_dimensions >= 2;
                     this.config.dim3_enabled = this.config.scan_dimensions >= 3;
@@ -3366,15 +3369,14 @@
                     if (!this.repeatRun || this.isRunning) return;
                     this.isPresetLoading = true;
                     try {
-                        if (this.isSyncMode()) await this.fetchSyncConfig();
                         const res = await axios.post('/experiment/load-run-preset', {
                             year: this.repeatYear,
                             month: this.repeatMonth,
                             day: this.repeatDay,
                             run_id: this.repeatRun,
-                            include_sync: this.isSyncMode(),
                         });
                         const payload = res.data?.data || {};
+                        if (payload.run_mode === 'sync') await this.fetchSyncConfig();
                         this.applyLoadedRunPreset(payload);
                         const displayName = payload.display_name || this.repeatRun;
                         this.addLog(`Loaded preset from ${displayName}.`);
