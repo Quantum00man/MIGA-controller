@@ -127,7 +127,20 @@ def test_browser_rebuild_and_csv_exports_include_sem_and_std():
         assert output['rows'][0][field] == pytest.approx(expected[field])
     sync = next(csv.DictReader(io.StringIO(output['downloads'][0]['csv'].lstrip('\ufeff'))))
     single = next(csv.DictReader(io.StringIO(output['downloads'][1]['csv'].lstrip('\ufeff'))))
-    assert float(sync['differential_s2_sem']) > 0
-    assert float(sync['delta_s_0deg_std']) > 0
-    assert float(single['interferometer_phase_s2_sem']) > 0
+    assert float(sync['Differential_S2_SEM']) > 0
+    assert float(sync['Delta_S_0deg_Std']) > 0
+    assert float(single['S2_Quadrature_Sum_SEM']) > 0
     assert float(single['Phase_0deg_Std_Rad']) > 0
+
+    single_headers = list(single)
+    sync_headers = list(sync)
+    assert len(single_headers) == len(set(single_headers))
+    assert len(sync_headers) == len(set(sync_headers))
+    for prefix, headers in (('Phase_0deg', single_headers), ('Atom_Number_UP_Fit_0deg', single_headers), ('Delta_S_0deg', sync_headers)):
+        unit = '_Rad' if prefix == 'Phase_0deg' else ''
+        start = headers.index(prefix + '_Count')
+        assert headers[start:start + 4] == [prefix + '_Count'] + [prefix + '_' + stat + unit for stat in ('Mean', 'Std', 'SEM')]
+    assert sync_headers.index('Differential_S2_SEM') == sync_headers.index('Differential_S2') + 1
+    assert single_headers.index('S2_Quadrature_Sum_SEM') == single_headers.index('S2_Quadrature_Sum') + 1
+    assert all(not header[:1].islower() for header in single_headers + sync_headers)
+    assert float(single['Phase_0deg_SEM_Rad']) == pytest.approx(.1)

@@ -9094,21 +9094,23 @@
                 async downloadSyncTransferFunctionDifferentialCSV() {
                     const rows = this.syncArchiveTransferDifferentialRows();
                     if (!rows.length) return;
-                    const fields = [
-                        'slave_node_id', 'frequency_hz',
-                        'delta_s_0deg_count', 'delta_s_0deg_mean', 'delta_s_0deg_std', 'delta_s_0deg_sem', 'delta_s_0deg_s2', 'delta_s_0deg_s2_sem', 'delta_s_0deg_noise_s2',
-                        'delta_s_90deg_count', 'delta_s_90deg_mean', 'delta_s_90deg_std', 'delta_s_90deg_sem', 'delta_s_90deg_s2', 'delta_s_90deg_s2_sem', 'delta_s_90deg_noise_s2',
-                        'phase_difference_0deg_count', 'phase_difference_0deg_mean_rad', 'phase_difference_0deg_std_rad', 'phase_difference_0deg_sem_rad',
-                        'phase_difference_90deg_count', 'phase_difference_90deg_mean_rad', 'phase_difference_90deg_std_rad', 'phase_difference_90deg_sem_rad',
-                        'phase_difference_magnitude_rad', 'phase_difference_magnitude_sem_rad',
-                        'phase_path_normalized_0deg_mean', 'phase_path_normalized_0deg_s2', 'phase_path_normalized_0deg_noise_s2',
-                        'phase_path_normalized_90deg_mean', 'phase_path_normalized_90deg_s2', 'phase_path_normalized_90deg_noise_s2',
-                        'differential_path_s2', 'differential_path_noise_s2',
-                        'differential_s2', 'differential_noise_s2', 'differential_magnitude', 'quadrature_complete',
-                        'differential_s2_sem', 'differential_magnitude_sem', 'differential_path_s2_sem',
-                        ...['0deg', '90deg'].flatMap(label => ['count', 'std', 'sem', 's2_sem'].map(stat => `phase_path_normalized_${label}_${stat}`))
-                    ];
-                    const csv = '\uFEFF' + [fields, ...rows.map(row => fields.map(field => row[field] ?? ''))]
+                    const fields = ['slave_node_id', 'frequency_hz'];
+                    ['0deg', '90deg'].forEach(phase => {
+                        ['count', 'mean', 'std', 'sem', 's2', 's2_sem', 'noise_s2'].forEach(stat => fields.push(`delta_s_${phase}_${stat}`));
+                    });
+                    fields.push('differential_s2', 'differential_s2_sem', 'differential_noise_s2',
+                        'differential_magnitude', 'differential_magnitude_sem', 'quadrature_complete');
+                    ['0deg', '90deg'].forEach(phase => {
+                        ['count', 'mean_rad', 'std_rad', 'sem_rad'].forEach(stat => fields.push(`phase_difference_${phase}_${stat}`));
+                    });
+                    fields.push('phase_difference_magnitude_rad', 'phase_difference_magnitude_sem_rad');
+                    ['0deg', '90deg'].forEach(phase => {
+                        ['count', 'mean', 'std', 'sem', 's2', 's2_sem', 'noise_s2'].forEach(stat => fields.push(`phase_path_normalized_${phase}_${stat}`));
+                    });
+                    fields.push('differential_path_s2', 'differential_path_s2_sem', 'differential_path_noise_s2');
+                    const words = { s: 'S', s2: 'S2', sem: 'SEM', std: 'Std', hz: 'Hz', rad: 'Rad', id: 'ID', '0deg': '0deg', '90deg': '90deg' };
+                    const headers = fields.map(field => field.split('_').map(word => words[word] || word.charAt(0).toUpperCase() + word.slice(1)).join('_'));
+                    const csv = '\uFEFF' + [headers, ...rows.map(row => fields.map(field => row[field] ?? ''))]
                         .map(row => row.map(value => this.csvCell(value)).join(',')).join('\n');
                     const runPart = this.sanitizeFilenamePart(this.selectedRun || this.loadedRunId || 'run');
                     const slavePart = this.sanitizeFilenamePart(this.syncArchiveNodeLabel(this.syncArchiveSlaveId), 'slave');
@@ -10151,13 +10153,45 @@
                         ['Allan_Phase_Noise_Sigma_mrad', 'transfer_phase_noise_sigma_mrad'],
                         ['Delta_Phi2_Allan_Noise_Floor_Rad2', 'interferometer_phase_noise_phase2_rad2'],
                     ];
-                    const included = new Set(columns.map(([, field]) => field));
-                    [...new Set(rows.flatMap(row => Object.keys(row)))].forEach(field => {
-                        if (!included.has(field) && field !== 'interferometer_phase_s2_components') columns.push([field, field]);
+                    // Keep public CSV labels independent of internal analysis keys.
+                    const squaredErrors = {
+                        interferometer_phase_0deg_s2: ['S2_0deg_SEM', 'interferometer_phase_0deg_s2_sem'],
+                        interferometer_phase_90deg_s2: ['S2_90deg_SEM', 'interferometer_phase_90deg_s2_sem'],
+                        interferometer_phase_s2: ['S2_Quadrature_Sum_SEM', 'interferometer_phase_s2_sem'],
+                        interferometer_phase_0deg_phase2_rad2: ['Delta_Phi2_0deg_SEM_Rad2', 'interferometer_phase_0deg_phase2_sem_rad2'],
+                        interferometer_phase_90deg_phase2_rad2: ['Delta_Phi2_90deg_SEM_Rad2', 'interferometer_phase_90deg_phase2_sem_rad2'],
+                        interferometer_phase_phase2_rad2: ['Delta_Phi2_Quadrature_Sum_SEM_Rad2', 'interferometer_phase_phase2_sem_rad2'],
+                    };
+                    const orderedColumns = columns.flatMap(([label, field]) => {
+                        const group = [[label, field]];
+                        if (/_std$/.test(field) || field === 'interferometer_phase_std') {
+                            group.push([label.replace('_Std', '_SEM'), field.replace(/_std$/, '_sem')]);
+                        } else if (/_std_rad$/.test(field)) {
+                            group.push([label.replace('_Std', '_SEM'), field.replace('_std_rad', '_sem_rad')]);
+                        }
+                        if (squaredErrors[field]) group.push(squaredErrors[field]);
+                        return group;
                     });
+                    // Export phase-resolved atom/probability statistics as complete groups.
+                    columns.filter(([, field]) => field.endsWith('_count') && /^(atom_number_|intf_p)/.test(field))
+                        .forEach(([label, field]) => {
+                            const base = field.slice(0, -6);
+                            const title = label.slice(0, -6);
+                            ['0deg', '90deg'].forEach(phase => {
+                                [['Count', 'count'], ['Mean', 'mean'], ['Std', 'std'], ['SEM', 'sem']].forEach(([statLabel, stat]) => {
+                                    orderedColumns.push([`${title}_${phase}_${statLabel}`, `${base}_${phase}_${stat}`]);
+                                });
+                            });
+                        });
+                    orderedColumns.push(
+                        ['Zero_Phase_Reference_Count', 'zero_phase_reference_count'],
+                        ['Zero_Phase_Reference_Rad', 'zero_phase_reference_rad'],
+                        ['Zero_Phase_Reference_Std_Rad', 'zero_phase_reference_std_rad'],
+                        ['Zero_Phase_Reference_SEM_Rad', 'zero_phase_reference_sem_rad'],
+                    );
                     const csvRows = [
-                        columns.map(([label]) => this.csvCell(label)).join(','),
-                        ...rows.map(row => columns.map(([, field]) => this.csvCell(row?.[field] ?? '')).join(',')),
+                        orderedColumns.map(([label]) => this.csvCell(label)).join(','),
+                        ...rows.map(row => orderedColumns.map(([, field]) => this.csvCell(row?.[field] ?? '')).join(',')),
                     ];
                     const runPart = this.sanitizeFilenamePart(this.selectedRun || this.loadedRunId || 'archive');
                     await this.downloadCsvContent(
