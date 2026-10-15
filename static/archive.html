@@ -8897,14 +8897,61 @@
                     };
                     return calculated;
                 },
+                withTransferUncertainties(input) {
+                    const row = { ...input };
+                    const number = key => row[key] !== null && row[key] !== undefined && row[key] !== '' && Number.isFinite(Number(row[key])) ? Number(row[key]) : null;
+                    const squareError = (mean, sem) => mean === null || sem === null ? null : Math.hypot(2 * mean * sem, Math.SQRT2 * sem * sem);
+                    const combine = keys => keys.length && keys.every(key => number(key) !== null) ? Math.hypot(...keys.map(key => number(key))) : null;
+                    Object.keys(row).forEach(key => {
+                        if (!/_std(_rad)?$/.test(key)) return;
+                        const count = number(key.replace(/_std(_rad)?$/, '_count'));
+                        const std = number(key);
+                        row[key.replace('_std', '_sem')] = std !== null && count >= 2 ? std / Math.sqrt(count) : null;
+                    });
+                    const amplitude = number('bragg_phase_modulation_rad');
+                    ['0deg', '90deg'].forEach(label => {
+                        const prefix = `interferometer_phase_${label}`;
+                        const error = squareError(number(`${prefix}_mean_rad`), number(`${prefix}_sem_rad`));
+                        row[`${prefix}_phase2_sem_rad2`] = error;
+                        row[`${prefix}_s2_sem`] = error !== null && amplitude ? error / amplitude ** 2 : null;
+                    });
+                    row.interferometer_phase_s2_components = (row.interferometer_phase_s2_components || []).map(component => ({
+                        ...component,
+                        sem_rad: row[`interferometer_phase_${component.phase_deg}deg_sem_rad`],
+                        s2_sem: row[`interferometer_phase_${component.phase_deg}deg_s2_sem`],
+                        phase2_sem_rad2: row[`interferometer_phase_${component.phase_deg}deg_phase2_sem_rad2`],
+                    }));
+                    row.interferometer_phase_s2_sem = combine(['interferometer_phase_0deg_s2_sem', 'interferometer_phase_90deg_s2_sem']);
+                    row.interferometer_phase_phase2_sem_rad2 = combine(['interferometer_phase_0deg_phase2_sem_rad2', 'interferometer_phase_90deg_phase2_sem_rad2']);
+                    if (!row.interferometer_phase_s2_components.length && number('interferometer_phase_mean') !== null) {
+                        const error = squareError(number('interferometer_phase_mean'), number('interferometer_phase_sem'));
+                        row.interferometer_phase_phase2_sem_rad2 = error;
+                        row.interferometer_phase_s2_sem = error !== null && amplitude ? error / amplitude ** 2 : null;
+                    }
+                    if (row.slave_node_id !== undefined) {
+                        ['0deg', '90deg'].forEach(label => {
+                            ['delta_s', 'phase_path_normalized'].forEach(base => {
+                                const prefix = `${base}_${label}`;
+                                row[`${prefix}_s2_sem`] = squareError(number(`${prefix}_mean`), number(`${prefix}_sem`));
+                            });
+                        });
+                        const available = ['0deg', '90deg'].filter(label => number(`delta_s_${label}_mean`) !== null);
+                        row.differential_s2_sem = combine(available.map(label => `delta_s_${label}_s2_sem`));
+                        row.differential_path_s2_sem = combine(['phase_path_normalized_0deg_s2_sem', 'phase_path_normalized_90deg_s2_sem']);
+                        const magnitude = number('differential_magnitude');
+                        row.differential_magnitude_sem = magnitude && available.every(label => number(`delta_s_${label}_sem`) !== null)
+                            ? Math.hypot(...available.map(label => number(`delta_s_${label}_mean`) * number(`delta_s_${label}_sem`))) / magnitude : null;
+                    }
+                    return row;
+                },
                 syncArchiveTransferDifferentialRows() {
                     const selectedSlave = String(this.syncArchiveSlaveId || '');
                     const saved = Array.isArray(this.syncManifest?.transfer_function_differential_summary)
                         ? this.syncManifest.transfer_function_differential_summary : [];
                     const previewScale = this.syncTransferNormalizationOptimization?.result?.scale_after;
-                    if (saved.length && Number(this.syncManifest?.transfer_function_differential_formula_version) >= 9 && !this.syncArchiveHasPhaseOverrides() && !this.syncAnalysisCopy.selectedId && !Object.keys(this.syncTransferNormalization?.slave_scales || {}).length && !Number.isFinite(Number(previewScale))) {
+                    if (saved.length && Number(this.syncManifest?.transfer_function_differential_formula_version) >= 10 && !this.syncArchiveHasPhaseOverrides() && !this.syncAnalysisCopy.selectedId && !Object.keys(this.syncTransferNormalization?.slave_scales || {}).length && !Number.isFinite(Number(previewScale))) {
                         return saved.filter(row => !selectedSlave || String(row.slave_node_id || '') === selectedSlave)
-                            .slice().sort((a, b) => Number(a.frequency_hz) - Number(b.frequency_hz));
+                            .map(row => this.withTransferUncertainties(row)).sort((a, b) => Number(a.frequency_hz) - Number(b.frequency_hz));
                     }
 
                     // Rebuild legacy summaries from paired shots using each node's
@@ -9025,7 +9072,9 @@
                             phase_difference_0deg_count: phaseDifferenceZero.count, phase_difference_0deg_mean_rad: phaseDifferenceZero.mean, phase_difference_0deg_std_rad: phaseDifferenceZero.std, phase_difference_0deg_sem_rad: phaseDifferenceZero.sem,
                             phase_difference_90deg_count: phaseDifferenceNinety.count, phase_difference_90deg_mean_rad: phaseDifferenceNinety.mean, phase_difference_90deg_std_rad: phaseDifferenceNinety.std, phase_difference_90deg_sem_rad: phaseDifferenceNinety.sem,
                             phase_difference_magnitude_rad: phaseDifferenceMagnitude, phase_difference_magnitude_sem_rad: phaseDifferenceMagnitudeSem,
+                            phase_path_normalized_0deg_count: pathZero.count, phase_path_normalized_0deg_std: pathZero.std,
                             phase_path_normalized_0deg_mean: pathZero.mean, phase_path_normalized_0deg_s2: pathZero.mean === null ? null : pathZero.mean ** 2, phase_path_normalized_0deg_noise_s2: pathNoiseZero,
+                            phase_path_normalized_90deg_count: pathNinety.count, phase_path_normalized_90deg_std: pathNinety.std,
                             phase_path_normalized_90deg_mean: pathNinety.mean, phase_path_normalized_90deg_s2: pathNinety.mean === null ? null : pathNinety.mean ** 2, phase_path_normalized_90deg_noise_s2: pathNoiseNinety,
                             differential_path_s2: [pathZero.mean, pathNinety.mean].filter(value => value !== null).length === 2
                                 ? [pathZero.mean, pathNinety.mean].filter(value => value !== null).reduce((sum, value) => sum + value ** 2, 0) : null,
@@ -9037,7 +9086,7 @@
                             differential_magnitude: differentialS2 === null ? null : Math.sqrt(differentialS2),
                             quadrature_complete: zero.mean !== null && ninety.mean !== null,
                         };
-                    });
+                    }).map(row => this.withTransferUncertainties(row));
                 },
                 syncArchiveHasPhaseOverrides() {
                     return Object.values(this.archivePhaseReferenceContexts || {}).some(context => context?.has_override === true);
@@ -9055,7 +9104,9 @@
                         'phase_path_normalized_0deg_mean', 'phase_path_normalized_0deg_s2', 'phase_path_normalized_0deg_noise_s2',
                         'phase_path_normalized_90deg_mean', 'phase_path_normalized_90deg_s2', 'phase_path_normalized_90deg_noise_s2',
                         'differential_path_s2', 'differential_path_noise_s2',
-                        'differential_s2', 'differential_noise_s2', 'differential_magnitude', 'quadrature_complete'
+                        'differential_s2', 'differential_noise_s2', 'differential_magnitude', 'quadrature_complete',
+                        'differential_s2_sem', 'differential_magnitude_sem', 'differential_path_s2_sem',
+                        ...['0deg', '90deg'].flatMap(label => ['count', 'std', 'sem', 's2_sem'].map(stat => `phase_path_normalized_${label}_${stat}`))
                     ];
                     const csv = '\uFEFF' + [fields, ...rows.map(row => fields.map(field => row[field] ?? ''))]
                         .map(row => row.map(value => this.csvCell(value)).join(',')).join('\n');
@@ -9069,6 +9120,7 @@
                     const traces = [{
                         x: rows.map(row => Number(row.frequency_hz)),
                         y: rows.map(row => row.differential_s2),
+                        error_y: { type: 'data', array: rows.map(row => row.differential_s2_sem), visible: true },
                         customdata: rows.map(row => `${Number(row.delta_s_0deg_count || 0)}/${Number(row.delta_s_90deg_count || 0)}`),
                         type: 'scatter', mode: 'lines+markers', name: '|ΔS|²',
                         line: { color: '#198754', width: 3 }, marker: { color: '#198754', size: 8, symbol: 'diamond' },
@@ -9087,7 +9139,7 @@
                         [[0, '#c62828'], [90, '#1565c0']].forEach(([phase, color]) => traces.push({
                             x: rows.map(row => Number(row.frequency_hz)),
                             y: rows.map(row => row[`delta_s_${phase}deg_s2`]),
-                            error_y: { type: 'data', array: rows.map(row => row[`delta_s_${phase}deg_s2_sem`] ?? 0), visible: true },
+                            error_y: { type: 'data', array: rows.map(row => row[`delta_s_${phase}deg_s2_sem`] ?? null), visible: true },
                             type: 'scatter', mode: 'lines+markers', name: `|ΔS${phase}|²`,
                             line: { color, width: 1.8, dash: phase === 0 ? 'dash' : 'dot' }, marker: { color, size: 7 },
                             connectgaps: false,
@@ -9113,14 +9165,14 @@
                     const label = this.syncArchiveNodeLabel(this.syncArchiveSlaveId);
                     const traces = [{
                         x: rows.map(row => Number(row.frequency_hz)), y: rows.map(row => row.phase_difference_magnitude_rad),
-                        error_y: { type: 'data', array: rows.map(row => row.phase_difference_magnitude_sem_rad ?? 0), visible: true },
+                        error_y: { type: 'data', array: rows.map(row => row.phase_difference_magnitude_sem_rad ?? null), visible: true },
                         type: 'scatter', mode: 'lines+markers', name: 'Quadrature |mean(Δφ)|',
                         line: { color: '#198754', width: 3 }, marker: { color: '#198754', size: 8, symbol: 'diamond' }, connectgaps: false,
                         hovertemplate: 'Frequency=%{x:.9g} Hz<br>√(mean(Δφ₀)² + mean(Δφ₉₀)²)=%{y:.6g} rad<extra></extra>'
                     }, ...[[0, '#c62828', 'dash'], [90, '#1565c0', 'dot']].map(([phase, color, dash]) => ({
                         x: rows.map(row => Number(row.frequency_hz)),
                         y: rows.map(row => Math.abs(row[`phase_difference_${phase}deg_mean_rad`])),
-                        error_y: { type: 'data', array: rows.map(row => row[`phase_difference_${phase}deg_sem_rad`] ?? 0), visible: true },
+                        error_y: { type: 'data', array: rows.map(row => row[`phase_difference_${phase}deg_sem_rad`] ?? null), visible: true },
                         type: 'scatter', mode: 'lines+markers', name: `|mean(Δφ)| ${phase}°`,
                         line: { color, width: 2, dash }, marker: { color, size: 7 }, connectgaps: false,
                         hovertemplate: `Frequency=%{x:.9g} Hz<br>|mean(φ<sub>M</sub> − φ<sub>S</sub>)| (${phase}°)=%{y:.6g} rad<extra></extra>`
@@ -9147,6 +9199,7 @@
                     const label = this.syncArchiveNodeLabel(this.syncArchiveSlaveId);
                     const traces = [{
                         x: rows.map(row => Number(row.frequency_hz)), y: rows.map(row => row.differential_path_s2),
+                        error_y: { type: 'data', array: rows.map(row => row.differential_path_s2_sem), visible: true },
                         type: 'scatter', mode: 'lines+markers', name: '|ΔΦ / [2Δk(LM−LS)]|²',
                         line: { color: '#198754', width: 3 }, marker: { color: '#198754', size: 8, symbol: 'diamond' }, connectgaps: false,
                         hovertemplate: 'Frequency=%{x:.9g} Hz<br>|ΔΦ / [2Δk(L<sub>M</sub>−L<sub>S</sub>)]|²=%{y:.6g}<extra></extra>'
@@ -9892,6 +9945,7 @@
                             phase_noise_summary: this.isPhaseNoiseArchive() && this.phaseNoiseSummary.length
                                 ? this.phaseNoiseSummary
                                 : null,
+                            transfer_function_differential_summary: this.isTransferFunctionArchive() && this.syncManifest ? this.syncArchiveTransferDifferentialRows() : null,
                             phase_noise_x_axis: this.phaseNoiseXAxis
                         }, { responseType: 'blob' });
                         const fallbackName = `miga_${this.sanitizeFilenamePart(this.selectedRun || this.loadedRunId || 'archive')}.lml`;
@@ -10036,7 +10090,7 @@
 
                 async exportTransferFunctionCSV() {
                     const rows = Array.isArray(this.transferFunctionSummary)
-                        ? this.transferFunctionSummary
+                        ? this.transferFunctionSummary.map(row => this.withTransferUncertainties(row))
                         : [];
                     if (!rows.length) {
                         this.errorMsg = 'Transfer Function CSV export failed: no response summary is available.';
@@ -10097,6 +10151,10 @@
                         ['Allan_Phase_Noise_Sigma_mrad', 'transfer_phase_noise_sigma_mrad'],
                         ['Delta_Phi2_Allan_Noise_Floor_Rad2', 'interferometer_phase_noise_phase2_rad2'],
                     ];
+                    const included = new Set(columns.map(([, field]) => field));
+                    [...new Set(rows.flatMap(row => Object.keys(row)))].forEach(field => {
+                        if (!included.has(field) && field !== 'interferometer_phase_s2_components') columns.push([field, field]);
+                    });
                     const csvRows = [
                         columns.map(([label]) => this.csvCell(label)).join(','),
                         ...rows.map(row => columns.map(([, field]) => this.csvCell(row?.[field] ?? '')).join(',')),
@@ -10611,7 +10669,7 @@
                 },
                 renderTransferFunctionArchivePlot() {
                     const rows = (Array.isArray(this.transferFunctionSummary) ? this.transferFunctionSummary : [])
-                        .slice().sort((a, b) => Number(a.frequency_hz) - Number(b.frequency_hz));
+                        .map(row => this.withTransferUncertainties(row)).sort((a, b) => Number(a.frequency_hz) - Number(b.frequency_hz));
                     const raw = this.showRawData;
                     const statistic = ['s2', 'phase2'].includes(this.transferFunctionStatistic) && this.currentTab === 'phase'
                         ? this.transferFunctionStatistic
@@ -10763,6 +10821,21 @@
                                 hovertemplate: `Frequency=%{x:.9g} Hz<br>${hoverStatisticLabel}=%{y:.6g}<br>n=%{text}<extra></extra>`
                             }];
                         }
+                        if (statistic !== 'std') traces.forEach(trace => {
+                            if (trace.name === 'Allan phase-noise floor') return;
+                            const phase = configuredPhases.find(value => trace.name.endsWith(`at ${value}°`));
+                            let errorField;
+                            if (['s2', 'phase2'].includes(statistic)) {
+                                const prefix = phase === undefined ? 'interferometer_phase' : `interferometer_phase_${phase}deg`;
+                                errorField = `${prefix}_${statistic === 's2' ? 's2_sem' : 'phase2_sem_rad2'}`;
+                            } else if (this.currentTab === 'phase') {
+                                errorField = phase === undefined ? 'interferometer_phase_sem' : `interferometer_phase_${phase}deg_sem_rad`;
+                            } else {
+                                const base = field.slice(0, -(statistic.length + 1));
+                                errorField = `${base}${phase === undefined ? '' : `_${phase}deg`}_sem`;
+                            }
+                            trace.error_y = { type: 'data', array: rows.map(row => numericOrNull(row[errorField]) === null ? null : Number(row[errorField]) * (statistic === 'mean' ? scale : 1)), visible: true };
+                        });
                         const base = this.buildCommonAnalysisLayout();
                         const isLastVisible = (this.currentTab === 'atoms' && index === 2)
                             || (this.currentTab === 'intf' && index === 1)

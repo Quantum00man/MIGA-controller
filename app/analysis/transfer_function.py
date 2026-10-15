@@ -12,7 +12,7 @@ SPEED_OF_LIGHT_M_S = 299_792_458.0
 DEFAULT_ATOM_MIRROR_DISTANCE_M = 2.23
 # Backward-compatible name for integrations that imported the former constant.
 ATOM_MIRROR_DISTANCE_M = DEFAULT_ATOM_MIRROR_DISTANCE_M
-SYNC_DIFFERENTIAL_FORMULA_VERSION = 9
+SYNC_DIFFERENTIAL_FORMULA_VERSION = 10
 
 
 METRIC_FIELDS = {
@@ -94,6 +94,71 @@ def differential_path_phase_modulation_rad(master: Dict[str, Any], slave: Dict[s
     ):
         return None
     return (4.0 * math.pi * modulation_hz / SPEED_OF_LIGHT_M_S) * distance_difference_m
+
+
+def add_transfer_function_uncertainties(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Enrich summaries in place; uncertainties assume independent repeated shots.
+
+    Squared means retain the second-order Gaussian term, including at a null.
+    Calibration uncertainties and correlations between quadratures are excluded.
+    """
+    def number(key):
+        try:
+            value = float(row.get(key))
+            return value if math.isfinite(value) else None
+        except (TypeError, ValueError):
+            return None
+
+    def square_error(mean, sem):
+        return math.hypot(2 * mean * sem, math.sqrt(2) * sem * sem) if mean is not None and sem is not None else None
+
+    def combine(keys):
+        values = [number(key) for key in keys]
+        return math.sqrt(sum(value ** 2 for value in values)) if all(value is not None for value in values) else None
+
+    for component in row.get('interferometer_phase_s2_components') or []:
+        phase = component.get('phase_deg')
+        if phase not in (0, 90):
+            continue
+        prefix = f'interferometer_phase_{int(phase)}deg'
+        for suffix, nested in (('_mean_rad', 'mean_rad'), ('_std_rad', 'std_rad'), ('_count', 'count')):
+            row.setdefault(prefix + suffix, component.get(nested))
+
+    for key in list(row):
+        if key.endswith('_std') or key.endswith('_std_rad'):
+            count_key = key.replace('_std_rad', '_count').replace('_std', '_count')
+            std, count = number(key), number(count_key)
+            sem_key = key.replace('_std_rad', '_sem_rad').replace('_std', '_sem')
+            row[sem_key] = std / math.sqrt(count) if std is not None and count is not None and count >= 2 else None
+
+    amplitude = number('bragg_phase_modulation_rad')
+    for label in ('0deg', '90deg'):
+        prefix = f'interferometer_phase_{label}'
+        error = square_error(number(prefix + '_mean_rad'), number(prefix + '_sem_rad'))
+        row[prefix + '_phase2_sem_rad2'] = error
+        row[prefix + '_s2_sem'] = error / amplitude ** 2 if error is not None and amplitude else None
+        for component in row.get('interferometer_phase_s2_components') or []:
+            if component.get('phase_deg') == float(label[:-3]):
+                component.update(sem_rad=row.get(prefix + '_sem_rad'), phase2_sem_rad2=error, s2_sem=row[prefix + '_s2_sem'])
+    for output, suffix in (('interferometer_phase_phase2_sem_rad2', '_phase2_sem_rad2'), ('interferometer_phase_s2_sem', '_s2_sem')):
+        row[output] = combine([f'interferometer_phase_{label}{suffix}' for label in ('0deg', '90deg')])
+    if not row.get('interferometer_phase_s2_components') and number('interferometer_phase_mean') is not None:
+        error = square_error(number('interferometer_phase_mean'), number('interferometer_phase_sem'))
+        row['interferometer_phase_phase2_sem_rad2'] = error
+        row['interferometer_phase_s2_sem'] = error / amplitude ** 2 if error is not None and amplitude else None
+
+    if 'slave_node_id' in row:
+        for label in ('0deg', '90deg'):
+            prefix = f'delta_s_{label}'
+            row[prefix + '_s2_sem'] = square_error(number(prefix + '_mean'), number(prefix + '_sem'))
+            prefix = f'phase_path_normalized_{label}'
+            row[prefix + '_s2_sem'] = square_error(number(prefix + '_mean'), number(prefix + '_sem'))
+        row['differential_s2_sem'] = combine([f'delta_s_{label}_s2_sem' for label in ('0deg', '90deg') if number(f'delta_s_{label}_mean') is not None]) if any(number(f'delta_s_{label}_mean') is not None for label in ('0deg', '90deg')) else None
+        row['differential_path_s2_sem'] = combine([f'phase_path_normalized_{label}_s2_sem' for label in ('0deg', '90deg')])
+        magnitude = number('differential_magnitude')
+        terms = [(number(f'delta_s_{label}_mean'), number(f'delta_s_{label}_sem')) for label in ('0deg', '90deg') if number(f'delta_s_{label}_mean') is not None]
+        row['differential_magnitude_sem'] = math.sqrt(sum((mean * sem) ** 2 for mean, sem in terms)) / magnitude if magnitude and all(sem is not None for _, sem in terms) else None
+    return row
 
 
 def build_transfer_function_summary(
@@ -281,7 +346,7 @@ def build_transfer_function_summary(
             )
         else:
             row["interferometer_phase_s2"] = None
-        rows.append(row)
+        rows.append(add_transfer_function_uncertainties(row))
     return rows
 
 
@@ -414,6 +479,9 @@ def build_differential_transfer_function_summary(
                 if phase_std is not None else None
             )
             means.append(mean)
+            path_std = float(np.std(path_values, ddof=1)) if len(path_values) >= 2 else None
+            row[f"phase_path_normalized_{label}_count"] = len(path_values)
+            row[f"phase_path_normalized_{label}_std"] = path_std
             path_mean = float(np.mean(path_values)) if path_values else None
             row[f"phase_path_normalized_{label}_mean"] = path_mean
             row[f"phase_path_normalized_{label}_s2"] = path_mean ** 2 if path_mean is not None else None
@@ -459,7 +527,7 @@ def build_differential_transfer_function_summary(
         else:
             row["phase_difference_magnitude_rad"] = None
             row["phase_difference_magnitude_sem_rad"] = None
-        rows.append(row)
+        rows.append(add_transfer_function_uncertainties(row))
     return rows
 
 

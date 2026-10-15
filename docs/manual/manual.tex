@@ -1157,6 +1157,20 @@ The run archive retains two complementary CSV products:
   calibrated phase statistics, the \ang{0}/\ang{90} phase statistics and $S^2$ components,
   the quadrature sum, $\Delta\nu_{780}$ and $\phi_\omega$.
 \end{itemize}
+Transfer Function exports retain both sample standard deviation (STD) and standard
+error of the mean (SEM), with $u(\bar{x})=s/\sqrt{n}$ for $n\geq2$ independent shots.
+Archive plots and LabPlot mean-response curves use SEM error bars; the STD curves
+remain available separately. For a squared mean $q=\bar{x}^2$, the exported standard
+uncertainty is $u(q)=\sqrt{4\bar{x}^2u(\bar{x})^2+2u(\bar{x})^4}$ under a Gaussian
+approximation. This retains a nonzero uncertainty near a response null. Independent
+quadrature uncertainties are combined in quadrature, and normalization factors are
+held fixed. These statistical uncertainties exclude calibration errors and drift.
+SYNC statistics are calculated from paired Master--Slave shots before averaging;
+its differential CSV and LabPlot exports include component STD/SEM, squared-response
+uncertainties, and path-normalized uncertainties. Undefined uncertainties (including
+fewer than two valid shots) remain missing. Magnitude uncertainties use first-order
+propagation away from zero and remain missing at exactly zero.
+
 The Archive \ui{CSV} action automatically selects this frequency-summary format for a
 Transfer Function run. For a legacy run, the Archive rebuilds the summary from its raw
 \pathcode{results.csv}; quantities that were never recorded, or $S^2$ without a usable

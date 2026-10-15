@@ -7,6 +7,7 @@ from collections import defaultdict
 from copy import deepcopy
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
+from app.analysis.transfer_function import add_transfer_function_uncertainties, build_differential_transfer_function_summary
 from app.core.labplot_export import Curve, Plot, Worksheet, build_project
 
 
@@ -172,6 +173,7 @@ def _transfer_curve(
     *,
     symbols: bool = True,
     line_style: int = 1,
+    error_field: Optional[str] = None,
 ) -> Optional[Curve]:
     x_values: List[float] = []
     y_values: List[float] = []
@@ -181,9 +183,23 @@ def _transfer_curve(
         if x is not None and y is not None:
             x_values.append(x)
             y_values.append(y)
+    if error_field is None:
+        if field.endswith('_mean'):
+            error_field = field[:-5] + '_sem'
+        elif field.endswith('_s2'):
+            error_field = field + '_sem'
+        elif field.endswith('_phase2_rad2'):
+            error_field = field.replace('_phase2_rad2', '_phase2_sem_rad2')
+    errors = [
+        _finite(row.get(error_field)) if error_field else None
+        for row in rows
+        if _finite(row.get('frequency_hz')) is not None and _finite(row.get(field)) is not None
+    ]
+    error_values = [value if value is not None else float('nan') for value in errors] if error_field and any(value is not None for value in errors) else None
     return Curve(
         label, x_values, y_values, color,
         symbols=symbols, line_style=line_style,
+        y_error_plus=error_values, y_error_minus=error_values,
     ) if x_values else None
 
 
@@ -202,19 +218,20 @@ def _transfer_phase_curve(
         "s2": f"interferometer_phase_{phase_label}_s2",
         "phase2": f"interferometer_phase_{phase_label}_phase2_rad2",
     }[statistic]
-    x_values: List[float] = []
-    y_values: List[float] = []
+    normalized = []
     for row in rows:
-        x = _finite(row.get("frequency_hz"))
+        item = dict(row)
         component = _transfer_component(row, phase_deg)
-        y = _finite(component.get(nested_key))
-        if y is None:
-            y = _finite(row.get(flat_key))
-        if x is not None and y is not None:
-            x_values.append(x)
-            y_values.append(y)
-    color = TRANSFER_PHASE_COLORS.get(phase_deg, COLORS[len(TRANSFER_PHASE_COLORS) % len(COLORS)])
-    return Curve(f"{phase_deg:g} deg", x_values, y_values, color) if x_values else None
+        if component.get(nested_key) is not None:
+            item[flat_key] = component[nested_key]
+        normalized.append(item)
+    error_field = {
+        'mean': f'interferometer_phase_{phase_label}_sem_rad',
+        's2': f'interferometer_phase_{phase_label}_s2_sem',
+        'phase2': f'interferometer_phase_{phase_label}_phase2_sem_rad2',
+    }.get(statistic)
+    return _transfer_curve(normalized, flat_key, f'{phase_deg:g} deg',
+        TRANSFER_PHASE_COLORS.get(phase_deg, COLORS[0]), error_field=error_field)
 
 
 def _transfer_statistic_curves(
@@ -245,7 +262,7 @@ def _transfer_function_worksheets(
     metrics: Sequence[str], source: str, rows: Sequence[Dict[str, Any]], x_label: str = "TTI carrier frequency (Hz)"
 ) -> List[Worksheet]:
     ordered_rows = sorted(
-        (row for row in rows if isinstance(row, dict)),
+        (add_transfer_function_uncertainties(deepcopy(row)) for row in rows if isinstance(row, dict)),
         key=lambda row: _finite(row.get("frequency_hz")) or 0.0,
     )
     phases = _transfer_phase_degrees(ordered_rows)
@@ -440,6 +457,26 @@ def _phase_noise_worksheets(
             ))
     if allan_plots:
         worksheets.append(Worksheet("Phase Noise - Allan Deviation", allan_plots))
+    return worksheets
+
+
+def _transfer_differential_worksheets(rows):
+    worksheets = []
+    for slave_id in sorted({str(row.get('slave_node_id', 'slave')) for row in rows}):
+        selected = sorted([add_transfer_function_uncertainties(deepcopy(row)) for row in rows if str(row.get('slave_node_id', 'slave')) == slave_id], key=lambda row: row['frequency_hz'])
+        definitions = [
+            ('SYNC Transfer S2', 'S2 (dimensionless)', [('differential_s2', 'Quadrature sum', 'differential_s2_sem'), ('delta_s_0deg_s2', '0 deg', 'delta_s_0deg_s2_sem'), ('delta_s_90deg_s2', '90 deg', 'delta_s_90deg_s2_sem')]),
+            ('SYNC Transfer Magnitude', 'Response magnitude', [('differential_magnitude', 'Magnitude', 'differential_magnitude_sem')]),
+            ('SYNC Phase Difference', 'Phase difference (rad)', [('phase_difference_magnitude_rad', 'Magnitude', 'phase_difference_magnitude_sem_rad'), ('phase_difference_0deg_mean_rad', '0 deg', 'phase_difference_0deg_sem_rad'), ('phase_difference_90deg_mean_rad', '90 deg', 'phase_difference_90deg_sem_rad')]),
+            ('SYNC Path S2', 'Path normalized S2', [('differential_path_s2', 'Quadrature sum', 'differential_path_s2_sem')]),
+            ('SYNC Standard Deviation', 'Sample standard deviation', [(f'delta_s_{phase}_std', f'Normalized {phase}', None) for phase in ('0deg', '90deg')]),
+            ('SYNC Phase Std', 'Phase standard deviation (rad)', [(f'phase_difference_{phase}_std_rad', phase, None) for phase in ('0deg', '90deg')]),
+            ('SYNC Path Std', 'Path normalized standard deviation', [(f'phase_path_normalized_{phase}_std', phase, None) for phase in ('0deg', '90deg')]),
+        ]
+        for title, ylabel, fields in definitions:
+            curves = [curve for index, (field, label, error) in enumerate(fields) if (curve := _transfer_curve(selected, field, label, COLORS[index % len(COLORS)], error_field=error))]
+            if curves:
+                worksheets.append(Worksheet(f'{title} - {slave_id}', [Plot(title, 'TTI carrier frequency (Hz)', ylabel, curves)]))
     return worksheets
 
 
@@ -674,6 +711,7 @@ def build_archive_project(
     transfer_function_summary: Optional[Sequence[Dict[str, Any]]] = None,
     phase_noise_summary: Optional[Sequence[Dict[str, Any]]] = None,
     phase_noise_x_axis: str = "t2",
+    transfer_function_differential_summary: Optional[Sequence[Dict[str, Any]]] = None,
 ) -> bytes:
     loaded_root = loader.load_run(
         year, month, day, run_id, current_phase_calibration=current_phase_calibration
@@ -690,6 +728,12 @@ def build_archive_project(
         burst_time_scan = str(config_data.get("mode") or "").strip().lower() == "transfer_burst_time_scan"
         x_label = "P0" if burst_time_scan else "TTI carrier frequency (Hz)"
         worksheets = _transfer_function_worksheets(selected, source, summary, x_label=x_label)
+        if include_differential and 'phase' in selected:
+            manifest = loaded_root.get('sync_manifest') or {}
+            differential = transfer_function_differential_summary
+            if differential is None:
+                differential = build_differential_transfer_function_summary(manifest.get('pairs') or []) if manifest.get('pairs') else manifest.get('transfer_function_differential_summary') or []
+            worksheets.extend(_transfer_differential_worksheets(differential))
         power_worksheet = _power_meter_worksheet(loaded_root.get("data") or [])
         if power_worksheet:
             worksheets.append(power_worksheet)
@@ -706,6 +750,8 @@ def build_archive_project(
         comment = (
             f"Transfer Function archive {year}-{month}-{day}/{run_id}; source={source}; "
             f"x={x_label}{'; ' + normalization_comment if normalization_comment else ''}; "
+            "SEM statistical error bars (independent shots/quadratures; fixed calibration); "
+            "squared means include second-order Gaussian uncertainty; STD curves retained; "
             "generated for LabPlot 2.12.1"
         )
         return build_project(project_name, worksheets, comment=comment)

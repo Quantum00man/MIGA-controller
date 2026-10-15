@@ -1176,6 +1176,7 @@ async def export_archive_labplot(req: ArchiveLabPlotExportRequest):
             req.transfer_function_summary,
             req.phase_noise_summary,
             req.phase_noise_x_axis,
+            req.transfer_function_differential_summary,
         )
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc))
