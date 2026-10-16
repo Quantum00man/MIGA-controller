@@ -8949,7 +8949,9 @@
                     const saved = Array.isArray(this.syncManifest?.transfer_function_differential_summary)
                         ? this.syncManifest.transfer_function_differential_summary : [];
                     const previewScale = this.syncTransferNormalizationOptimization?.result?.scale_after;
-                    if (saved.length && Number(this.syncManifest?.transfer_function_differential_formula_version) >= 10 && !this.syncArchiveHasPhaseOverrides() && !this.syncAnalysisCopy.selectedId && !Object.keys(this.syncTransferNormalization?.slave_scales || {}).length && !Number.isFinite(Number(previewScale))) {
+                    // Version 9 already has the current response definition. Adding
+                    // uncertainty columns must not invalidate its recorded S² values.
+                    if (saved.length && Number(this.syncManifest?.transfer_function_differential_formula_version) >= 9 && !this.syncArchiveHasPhaseOverrides() && !this.syncAnalysisCopy.selectedId && !Object.keys(this.syncTransferNormalization?.slave_scales || {}).length && (previewScale === null || previewScale === undefined || previewScale === '' || !Number.isFinite(Number(previewScale)))) {
                         return saved.filter(row => !selectedSlave || String(row.slave_node_id || '') === selectedSlave)
                             .map(row => this.withTransferUncertainties(row)).sort((a, b) => Number(a.frequency_hz) - Number(b.frequency_hz));
                     }
@@ -8961,9 +8963,18 @@
                     this.syncArchivePairs().forEach(pair => {
                         const master = pair.master || {};
                         const slave = pair.slave || {};
+                        if ([master, slave].some(record => record.transfer_zero_phase_baseline
+                            || record.intf_alpha_calibration_block_id !== null && record.intf_alpha_calibration_block_id !== undefined
+                            || record.power_meter_invalid_reason === 'threshold_exceeded' || record.error)) return;
                         if (master.interferometer_phase_valid !== true || slave.interferometer_phase_valid !== true) return;
-                        const frequency = Number(master.transfer_frequency_hz ?? slave.transfer_frequency_hz);
-                        const phase = Number(master.transfer_phase_deg ?? slave.transfer_phase_deg);
+                        if ([master, slave].some(record => record.interferometer_phase === null
+                            || record.interferometer_phase === undefined || record.interferometer_phase === ''
+                            || !Number.isFinite(Number(record.interferometer_phase)))) return;
+                        const frequencyValue = master.transfer_frequency_hz ?? slave.transfer_frequency_hz;
+                        const phaseValue = master.transfer_phase_deg ?? slave.transfer_phase_deg;
+                        if ([frequencyValue, phaseValue].some(value => value === null || value === undefined || value === '')) return;
+                        const frequency = Number(frequencyValue);
+                        const phase = Number(phaseValue);
                         if (!Number.isFinite(frequency) || ![0, 90].includes(phase)) return;
                         const normalized = record => {
                             const phaseValue = Number(record.interferometer_phase);

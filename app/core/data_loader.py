@@ -17,7 +17,10 @@ from app.analysis import (
     bragg_fringe_calibration, fitting, physics, interferometer_phase, phase_noise,
     interferometer_alpha,
 )
-from app.analysis.transfer_function import build_transfer_function_summary
+from app.analysis.transfer_function import (
+    add_transfer_function_uncertainties, build_differential_transfer_function_summary,
+    build_transfer_function_summary, is_transfer_response_record,
+)
 from app.analysis.lock_in import build_lock_in_analysis
 import config
 
@@ -35,9 +38,7 @@ class DataLoader:
         """Return formal transfer shots, retaining calibration shots in raw archive data."""
         return [
             point for point in points
-            if not self._is_transfer_zero_phase_baseline(point)
-            and point.get("intf_alpha_calibration_block_id") is None
-            and str(point.get("power_meter_invalid_reason") or "") != "threshold_exceeded"
+            if is_transfer_response_record(point)
         ]
 
     @staticmethod
@@ -1196,28 +1197,122 @@ class DataLoader:
         self,
         sync_manifest: Optional[Dict[str, Any]],
         contexts: Dict[str, Dict[str, Any]],
+        root_run_dir: Optional[Path] = None,
     ) -> Optional[Dict[str, Any]]:
         if not sync_manifest:
             return sync_manifest
         output = deepcopy(sync_manifest)
+        # Process a node's complete series together: Transfer Function zeroing
+        # needs its FM-off shots, which need not have a corresponding SYNC pair.
+        references: Dict[str, List[Tuple[Any, Any]]] = {}
+        node_results = output.get("node_results") or {}
+        for node_key, records in [("master", node_results.get("master"))] + list(
+            (node_results.get("slaves") or {}).items()
+        ):
+            if isinstance(records, list):
+                references.setdefault(str(node_key), []).extend(
+                    (records, index) for index, record in enumerate(records) if isinstance(record, dict)
+                )
+        for pair in output.get("pairs") or []:
+            for role, node_key in (("master", "master"), ("slave", str(pair.get("slave_node_id") or ""))):
+                if isinstance(pair.get(role), dict):
+                    references.setdefault(node_key, []).append((pair, role))
 
-        def convert(record: Any, node_key: str) -> Any:
+        for node_key, locations in references.items():
             context = contexts.get(node_key) or {}
             calibration = context.get("effective_calibration")
-            if not isinstance(record, dict) or not isinstance(calibration, dict):
-                return record
-            return interferometer_phase.apply_phase(record, calibration)
+            if not isinstance(calibration, dict):
+                continue
+            records = [container[key] for container, key in locations]
+            node_dir = None
+            settings: Dict[str, Any] = {}
+            if root_run_dir is not None:
+                try:
+                    node_dir = self._resolve_archive_node_dir(root_run_dir, node_key)
+                    settings = self._load_config_data(node_dir)
+                except (FileNotFoundError, ValueError):
+                    pass
+            is_transfer = str(settings.get("mode") or "").strip().lower() in {
+                "transfer_function", "transfer_burst_time_scan"
+            } or any(record.get("transfer_frequency_hz") is not None
+                     or record.get("transfer_zero_phase_baseline") for record in records)
+            if not is_transfer:
+                for container, key in locations:
+                    container[key] = interferometer_phase.apply_phase(container[key], calibration)
+                continue
+            # Recorded TF phases already include run-local zeroing. Even the
+            # original fringe calibration must not overwrite them on a plain load.
+            if not context.get("has_override") and any(
+                record.get("interferometer_phase") is not None
+                for record in self._transfer_response_points(records)
+            ):
+                continue
 
-        for pair in output.get("pairs") or []:
-            pair["master"] = convert(pair.get("master"), "master")
-            slave_key = str(pair.get("slave_node_id") or "")
-            pair["slave"] = convert(pair.get("slave"), slave_key)
-        node_results = output.get("node_results") or {}
-        if isinstance(node_results.get("master"), list):
-            node_results["master"] = [convert(record, "master") for record in node_results["master"]]
-        for slave_key, records in (node_results.get("slaves") or {}).items():
-            if isinstance(records, list):
-                node_results["slaves"][slave_key] = [convert(record, str(slave_key)) for record in records]
+            def identity(record):
+                if record.get("sync_shot_index") is not None:
+                    return ("sync", str(record["sync_shot_index"]))
+                if record.get("step") is not None:
+                    return ("step", str(record["step"]))
+                return ("record", json.dumps(record, sort_keys=True, default=str))
+
+            unique = {identity(record): record for record in records}
+            baselines = [record for record in unique.values() if self._is_transfer_zero_phase_baseline(record)]
+            if node_dir is not None:
+                # CSV baselines include unpaired shots and are authoritative.
+                # Do not mix them with compact copies and count a baseline twice.
+                csv_baselines = [record for record in self._read_results_csv(node_dir, max_points=None)
+                                 if self._is_transfer_zero_phase_baseline(record)]
+                if csv_baselines:
+                    baselines = csv_baselines
+            baseline_converted = [interferometer_phase.apply_phase(record, calibration) for record in baselines]
+            science = [record for record in unique.values() if not self._is_transfer_zero_phase_baseline(record)]
+            converted = [interferometer_phase.apply_phase(record, calibration) for record in science]
+            prepared = self._rebase_converted_transfer_phases(
+                baseline_converted + converted, settings, calibration
+            )[len(baseline_converted):]
+            processed = {identity(record): interferometer_phase.apply_phase(record, calibration)
+                         for record in unique.values() if self._is_transfer_zero_phase_baseline(record)}
+            mode = str(settings.get("transfer_zero_phase_reference_mode") or "recorded").lower()
+            probability_baseline = int(settings.get("transfer_baseline_calibration_version") or 0) >= 2
+            valid_blocks = {self._parse_int(record.get("transfer_zero_phase_block_id"), -1)
+                            for record in baseline_converted
+                            if self._parse_float(record.get("intf_p1") if probability_baseline
+                                                 else record.get("interferometer_phase")) is not None}
+            for original, result in zip(science, prepared):
+                block = self._parse_int(original.get("transfer_zero_phase_block_id"), -1)
+                selected_block = self._parse_int(settings.get("transfer_zero_phase_reference_block_id"), -1)
+                needs_baseline = (block >= 0 or bool(settings.get("transfer_calibrate_zero_phase"))
+                                  or settings.get("_transfer_zero_phase_rad") is not None)
+                missing = (selected_block if mode == "block" else block) not in valid_blocks
+                if mode == "manual":
+                    missing = self._parse_float(settings.get("transfer_zero_phase_reference_rad")) is None
+                if needs_baseline and missing:
+                    # An unzeroed phase is not a valid TF response. Preserve raw
+                    # diagnostics rather than silently plotting a biased result.
+                    result["interferometer_phase"] = None
+                    result["interferometer_phase_valid"] = False
+                    result["transfer_zero_phase_reference_missing"] = True
+                processed[identity(original)] = result
+            for container, key in locations:
+                container[key] = deepcopy(processed.get(identity(container[key]), container[key]))
+        if int(output.get("transfer_function_differential_formula_version") or 0) >= 9:
+            # Old summaries lack path STD/SEM. Supplement only when corrected
+            # paired data reproduce the recorded component mean; never replace
+            # historical response values merely to populate an error column.
+            rebuilt = {(row["slave_node_id"], row["frequency_hz"]): row
+                       for row in build_differential_transfer_function_summary(output.get("pairs") or [])}
+            for row in output.get("transfer_function_differential_summary") or []:
+                current = rebuilt.get((row.get("slave_node_id"), row.get("frequency_hz"))) or {}
+                for phase in ("0deg", "90deg"):
+                    prefix = f"phase_path_normalized_{phase}"
+                    stored_mean = self._parse_float(row.get(prefix + "_mean"))
+                    current_mean = self._parse_float(current.get(prefix + "_mean"))
+                    if stored_mean is not None and current_mean is not None and math.isclose(
+                        stored_mean, current_mean, rel_tol=1e-10, abs_tol=1e-12
+                    ):
+                        for statistic in ("count", "std", "sem"):
+                            row.setdefault(f"{prefix}_{statistic}", current.get(f"{prefix}_{statistic}"))
+                add_transfer_function_uncertainties(row)
         return output
 
     def _apply_sync_analysis_copy(
@@ -2220,7 +2315,7 @@ class DataLoader:
             if is_phase_noise else []
         )
         phase_noise_series = self._phase_noise_series(science_points) if is_phase_noise else []
-        sync_manifest = self._apply_sync_phase_reference_overrides(sync_manifest, phase_contexts)
+        sync_manifest = self._apply_sync_phase_reference_overrides(sync_manifest, phase_contexts, root_run_dir)
         bragg_calibration_result = None
         bragg_calibration_path = run_dir / "bragg_fringe_calibration.json"
         if bragg_calibration_path.is_file():

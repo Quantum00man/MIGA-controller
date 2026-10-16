@@ -732,7 +732,16 @@ def build_archive_project(
             manifest = loaded_root.get('sync_manifest') or {}
             differential = transfer_function_differential_summary
             if differential is None:
-                differential = build_differential_transfer_function_summary(manifest.get('pairs') or []) if manifest.get('pairs') else manifest.get('transfer_function_differential_summary') or []
+                scales = (loaded_root.get('sync_transfer_normalization') or {}).get('slave_scales') or {}
+                has_override = any(context.get('has_override') for context in
+                                   (loaded_root.get('archive_phase_reference_contexts') or {}).values())
+                saved = manifest.get('transfer_function_differential_summary') or []
+                if saved and int(manifest.get('transfer_function_differential_formula_version') or 0) >= 9 and not (
+                    has_override or scales or loaded_root.get('selected_sync_analysis_copy')
+                ):
+                    differential = saved
+                else:
+                    differential = build_differential_transfer_function_summary(manifest.get('pairs') or [], scales)
             worksheets.extend(_transfer_differential_worksheets(differential))
         power_worksheet = _power_meter_worksheet(loaded_root.get("data") or [])
         if power_worksheet:

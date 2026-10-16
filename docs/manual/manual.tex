@@ -1171,6 +1171,16 @@ uncertainties, and path-normalized uncertainties. Undefined uncertainties (inclu
 fewer than two valid shots) remain missing. Magnitude uncertainties use first-order
 propagation away from zero and remain missing at exactly zero.
 
+For SYNC Transfer Function archives, ordinary loading preserves the recorded,
+already zero-referenced phases. Version-9 differential summaries remain compatible
+when uncertainty columns are added. An explicit phase-reference or calibration
+change recalculates each node using its own FM-off baseline, including unpaired
+baseline shots retained in the node archive. Baseline and I-alpha calibration shots,
+failed shots and invalid power-monitor attempts do not enter newly calculated
+response statistics. When a required baseline is unavailable, the recalculated
+phase is invalid rather than an unzeroed response. Controller and Archive Server
+use the same loading and export rules; raw archive files are not rewritten.
+
 The Archive \ui{CSV} action automatically selects this frequency-summary format for a
 Transfer Function run. For a legacy run, the Archive rebuilds the summary from its raw
 \pathcode{results.csv}; quantities that were never recorded, or $S^2$ without a usable

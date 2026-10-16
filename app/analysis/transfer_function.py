@@ -350,6 +350,16 @@ def build_transfer_function_summary(
     return rows
 
 
+def is_transfer_response_record(record: Dict[str, Any]) -> bool:
+    """Match the Archive's science-shot selection before pairing statistics."""
+    return (
+        not record.get("transfer_zero_phase_baseline", False)
+        and record.get("intf_alpha_calibration_block_id") is None
+        and str(record.get("power_meter_invalid_reason") or "") != "threshold_exceeded"
+        and not record.get("error")
+    )
+
+
 def build_differential_transfer_function_summary(
     pairs: Iterable[Dict[str, Any]],
     slave_normalization_scales: Optional[Dict[str, Any]] = None,
@@ -359,6 +369,8 @@ def build_differential_transfer_function_summary(
     for pair in pairs:
         master = pair.get("master") or {}
         slave = pair.get("slave") or {}
+        if not all(is_transfer_response_record(record) for record in (master, slave)):
+            continue
         if not (_value(master, ("interferometer_phase",)) is not None
                 and _value(slave, ("interferometer_phase",)) is not None):
             continue
