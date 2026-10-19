@@ -69,3 +69,11 @@ const app = Object.assign(options.data(), methods, {
 })().catch(error => {console.error(error); process.exitCode = 1});
 """
     subprocess.run([node, '-e', script], cwd=root, check=True, capture_output=True, text=True)
+
+
+def test_analysis_results_distinguishes_loaded_data_from_calibration_host():
+    page = (Path(__file__).resolve().parents[1] / 'static/archive.html').read_text()
+    assert "Data node: {{ syncArchiveNodeLabel(loadedSyncNode || 'master') }}" in page
+    assert "Calibration host: {{ syncArchiveNodeLabel(syncArchiveNodeSource) }}" in page
+    assert "A complete archive for this node has not been loaded" in page
+    assert "phase-reference changes apply to the selected calibration host" in page

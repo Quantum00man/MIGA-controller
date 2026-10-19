@@ -2456,7 +2456,8 @@
                                 <span v-if="loadedRunId" class="badge" :class="displayMode === 'saved' ? 'bg-secondary' : 'bg-warning text-dark'">
                                     {{ analysisSnapshotRestored && (plotMode === 'allan' || phaseNoiseStatistic === 'allan') ? 'Saved analysis snapshot' : (displayMode === 'saved' ? 'Saved Results' : 'Recalculated') }}
                                 </span>
-                                <span v-if="syncManifest" class="badge bg-primary">Node: {{ syncArchiveNodeLabel(loadedSyncNode || 'master') }}</span>
+                                <span v-if="syncManifest" class="badge bg-primary">Data node: {{ syncArchiveNodeLabel(loadedSyncNode || 'master') }}</span>
+                                <span v-if="syncManifest && syncArchiveNodeSource !== (loadedSyncNode || 'master')" class="badge bg-warning text-dark">Calibration host: {{ syncArchiveNodeLabel(syncArchiveNodeSource) }}</span>
                                 <div class="btn-group btn-group-sm">
                                     <button class="btn btn-outline-primary fw-bold" @click="exportCSV"
                                         :disabled="!loadedRunId"><i class="bi bi-file-earmark-spreadsheet-fill"></i>
@@ -2630,6 +2631,9 @@
                             </div>
                         </div>
 
+                        <div v-if="syncManifest && syncArchiveNodeSource !== (loadedSyncNode || 'master')" class="alert alert-warning mx-3 mt-3 mb-2 small" role="status">
+                            Calibration host is {{ syncArchiveNodeLabel(syncArchiveNodeSource) }}. A complete archive for this node has not been loaded; Analysis Results below still uses {{ syncArchiveNodeLabel(loadedSyncNode || 'master') }} data. The SYNC plots above use paired node records, and phase-reference changes apply to the selected calibration host.
+                        </div>
                         <div v-if="loadedRunId && showAnalysisTools()" class="analysis-tools">
                             <div v-if="showAllanToolbar()" class="slice-toolbar">
                                 <div class="d-flex align-items-center gap-2">
