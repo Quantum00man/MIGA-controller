@@ -5974,15 +5974,18 @@ finishScheduledRun(finalStatus = 'IDLE') {
                             }
                             if (statistic === 'phase2' && phases.length > 0) {
                                 const sigmaRad = Number(this.transferPhaseNoiseSigmaMrad) / 1000;
-                                const noiseFloor = Number.isFinite(sigmaRad) && sigmaRad >= 0
-                                    ? phases.length * sigmaRad ** 2 : null;
+                                const noiseFloor = point => {
+                                    const counts = phases.map(phaseDeg => (point.phaseData?.[Number(phaseDeg).toPrecision(15)]?.[field] || []).length);
+                                    return Number.isFinite(sigmaRad) && sigmaRad >= 0 && counts.every(count => count > 0)
+                                        ? counts.reduce((sum, count) => sum + sigmaRad ** 2 / count, 0) : null;
+                                };
                                 traces.push({
                                     x: points.map(point => point.frequency),
-                                    y: points.map(() => noiseFloor),
+                                    y: points.map(point => noiseFloor(point)),
                                     customdata: points.map(point => phases.map(phaseDeg => (
                                         point.phaseData?.[Number(phaseDeg).toPrecision(15)]?.[field] || []
                                     ).length).join('/')),
-                                    type: 'scatter', mode: 'lines', name: 'Allan phase-noise floor',
+                                    type: 'scatter', mode: 'lines', name: 'SEM² noise floor',
                                     line: { color: '#343a40', width: 2.4, dash: 'dash' },
                                     connectgaps: false,
                                     hovertemplate: `${this.transferResponseAxisLabel()}=%{x:.9g}<br>Noise floor=%{y:.6g} rad²<br>n=%{customdata}<extra></extra>`
@@ -6477,7 +6480,11 @@ finishScheduledRun(finalStatus = 'IDLE') {
                             const available = [deltaS0, deltaS90].filter(value => value !== null);
                             const availablePath = [path0, path90].filter(value => value !== null);
                             const pathNoiseValues = [0, 90]
-                                .map(phase => this.sampleMean(group.pathNoiseS2[phase]))
+                                .map(phase => {
+                                    const count = group.pathComponents[phase].length;
+                                    const noise = this.sampleMean(group.pathNoiseS2[phase]);
+                                    return count > 0 && group.pathNoiseS2[phase].length === count && noise !== null ? noise / count : null;
+                                })
                                 .filter(value => value !== null);
                             return {
                                 ...group, deltaS0, deltaS90,
@@ -6586,7 +6593,7 @@ finishScheduledRun(finalStatus = 'IDLE') {
                         });
                         traces.push({
                             x: selected.map(row => row.frequency), y: selected.map(row => row.differentialPathNoiseS2),
-                            type: 'scatter', mode: 'lines', name: `${slaveId} Allan phase-noise floor`,
+                            type: 'scatter', mode: 'lines', name: `${slaveId} SEM² noise floor`,
                             line: { color: '#343a40', width: 2.4, dash: 'dash' }, connectgaps: false,
                             hovertemplate: 'Frequency=%{x:.9g} Hz<br>Noise floor=%{y:.6g} (dimensionless)<extra></extra>'
                         });

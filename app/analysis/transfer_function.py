@@ -96,6 +96,67 @@ def differential_path_phase_modulation_rad(master: Dict[str, Any], slave: Dict[s
     return (4.0 * math.pi * modulation_hz / SPEED_OF_LIGHT_M_S) * distance_difference_m
 
 
+def add_transfer_function_sem_noise_floor(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Migrate single-shot squared noise to variance of the mean exactly once.
+
+    Responses and their error bars are unchanged. Legacy summaries need actual
+    valid counts; missing counts never imply a guessed averaging factor.
+    """
+    if row.get('noise_floor_sem_version') == 1:
+        return row
+
+    def number(key):
+        try:
+            value = float(row.get(key))
+            return value if math.isfinite(value) else None
+        except (TypeError, ValueError):
+            return None
+
+    def divide(key, count):
+        value = number(key)
+        return value / count if value is not None and count is not None and count > 0 else None
+
+    labels = ('0deg', '90deg')
+    if 'slave_node_id' in row:
+        for base, output in (('delta_s', 'differential_noise_s2'), ('phase_path_normalized', 'differential_path_noise_s2')):
+            active, floors = [], []
+            for label in labels:
+                prefix = f'{base}_{label}'
+                count = number(prefix + '_count')
+                if count is None and base == 'phase_path_normalized' and number(prefix + '_mean') is not None:
+                    count = number(f'delta_s_{label}_count')
+                key = prefix + '_noise_s2'
+                row[key] = divide(key, count)
+                if count is not None and count > 0:
+                    active.append(label)
+                    floors.append(row[key])
+            complete = len(active) == 2 if base == 'phase_path_normalized' else bool(active)
+            row[output] = sum(floors) if complete and all(value is not None for value in floors) else None
+    else:
+        components = row.get('interferometer_phase_s2_components') or []
+        counts = [component.get('count') if component.get('count') is not None else (
+            number(f"interferometer_phase_{int(component['phase_deg'])}deg_count")
+            if component.get('phase_deg') in (0, 90) else None) for component in components]
+        if not counts:
+            counts = [number(f'interferometer_phase_{label}_count') for label in labels
+                      if (number(f'interferometer_phase_{label}_count') or 0) > 0]
+        if not counts:
+            counts = [number('interferometer_phase_count')]
+        try:
+            factor = sum(1 / float(count) for count in counts) / len(counts) if all(count is not None and math.isfinite(float(count)) and float(count) > 0 for count in counts) else None
+        except (TypeError, ValueError):
+            factor = None
+        phase2 = number('interferometer_phase_noise_phase2_rad2')
+        normalized = number('interferometer_phase_noise_s2')
+        row['interferometer_phase_noise_phase2_rad2'] = phase2 * factor if phase2 is not None and factor is not None else None
+        amplitude = number('bragg_phase_modulation_rad')
+        row['interferometer_phase_noise_s2'] = normalized * factor if normalized is not None and factor is not None else (
+            row['interferometer_phase_noise_phase2_rad2'] / amplitude ** 2
+            if row['interferometer_phase_noise_phase2_rad2'] is not None and amplitude and amplitude > 0 else None)
+    row['noise_floor_sem_version'] = 1
+    return row
+
+
 def add_transfer_function_uncertainties(row: Dict[str, Any]) -> Dict[str, Any]:
     """Enrich summaries in place; uncertainties assume independent repeated shots.
 
@@ -158,7 +219,7 @@ def add_transfer_function_uncertainties(row: Dict[str, Any]) -> Dict[str, Any]:
         magnitude = number('differential_magnitude')
         terms = [(number(f'delta_s_{label}_mean'), number(f'delta_s_{label}_sem')) for label in ('0deg', '90deg') if number(f'delta_s_{label}_mean') is not None]
         row['differential_magnitude_sem'] = math.sqrt(sum((mean * sem) ** 2 for mean, sem in terms)) / magnitude if magnitude and all(sem is not None for _, sem in terms) else None
-    return row
+    return add_transfer_function_sem_noise_floor(row)
 
 
 def build_transfer_function_summary(
@@ -477,7 +538,7 @@ def build_differential_transfer_function_summary(
             )
             noise_values = components[phase_deg]["noise_s2"]
             row[f"delta_s_{label}_noise_s2"] = (
-                float(np.mean(noise_values)) if noise_values else None
+                float(np.mean(noise_values)) if noise_values and len(noise_values) == len(values) else None
             )
             phase_mean = float(np.mean(phase_values)) if phase_values else None
             phase_std = (
@@ -499,7 +560,7 @@ def build_differential_transfer_function_summary(
             row[f"phase_path_normalized_{label}_s2"] = path_mean ** 2 if path_mean is not None else None
             path_means.append(path_mean)
             path_noise_values = components[phase_deg]["path_noise_s2"]
-            path_noise_floor = float(np.mean(path_noise_values)) if path_noise_values else None
+            path_noise_floor = float(np.mean(path_noise_values)) if path_noise_values and len(path_noise_values) == len(path_values) else None
             row[f"phase_path_normalized_{label}_noise_s2"] = path_noise_floor
             path_noise_floors.append(path_noise_floor)
         available = [value for value in means if value is not None]

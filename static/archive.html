@@ -8995,6 +8995,37 @@
                         row.differential_magnitude_sem = magnitude && available.every(label => number(`delta_s_${label}_sem`) !== null)
                             ? Math.hypot(...available.map(label => number(`delta_s_${label}_mean`) * number(`delta_s_${label}_sem`))) / magnitude : null;
                     }
+                    if (row.noise_floor_sem_version !== 1) {
+                        const labels = ['0deg', '90deg'];
+                        if (row.slave_node_id !== undefined) {
+                            [['delta_s', 'differential_noise_s2'], ['phase_path_normalized', 'differential_path_noise_s2']].forEach(([base, output]) => {
+                                const active = [];
+                                labels.forEach(label => {
+                                    const prefix = `${base}_${label}`;
+                                    let count = number(`${prefix}_count`);
+                                    if (count === null && base === 'phase_path_normalized' && number(`${prefix}_mean`) !== null) count = number(`delta_s_${label}_count`);
+                                    const noise = number(`${prefix}_noise_s2`);
+                                    row[`${prefix}_noise_s2`] = noise !== null && count !== null && count > 0 ? noise / count : null;
+                                    if (count !== null && count > 0) active.push(row[`${prefix}_noise_s2`]);
+                                });
+                                const complete = base === 'phase_path_normalized' ? active.length === 2 : active.length > 0;
+                                row[output] = complete && active.every(value => value !== null) ? active.reduce((sum, value) => sum + value, 0) : null;
+                            });
+                        } else {
+                            const components = row.interferometer_phase_s2_components || [];
+                            let counts = components.map(component => component.count ?? number(`interferometer_phase_${component.phase_deg}deg_count`));
+                            if (!counts.length) counts = labels.map(label => number(`interferometer_phase_${label}_count`)).filter(count => count !== null && count > 0);
+                            if (!counts.length) counts = [number('interferometer_phase_count')];
+                            const factor = counts.every(count => count !== null && Number.isFinite(Number(count)) && Number(count) > 0)
+                                ? counts.reduce((sum, count) => sum + 1 / Number(count), 0) / counts.length : null;
+                            const phase2 = number('interferometer_phase_noise_phase2_rad2');
+                            const normalized = number('interferometer_phase_noise_s2');
+                            row.interferometer_phase_noise_phase2_rad2 = phase2 !== null && factor !== null ? phase2 * factor : null;
+                            row.interferometer_phase_noise_s2 = normalized !== null && factor !== null ? normalized * factor
+                                : (row.interferometer_phase_noise_phase2_rad2 !== null && amplitude !== null && amplitude > 0 ? row.interferometer_phase_noise_phase2_rad2 / amplitude ** 2 : null);
+                        }
+                        row.noise_floor_sem_version = 1;
+                    }
                     return row;
                 },
                 syncArchiveTransferDifferentialRows() {
@@ -9099,17 +9130,17 @@
                     return [...groups.values()].sort((a, b) => a.frequency_hz - b.frequency_hz).map(group => {
                         const zero = statistics(group.values[0]);
                         const ninety = statistics(group.values[90]);
-                        const zeroNoiseS2 = group.noise_s2[0].length
+                        const zeroNoiseS2 = group.noise_s2[0].length && group.noise_s2[0].length === zero.count
                             ? group.noise_s2[0].reduce((sum, value) => sum + value, 0) / group.noise_s2[0].length : null;
-                        const ninetyNoiseS2 = group.noise_s2[90].length
+                        const ninetyNoiseS2 = group.noise_s2[90].length && group.noise_s2[90].length === ninety.count
                             ? group.noise_s2[90].reduce((sum, value) => sum + value, 0) / group.noise_s2[90].length : null;
                         const phaseDifferenceZero = statistics(group.phase_differences[0]);
                         const phaseDifferenceNinety = statistics(group.phase_differences[90]);
                         const pathZero = statistics(group.path_normalized[0]);
                         const pathNinety = statistics(group.path_normalized[90]);
-                        const pathNoiseZero = group.path_noise_s2[0].length
+                        const pathNoiseZero = group.path_noise_s2[0].length && group.path_noise_s2[0].length === pathZero.count
                             ? group.path_noise_s2[0].reduce((sum, value) => sum + value, 0) / group.path_noise_s2[0].length : null;
-                        const pathNoiseNinety = group.path_noise_s2[90].length
+                        const pathNoiseNinety = group.path_noise_s2[90].length && group.path_noise_s2[90].length === pathNinety.count
                             ? group.path_noise_s2[90].reduce((sum, value) => sum + value, 0) / group.path_noise_s2[90].length : null;
                         const phaseDifferenceMagnitude = phaseDifferenceZero.mean === null || phaseDifferenceNinety.mean === null
                             ? null : Math.hypot(phaseDifferenceZero.mean, phaseDifferenceNinety.mean);
@@ -9215,7 +9246,7 @@
                     ['0deg', '90deg'].forEach(phase => {
                         ['count', 'mean', 'std', 'sem', 's2', 's2_sem', 'noise_s2'].forEach(stat => fields.push(`delta_s_${phase}_${stat}`));
                     });
-                    fields.push('differential_s2', 'differential_s2_sem', 'differential_noise_s2',
+                    fields.push('noise_floor_sem_version', 'differential_s2', 'differential_s2_sem', 'differential_noise_s2',
                         'differential_magnitude', 'differential_magnitude_sem', 'quadrature_complete');
                     ['0deg', '90deg'].forEach(phase => {
                         ['count', 'mean_rad', 'std_rad', 'sem_rad'].forEach(stat => fields.push(`phase_difference_${phase}_${stat}`));
@@ -9249,7 +9280,7 @@
                     traces.push({
                         x: rows.map(row => Number(row.frequency_hz)),
                         y: rows.map(row => row.differential_noise_s2),
-                        type: 'scatter', mode: 'lines', name: 'Allan phase-noise floor',
+                        type: 'scatter', mode: 'lines', name: 'SEM² noise floor',
                         line: { color: '#343a40', width: 2.4, dash: 'dash' },
                         connectgaps: false,
                         hovertemplate: 'Frequency=%{x:.9g} Hz<br>Noise floor=%{y:.6g} (dimensionless)<extra></extra>'
@@ -9339,7 +9370,7 @@
                         hovertemplate: 'Frequency=%{x:.9g} Hz<br>|ΔΦ / [2Δk(L<sub>M</sub>−L<sub>S</sub>)]|²=%{y:.6g}<extra></extra>'
                     }, {
                         x: rows.map(row => Number(row.frequency_hz)), y: rows.map(row => row.differential_path_noise_s2),
-                        type: 'scatter', mode: 'lines', name: 'Allan phase-noise floor',
+                        type: 'scatter', mode: 'lines', name: 'SEM² noise floor',
                         line: { color: '#343a40', width: 2.4, dash: 'dash' }, connectgaps: false,
                         hovertemplate: 'Frequency=%{x:.9g} Hz<br>Noise floor=%{y:.6g} (dimensionless)<extra></extra>'
                     }];
@@ -10233,6 +10264,7 @@
                     const columns = [
                         [String(this.loadedConfig?.mode || '').trim().toLowerCase() === 'transfer_burst_time_scan' ? 'P0' : 'Frequency_Hz', 'frequency_hz'],
                         ['Shot_Count', 'shot_count'],
+                        ['Noise_Floor_SEM_Version', 'noise_floor_sem_version'],
                         ['Frequency_Modulation_MHz_780nm', 'frequency_modulation_mhz'],
                         ['Atom_Mirror_Distance_M', 'atom_mirror_distance_m'],
                         ['Bragg_Phase_Modulation_Rad', 'bragg_phase_modulation_rad'],
@@ -10280,10 +10312,10 @@
                         ['S2_90deg', 'interferometer_phase_90deg_s2'],
                         ['Delta_Phi2_90deg_Rad2', 'interferometer_phase_90deg_phase2_rad2'],
                         ['S2_Quadrature_Sum', 'interferometer_phase_s2'],
-                        ['S2_Allan_Noise_Floor', 'interferometer_phase_noise_s2'],
+                        ['S2_SEM2_Noise_Floor', 'interferometer_phase_noise_s2'],
                         ['Delta_Phi2_Quadrature_Sum_Rad2', 'interferometer_phase_phase2_rad2'],
                         ['Allan_Phase_Noise_Sigma_mrad', 'transfer_phase_noise_sigma_mrad'],
-                        ['Delta_Phi2_Allan_Noise_Floor_Rad2', 'interferometer_phase_noise_phase2_rad2'],
+                        ['Delta_Phi2_SEM2_Noise_Floor_Rad2', 'interferometer_phase_noise_phase2_rad2'],
                     ];
                     // Keep public CSV labels independent of internal analysis keys.
                     const squaredErrors = {
@@ -10937,7 +10969,7 @@
                                     y: noiseFloorValues,
                                     customdata: rows.map(row => this.getHistoryKey([Number(row.frequency_hz)])),
                                     text: rows.map(row => configuredPhases.map(phaseDeg => Number(componentFor(row, phaseDeg)?.count || 0)).join('/')),
-                                    type: 'scatter', mode: 'lines', name: 'Allan phase-noise floor',
+                                    type: 'scatter', mode: 'lines', name: 'SEM² noise floor',
                                     line: { color: '#343a40', width: 2.4, dash: 'dash' },
                                     connectgaps: false,
                                     hovertemplate: `Frequency=%{x:.9g} Hz<br>Noise floor=%{y:.6g} ${statistic === 's2' ? '(dimensionless)' : 'rad²'}<br>n=%{text}<extra></extra>`
@@ -10988,7 +11020,7 @@
                             }];
                         }
                         if (statistic !== 'std') traces.forEach(trace => {
-                            if (trace.name === 'Allan phase-noise floor') return;
+                            if (trace.name === 'SEM² noise floor') return;
                             const phase = configuredPhases.find(value => trace.name.endsWith(`at ${value}°`));
                             let errorField;
                             if (['s2', 'phase2'].includes(statistic)) {

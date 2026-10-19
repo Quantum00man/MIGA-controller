@@ -335,7 +335,7 @@ def _transfer_function_worksheets(
         noise_floor = _transfer_curve(
             ordered_rows,
             "interferometer_phase_noise_s2",
-            "Allan phase-noise floor",
+            "SEM² noise floor",
             FIT_COLOR,
             symbols=False,
             line_style=2,
@@ -359,7 +359,7 @@ def _transfer_function_worksheets(
         noise_floor = _transfer_curve(
             ordered_rows,
             "interferometer_phase_noise_phase2_rad2",
-            "Allan phase-noise floor",
+            "SEM² noise floor",
             FIT_COLOR,
             symbols=False,
             line_style=2,

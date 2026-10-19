@@ -121,6 +121,7 @@ def transfer_summary():
             phase_label = f"{int(phase_deg)}deg"
             component = {
                 "phase_deg": phase_deg,
+                "count": 4,
                 "mean_rad": factor * index / 10,
                 "std_rad": factor * index / 100,
                 "s2": factor * index,
@@ -288,18 +289,18 @@ class LabPlotExportTests(unittest.TestCase):
             "Interferometer Phase Squared",
         })
         s2_curves = [item.attrib["name"] for item in worksheets["Transfer Function S2"].iter("xyCurve")]
-        self.assertEqual(s2_curves, ["0 deg", "90 deg", "Quadrature sum", "Allan phase-noise floor"])
+        self.assertEqual(s2_curves, ["0 deg", "90 deg", "Quadrature sum", "SEM² noise floor"])
         phase2_curves = [
             item.attrib["name"]
             for item in worksheets["Interferometer Phase Squared"].iter("xyCurve")
         ]
         self.assertEqual(
             phase2_curves,
-            ["0 deg", "90 deg", "Quadrature sum", "Allan phase-noise floor"],
+            ["0 deg", "90 deg", "Quadrature sum", "SEM² noise floor"],
         )
         noise_curve = next(
             item for item in worksheets["Interferometer Phase Squared"].iter("xyCurve")
-            if item.attrib["name"] == "Allan phase-noise floor"
+            if item.attrib["name"] == "SEM² noise floor"
         )
         self.assertEqual(noise_curve.find("lines").attrib["style"], "2")
         self.assertEqual(noise_curve.find("symbols").attrib["symbolsStyle"], "0")
