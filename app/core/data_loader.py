@@ -1105,6 +1105,7 @@ class DataLoader:
         monotonic_slope_value: str,
         current_phase_calibration: Optional[Dict[str, Any]] = None,
         selected_phase_calibration: Optional[Dict[str, Any]] = None,
+        amplitude: Optional[float] = None,
     ) -> Dict[str, Any]:
         root_run_dir = self._get_run_dir(year, month, day, run_id)
         sync_manifest = self._load_sync_manifest_payload(root_run_dir)
@@ -1133,6 +1134,20 @@ class DataLoader:
             current_effective if isinstance(context, dict) and context.get("has_override") and isinstance(current_effective, dict) else original
         )
         calibration = deepcopy(base_calibration)
+        if amplitude is not None:
+            amplitude = float(amplitude)
+            if not math.isfinite(amplitude) or amplitude <= 0:
+                raise ValueError("Fringe amplitude A must be a positive finite number")
+            calibration.setdefault("parameter_values", {})["A"] = amplitude
+            # Keep the saved preview consistent with the effective conversion.
+            fit_x = calibration.get("fit_x") or []
+            if fit_x:
+                params = calibration["parameter_values"]
+                omega = float(calibration["bragg"]["angular_frequency_rad_per_us2"])
+                calibration["fit_y"] = [
+                    float(params["C"]) + amplitude * math.cos(omega * float(x) + float(params["phi0"]))
+                    for x in fit_x
+                ]
         calibration.update({
             "reference_input_mode": mode,
             "reference_value": numeric_value,

@@ -2393,6 +2393,11 @@
                                         <span v-if="archivePhaseReferenceDraft.id === settingsActivePhaseCalibrationId" class="badge bg-primary ms-1">Settings active</span><br>
                                         A={{ formatPhaseNumber(archivePhaseReferenceDraft.parameter_values?.A) }}, C={{ formatPhaseNumber(archivePhaseReferenceDraft.parameter_values?.C) }}, ω={{ formatPhaseNumber(archivePhaseReferenceDraft.bragg?.angular_frequency_rad_per_us2) }} rad/(μs)², φ₀={{ formatPhaseNumber(archivePhaseReferenceDraft.parameter_values?.phi0) }} rad
                                     </div>
+                                    <label class="form-label-small">Fringe amplitude A</label>
+                                    <input type="number" min="0" step="any" class="form-control mb-2"
+                                        v-model.number="archivePhaseReferenceDraft.parameter_values.A"
+                                        @input="renderArchivePhaseReferencePlot" aria-label="Fringe amplitude A">
+                                    <div class="form-text mb-3">Half the peak-to-peak fringe range, in the selected signal's units ({{ archivePhaseReferenceDraft.metric_label || 'Signal' }}). Changes phase sensitivity; the measured local probability baseline stays at zero. Apply &amp; recalculate to save.</div>
                                     <h6 class="fw-bold mb-2">Reference point</h6>
                                     <div class="row g-2 mb-2">
                                         <div class="col-4"><label class="form-label-small">Input</label><select class="form-select" v-model="archivePhaseReferenceDraft.reference_input_mode" @change="syncArchivePhaseReferenceFromT2"><option value="t">T</option><option value="t2">T²</option></select></div>
@@ -7457,7 +7462,7 @@
                     const positiveMid = mid.filter(value => this.archivePhaseSlopeAtT2(value) === 'positive');
                     const branchRange = this.archivePhaseBranchT2Range();
                     const traces = [
-                        { x: draft.fit_x, y: draft.fit_y, mode: 'lines', name: 'Fitted fringe', line: { color: '#0d6efd', width: 2.5 } },
+                        { x: draft.fit_x, y: draft.fit_x.map(x => offset + amplitude * Math.cos(omega * Number(x) + phi0)), mode: 'lines', name: 'Fitted fringe', line: { color: '#0d6efd', width: 2.5 } },
                         { x: negativeMid, y: negativeMid.map(() => offset), mode: 'markers', name: 'Negative-slope mid fringes', customdata: negativeMid, marker: { color: '#dc3545', size: 10, symbol: 'triangle-down' }, hovertemplate: 'T²=%{x:.8g} (μs)²<br>Negative slope<extra>Click to select</extra>' },
                         { x: positiveMid, y: positiveMid.map(() => offset), mode: 'markers', name: 'Positive-slope mid fringes', customdata: positiveMid, marker: { color: '#fd7e14', size: 10, symbol: 'triangle-up' }, hovertemplate: 'T²=%{x:.8g} (μs)²<br>Positive slope<extra>Click to select</extra>' },
                         { x: [reference], y: [referenceSignal], mode: 'markers', name: 'Reference', marker: { color: '#198754', size: 15, symbol: 'circle-open', line: { width: 3 } }, hovertemplate: 'Reference T²=%{x:.8g} (μs)²<br>Signal=%{y:.6g}<extra></extra>' }
@@ -7479,6 +7484,12 @@
                         this.archivePhaseReferenceMessage = 'Reference value must be a non-negative number.';
                         return;
                     }
+                    const amplitude = Number(this.archivePhaseReferenceDraft.parameter_values.A);
+                    if (!Number.isFinite(amplitude) || amplitude <= 0) {
+                        this.archivePhaseReferenceError = true;
+                        this.archivePhaseReferenceMessage = 'Fringe amplitude A must be a positive finite number.';
+                        return;
+                    }
                     this.archivePhaseReferenceBusy = true;
                     this.archivePhaseReferenceMessage = '';
                     this.archivePhaseReferenceError = false;
@@ -7489,6 +7500,7 @@
                             node_id: node || null,
                             calibration_id: this.archivePhaseReferenceSelectedCalibrationId.startsWith('settings:')
                                 ? this.archivePhaseReferenceSelectedCalibrationId.slice(9) : null,
+                            amplitude,
                             reference_input_mode: this.archivePhaseReferenceDraft.reference_input_mode,
                             reference_value: value,
                             reference_t_unit: this.archivePhaseReferenceDraft.reference_t_unit,

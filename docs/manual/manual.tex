@@ -1649,6 +1649,14 @@ The ordinary series view wraps the difference to $(-\pi,\pi]$. Optimization unwr
 chronological sequence because the expected physical differential phase is an unknown
 constant and a wrap boundary must not create artificial noise.
 
+The \ui{Reference fringe} panel accepts a positive finite \ui{Fringe amplitude A},
+initialized from the selected calibration: half the peak-to-peak range in the selected
+signal's units. \ui{Apply \& recalculate} saves a run-local, per-node Archive override
+and recalculates phases, including Transfer Function baseline correction. The measured
+local probability baseline remains zero; amplitude changes sensitivity, nonlinear response
+and the valid signal envelope. The preview follows the entered amplitude.
+\ui{Restore experiment reference} restores the original calibration.
+
 \subsection{Why optimize $A$ and $C$}
 Equation~\eqref{eq:archive-phase} shows that changing only $\omega$ or $\phi_0$ changes a
 constant reference term and therefore cannot change standard deviation or first-order

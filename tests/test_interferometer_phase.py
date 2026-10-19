@@ -201,6 +201,48 @@ class InterferometerPhaseTests(unittest.TestCase):
         self.assertIn("offset + amplitude * Math.cos(omega * reference + phi0)", settings_html)
         self.assertIn("y: [referenceSignal]", settings_html)
 
+    def test_manual_amplitude_override_preserves_baseline_and_original(self):
+        cal = calibration(fit_x=[0.0, 100.0], fit_y=[0.0, 0.0])
+        original_config = {"_interferometer_phase_calibration_snapshot": cal}
+        loader = DataLoader()
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            config_path = run_dir / "config.json"
+            config_path.write_text(json.dumps(original_config), encoding="utf-8")
+            with patch.object(loader, "_get_run_dir", return_value=run_dir):
+                for invalid in (0, -1, float("nan"), float("inf")):
+                    with self.assertRaises(ValueError):
+                        loader.save_archive_phase_reference_override(
+                            "2026", "08", "26", "run01", None, "t2", 100, "us", "negative",
+                            amplitude=invalid,
+                        )
+                context = loader.save_archive_phase_reference_override(
+                    "2026", "08", "26", "run01", None, "t2", 100, "us", "negative",
+                    amplitude=40.0,
+                )
+                effective = context["effective_calibration"]
+                self.assertEqual(effective["parameter_values"]["A"], 40.0)
+                self.assertEqual(context["original_calibration"]["parameter_values"]["A"], 20.0)
+                self.assertAlmostEqual(effective["fit_y"][0], 50 + 40 * math.cos(0.2))
+                points = [
+                    {"transfer_zero_phase_baseline": True, "transfer_zero_phase_block_id": 0, "intf_p1": 51.0},
+                    {"transfer_zero_phase_block_id": 0, "intf_p1": 51.0},
+                    {"transfer_zero_phase_block_id": 0, "intf_p1": 55.0},
+                ]
+                converted = loader._apply_transfer_zero_phase_reference(
+                    points, {"transfer_baseline_calibration_version": 2}, effective,
+                )
+                self.assertAlmostEqual(converted[1]["interferometer_phase"], 0.0)
+                self.assertAlmostEqual(converted[2]["interferometer_phase"], -math.asin(4 / 40))
+                retained = loader.save_archive_phase_reference_override(
+                    "2026", "08", "26", "run01", None, "t2", 110, "us", "negative",
+                )
+                self.assertEqual(retained["effective_calibration"]["parameter_values"]["A"], 40.0)
+                self.assertEqual(json.loads(config_path.read_text()), original_config)
+                loader.delete_archive_phase_reference_override("2026", "08", "26", "run01", None)
+                contexts = loader.archive_phase_reference_contexts("2026", "08", "26", "run01")
+                self.assertEqual(contexts["archive"]["effective_calibration"]["parameter_values"]["A"], 20.0)
+
     def test_archive_reference_override_is_sidecar_and_restorable(self):
         cal = calibration(phase_conversion_mode="monotonic_half_fringe")
         original_config = {"scan_dimensions": 1, "_interferometer_phase_calibration_snapshot": cal}

@@ -342,6 +342,7 @@ async def save_archive_phase_reference_override(req: ArchivePhaseReferenceOverri
             req.monotonic_slope,
             current_phase_calibration=manager.get_active_bragg_phase_calibration(),
             selected_phase_calibration=selected_calibration,
+            amplitude=req.amplitude,
         )
         sync_result = await _synchronize_archive_phase_metadata(
             req.year, req.month, req.day, req.run_id, request

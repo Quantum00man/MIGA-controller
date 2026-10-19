@@ -1164,6 +1164,8 @@ class ArchivePhaseReferenceOverrideRequest(BaseModel):
     reference_t_unit: str = Field("us")
     monotonic_slope: str = Field("negative")
 
+    amplitude: Optional[float] = Field(None, gt=0, allow_inf_nan=False)
+
 
 class BraggPhaseInputPoint(BaseModel):
     p0: float
