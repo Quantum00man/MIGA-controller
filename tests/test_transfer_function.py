@@ -669,7 +669,7 @@ class TransferFunctionStatisticsTests(unittest.TestCase):
         self.assertIn("`${labels[index]} ${statisticLabel} at ${phaseDeg}°`", archive_html)
         self.assertIn("isSquareSummaryArchive()", archive_html)
         self.assertIn("return this.isPhaseNoiseArchive() || this.isTransferFunctionArchive()", archive_html)
-        self.assertIn('v-show="!isSquareSummaryArchive()"', archive_html)
+        self.assertIn('v-show="!isSquareSummaryArchive() || transferTof.open"', archive_html)
         self.assertIn("transferFunctionStatistic: 'std'", index_html)
         self.assertIn("transferFunctionYAxisScale: 'linear'", index_html)
         self.assertIn("setTransferFunctionStatistic('s2')", index_html)

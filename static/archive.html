@@ -2837,7 +2837,7 @@
                     </div>
                 </div>
 
-                <div v-show="!isSquareSummaryArchive()" class="card border-0 shadow-sm" :class="{'maximized': maximizedView === 'scope'}">
+                <div id="selectedWaveformCard" v-show="!isSquareSummaryArchive() || transferTof.open" class="card border-0 shadow-sm" :class="{'maximized': maximizedView === 'scope'}">
                     <div class="waveform-header card-header bg-light py-2 d-flex justify-content-between align-items-center">
                         <div class="d-flex align-items-center"><i class="bi bi-activity me-2 text-danger"></i><span
                                 class="fw-bold">Selected Waveform</span></div>
@@ -2861,6 +2861,21 @@
                             <span v-else class="small text-muted fst-italic"><i class="bi bi-cursor me-1"></i>Click a
                                 data point above</span>
                         </div>
+                    </div>
+                    <div v-if="transferTof.open" class="border-bottom px-3 py-2">
+                        <div class="d-flex flex-wrap align-items-center gap-2">
+                            <strong class="small">Transfer Function TOF</strong>
+                            <select v-if="syncManifest" class="form-select form-select-sm" style="width:auto" aria-label="TOF node" v-model="transferTof.node" @change="changeTransferTofNode" :disabled="isLoadingWaveforms"><option v-for="node in transferTofNodes()" :value="node">{{ syncArchiveNodeLabel(node) }}</option></select>
+                            <select class="form-select form-select-sm" style="width:auto" aria-label="TOF generator phase" v-model="transferTof.phase" @change="changeTransferTofPhase" :disabled="isLoadingWaveforms"><option value="all">All phases</option><option :value="0">0°</option><option :value="90">90°</option></select>
+                            <select class="form-select form-select-sm" style="width:auto;max-width:330px" aria-label="TOF shot" v-model.number="transferTof.shot" @change="showTransferTofShot" :disabled="isLoadingWaveforms"><option v-for="row in transferTofShots()" :key="row.step" :value="Number(row.step)">Shot {{ row.sync_shot_index ?? row.step }} · {{ row.transfer_phase_deg }}° · step {{ row.step }}</option></select>
+                            <button class="btn btn-outline-secondary btn-sm" @click="stepTransferTof(-1)" :disabled="isLoadingWaveforms || !transferTofShots().length || Number(transferTof.shot) === Number(transferTofShots()[0]?.step)">Previous</button>
+                            <button class="btn btn-outline-secondary btn-sm" @click="stepTransferTof(1)" :disabled="isLoadingWaveforms || !transferTofShots().length || Number(transferTof.shot) === Number(transferTofShots().at(-1)?.step)">Next</button>
+                            <label class="form-check-label small"><input class="form-check-input me-1" type="checkbox" v-model="showTofRawCurve">Raw</label>
+                            <label class="form-check-label small"><input class="form-check-input me-1" type="checkbox" v-model="showTofFitCurve">Fit</label>
+                            <button class="btn btn-outline-secondary btn-sm ms-auto" @click="closeTransferTof">Close</button>
+                        </div>
+                        <div class="small text-muted mt-1">Each TF point summarizes repeated shots. Inspect one saved raw/fit TOF at a time; UP and DOWN are shown below. Phase-invalid shots remain available for inspection.</div>
+                        <div v-if="transferTof.error" class="alert alert-warning small py-2 mt-2 mb-0">{{ transferTof.error }}</div>
                     </div>
                     <div class="card-body p-0 position-relative">
                         <div v-if="isLoadingWaveforms" class="loading-overlay">
@@ -3129,6 +3144,7 @@
                     runLogViewer: { open: false, loading: false, error: '', events: [], selected: null, summary: null, anomalyCount: 0, focusIndex: -1, nodes: [], levels: [], eventNames: [], search: '', node: '', level: '', event: '', anomaliesOnly: false },
                     shareLinkMessage: '', shareLinkError: false,
                     labPlotExport: { open: false, metrics: [], source: 'fit', includeFits: true, includeDifferential: true, busy: false, error: '' },
+                    transferTof: {open: false, frequency: null, node: '', phase: 'all', shot: '', rows: [], error: '', request: 0}, waveformRequestId: 0,
                     currentWaveforms: [],
                     selectedAllanWindow: null,
                     loadedPoints: [], currentCalculatedPoints: [], originalSettings: {}, loadedConfig: {}, currentScanDimensions: 1,
@@ -6530,6 +6546,7 @@
                 },
 
                 async loadRun(requestedNodeId = '', requestedAnalysisCopyId = '') {
+                    this.transferTof.open = false; this.transferTof.request++; this.waveformRequestId++; this.isLoadingWaveforms = false;
                     if (!this.selectedRun) return;
                     const requestedSyncNode = typeof requestedNodeId === 'string' ? requestedNodeId : '';
                     const previousSyncNode = String(this.loadedSyncNode || this.syncArchiveNodeSource || '');
@@ -7048,6 +7065,7 @@
                 },
 
                 async refreshWaveformPreview() {
+                    if (this.transferTof.open) { await this.showTransferTofShot(); return; }
                     const keys = Array.isArray(this.selectedPointKeys) && this.selectedPointKeys.length
                         ? this.selectedPointKeys.filter(key => this.historyMap[key])
                         : (this.selectedPointKey && this.historyMap[this.selectedPointKey] ? [this.selectedPointKey] : []);
@@ -7138,6 +7156,111 @@
                     this.publicationColumn = window.MigaPlotStyle?.setColumn(column) || (column === 'single' ? 'single' : 'double');
                 },
 
+                transferTofNodes() {
+                    return this.syncManifest ? ['master', ...this.syncArchiveSlaveOptions()] : [''];
+                },
+                transferTofShots() {
+                    const state = this.transferTof;
+                    return state.rows.filter(row => state.phase === 'all' || Number(row.transfer_phase_deg) === Number(state.phase));
+                },
+                async openTransferTof(point) {
+                    if (!this.isTransferFunctionArchive() || point?.data?.meta?.nonSelectable || /noise floor/i.test(point?.data?.name || '')) return;
+                    const frequency = Number(point?.x);
+                    if (!Number.isFinite(frequency)) return;
+                    const state = this.transferTof;
+                    state.open = true; state.frequency = frequency; state.error = '';
+                    if (this.maximizedView) this.maximizedView = 'scope';
+                    state.node = this.syncManifest ? (point?.data?.meta?.transferNode || this.loadedSyncNode || 'master') : '';
+                    const phase = point?.data?.meta?.transferPhase;
+                    state.phase = phase === 0 || phase === 90 ? phase : 'all';
+                    state.shot = ''; state.rows = []; this.currentWaveforms = [];
+                    this.selectedPointKeys = []; this.selectedPointKey = '';
+                    await this.changeTransferTofNode();
+                    this.$nextTick(() => {
+                        document.getElementById('selectedWaveformCard')?.scrollIntoView({behavior: 'smooth', block: 'start'});
+                        if (typeof Plotly !== 'undefined') { Plotly.Plots.resize('waveformPlotUp'); Plotly.Plots.resize('waveformPlotDw'); }
+                    });
+                },
+                clearTransferTofWaveform() {
+                    this.currentWaveforms = []; this.selectedPointLabel = '';
+                    if (typeof Plotly !== 'undefined') {
+                        Plotly.react('waveformPlotUp', [], this.layoutOscUp);
+                        Plotly.react('waveformPlotDw', [], this.layoutOscDw);
+                    }
+                },
+                async changeTransferTofNode() {
+                    const state = this.transferTof;
+                    state.error = ''; state.shot = ''; state.rows = []; this.clearTransferTofWaveform();
+                    const request = ++state.request;
+                    const frequency = state.frequency;
+                    const node = state.node;
+                    const ref = [this.selectedYear, this.selectedMonth, this.selectedDay, this.selectedRun].join('/');
+                    this.isLoadingWaveforms = true;
+                    try {
+                        let rows;
+                        if (!this.syncManifest || node === this.loadedSyncNode) {
+                            rows = this.syncManifest && this.loadedSyncNodeData?.length ? this.loadedSyncNodeData : this.loadedPoints;
+                        } else {
+                            const cached = this.syncArchiveNodeRows?.(node);
+                            const matching = Array.isArray(cached) ? cached.filter(row => row.transfer_frequency_hz != null && Math.abs(Number(row.transfer_frequency_hz) - frequency) <= 1e-9 * Math.max(1, Math.abs(frequency))) : [];
+                            if (matching.length && matching.every(row => row.step != null && Number.isInteger(Number(row.step)))) {
+                                rows = cached;
+                            } else {
+                                const response = await axios.get(`/archive/load/${ref}?node_id=${encodeURIComponent(node)}`);
+                                rows = response.data.archive_node_data || response.data.data || [];
+                            }
+                        }
+                        if (request !== state.request || !state.open) return;
+                        state.rows = rows.filter(row => {
+                            const value = Number(row.transfer_frequency_hz);
+                            return row.transfer_frequency_hz !== null && row.transfer_frequency_hz !== undefined && Number.isFinite(value)
+                                && Math.abs(value - frequency) <= 1e-9 * Math.max(1, Math.abs(frequency))
+                                && !row.transfer_zero_phase_baseline && row.intf_alpha_calibration_block_id == null
+                                && !row.error && row.power_meter_invalid_reason !== 'threshold_exceeded'
+                                && row.step !== null && row.step !== undefined && Number.isInteger(Number(row.step));
+                        }).sort((a, b) => Number(a.step) - Number(b.step));
+                        await this.changeTransferTofPhase();
+                    } catch (error) {
+                        if (request === state.request) state.error = error.response?.data?.detail || error.message;
+                    } finally { if (request === state.request) this.isLoadingWaveforms = false; }
+                },
+                async changeTransferTofPhase() {
+                    this.clearTransferTofWaveform();
+                    const shots = this.transferTofShots();
+                    this.transferTof.shot = shots.length ? Number(shots[0].step) : '';
+                    if (!shots.length) { this.transferTof.error = 'No archived science shots with TOF indices match this selection.'; this.currentWaveforms = []; return; }
+                    await this.showTransferTofShot();
+                },
+                async showTransferTofShot() {
+                    const state = this.transferTof;
+                    const row = this.transferTofShots().find(item => Number(item.step) === Number(state.shot));
+                    if (!state.open || !row || state.shot === '') return;
+                    state.error = ''; this.clearTransferTofWaveform();
+                    const context = `${state.request}:${state.node}:${state.phase}:${state.shot}`;
+                    const nodeLabel = this.syncManifest ? this.syncArchiveNodeLabel(state.node) : 'This archive';
+                    this.selectedPointLabel = `${nodeLabel} · ${this.getArchiveXAxisLabel()}=${state.frequency} · ${row.transfer_phase_deg}° · shot ${row.sync_shot_index ?? row.step} · step ${row.step} · saved TOF`;
+                    this.selectedCount = 1;
+                    const loaded = await this.loadWaveforms([Number(row.step)], {nodeId: state.node, savedOnly: true});
+                    if (loaded === false && context === `${state.request}:${state.node}:${state.phase}:${state.shot}`) state.error = this.errorMsg || 'Archived TOF could not be loaded.';
+                },
+                async stepTransferTof(direction) {
+                    const shots = this.transferTofShots();
+                    const index = shots.findIndex(row => Number(row.step) === Number(this.transferTof.shot));
+                    const next = index + direction;
+                    if (next < 0 || next >= shots.length) return;
+                    this.transferTof.shot = Number(shots[next].step);
+                    await this.showTransferTofShot();
+                },
+                closeTransferTof() {
+                    this.transferTof.open = false; this.transferTof.request++;
+                    if (this.maximizedView === 'scope') this.maximizedView = '';
+                    this.waveformRequestId++; this.isLoadingWaveforms = false;
+                    this.currentWaveforms = []; this.selectedPointLabel = '';
+                    if (typeof Plotly !== 'undefined') {
+                        Plotly.react('waveformPlotUp', [], this.layoutOscUp);
+                        Plotly.react('waveformPlotDw', [], this.layoutOscDw);
+                    }
+                },
                 async onPlotClick(data) {
                     if (!data || !data.points) return;
                     if (this.plotMode === 'allan') return;
@@ -7147,6 +7270,8 @@
                         return;
                     }
                     if (point?.data?.meta?.nonSelectable) return;
+                    if (this.isTransferFunctionArchive()) { await this.openTransferTof(point); return; }
+                    this.transferTof.open = false;
                     const keys = this.resolveClickedKeys(point);
                     const indices = this.collectHistoryIndices(keys);
                     if (indices.length) {
@@ -7167,20 +7292,23 @@
                     }
                 },
 
-                async loadWaveforms(indices) {
+                async loadWaveforms(indices, options = {}) {
                     if (!this.selectedRun || !indices || !indices.length) return;
+                    const requestId = this.waveformRequestId = (Number(this.waveformRequestId) || 0) + 1;
+                    const nodeId = options.nodeId ?? this.loadedSyncNode;
                     this.isLoadingWaveforms = true;
                     try {
                         let responses = [];
-                        if (this.displayMode === 'recalculated') {
-                            const res = await axios.post('/archive/waveforms/recalculate', this.buildArchivePayload({ step_indices: indices }));
+                        if (this.displayMode === 'recalculated' && !options.savedOnly) {
+                            const res = await axios.post('/archive/waveforms/recalculate', this.buildArchivePayload({ step_indices: indices, node_id: nodeId || null }));
                             responses = Array.isArray(res.data?.data) ? res.data.data : [];
                         } else {
-                            const waveformQuery = this.loadedSyncNode ? `?node_id=${encodeURIComponent(this.loadedSyncNode)}` : '';
+                            const waveformQuery = nodeId ? `?node_id=${encodeURIComponent(nodeId)}` : '';
                             const requests = indices.map(idx => axios.get(`/archive/waveform/${this.selectedYear}/${this.selectedMonth}/${this.selectedDay}/${this.selectedRun}/${idx}${waveformQuery}`));
                             const fetched = await Promise.all(requests);
                             responses = fetched.map((res, index) => ({ step: indices[index], ...res.data }));
                         }
+                        if (requestId !== this.waveformRequestId) return false;
                         const normalizedResponses = responses.map((data, index) =>
                             this.normalizeWaveformResponse(data, indices[index], index)
                         );
@@ -7255,13 +7383,13 @@
                         // 最后绘制数据
                         Plotly.react('waveformPlotUp', tracesUp, this.layoutOscUp);
                         Plotly.react('waveformPlotDw', tracesDw, this.layoutOscDw);
+                        return true;
 
                     } catch (e) {
                         console.error(e);
-                        if (e.response?.data?.detail) {
-                            this.errorMsg = "Waveform Preview Failed: " + e.response.data.detail;
-                        }
-                    } finally { this.isLoadingWaveforms = false; }
+                        if (requestId === this.waveformRequestId) this.errorMsg = "Waveform Preview Failed: " + (e.response?.data?.detail || e.message);
+                        return false;
+                    } finally { if (requestId === this.waveformRequestId) this.isLoadingWaveforms = false; }
                 },
 
                 calcStats(arr) {
@@ -8467,7 +8595,7 @@
                         const traces = [{
                             x: fit.map(point => point.x), y: fit.map(point => point.y),
                             text: fit.map(point => `${point.count} shot${point.count === 1 ? '' : 's'}`),
-                            type: 'scatter', mode: 'lines+markers', name: `${label} (Fit)`,
+                            type: 'scatter', mode: 'lines+markers', name: `${label} (Fit)`, meta: {transferNode: source},
                             line: { color, width: 2.5 }, marker: { color, size: 8 }, connectgaps: false,
                         }];
                         if (this.showRawData) {
@@ -8475,7 +8603,7 @@
                             traces.push({
                                 x: raw.map(point => point.x), y: raw.map(point => point.y),
                                 text: raw.map(point => `${point.count} shot${point.count === 1 ? '' : 's'}`),
-                                type: 'scatter', mode: 'lines+markers', name: `${label} (NoFit)`,
+                                type: 'scatter', mode: 'lines+markers', name: `${label} (NoFit)`, meta: {transferNode: source},
                                 line: { color, width: 1.2, dash: 'dot' },
                                 marker: { color, size: 6, symbol: 'circle-open', opacity: 0.65 }, connectgaps: false,
                             });
@@ -8494,6 +8622,8 @@
                             legend: { orientation: 'h', x: 1, xanchor: 'right', y: 1.12 }, hovermode: 'closest',
                             paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
                         }, { responsive: true, displaylogo: false });
+                        if (element.removeAllListeners) element.removeAllListeners('plotly_click');
+                        element.on('plotly_click', event => this.openTransferTof(event?.points?.[0]));
                     };
                     renderChannel('up', 'syncArchiveNodePlotUp');
                     renderChannel('dw', 'syncArchiveNodePlotDw');
@@ -8549,6 +8679,7 @@
                                     type: 'scatter', mode: 'lines+markers',
                                     name: generatorPhase === null ? name : `${name} · ${generatorPhase}°`,
                                     legendgroup: `${definition.id}:${generatorPhase ?? 'series'}`,
+                                    meta: {transferNode: definition.kind === 'host' ? definition.id : null, transferPhase: generatorPhase},
                                     line: { color: definition.color, width: definition.kind === 'difference' ? 3 : 2, dash: generatorPhase === 90 ? 'dot' : (definition.kind === 'difference' ? 'dash' : 'solid') },
                                     marker: { color: definition.color, symbol: definition.kind === 'difference' ? 'diamond' : 'circle', size: transferFunction || this.syncPhaseAggregation === 'average' ? 8 : 7, opacity: 0.82 },
                                     hovertemplate: transferFunction
@@ -8576,6 +8707,8 @@
                     };
                     if (this.syncPhasePlotMode === 'allan') this.rememberSyncPhaseAllan(definitions, traces, layout);
                     Plotly.react(element, traces, layout, { responsive: true, displaylogo: false });
+                    if (element.removeAllListeners) element.removeAllListeners('plotly_click');
+                    element.on('plotly_click', event => { if (this.syncPhasePlotMode !== 'allan') this.openTransferTof(event?.points?.[0]); });
                 },
                 syncPhaseExportRows() {
                     const nodeIds = this.syncPhaseNodeIds();
@@ -9290,7 +9423,7 @@
                             x: rows.map(row => Number(row.frequency_hz)),
                             y: rows.map(row => row[`delta_s_${phase}deg_s2`]),
                             error_y: { type: 'data', array: rows.map(row => row[`delta_s_${phase}deg_s2_sem`] ?? null), visible: true },
-                            type: 'scatter', mode: 'lines+markers', name: `|ΔS${phase}|²`,
+                            type: 'scatter', mode: 'lines+markers', name: `|ΔS${phase}|²`, meta: {transferPhase: phase},
                             line: { color, width: 1.8, dash: phase === 0 ? 'dash' : 'dot' }, marker: { color, size: 7 },
                             connectgaps: false,
                             hovertemplate: `Frequency=%{x:.9g} Hz<br>|ΔS${phase}|²=%{y:.6g}<extra></extra>`
@@ -9318,9 +9451,10 @@
                     }, { responsive: true, displaylogo: false });
                     this.renderSyncArchiveTransferPhaseDifferencePlot();
                     if (element.removeAllListeners) element.removeAllListeners('plotly_click');
-                    element.on('plotly_click', event => {
+                    element.on('plotly_click', async event => {
                         const frequency = Number(event?.points?.[0]?.x);
                         if (Number.isFinite(frequency)) { this.transferAmplitude.frequency = frequency; this.transferAmplitude.open = true; this.$nextTick(() => this.renderSyncArchiveNodePlots()); }
+                        await this.openTransferTof(event?.points?.[0]);
                     });
                 },
                 renderSyncArchiveTransferPhaseDifferencePlot() {
@@ -9338,7 +9472,7 @@
                         x: rows.map(row => Number(row.frequency_hz)),
                         y: rows.map(row => Math.abs(row[`phase_difference_${phase}deg_mean_rad`])),
                         error_y: { type: 'data', array: rows.map(row => row[`phase_difference_${phase}deg_sem_rad`] ?? null), visible: true },
-                        type: 'scatter', mode: 'lines+markers', name: `|mean(Δφ)| ${phase}°`,
+                        type: 'scatter', mode: 'lines+markers', name: `|mean(Δφ)| ${phase}°`, meta: {transferPhase: phase},
                         line: { color, width: 2, dash }, marker: { color, size: 7 }, connectgaps: false,
                         hovertemplate: `Frequency=%{x:.9g} Hz<br>|mean(φ<sub>M</sub> − φ<sub>S</sub>)| (${phase}°)=%{y:.6g} rad<extra></extra>`
                     }))];
@@ -9356,6 +9490,8 @@
                         paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', hovermode: 'closest'
                     }, { responsive: true, displaylogo: false });
                     this.renderSyncArchiveTransferPathNormalizedPlot();
+                    if (element.removeAllListeners) element.removeAllListeners('plotly_click');
+                    element.on('plotly_click', event => this.openTransferTof(event?.points?.[0]));
                 },
                 renderSyncArchiveTransferPathNormalizedPlot() {
                     const element = document.getElementById('syncArchiveTransferPathNormalizedPlot');
@@ -9383,6 +9519,8 @@
                         annotations: rows.length ? [] : [{ text: 'No valid path-normalized differential phase data', showarrow: false, xref: 'paper', yref: 'paper', x: 0.5, y: 0.5 }],
                         paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', hovermode: 'closest'
                     }, { responsive: true, displaylogo: false });
+                    if (element.removeAllListeners) element.removeAllListeners('plotly_click');
+                    element.on('plotly_click', event => this.openTransferTof(event?.points?.[0]));
                 },
                 renderSyncArchivePlot() {
                     if (this.isBraggRabiArchive()) {
@@ -10937,7 +11075,7 @@
                                 )),
                                 customdata: rows.map(row => this.getHistoryKey([Number(row.frequency_hz)])),
                                 text: rows.map(row => Number(componentFor(row, phaseDeg)?.count || 0)),
-                                type: 'scatter', mode: 'lines+markers', name: `${statisticLabel} at ${phaseDeg}°`,
+                                type: 'scatter', mode: 'lines+markers', name: `${statisticLabel} at ${phaseDeg}°`, meta: {transferPhase: phaseDeg},
                                 line: { color: colors[phaseIndex], width: 2 }, marker: { color: colors[phaseIndex], size: 7 },
                                 connectgaps: false,
                                 hovertemplate: `Frequency=%{x:.9g} Hz<br>${phaseDeg}° ${hoverStatisticLabel}=%{y:.6g}<br>n=%{text}<extra></extra>`
@@ -10999,7 +11137,7 @@
                                 customdata: rows.map(row => this.getHistoryKey([Number(row.frequency_hz)])),
                                 text: rows.map(row => phaseCount(row, phaseDeg)),
                                 type: 'scatter', mode: 'lines+markers',
-                                name: `${labels[index]} ${statisticLabel} at ${phaseDeg}°`,
+                                name: `${labels[index]} ${statisticLabel} at ${phaseDeg}°`, meta: {transferPhase: phaseDeg},
                                 line: { color: colors[phaseIndex], width: 2 }, marker: { color: colors[phaseIndex], size: 7 },
                                 connectgaps: false,
                                 hovertemplate: `Frequency=%{x:.9g} Hz<br>Phase=${phaseDeg}°<br>${hoverStatisticLabel}=%{y:.6g}<br>n=%{text}<extra></extra>`
