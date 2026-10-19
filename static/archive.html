@@ -1997,7 +1997,7 @@
                         <div class="d-flex flex-wrap gap-2 align-items-center">
                             <input class="form-control form-control-sm" style="max-width:220px" v-model="analysisResultName" placeholder="Analysis name" aria-label="Analysis name">
                             <input class="form-control form-control-sm" style="max-width:280px" v-model="analysisResultNote" placeholder="Note (optional)" aria-label="Analysis note">
-                            <button class="btn btn-success btn-sm" @click="saveAnalysisResult" :disabled="!canSaveAnalysisResult">Save analysis result</button>
+                            <button class="btn btn-success btn-sm" @click="saveAnalysisResult" :disabled="!canSaveAnalysisResult">Save Allan result</button>
                             <select class="form-select form-select-sm" style="max-width:360px" v-model="selectedAnalysisResultId" @change="restoreAnalysisResult" :disabled="analysisResultBusy || isLoading || analysisResultsLoading" aria-label="Saved analysis result">
                                 <option value="">Select saved analysis</option>
                                 <option v-for="record in analysisResults" :key="record.id" :value="record.id">{{ record.name }} · {{ record.kind }} · {{ record.created_at }}</option>
@@ -2007,12 +2007,10 @@
                             <button class="btn btn-outline-primary btn-sm" @click="reloadOriginalAllan" :disabled="analysisResultBusy || isLoading || isLoadingAllan">Reload original Allan</button>
                             <button class="btn btn-outline-secondary btn-sm" @click="exportAnalysisResult" :disabled="analysisResultBusy || !selectedAnalysisResultId">Export result + parameters</button>
                         </div>
-                        <div class="small text-muted mt-2" v-if="!hasAnalysisResult">Compute an analysis or restore a saved result to begin. Restoring reads saved values without recalculation.</div>
+                        <div class="small text-muted mt-2" v-if="!hasAnalysisResult">Compute Allan or restore a saved result to begin. Restoring reads saved values without recalculation.</div>
                         <div class="small mt-2" v-if="analysisResultMessage" role="status">{{ analysisResultMessage }}</div>
-                        <div v-if="analysisStaleReasons.length" class="small text-warning mt-2" role="status">{{ analysisStaleReasons.join('; ') }}</div>
-                        <div v-if="workflowDependencyWarnings.length" class="small text-warning mt-2" role="status">{{ workflowDependencyWarnings.join('; ') }}</div>
                         <details v-if="restoredAnalysisParameters" class="small mt-2"><summary>Saved analysis parameters</summary><pre class="mt-2 mb-0" style="max-height:240px;overflow:auto">{{ JSON.stringify(restoredAnalysisParameters, null, 2) }}</pre></details>
-                        <div class="small text-warning mt-2" v-if="hasAnalysisResult && analysisResultIsStale">Needs recompute: inputs, parameters or upstream calibration have changed. This snapshot still displays its recorded result.</div>
+                        <div class="small text-warning mt-2" v-if="hasAnalysisResult && analysisResultIsStale">Analysis conditions have changed. This snapshot still uses its recorded inputs; compute again for the current conditions.</div>
                     </div>
                 </section>
 
@@ -3172,7 +3170,6 @@
                     savedAllanCache: {}, recalculatedAllanCache: {}, currentAllanData: null,
                     analysisResults: [], analysisResultsLoading: false, restoredAnalysisParameters: null, analysisCandidateId: '', selectedAnalysisResultId: '',
                     analysisResultName: '', analysisResultNote: '', analysisResultBusy: false,
-                    analysisDependencySources: {}, analysisAlphaSelections: {}, analysisResultDependencies: {}, analysisResultServerStale: false, analysisStaleReasons: [],
                     analysisResultMessage: '', analysisResultKind: '', analysisResultContext: '', analysisSnapshotRestored: false,
                     phaseNoiseAllanSnapshot: null, phaseNoiseAllanPlot: null,
                     syncPhaseAllanSnapshot: null, restoredSyncPhaseAllan: null, loadedArchiveInputStamp: '',
@@ -3237,11 +3234,7 @@
                     return this.analysisContextKey(this.analysisResultKind);
                 },
                 analysisResultIsStale() {
-                    return this.analysisResultServerStale || this.analysisResultContext !== this.currentAnalysisContext
-                        || Object.entries(this.analysisResultDependencies || {}).some(([role, id]) => {
-                            const source = this.analysisDependencySources?.[role];
-                            return source && (source.id !== id || source.context !== this.analysisContextKey(source.kind, source.node));
-                        });
+                    return this.analysisResultContext !== this.currentAnalysisContext;
                 },
                 hasAnalysisResult() {
                     return Boolean(this.analysisCandidateId || (this.analysisResultKind === 'sync_phase_allan' && this.syncPhaseAllanSnapshot));
@@ -3249,10 +3242,6 @@
                 canSaveAnalysisResult() {
                     return this.hasAnalysisResult && !this.analysisResultBusy && !this.isLoadingAllan
                         && Boolean(this.analysisResultName.trim()) && !this.analysisResultIsStale;
-                },
-                workflowDependencyWarnings() {
-                    return Object.values(this.analysisDependencySources).filter(source => source.context !== this.analysisContextKey(source.kind, source.node))
-                        .map(source => `${source.kind}: needs recompute (upstream inputs or analysis parameters changed)`);
                 },
                 syncPhaseMaxOrder() {
                     return this.syncPhaseMaxAllanOrder();
@@ -4091,7 +4080,6 @@
                         run_id: this.selectedRun,
                         node_id: this.loadedSyncNode || null,
                         new_settings: this.normalizeAnalysis(this.analysis),
-                        ...this.analysisWorkflowPayload(extra.orders ? 'phase_noise_allan' : (extra.order ? 'allan' : this.analysisResultKind)),
                         ...extra
                     };
                 },
@@ -5183,104 +5171,19 @@
                 is3DSliceMode() {
                     return this.show3DControls() && this.dim3DisplayMode === 'slice';
                 },
-                analysisContextKey(kind, node) {
-                    const workflow = this.analysisRecipeContext(kind, node);
-                    if (['intf_alpha', 'joint_ac', 'transfer_r', 'phase_reference', 'sync_calibration_bundle'].includes(kind))
-                        return JSON.stringify({ref: this.loadedRunRef, version: this.serverVersion || 'original', kind, workflow});
+                analysisContextKey(kind) {
                     if (kind === 'sync_phase_allan') return JSON.stringify({ref: this.loadedRunRef,
                         version: this.serverVersion || 'original', input: this.loadedArchiveInputStamp,
-                        parameters: {...this.syncPhaseAnalysisParameters(), calibration_optimization: this.analysisResultIdentity(this.syncPhaseCalibrationOptimization?.result)}, workflow});
+                        parameters: this.syncPhaseAnalysisParameters()});
                     const range = this.normalizeAllanP0RangeValues(this.allanP0Min, this.allanP0Max);
                     return JSON.stringify({ref: this.loadedRunRef, node: this.loadedSyncNode || '',
                         version: this.serverVersion || 'original', settings: this.normalizeAnalysis(this.analysis),
                         mode: this.displayMode, selection: this.activeIntfAlphaSelection,
-                        kind, workflow, metric: kind === 'allan' ? this.currentTab : 'phase',
+                        kind, metric: kind === 'allan' ? this.currentTab : 'phase',
                         source: this.showRawData ? 'raw' : 'fit',
                         orders: kind === 'allan' ? this.allanOrder : this.phaseNoiseAllanOrders,
                         detail: kind === 'phase_noise_allan' ? [this.phaseNoiseView, this.phaseNoiseSelectedT2, this.phaseNoiseXAxis, this.phaseNoiseXAxisScale, this.phaseNoiseYAxisScale, this.syncPhaseCalibrationOptimization?.selectedId, this.syncPhaseCalibrationOptimization?.result] : null,
                         range: kind === 'allan' ? range : null});
-                },
-                analysisResultIdentity(result) {
-                    if (!result) return null;
-                    return {id: result.analysis_result_id || result.analysis_candidate_id || result.id || null,
-                        parameters: result.parameters_after || null, scale: result.scale_after ?? null,
-                        settings: result.settings || null};
-                },
-                analysisRecipeContext(kind, node = this.loadedSyncNode || '') {
-                    const refs = Object.fromEntries(Object.entries(this.archivePhaseReferenceContexts || {}).map(([node, value]) =>
-                        [node, {effective_calibration: value.effective_calibration || null, has_override: Boolean(value.has_override)}]));
-                    const common = {phase_references: refs, alpha_by_node: this.analysisAlphaSelections || {},
-                        intf_alpha_selection: this.activeIntfAlphaSelection || null,
-                        transfer_normalization: this.syncTransferNormalization || {}, analysis_copy_id: this.syncAnalysisCopy?.selectedId || ''};
-                    if (kind === 'intf_alpha') {
-                        const selection = this.analysisAlphaSelections?.[node || 'archive'];
-                        const current = node === (this.loadedSyncNode || '');
-                        return {node, phase_reference: refs[node || 'archive'] || null,
-                            accepted_ids: current ? (this.acceptedIntfAlphaCalibrationIds?.() || []) : (selection?.accepted_calibration_ids || []),
-                            interpolation: current ? this.intfAlphaInterpolationMethod : selection?.interpolation_method,
-                            accepted_min: current ? this.intfAlphaAcceptedMin : selection?.accepted_min,
-                            accepted_max: current ? this.intfAlphaAcceptedMax : selection?.accepted_max};
-                    }
-                    const phase = this.syncPhaseCalibrationOptimization || {};
-                    if (kind === 'joint_ac') return {...common, nodes: [this.syncPhaseReferenceNode, this.syncPhaseTargetNode],
-                        settings: {objective: phase.objective, weight: phase.combinedAllanWeight, bound: phase.boundPercent,
-                            fringe_weight: phase.fringeWeight, prior_weight: phase.priorWeight, interpolation: phase.intfAlphaInterpolationMethod,
-                            frequency: phase.transferFrequencyHz, phase: phase.transferPhaseDeg, t2: this.phaseNoiseSelectedT2,
-                            p0_min: this.syncPhaseP0Min, p0_max: this.syncPhaseP0Max, shot_min: this.syncPhaseShotMin, shot_max: this.syncPhaseShotMax}};
-                    const phaseResult = this.currentSyncAnalysisPhaseResult?.() || null;
-                    if (kind === 'transfer_r') return {...common, phase_optimization: this.analysisResultIdentity(phaseResult),
-                        selected_nodes: this.syncPhaseSelectedNodes || [], frequency: this.syncTransferNormalizationOptimization?.frequencyHz,
-                        bound: this.syncTransferNormalizationOptimization?.boundPercent};
-                    return {...common, phase_optimization: this.analysisResultIdentity(phaseResult),
-                        normalization_optimization: this.analysisResultIdentity(this.currentSyncAnalysisNormalizationResult?.() || null)};
-                },
-                analysisWorkflowPayload(kind) {
-                    const dependencies = {};
-                    for (const [role, source] of Object.entries(this.analysisDependencySources || {})) {
-                        if (source.kind === kind) continue;
-                        if (kind === 'joint_ac' && !['intf_alpha', 'phase_reference'].includes(source.kind)) continue;
-                        if (kind === 'intf_alpha' && source.kind !== 'phase_reference') continue;
-                        if (kind === 'transfer_r' && source.kind === 'transfer_r') continue;
-                        dependencies[role] = source.id;
-                    }
-                    return {analysis_dependencies: dependencies, analysis_context: this.analysisRecipeContext(kind)};
-                },
-                rememberWorkflowResult(result, kind) {
-                    const role = kind === 'intf_alpha' ? `intf_alpha:${this.loadedSyncNode || 'archive'}` : kind;
-                    const id = result.analysis_result_id || result.analysis_candidate_id;
-                    if (id) this.analysisDependencySources[role] = {id, kind, node: this.loadedSyncNode || '', context: this.analysisContextKey(kind)};
-                    this.rememberAnalysisResult(result, kind);
-                },
-                restoreWorkflowContext(context) {
-                    if (!context) return;
-                    if (context.phase_references) this.archivePhaseReferenceContexts = context.phase_references;
-                    if (context.alpha_by_node) this.analysisAlphaSelections = context.alpha_by_node;
-                    if ('intf_alpha_selection' in context) this.activeIntfAlphaSelection = context.intf_alpha_selection;
-                    if (context.transfer_normalization) this.syncTransferNormalization = context.transfer_normalization;
-                    if (context.selected_nodes) this.syncPhaseSelectedNodes = [...context.selected_nodes];
-                    if (this.syncAnalysisCopy) this.syncAnalysisCopy.selectedId = context.analysis_copy_id || '';
-                },
-                async applyIntfAlphaSnapshot(data, params) {
-                    const accepted = params.accepted_calibration_ids || [];
-                    this.intfAlphaInterpolationMethod = params.interpolation_method || 'linear';
-                    this.intfAlphaAcceptedMin = params.accepted_min ?? 0; this.intfAlphaAcceptedMax = params.accepted_max ?? 1;
-                    this.intfAlphaCalibrations = data.intf_alpha_calibrations || [];
-                    this.intfAlphaDraft = Object.fromEntries(this.intfAlphaCalibrations.map(row => [row.calibration_id, accepted.includes(row.calibration_id)]));
-                    this.activeIntfAlphaSelection = {accepted_calibration_ids: [...accepted], interpolation_method: this.intfAlphaInterpolationMethod};
-                    this.analysisAlphaSelections[this.loadedSyncNode || 'archive'] = {...this.activeIntfAlphaSelection,
-                        accepted_min: this.intfAlphaAcceptedMin, accepted_max: this.intfAlphaAcceptedMax};
-                    this.intfAlphaInterpolationCurve = data.intf_alpha_interpolation_curve || null;
-                    this.loadedPoints = data.data || []; this.currentCalculatedPoints = this.loadedPoints;
-                    this.recalculatedStats = this.normalizeStatsRows(data.stats || []);
-                    this.recalculatedTransferFunctionSummary = data.transfer_function_summary || [];
-                    this.transferFunctionSummary = this.recalculatedTransferFunctionSummary;
-                    this.recalculatedPhaseNoiseSummary = data.phase_noise_summary || []; this.phaseNoiseSummary = this.recalculatedPhaseNoiseSummary;
-                    if (data.phase_noise_series) this.phaseNoiseSeries = data.phase_noise_series;
-                    this.recalculatedPreviewMap = data.preview_map || {};
-                    this.displayMode = 'recalculated'; this.plotMode = 'series'; this.phaseNoiseStatistic = 'std';
-                    this.clearAllanCache();
-                    await this.applyDisplayedPoints(this.loadedPoints, this.recalculatedStats, this.recalculatedPreviewMap, true);
-                    this.$nextTick(() => this.renderArchiveIntfAlphaPlot());
                 },
                 syncPhaseAnalysisParameters() {
                     return {selected_nodes: [...this.syncPhaseSelectedNodes], reference_node: this.syncPhaseReferenceNode,
@@ -5304,16 +5207,12 @@
                     this.analysisResultContext = context;
                     this.analysisSnapshotRestored = Boolean(restored && restored.context === context);
                     this.analysisCandidateId = this.analysisSnapshotRestored ? restored.id : '';
-                    this.analysisResultDependencies = this.analysisWorkflowPayload('sync_phase_allan').analysis_dependencies;
-                    this.analysisResultServerStale = false; this.analysisStaleReasons = [];
                     this.analysisResultMessage = this.analysisSnapshotRestored
                         ? `Restored “${restored.name}” without recalculation.` : 'SYNC phase Allan snapshot ready to save.';
                 },
                 rememberAnalysisResult(result, kind) {
                     this.analysisSnapshotRestored = Boolean(result._saved_snapshot);
-                    this.analysisResultServerStale = false; this.analysisStaleReasons = [];
-                    this.analysisResultDependencies = result.analysis_dependencies || {};
-                    this.analysisCandidateId = result.analysis_result_id || result.analysis_candidate_id || '';
+                    this.analysisCandidateId = result.analysis_candidate_id || '';
                     this.analysisResultKind = kind;
                     this.analysisResultContext = this.analysisContextKey(kind);
                     this.analysisResultMessage = this.analysisCandidateId ? 'Computed snapshot ready to save.'
@@ -5408,65 +5307,13 @@
                             this.analysisResultMessage = 'Select the recorded SYNC node before restoring this result.';
                             return;
                         }
-                        for (const parent of record.dependency_snapshots || []) {
-                            if (parent.kind === 'intf_alpha' && (parent.parameters.node_id || '') === (this.loadedSyncNode || ''))
-                                await this.applyIntfAlphaSnapshot(parent.result, parent.parameters);
-                            if (parent.kind === 'joint_ac') this.syncPhaseCalibrationOptimization.result = {...parent.result, analysis_result_id: parent.id};
-                            if (parent.kind === 'transfer_r') this.syncTransferNormalizationOptimization.result = {...parent.result, analysis_result_id: parent.id};
-                            if (parent.kind === 'phase_reference') {
-                                if (parent.result.contexts) this.archivePhaseReferenceContexts = parent.result.contexts;
-                                else if (parent.result.context) this.archivePhaseReferenceContexts[parent.result.context.node_id || parent.parameters.node_id || 'archive'] = parent.result.context;
-                            }
-                        }
-                        if (params.new_settings && 'alpha' in params.new_settings) this.analysis = this.normalizeAnalysis(params.new_settings);
-                        this.restoreWorkflowContext(params.analysis_context);
+                        this.analysis = this.normalizeAnalysis(params.new_settings);
                         this.displayMode = params.display_mode || 'saved';
                         this.activeIntfAlphaSelection = params.intf_alpha_selection || null;
                         for (const [key, value] of Object.entries(record.view || {})) {
                             if (['allanYAxisMode', 'allanXAxisMode', 'allanScaleMode', 'phaseUnit', 'phaseNoiseView', 'phaseNoiseSelectedT2', 'phaseNoiseYAxisScale', 'phaseNoiseXAxis', 'phaseNoiseXAxisScale', 'syncPhaseAllanScale', 'syncPhaseAllanXAxis', 'syncPhaseAllanYAxis'].includes(key)) this[key] = value;
                         }
-                        if (record.kind === 'intf_alpha') {
-                            await this.applyIntfAlphaSnapshot(record.result, params);
-                        } else if (record.kind === 'joint_ac') {
-                            this.syncPhaseCalibrationOptimization.result = {...record.result, analysis_result_id: record.id};
-                            this.syncPhaseCalibrationOptimization.selectedId = '';
-                            this.syncPhaseReferenceNode = record.result.reference_node_id;
-                            this.syncPhaseTargetNode = record.result.target_node_id;
-                            this.syncPhaseSelectedNodes = [record.result.reference_node_id, record.result.target_node_id];
-                            const settings = record.result.settings || {};
-                            const state = this.syncPhaseCalibrationOptimization;
-                            for (const [field, value] of Object.entries({objective: settings.objective, combinedAllanWeight: settings.combined_allan_weight,
-                                boundPercent: settings.parameter_bound_fraction == null ? null : settings.parameter_bound_fraction * 100,
-                                fringeWeight: settings.fringe_weight, priorWeight: settings.prior_weight, intfAlphaInterpolationMethod: settings.intf_alpha_interpolation_method,
-                                transferFrequencyHz: settings.transfer_frequency_hz, transferPhaseDeg: settings.transfer_phase_deg})) if (value != null) state[field] = value;
-                            this.syncPhaseP0Min = settings.p0_min ?? null; this.syncPhaseP0Max = settings.p0_max ?? null;
-                            this.syncPhaseShotMin = settings.shot_index_min ?? null; this.syncPhaseShotMax = settings.shot_index_max ?? null;
-                            this.syncPhaseP0MinInput = String(this.syncPhaseP0Min ?? ''); this.syncPhaseP0MaxInput = String(this.syncPhaseP0Max ?? '');
-                            this.syncPhaseShotMinInput = String(this.syncPhaseShotMin ?? ''); this.syncPhaseShotMaxInput = String(this.syncPhaseShotMax ?? '');
-                            if (settings.phase_noise_t2_us2 != null) this.phaseNoiseSelectedT2 = settings.phase_noise_t2_us2;
-                            this.syncArchiveViewMode = 'node'; this.syncArchiveTab = 'phase'; this.syncPhasePlotMode = 'series';
-                        } else if (record.kind === 'transfer_r') {
-                            this.syncTransferNormalizationOptimization.result = {...record.result, analysis_result_id: record.id};
-                            this.syncTransferNormalizationOptimization.frequencyHz = record.result.transfer_frequency_hz;
-                            this.syncTransferNormalizationOptimization.boundPercent = record.result.bound_fraction * 100;
-                            this.syncArchiveViewMode = 'node'; this.syncArchiveTab = 'phase'; this.syncPhasePlotMode = 'series';
-                        } else if (record.kind === 'sync_calibration_bundle') {
-                            this.syncPhaseCalibrationOptimization.result = record.result.phase_calibration_result || null;
-                            this.syncTransferNormalizationOptimization.result = record.result.transfer_normalization_result || null;
-                            this.syncSelectedAnalysisCopy = record.result;
-                            this.syncArchiveViewMode = 'node'; this.syncArchiveTab = 'phase'; this.syncPhasePlotMode = 'series';
-                        } else if (record.kind === 'phase_reference') {
-                            if (record.result.contexts) this.archivePhaseReferenceContexts = record.result.contexts;
-                            const node = record.result.context?.node_id || params.node_id || 'archive';
-                            const context = record.result.context || record.result.contexts?.[node] || Object.values(record.result.contexts || {})[0];
-                            if (!context) throw new Error('Saved phase reference has no calibration context.');
-                            this.archivePhaseReferenceContexts[context.node_id || node] = context;
-                            this.archivePhaseReferenceNodeId = node;
-                            this.archivePhaseReferenceDraft = {...JSON.parse(JSON.stringify(context.effective_calibration || {})),
-                                reference_input_mode: params.reference_input_mode || 't2', reference_value: params.reference_value,
-                                reference_t_unit: params.reference_t_unit || 'us', monotonic_slope: params.monotonic_slope || 'negative'};
-                            this.currentTab = 'phase'; this.syncArchiveTab = 'phase';
-                        } else if (record.kind === 'sync_phase_allan') {
+                        if (record.kind === 'sync_phase_allan') {
                             if (!this.syncManifest) throw new Error('Load the SYNC archive before restoring this result.');
                             const selected = params.sync_parameters;
                             this.syncPhaseSelectedNodes = [...selected.selected_nodes];
@@ -5514,20 +5361,7 @@
                         // Render after Vue has mounted the plot container for the restored mode.
                         if (record.kind === 'sync_phase_allan') this.renderSyncArchiveNodePlots();
                         else if (record.kind === 'phase_noise_allan') this.renderPhaseNoiseArchivePlot();
-                        else if (['joint_ac', 'transfer_r', 'sync_calibration_bundle'].includes(record.kind)) {
-                            this.renderSyncArchiveNodePlots(); this.renderSyncPhaseCalibrationOptimizationPlot();
-                        } else this.renderMainPlot();
-                        if (['intf_alpha', 'joint_ac', 'transfer_r', 'phase_reference', 'sync_calibration_bundle'].includes(record.kind))
-                            this.rememberWorkflowResult({...record.result, analysis_candidate_id: record.id, _saved_snapshot: true}, record.kind);
-                        this.analysisResultServerStale = Boolean(record.needs_recompute);
-                        this.analysisStaleReasons = record.stale_reasons || [];
-                        this.analysisResultDependencies = params.analysis_dependencies || {};
-                        for (const parent of record.dependency_snapshots || []) {
-                            const node = parent.parameters.node_id || '';
-                            const role = parent.kind === 'intf_alpha' ? `intf_alpha:${node || 'archive'}` : parent.kind;
-                            this.analysisDependencySources[role] = {id: parent.id, kind: parent.kind, node, context: this.analysisContextKey(parent.kind, node)};
-                        }
-                        if (record.kind === 'phase_reference') this.renderArchivePhaseReferencePlot();
+                        else this.renderMainPlot();
                         this.analysisResultName = record.name;
                         this.analysisResultNote = record.note || '';
                         this.restoredAnalysisParameters = {source: record.source, parameters: record.parameters, view: record.view};
@@ -5568,7 +5402,7 @@
                     const normalizedOrder = Math.max(1, Math.round(Number(order) || 1));
                     const normalizedRange = this.normalizeAllanP0RangeValues(this.allanP0Min, this.allanP0Max);
                     const selectionKey = this.getAllanCacheMode() === 'recalculated' ? JSON.stringify([this.activeIntfAlphaSelection, this.normalizeAnalysis(this.analysis)]) : '';
-                    const metric = `${String(this.currentTab || 'atoms')}|${selectionKey}|${JSON.stringify(this.analysisRecipeContext('allan'))}`;
+                    const metric = `${String(this.currentTab || 'atoms')}|${selectionKey}`;
                     const source = this.showRawData ? 'raw' : 'fit';
                     if (!normalizedRange) return `${metric}|${source}|${normalizedOrder}`;
                     return `${metric}|${source}|${normalizedOrder}|${this.formatAllanCacheFloat(normalizedRange.min)}|${this.formatAllanCacheFloat(normalizedRange.max)}`;
@@ -6663,10 +6497,6 @@
 
                 async loadRun(requestedNodeId = '', requestedAnalysisCopyId = '') {
                     if (!this.selectedRun) return;
-                    const reference = [this.selectedYear, this.selectedMonth, this.selectedDay, this.selectedRun].join('/');
-                    if (!this.loadedRunRef || reference !== [this.loadedRunRef.year, this.loadedRunRef.month, this.loadedRunRef.day, this.loadedRunRef.run_id].join('/')) {
-                        this.analysisDependencySources = {}; this.analysisAlphaSelections = {};
-                    }
                     const requestedSyncNode = typeof requestedNodeId === 'string' ? requestedNodeId : '';
                     const previousSyncNode = String(this.loadedSyncNode || this.syncArchiveNodeSource || '');
                     this.isLoading = true;
@@ -7669,8 +7499,7 @@
                     this.archivePhaseReferenceError = false;
                     const node = this.syncManifest ? this.archivePhaseReferenceNodeKey() : '';
                     try {
-                        const response = await axios.post('/archive/phase-reference-override', {
-                            ...this.analysisWorkflowPayload('phase_reference'),
+                        await axios.post('/archive/phase-reference-override', {
                             year: this.selectedYear, month: this.selectedMonth, day: this.selectedDay, run_id: this.selectedRun,
                             node_id: node || null,
                             calibration_id: this.archivePhaseReferenceSelectedCalibrationId.startsWith('settings:')
@@ -7682,7 +7511,6 @@
                             monotonic_slope: this.archivePhaseReferenceDraft.monotonic_slope,
                         });
                         await this.loadRun(node);
-                        this.rememberWorkflowResult(response.data, 'phase_reference');
                         const syncSuffix = this.syncManifest
                             ? (this.archivePhaseAnalysis?.sync_status === 'synced' ? ' SYNC metadata updated on all reachable nodes.' : ' Saved locally; SYNC update is pending.')
                             : '';
@@ -8205,7 +8033,6 @@
                     state.loading = true; state.error = ''; state.result = null;
                     try {
                         const response = await axios.post('/archive/sync-transfer-normalization-optimize', {
-                            ...this.analysisWorkflowPayload('transfer_r'),
                             year: this.selectedYear, month: this.selectedMonth, day: this.selectedDay, run_id: this.selectedRun,
                             slave_node_id: slave, transfer_frequency_hz: Number(state.frequencyHz),
                             bound_fraction: Math.max(.001, Math.min(.5, Number(state.boundPercent || 10) / 100)),
@@ -8214,7 +8041,6 @@
                         });
                         state.result = response.data;
                         this.renderSyncArchiveNodePlots();
-                        this.rememberWorkflowResult(response.data, 'transfer_r');
                     } catch (error) {
                         state.error = error.response?.data?.detail || error.message || 'Normalization optimization failed.';
                     } finally {
@@ -8247,7 +8073,6 @@
                     state.saving = true; state.error = ''; state.message = '';
                     try {
                         const response = await axios.post('/archive/sync-analysis-copies/save', {
-                            ...this.analysisWorkflowPayload('sync_calibration_bundle'),
                             year: this.selectedYear, month: this.selectedMonth, day: this.selectedDay, run_id: this.selectedRun,
                             name: state.name || '',
                             phase_calibration_result: this.currentSyncAnalysisPhaseResult(),
@@ -8291,7 +8116,6 @@
                     }
                     try {
                         const response = await axios.post('/archive/sync-phase-calibration-optimize', {
-                            ...this.analysisWorkflowPayload('joint_ac'),
                             year: this.selectedYear, month: this.selectedMonth, day: this.selectedDay, run_id: this.selectedRun,
                             reference_node_id: this.syncPhaseReferenceNode, target_node_id: this.syncPhaseTargetNode,
                             objective: state.objective, combined_allan_weight: allanWeight,
@@ -8306,13 +8130,11 @@
                             transfer_phase_deg: transferFunction ? transferPhaseDeg : null,
                             phase_noise_t2_us2: this.isPhaseNoiseArchive() && Number.isFinite(Number(this.phaseNoiseSelectedT2)) ? Number(this.phaseNoiseSelectedT2) : null,
                             intf_alpha_interpolation_method: state.intfAlphaInterpolationMethod,
-                            intf_alpha_selections: this.analysisAlphaSelections,
                         });
                         state.result = response.data;
                         await this.$nextTick();
                         this.renderSyncArchiveNodePlots();
                         this.renderSyncPhaseCalibrationOptimizationPlot();
-                        this.rememberWorkflowResult(response.data, 'joint_ac');
                     } catch (error) {
                         state.error = error.response?.data?.detail || error.message || 'A/C optimization failed.';
                     } finally {
@@ -8337,7 +8159,6 @@
                     state.saving = true; state.error = ''; state.message = '';
                     try {
                         const response = await axios.post('/archive/sync-phase-calibration-optimization/save', {
-                            ...this.analysisWorkflowPayload('joint_ac'),
                             year: this.selectedYear, month: this.selectedMonth, day: this.selectedDay, run_id: this.selectedRun,
                             name: state.name || '', result: state.result,
                         });
@@ -8345,8 +8166,6 @@
                         state.saved.push(saved);
                         state.selectedId = String(saved.id || '');
                         state.result = saved;
-                        this.rememberWorkflowResult(saved, 'joint_ac');
-                        await this.refreshAnalysisResults();
                         state.name = '';
                         state.message = 'Optimization result saved as an Archive sidecar. Original run data and calibrations were not changed.';
                     } catch (error) {
@@ -11629,7 +11448,6 @@
                     this.intfAlphaAnalysisMessage = '';
                     try {
                         const res = await axios.post('/archive/intf-alpha/reanalyze', {
-                            ...this.analysisWorkflowPayload('intf_alpha'),
                             year: this.selectedYear, month: this.selectedMonth, day: this.selectedDay, run_id: this.selectedRun,
                             node_id: this.loadedSyncNode || null,
                             accepted_calibration_ids: accepted,
@@ -11658,11 +11476,7 @@
                         if (Array.isArray(data.phase_noise_series)) this.phaseNoiseSeries = data.phase_noise_series;
                         this.recalculatedPreviewMap = data.preview_map && typeof data.preview_map === 'object' ? data.preview_map : {};
                         this.displayMode = 'recalculated';
-                        this.analysisAlphaSelections[this.loadedSyncNode || 'archive'] = {...this.activeIntfAlphaSelection,
-                            accepted_min: this.intfAlphaAcceptedMin, accepted_max: this.intfAlphaAcceptedMax};
                         await this.applyDisplayedPoints(this.loadedPoints, this.recalculatedStats, this.recalculatedPreviewMap, true);
-                        this.rememberWorkflowResult(data, 'intf_alpha');
-                        if (save) await this.refreshAnalysisResults();
                         this.intfAlphaAnalysisError = false;
                         const effectiveMethod = this.intfAlphaInterpolationCurve?.effective_method || this.intfAlphaInterpolationMethod;
                         this.intfAlphaAnalysisMessage = successMessage || (save ? `Analysis copy saved with ${effectiveMethod}; original raw data were not changed.` : `${effectiveMethod} I_alpha preview applied.`);
@@ -11675,22 +11489,7 @@
                     }
                 },
                 previewIntfAlphaAnalysis() { return this.runIntfAlphaAnalysis(false); },
-                async saveIntfAlphaAnalysis() {
-                    const source = this.analysisDependencySources[`intf_alpha:${this.loadedSyncNode || 'archive'}`];
-                    if (!source || source.context !== this.analysisContextKey('intf_alpha')) return this.runIntfAlphaAnalysis(true);
-                    this.intfAlphaAnalysisBusy = true;
-                    try {
-                        const response = await axios.post('/archive/analysis-results/save', {...this.loadedRunRef,
-                            candidate_id: source.id, name: this.intfAlphaAnalysisName, view: this.analysisResultView()});
-                        await this.refreshAnalysisResults();
-                        this.selectedAnalysisResultId = response.data.id;
-                        this.intfAlphaAnalysisError = false;
-                        this.intfAlphaAnalysisMessage = 'Iα snapshot saved without recalculation. Original data is unchanged.';
-                    } catch (error) {
-                        this.intfAlphaAnalysisError = true;
-                        this.intfAlphaAnalysisMessage = error.response?.data?.detail || error.message;
-                    } finally { this.intfAlphaAnalysisBusy = false; }
-                },
+                saveIntfAlphaAnalysis() { return this.runIntfAlphaAnalysis(true); },
             }
         }).mount('#app');
     </script>
