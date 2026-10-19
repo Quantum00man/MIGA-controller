@@ -2352,6 +2352,35 @@
                     </div>
                     <div v-else class="sync-archive-plot-wrap">
                         <div id="syncArchivePlot" class="sync-archive-square-plot"></div>
+                        <details v-if="isTransferFunctionArchive()" class="border rounded p-3 my-3" :open="transferAmplitude.open" @toggle="transferAmplitude.open = $event.target.open">
+                            <summary class="fw-bold">Optimize A — selected frequency</summary>
+                            <p class="small text-muted mt-2">Optimize Master and {{ syncArchiveNodeLabel(syncArchiveSlaveId) }} amplitudes together using both 0° and 90°. Baseline, C and normalization stay fixed. The selected frequency defines the objective; applying changes all frequencies.</p>
+                            <div v-if="syncAnalysisCopy.selectedId || hasSyncAnalysisPreview()" class="alert alert-info small">Load the applied archive and apply or discard other optimization previews before optimizing A.</div>
+                            <div class="row g-2 align-items-end">
+                                <div class="col-md-3"><label class="form-label-small">Target frequency (Hz)</label><select class="form-select form-select-sm" v-model.number="transferAmplitude.frequency" :disabled="transferAmplitude.busy" @change="renderSyncArchiveNodePlots"><option :value="null">Select frequency</option><option v-for="frequency in syncTransferFunctionOptimizationFrequencies()" :value="frequency">{{ frequency }}</option></select></div>
+                                <div v-for="entry in [{node:'master', field:'masterPercent'}, {node:syncArchiveSlaveId, field:'slavePercent'}]" :key="entry.field" class="col-md-3">
+                                    <label class="form-label-small">{{ syncArchiveNodeLabel(entry.node) }} A range ± (%)</label><input class="form-control form-control-sm" type="number" min="0.01" max="50" step="0.1" v-model.number="transferAmplitude[entry.field]" :disabled="transferAmplitude.busy" @change="renderSyncArchiveNodePlots">
+                                    <div class="small text-muted">{{ transferAmplitudeRangeLabel(entry.node, transferAmplitude[entry.field]) }}</div>
+                                </div>
+                                <div class="col-md-3"><button class="btn btn-primary btn-sm" @click="previewTransferAmplitude" :disabled="transferAmplitude.busy || isLoading || syncAnalysisCopy.selectedId || hasSyncAnalysisPreview() || transferAmplitude.frequency === null">{{ transferAmplitude.busy ? 'Computing…' : 'Preview optimization' }}</button></div>
+                                <div class="col-md-3"><label class="form-label-small">First shot index (optional)</label><input type="number" step="1" class="form-control form-control-sm" v-model="transferAmplitude.shotMin" :disabled="transferAmplitude.busy" @change="renderSyncArchiveNodePlots"></div>
+                                <div class="col-md-3"><label class="form-label-small">Last shot index (optional)</label><input type="number" step="1" class="form-control form-control-sm" v-model="transferAmplitude.shotMax" :disabled="transferAmplitude.busy" @change="renderSyncArchiveNodePlots"></div>
+                            </div>
+                            <div v-if="transferAmplitude.error" class="alert alert-danger small mt-2 mb-0">{{ transferAmplitude.error }}</div>
+                            <div v-if="transferAmplitude.message" class="alert alert-success small mt-2 mb-0">{{ transferAmplitude.message }}</div>
+                            <div v-if="transferAmplitude.result" class="mt-3">
+                                <div v-if="!transferAmplitudePreviewCurrent()" class="alert alert-warning small">Selection or inputs changed. Recompute the preview before applying.</div>
+                                <div class="table-responsive"><table class="table table-sm small"><thead><tr><th>Value</th><th>Before</th><th>Preview</th></tr></thead><tbody>
+                                    <tr v-for="node in ['master', transferAmplitude.result.slave_node_id]" :key="node"><td>{{ syncArchiveNodeLabel(node) }} A</td><td>{{ formatPhaseNumber(transferAmplitude.result.parameters_before[node]) }}</td><td>{{ formatPhaseNumber(transferAmplitude.result.parameters_after[node]) }}</td></tr>
+                                    <tr><td>Target |ΔS|² (selected shots)</td><td>{{ formatPhaseNumber(transferAmplitude.result.before.differential_s2) }}</td><td>{{ formatPhaseNumber(transferAmplitude.result.after.differential_s2) }}</td></tr>
+                                    <tr v-for="phase in ['0deg', '90deg']" :key="phase"><td>{{ phase }} mean ΔS</td><td>{{ formatPhaseNumber(transferAmplitude.result.before[`delta_s_${phase}_mean`]) }}</td><td>{{ formatPhaseNumber(transferAmplitude.result.after[`delta_s_${phase}_mean`]) }}</td></tr>
+                                </tbody></table></div>
+                                <div class="small text-muted">Fixed pairs: {{ transferAmplitude.result.before.delta_s_0deg_count }} (0°), {{ transferAmplitude.result.before.delta_s_90deg_count }} (90°). Dotted gray: recalculated before; dashed orange: preview across all frequencies and shots.</div>
+                                <div v-for="warning in transferAmplitude.result.warnings" class="small text-warning-emphasis mt-1">{{ warning }}</div>
+                                <div class="d-flex gap-2 mt-2"><button class="btn btn-success btn-sm" @click="applyTransferAmplitude" :disabled="transferAmplitude.busy || isLoading || !transferAmplitudePreviewCurrent()">Apply &amp; recalculate all frequencies</button><button class="btn btn-outline-secondary btn-sm" @click="discardTransferAmplitude" :disabled="transferAmplitude.busy">Discard preview</button></div>
+                                <div class="small text-muted mt-2">Original data stays unchanged. Restore through the archive version selector or each node's Restore experiment reference action.</div>
+                            </div>
+                        </details>
                         <div v-if="isTransferFunctionArchive()" id="syncArchiveTransferPhaseDifferencePlot" class="sync-archive-square-plot mt-3"></div>
                         <div v-if="isTransferFunctionArchive()" id="syncArchiveTransferPathNormalizedPlot" class="sync-archive-square-plot mt-3"></div>
                     </div>
@@ -3117,6 +3146,7 @@
                     archiveBraggSave: { name: '', saving: false, error: false, message: '' },
                     syncManifest: null,
                     syncArchiveViewMode: 'node',
+                    transferAmplitude: {open: false, frequency: null, masterPercent: 5, slavePercent: 5, shotMin: '', shotMax: '', busy: false, result: null, key: '', error: '', message: ''},
                     syncArchiveNodeSource: 'master',
                     loadedSyncNode: '',
                     loadedSyncNodeData: [],
@@ -9122,6 +9152,59 @@
                         };
                     }).map(row => this.withTransferUncertainties(row));
                 },
+                transferAmplitudePayload() {
+                    const state = this.transferAmplitude;
+                    const shot = value => value === '' || value === null ? null : Number(value);
+                    return {year: this.selectedYear, month: this.selectedMonth, day: this.selectedDay, run_id: this.selectedRun,
+                        slave_node_id: this.syncArchiveSlaveId, transfer_frequency_hz: Number(state.frequency),
+                        master_bound_fraction: Number(state.masterPercent) / 100, slave_bound_fraction: Number(state.slavePercent) / 100,
+                        shot_index_min: shot(state.shotMin), shot_index_max: shot(state.shotMax)};
+                },
+                transferAmplitudeKey() {
+                    return JSON.stringify({selection: this.transferAmplitudePayload(), version: this.serverVersion || '',
+                        contexts: this.archivePhaseReferenceContexts, normalization: this.syncTransferNormalization,
+                        input: this.loadedArchiveInputStamp, copy: this.syncAnalysisCopy.selectedId,
+                        otherPhase: this.currentSyncAnalysisPhaseResult(), otherNormalization: this.currentSyncAnalysisNormalizationResult()});
+                },
+                transferAmplitudePreviewCurrent() {
+                    return Boolean(this.transferAmplitude.result && this.transferAmplitude.key === this.transferAmplitudeKey());
+                },
+                transferAmplitudeRangeLabel(node, percent) {
+                    const amplitude = Number(this.archivePhaseReferenceContexts?.[node]?.effective_calibration?.parameter_values?.A);
+                    const fraction = Number(percent) / 100;
+                    return Number.isFinite(amplitude) ? `A=${amplitude.toPrecision(6)} · [${(amplitude * (1 - fraction)).toPrecision(6)}, ${(amplitude * (1 + fraction)).toPrecision(6)}]` : 'Calibration unavailable';
+                },
+                async previewTransferAmplitude() {
+                    const state = this.transferAmplitude;
+                    if (state.busy || state.frequency === null || this.syncAnalysisCopy.selectedId || this.hasSyncAnalysisPreview()) return;
+                    state.busy = true; state.error = ''; state.message = ''; state.result = null;
+                    const key = this.transferAmplitudeKey();
+                    try {
+                        const response = await axios.post('/archive/sync-transfer-amplitude-optimize', this.transferAmplitudePayload());
+                        if (key !== this.transferAmplitudeKey()) throw new Error('Selection changed during calculation; preview again.');
+                        state.result = response.data; state.key = key;
+                    } catch (error) { state.error = error.response?.data?.detail || error.message; }
+                    finally { state.busy = false; this.renderSyncArchiveNodePlots(); }
+                },
+                async applyTransferAmplitude() {
+                    const state = this.transferAmplitude;
+                    if (state.busy || !this.transferAmplitudePreviewCurrent()) return;
+                    state.busy = true; state.error = ''; state.message = '';
+                    try {
+                        const response = await axios.post('/archive/sync-transfer-amplitude-optimization/apply', {...this.transferAmplitudePayload(), result: state.result});
+                        state.result = null; state.key = '';
+                        if (!await this.loadRun(this.loadedSyncNode || 'master')) throw new Error(this.errorMsg || 'Applied amplitudes, but reloading the archive failed.');
+                        this.syncArchiveViewMode = 'differential';
+                        this.$nextTick(() => this.renderSyncArchiveNodePlots());
+                        state.message = response.data.sync?.status === 'pending' ? 'Applied locally; controller SYNC metadata distribution is pending.' : 'Applied both amplitudes and recalculated all frequencies.';
+                    } catch (error) { state.error = error.response?.data?.detail || error.message; }
+                    finally { state.busy = false; }
+                },
+                discardTransferAmplitude() {
+                    this.transferAmplitude.result = null; this.transferAmplitude.key = '';
+                    this.transferAmplitude.error = ''; this.transferAmplitude.message = '';
+                    this.renderSyncArchiveNodePlots();
+                },
                 syncArchiveHasPhaseOverrides() {
                     return Object.values(this.archivePhaseReferenceContexts || {}).some(context => context?.has_override === true);
                 },
@@ -9182,6 +9265,16 @@
                             hovertemplate: `Frequency=%{x:.9g} Hz<br>|ΔS${phase}|²=%{y:.6g}<extra></extra>`
                         }));
                     }
+                    if (this.transferAmplitudePreviewCurrent()) {
+                        const before = this.transferAmplitude.result.before_rows;
+                        traces.push({x: before.map(row => row.frequency_hz), y: before.map(row => row.differential_s2),
+                            type: 'scatter', mode: 'lines', name: 'Recalculated before A optimization',
+                            line: {color: '#6c757d', width: 1.5, dash: 'dot'}, connectgaps: false});
+                        const preview = this.transferAmplitude.result.preview_rows;
+                        traces.push({x: preview.map(row => row.frequency_hz), y: preview.map(row => row.differential_s2),
+                            type: 'scatter', mode: 'lines+markers', name: 'A optimization preview',
+                            line: {color: '#e67700', width: 2.5, dash: 'dash'}, connectgaps: false});
+                    }
                     const label = this.syncArchiveNodeLabel(this.syncArchiveSlaveId);
                     Plotly.react(element, traces, {
                         margin: { l: 78, r: 35, t: 52, b: 68 },
@@ -9193,6 +9286,11 @@
                         paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', hovermode: 'closest'
                     }, { responsive: true, displaylogo: false });
                     this.renderSyncArchiveTransferPhaseDifferencePlot();
+                    if (element.removeAllListeners) element.removeAllListeners('plotly_click');
+                    element.on('plotly_click', event => {
+                        const frequency = Number(event?.points?.[0]?.x);
+                        if (Number.isFinite(frequency)) { this.transferAmplitude.frequency = frequency; this.transferAmplitude.open = true; this.$nextTick(() => this.renderSyncArchiveNodePlots()); }
+                    });
                 },
                 renderSyncArchiveTransferPhaseDifferencePlot() {
                     const element = document.getElementById('syncArchiveTransferPhaseDifferencePlot');

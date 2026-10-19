@@ -1665,6 +1665,21 @@ subsequent changes to the independent Slave archive do not alter the saved analy
 Each node retains its own calibration and baseline settings. Ambiguous matches are not
 associated automatically. Original device backups remain unchanged.
 
+\subsection{Optimizing a differential Transfer Function frequency}
+Below the first Differential Transfer Function plot, expand \ui{Optimize A -- selected frequency}.
+Select a frequency from the list or click its plot point, choose independent Master and Slave
+amplitude ranges (default $\pm5\%$), and optionally restrict the logical shot-index range.
+\ui{Preview optimization} minimizes $|\Delta S|^2$ using both the $0^\circ$ and $90^\circ$
+quadratures. Each must contain at least two initially valid paired shots. The optimizer
+holds this sample set fixed and rejects amplitudes that invalidate its shots. The existing
+per-node baseline conversion, $C$, reference and normalization settings remain fixed.
+The panel shows before/after amplitudes and quadratures, boundary warnings and a full-frequency
+preview curve. Simultaneously increasing both amplitudes can reduce the overall response
+scale; a lower objective alone does not establish improved physical rejection.
+\ui{Apply \& recalculate all frequencies} saves reversible node overrides. Preview and
+\ui{Discard preview} do not write scientific data. Changes to inputs require a fresh preview.
+Other optimization previews or saved analysis copies must be applied or cleared first.
+
 \subsection{Why optimize $A$ and $C$}
 Equation~\eqref{eq:archive-phase} shows that changing only $\omega$ or $\phi_0$ changes a
 constant reference term and therefore cannot change standard deviation or first-order

@@ -1232,3 +1232,6 @@ async def delete_archive_bragg_phase_calibration(calibration_id: str):
 
 
 router.include_router(build_analysis_router(lambda: data_loader, DeviceRoute))
+
+from app.api.transfer_amplitude_routes import build_transfer_amplitude_router
+router.include_router(build_transfer_amplitude_router(lambda: data_loader, DeviceRoute, _synchronize_archive_phase_metadata))

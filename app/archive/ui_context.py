@@ -199,6 +199,7 @@ def writable_operation(request, body):
     return any(key in path for key in (
         '/archive/overwrite', '/archive/phase-reference-override', '/archive/phase-analysis/sync/', '/archive/sync-differential-fit',
         '/archive/sync-phase-calibration-optimization/', '/archive/sync-analysis-copies/save',
+        '/archive/sync-transfer-amplitude-optimization/apply',
     )) or ('/archive/intf-alpha/reanalyze' in path and body.get('save', False))
 
 

@@ -3073,3 +3073,6 @@ async def list_controller_analysis_versions(year: str, month: str, day: str, run
     return {'versions': versions(ControllerRepository(data_loader.base_dir), 'controller', [year, month, day, run_id])}
 
 router.include_router(build_analysis_router(lambda: data_loader, ControllerArchiveRoute))
+
+from app.api.transfer_amplitude_routes import build_transfer_amplitude_router
+router.include_router(build_transfer_amplitude_router(lambda: data_loader, ControllerArchiveRoute, _synchronize_archive_phase_metadata))

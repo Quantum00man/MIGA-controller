@@ -13,7 +13,7 @@
     axios.interceptors.response.use(response => {
         const url = response.config.url || '';
         const saved = response.config.method !== 'get' && (
-            /\/archive\/(overwrite|phase-reference-override|sync-differential-fit|sync-phase-calibration-optimization\/|sync-analysis-copies\/save)/.test(url)
+            /\/archive\/(overwrite|phase-reference-override|sync-differential-fit|sync-phase-calibration-optimization\/|sync-transfer-amplitude-optimization\/apply|sync-analysis-copies\/save)/.test(url)
             || response.data?.saved_intf_alpha_analysis_copy);
         if (saved && app) app.serverVersion = 'latest';
         return response;
