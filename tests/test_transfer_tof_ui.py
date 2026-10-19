@@ -5,7 +5,7 @@ import subprocess
 import pytest
 
 
-def test_transfer_tof_selects_phases_nodes_physical_steps_and_handles_missing_data():
+def test_transfer_tof_overlays_all_shots_and_filters_phases_without_mixing_nodes():
     node = shutil.which('node')
     if not node:
         pytest.skip('Node required')
@@ -41,17 +41,20 @@ const app={...methods,transferTof:{open:false,frequency:null,node:'',phase:'all'
  selectedPointKeys:['old'],selectedPointKey:'old',maximizedView:'analysis'};
 (async()=>{
  await app.openTransferTof({x:101,data:{meta:{transferPhase:90}}});
- assert.equal(app.maximizedView,'scope');assert.equal(app.transferTof.phase,90);assert.equal(app.transferTof.shot,11);
+ assert.equal(app.maximizedView,'scope');assert.equal(app.transferTof.phase,'all');
  assert.match(gets.at(-1),/\/11\?node_id=master$/);assert.equal(posts.length,0);
- assert.equal(app.currentWaveforms.length,1);
+ assert.equal(app.currentWaveforms.length,2);
+ assert.deepEqual(app.currentWaveforms.map(row=>row.step),[10,11]);
+ app.transferTof.phase=90;await app.changeTransferTofPhase();assert.equal(app.currentWaveforms.length,1);
  app.transferTof.node='slave-a';await app.changeTransferTofNode();
  assert.match(gets.at(-1),/\/121\?node_id=slave-a$/);
  assert.equal(app.loadedSyncNode,'master');assert.equal(app.transferTof.rows.length,2);
- app.transferTof.phase='all';await app.changeTransferTofPhase();assert.equal(app.transferTof.shot,120);
- await app.stepTransferTof(1);assert.equal(app.transferTof.shot,121);
- await app.stepTransferTof(1);assert.equal(app.transferTof.shot,121);
- failStep=120;app.transferTof.shot=120;await app.showTransferTofShot();
- assert.match(app.transferTof.error,/Waveform not archived/);assert.equal(app.currentWaveforms.length,0);
+ app.transferTof.phase='all';await app.changeTransferTofPhase();
+ assert.deepEqual(app.currentWaveforms.map(row=>row.step),[120,121]);
+ app.transferTof.phase=0;await app.changeTransferTofPhase();assert.equal(app.currentWaveforms[0].step,120);
+ app.transferTof.phase='all';failStep=120;await app.showTransferTofWaveforms();
+ assert.match(app.transferTof.error,/120/);assert.equal(app.currentWaveforms.length,1);
+ assert.equal(app.currentWaveforms[0].step,121);
  const before=gets.length;await app.openTransferTof({x:101,data:{name:'SEM² noise floor'}});assert.equal(gets.length,before);
  failStep=null;await app.loadWaveforms([10]);assert.equal(posts.length,1); // Existing recalculated previews still work.
  app.closeTransferTof();assert.equal(app.maximizedView,'');assert.equal(app.transferTof.open,false);assert.equal(app.currentWaveforms.length,0);
@@ -65,6 +68,12 @@ const app={...methods,transferTof:{open:false,frequency:null,node:'',phase:'all'
  await app.loadWaveforms([11],{savedOnly:true});
  release({data:waveform});await slow;
  assert.equal(app.currentWaveforms[0].step,11);assert.equal(app.isLoadingWaveforms,false);
+ // Large overlays load every shot with bounded concurrency rather than opening hundreds of requests.
+ let active=0, peak=0;
+ axios.get=async()=>{active++;peak=Math.max(peak,active);await new Promise(resolve=>setImmediate(resolve));active--;return {data:waveform}};
+ const bulk=await app.loadWaveforms(Array.from({length:17},(_,i)=>i),{savedOnly:true,allowPartial:true});
+ assert.equal(bulk.loaded,17);assert.equal(app.currentWaveforms.length,17);assert.ok(peak<=8);
+ assert.equal(plotted.at(-1).traces.length,34);
  assert.ok(html.includes('!isSquareSummaryArchive() || transferTof.open'));
 })().catch(error=>{console.error(error);process.exitCode=1});
 """

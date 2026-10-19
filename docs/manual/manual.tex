@@ -1668,15 +1668,16 @@ Each node retains its own calibration and baseline settings. Ambiguous matches a
 associated automatically. Original device backups remain unchanged.
 
 \subsection{Inspecting Transfer Function TOF shots}
-Click a Transfer Function data point to open \ui{Selected Waveform}. Component curves
-select their generator phase; quadrature sums allow either phase. The inspector shows one
-saved raw/fit TOF with separate UP and DOWN traces. Use the phase and shot selectors or
-\ui{Previous}/\ui{Next} to inspect repeated shots. SYNC plots also provide a Master/Slave
-selector without changing the loaded analysis node. Source-node waveform indices, rather
-than logical SYNC shot indices, select files. Excluded phase-invalid shots remain available
-for diagnosis; calibration, baseline, error and rejected power-monitor shots are omitted.
-Noise-floor curves are not selectable. Missing archived waveforms produce a visible message.
-This inspection is read-only and does not alter TF results or optimization parameters.
+Click a Transfer Function data point to open \ui{Selected Waveform} with all saved
+science-shot TOFs at that point overlaid, using separate UP and DOWN plots. The default
+\ui{All phases} selection includes both generator phases; select \ui{0 degrees} or
+\ui{90 degrees} to compare repetitions within one quadrature. Raw and Fit switches
+control which curves appear. SYNC plots also provide a Master/Slave selector without
+changing the loaded analysis node. Source-node waveform indices select the files.
+Phase-invalid shots remain available for diagnosis; calibration, baseline, error and rejected
+power-monitor shots are omitted. Noise-floor curves are not selectable. Missing waveform
+files produce a visible warning while available curves remain displayed. Inspection does
+not alter TF results, applied A/C values or original data.
 
 \subsection{Optimizing a differential Transfer Function frequency}
 Below the first Differential Transfer Function plot, expand \ui{Optimize A -- selected frequency}.

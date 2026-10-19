@@ -2867,14 +2867,11 @@
                             <strong class="small">Transfer Function TOF</strong>
                             <select v-if="syncManifest" class="form-select form-select-sm" style="width:auto" aria-label="TOF node" v-model="transferTof.node" @change="changeTransferTofNode" :disabled="isLoadingWaveforms"><option v-for="node in transferTofNodes()" :value="node">{{ syncArchiveNodeLabel(node) }}</option></select>
                             <select class="form-select form-select-sm" style="width:auto" aria-label="TOF generator phase" v-model="transferTof.phase" @change="changeTransferTofPhase" :disabled="isLoadingWaveforms"><option value="all">All phases</option><option :value="0">0°</option><option :value="90">90°</option></select>
-                            <select class="form-select form-select-sm" style="width:auto;max-width:330px" aria-label="TOF shot" v-model.number="transferTof.shot" @change="showTransferTofShot" :disabled="isLoadingWaveforms"><option v-for="row in transferTofShots()" :key="row.step" :value="Number(row.step)">Shot {{ row.sync_shot_index ?? row.step }} · {{ row.transfer_phase_deg }}° · step {{ row.step }}</option></select>
-                            <button class="btn btn-outline-secondary btn-sm" @click="stepTransferTof(-1)" :disabled="isLoadingWaveforms || !transferTofShots().length || Number(transferTof.shot) === Number(transferTofShots()[0]?.step)">Previous</button>
-                            <button class="btn btn-outline-secondary btn-sm" @click="stepTransferTof(1)" :disabled="isLoadingWaveforms || !transferTofShots().length || Number(transferTof.shot) === Number(transferTofShots().at(-1)?.step)">Next</button>
                             <label class="form-check-label small"><input class="form-check-input me-1" type="checkbox" v-model="showTofRawCurve">Raw</label>
                             <label class="form-check-label small"><input class="form-check-input me-1" type="checkbox" v-model="showTofFitCurve">Fit</label>
                             <button class="btn btn-outline-secondary btn-sm ms-auto" @click="closeTransferTof">Close</button>
                         </div>
-                        <div class="small text-muted mt-1">Each TF point summarizes repeated shots. Inspect one saved raw/fit TOF at a time; UP and DOWN are shown below. Phase-invalid shots remain available for inspection.</div>
+                        <div class="small text-muted mt-1">All saved TOFs at this point are overlaid. Select All phases, 0° or 90° to compare repetitions; UP and DOWN are shown separately. Phase-invalid shots remain available for inspection.</div>
                         <div v-if="transferTof.error" class="alert alert-warning small py-2 mt-2 mb-0">{{ transferTof.error }}</div>
                     </div>
                     <div class="card-body p-0 position-relative">
@@ -3144,7 +3141,7 @@
                     runLogViewer: { open: false, loading: false, error: '', events: [], selected: null, summary: null, anomalyCount: 0, focusIndex: -1, nodes: [], levels: [], eventNames: [], search: '', node: '', level: '', event: '', anomaliesOnly: false },
                     shareLinkMessage: '', shareLinkError: false,
                     labPlotExport: { open: false, metrics: [], source: 'fit', includeFits: true, includeDifferential: true, busy: false, error: '' },
-                    transferTof: {open: false, frequency: null, node: '', phase: 'all', shot: '', rows: [], error: '', request: 0}, waveformRequestId: 0,
+                    transferTof: {open: false, frequency: null, node: '', phase: 'all', rows: [], error: '', request: 0}, waveformRequestId: 0,
                     currentWaveforms: [],
                     selectedAllanWindow: null,
                     loadedPoints: [], currentCalculatedPoints: [], originalSettings: {}, loadedConfig: {}, currentScanDimensions: 1,
@@ -7065,7 +7062,7 @@
                 },
 
                 async refreshWaveformPreview() {
-                    if (this.transferTof.open) { await this.showTransferTofShot(); return; }
+                    if (this.transferTof.open) { await this.showTransferTofWaveforms(); return; }
                     const keys = Array.isArray(this.selectedPointKeys) && this.selectedPointKeys.length
                         ? this.selectedPointKeys.filter(key => this.historyMap[key])
                         : (this.selectedPointKey && this.historyMap[this.selectedPointKey] ? [this.selectedPointKey] : []);
@@ -7171,9 +7168,8 @@
                     state.open = true; state.frequency = frequency; state.error = '';
                     if (this.maximizedView) this.maximizedView = 'scope';
                     state.node = this.syncManifest ? (point?.data?.meta?.transferNode || this.loadedSyncNode || 'master') : '';
-                    const phase = point?.data?.meta?.transferPhase;
-                    state.phase = phase === 0 || phase === 90 ? phase : 'all';
-                    state.shot = ''; state.rows = []; this.currentWaveforms = [];
+                    state.phase = 'all';
+                    state.rows = []; this.currentWaveforms = [];
                     this.selectedPointKeys = []; this.selectedPointKey = '';
                     await this.changeTransferTofNode();
                     this.$nextTick(() => {
@@ -7182,7 +7178,7 @@
                     });
                 },
                 clearTransferTofWaveform() {
-                    this.currentWaveforms = []; this.selectedPointLabel = '';
+                    this.currentWaveforms = []; this.selectedPointLabel = ''; this.selectedCount = 0;
                     if (typeof Plotly !== 'undefined') {
                         Plotly.react('waveformPlotUp', [], this.layoutOscUp);
                         Plotly.react('waveformPlotDw', [], this.layoutOscDw);
@@ -7190,7 +7186,7 @@
                 },
                 async changeTransferTofNode() {
                     const state = this.transferTof;
-                    state.error = ''; state.shot = ''; state.rows = []; this.clearTransferTofWaveform();
+                    state.error = ''; state.rows = []; this.clearTransferTofWaveform();
                     const request = ++state.request;
                     const frequency = state.frequency;
                     const node = state.node;
@@ -7225,37 +7221,31 @@
                     } finally { if (request === state.request) this.isLoadingWaveforms = false; }
                 },
                 async changeTransferTofPhase() {
-                    this.clearTransferTofWaveform();
-                    const shots = this.transferTofShots();
-                    this.transferTof.shot = shots.length ? Number(shots[0].step) : '';
-                    if (!shots.length) { this.transferTof.error = 'No archived science shots with TOF indices match this selection.'; this.currentWaveforms = []; return; }
-                    await this.showTransferTofShot();
+                    await this.showTransferTofWaveforms();
                 },
-                async showTransferTofShot() {
+                async showTransferTofWaveforms() {
                     const state = this.transferTof;
-                    const row = this.transferTofShots().find(item => Number(item.step) === Number(state.shot));
-                    if (!state.open || !row || state.shot === '') return;
+                    if (!state.open) return;
                     state.error = ''; this.clearTransferTofWaveform();
-                    const context = `${state.request}:${state.node}:${state.phase}:${state.shot}`;
+                    const indices = [...new Set(this.transferTofShots().map(row => Number(row.step)))];
+                    if (!indices.length) { state.error = 'No archived science shots with TOF indices match this selection.'; return; }
+                    const context = `${state.request}:${state.node}:${state.phase}`;
                     const nodeLabel = this.syncManifest ? this.syncArchiveNodeLabel(state.node) : 'This archive';
-                    this.selectedPointLabel = `${nodeLabel} · ${this.getArchiveXAxisLabel()}=${state.frequency} · ${row.transfer_phase_deg}° · shot ${row.sync_shot_index ?? row.step} · step ${row.step} · saved TOF`;
-                    this.selectedCount = 1;
-                    const loaded = await this.loadWaveforms([Number(row.step)], {nodeId: state.node, savedOnly: true});
-                    if (loaded === false && context === `${state.request}:${state.node}:${state.phase}:${state.shot}`) state.error = this.errorMsg || 'Archived TOF could not be loaded.';
-                },
-                async stepTransferTof(direction) {
-                    const shots = this.transferTofShots();
-                    const index = shots.findIndex(row => Number(row.step) === Number(this.transferTof.shot));
-                    const next = index + direction;
-                    if (next < 0 || next >= shots.length) return;
-                    this.transferTof.shot = Number(shots[next].step);
-                    await this.showTransferTofShot();
+                    const label = `${nodeLabel} · ${this.getArchiveXAxisLabel()}=${state.frequency} · ${state.phase === 'all' ? '0° + 90°' : `${state.phase}°`}`;
+                    this.selectedPointLabel = `${label} · ${indices.length} saved TOFs`;
+                    this.selectedCount = indices.length;
+                    const loaded = await this.loadWaveforms(indices, {nodeId: state.node, savedOnly: true, allowPartial: true});
+                    if (context !== `${state.request}:${state.node}:${state.phase}` || !state.open) return;
+                    if (loaded === false) { state.error = this.errorMsg || 'Archived TOFs could not be loaded.'; return; }
+                    this.selectedCount = this.currentWaveforms.length;
+                    this.selectedPointLabel = `${label} · ${this.currentWaveforms.length}/${indices.length} saved TOFs`;
+                    if (loaded?.missing?.length) state.error = `${loaded.missing.length} TOF file(s) could not be loaded (steps ${loaded.missing.join(', ')}). Available TOFs are shown.`;
                 },
                 closeTransferTof() {
                     this.transferTof.open = false; this.transferTof.request++;
                     if (this.maximizedView === 'scope') this.maximizedView = '';
                     this.waveformRequestId++; this.isLoadingWaveforms = false;
-                    this.currentWaveforms = []; this.selectedPointLabel = '';
+                    this.currentWaveforms = []; this.selectedPointLabel = ''; this.selectedCount = 0;
                     if (typeof Plotly !== 'undefined') {
                         Plotly.react('waveformPlotUp', [], this.layoutOscUp);
                         Plotly.react('waveformPlotDw', [], this.layoutOscDw);
@@ -7299,18 +7289,32 @@
                     this.isLoadingWaveforms = true;
                     try {
                         let responses = [];
+                        const missing = [];
                         if (this.displayMode === 'recalculated' && !options.savedOnly) {
                             const res = await axios.post('/archive/waveforms/recalculate', this.buildArchivePayload({ step_indices: indices, node_id: nodeId || null }));
                             responses = Array.isArray(res.data?.data) ? res.data.data : [];
                         } else {
                             const waveformQuery = nodeId ? `?node_id=${encodeURIComponent(nodeId)}` : '';
-                            const requests = indices.map(idx => axios.get(`/archive/waveform/${this.selectedYear}/${this.selectedMonth}/${this.selectedDay}/${this.selectedRun}/${idx}${waveformQuery}`));
-                            const fetched = await Promise.all(requests);
-                            responses = fetched.map((res, index) => ({ step: indices[index], ...res.data }));
+                            const fetch = idx => axios.get(`/archive/waveform/${this.selectedYear}/${this.selectedMonth}/${this.selectedDay}/${this.selectedRun}/${idx}${waveformQuery}`);
+                            if (options.allowPartial) {
+                                for (let offset = 0; offset < indices.length; offset += 8) {
+                                    if (requestId !== this.waveformRequestId) return false;
+                                    const batch = indices.slice(offset, offset + 8);
+                                    const fetched = await Promise.allSettled(batch.map(fetch));
+                                    fetched.forEach((result, index) => {
+                                        if (result.status === 'fulfilled') responses.push({step: batch[index], ...result.value.data});
+                                        else missing.push(batch[index]);
+                                    });
+                                }
+                                if (!responses.length) throw new Error('None of the selected TOF files could be loaded.');
+                            } else {
+                                const fetched = await Promise.all(indices.map(fetch));
+                                responses = fetched.map((res, index) => ({ step: indices[index], ...res.data }));
+                            }
                         }
                         if (requestId !== this.waveformRequestId) return false;
                         const normalizedResponses = responses.map((data, index) =>
-                            this.normalizeWaveformResponse(data, indices[index], index)
+                            this.normalizeWaveformResponse(data, data.step ?? indices[index], index)
                         );
                         this.currentWaveforms = normalizedResponses;
                         const tracesUp = []; const tracesDw = [];
@@ -7383,7 +7387,7 @@
                         // 最后绘制数据
                         Plotly.react('waveformPlotUp', tracesUp, this.layoutOscUp);
                         Plotly.react('waveformPlotDw', tracesDw, this.layoutOscDw);
-                        return true;
+                        return options.allowPartial ? {missing, loaded: normalizedResponses.length} : true;
 
                     } catch (e) {
                         console.error(e);
