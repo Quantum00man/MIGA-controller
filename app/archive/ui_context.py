@@ -4,6 +4,7 @@ Only immutable waveform directories are shared with the original archive.
 All editable metadata is copied into a new version before a handler can write.
 """
 import asyncio
+import errno
 from contextvars import ContextVar
 from contextlib import asynccontextmanager
 import json
@@ -170,7 +171,14 @@ def clone_metadata(source, destination, original):
             raw = original / 'waveforms'
             if not raw.is_dir() or raw.is_symlink():
                 raise ValueError('Invalid original waveform directory')
-            target.symlink_to(raw.resolve(), target_is_directory=True)
+            try:
+                target.symlink_to(raw.resolve(), target_is_directory=True)
+            except OSError as exc:
+                if exc.errno not in {errno.EOPNOTSUPP, errno.ENOSYS}:
+                    raise
+                # CIFS/NAS mounts may not support links. Keep an independent copy
+                # in the new version rather than failing all analysis writes.
+                clone_metadata(raw, target, raw)
         elif item.is_symlink():
             raise ValueError('Unexpected link in archive metadata')
         elif item.is_dir():
