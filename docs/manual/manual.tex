@@ -1657,6 +1657,14 @@ local probability baseline remains zero; amplitude changes sensitivity, nonlinea
 and the valid signal envelope. The preview follows the entered amplitude.
 \ui{Restore experiment reference} restores the original calibration.
 
+On Archive Server, missing Slave replicas can be associated with an already backed-up
+Slave run when its recorded run ID, Slave identity and SYNC run ID match uniquely.
+Existing internal replicas take priority. The reference panel identifies the source device
+and run. Saving a Master analysis version copies associated Slave inputs into that version;
+subsequent changes to the independent Slave archive do not alter the saved analysis.
+Each node retains its own calibration and baseline settings. Ambiguous matches are not
+associated automatically. Original device backups remain unchanged.
+
 \subsection{Why optimize $A$ and $C$}
 Equation~\eqref{eq:archive-phase} shows that changing only $\omega$ or $\phi_0$ changes a
 constant reference term and therefore cannot change standard deviation or first-order

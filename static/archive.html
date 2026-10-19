@@ -2376,6 +2376,10 @@
                                     <div class="alert alert-light border py-2 small mt-2 mb-3">
                                         <strong>Currently applied fringe:</strong> {{ archivePhaseReferenceCalibration()?.name || 'unnamed' }}
                                     </div>
+                                    <div v-if="syncManifest?.archive_nodes?.[archivePhaseReferenceNodeKey()]?.device_id" class="small text-muted mb-2">
+                                        Source archive: {{ syncManifest.archive_nodes[archivePhaseReferenceNodeKey()].device_id }} / {{ (syncManifest.archive_nodes[archivePhaseReferenceNodeKey()].reference || []).join('/') }}
+                                        <span v-if="syncManifest.archive_nodes[archivePhaseReferenceNodeKey()].source === 'server_archive_snapshot'"> · fixed input copy in this analysis version</span>
+                                    </div>
                                     <label class="form-label-small mt-2">Reference fringe</label>
                                     <select class="form-select mb-2" v-model="archivePhaseReferenceSelectedCalibrationId" @change="selectArchivePhaseReferenceCalibration" :disabled="archivePhaseCalibrationListLoading">
                                         <option value="archive">Current archive fringe — {{ archivePhaseReferenceCalibration()?.name || 'unnamed' }}</option>
@@ -7342,6 +7346,9 @@
                     }
                     if (this.archivePhaseCalibrationListSource === 'local_settings') {
                         return `Calibration list loaded from this node's local Settings.`;
+                    }
+                    if (this.archivePhaseCalibrationListSource === 'backup_snapshot') {
+                        return 'Calibration list loaded from the archived node snapshot.';
                     }
                     return 'Calibration source unavailable.';
                 },

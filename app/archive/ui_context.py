@@ -162,13 +162,18 @@ def resolve(repository, device_id, reference, selection='latest'):
     return path
 
 
-def clone_metadata(source, destination, original):
+def clone_metadata(source, destination, original, share_waveforms=True):
     destination.mkdir(parents=True, exist_ok=False)
     for item in source.iterdir():
         target = destination / item.name
         if item.name == 'waveforms' and item.is_dir():
             # The loader reads waveforms; none of the UI mutation APIs writes them.
             raw = original / 'waveforms'
+            if not share_waveforms or (not raw.exists() and not item.is_symlink()):
+                # Associated node inputs exist only in derived versions. Preserve
+                # their private waveforms when cloning subsequent versions.
+                clone_metadata(item, target, item, share_waveforms=False)
+                continue
             if not raw.is_dir() or raw.is_symlink():
                 raise ValueError('Invalid original waveform directory')
             try:
@@ -182,7 +187,7 @@ def clone_metadata(source, destination, original):
         elif item.is_symlink():
             raise ValueError('Unexpected link in archive metadata')
         elif item.is_dir():
-            clone_metadata(item, target, original / item.name)
+            clone_metadata(item, target, original / item.name, share_waveforms=share_waveforms)
         elif item.is_file():
             shutil.copyfile(item, target)
 
@@ -229,6 +234,10 @@ async def request_context(request: Request):
             directory = version_root(repository, device_id, ref) / version_id
             await run_in_threadpool(clone_metadata, source, directory / 'run', original)
             loader._get_run_dir = lambda *requested: directory / 'run' if list(requested) == ref else resolve(repository, device_id, list(requested), selection)
+            from app.archive.sync_links import pin_sync_links
+            await run_in_threadpool(pin_sync_links, loader, repository, directory / 'run', clone_metadata)
+        from app.archive.sync_links import attach_sync_links
+        attach_sync_links(loader, repository)
         token = _scope.set(context)
         yield
         if mutable:
