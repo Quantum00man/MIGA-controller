@@ -2993,6 +2993,8 @@ async def export_archive_labplot(req: ArchiveLabPlotExportRequest):
             req.phase_noise_summary,
             req.phase_noise_x_axis,
             req.transfer_function_differential_summary,
+            req.strain_sensitivity_settings.model_dump() if req.strain_sensitivity_settings is not None else None,
+            req.cmrr_slave_normalization_scales,
         )
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc))

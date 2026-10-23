@@ -2302,7 +2302,7 @@
                                 </select>
                                 <div class="btn-group btn-group-sm" role="group" aria-label="Differential Transfer Function y-axis scale">
                                     <button class="btn" :class="transferFunctionYAxisScale === 'linear' ? 'btn-secondary' : 'btn-outline-secondary'" @click="transferFunctionYAxisScale='linear'; renderSyncArchivePlot()">Linear Y</button>
-                                    <button class="btn" :class="transferFunctionYAxisScale === 'log' ? 'btn-secondary' : 'btn-outline-secondary'" @click="transferFunctionYAxisScale='log'; renderSyncArchivePlot()" title="Apply logarithmic Y scaling to both differential plots">Log Y</button>
+                                    <button class="btn" :class="transferFunctionYAxisScale === 'log' ? 'btn-secondary' : 'btn-outline-secondary'" @click="transferFunctionYAxisScale='log'; renderSyncArchivePlot()" title="Log Y applies to response and strain plots; CMRR always uses a linear dB axis">Log Y</button>
                                 </div>
                                 <button class="btn btn-outline-success btn-sm" @click="downloadSyncTransferFunctionDifferentialCSV" :disabled="!syncArchiveTransferDifferentialRows().length">
                                     <i class="bi bi-download me-1"></i>Differential TF CSV
@@ -2402,6 +2402,7 @@
                         <div v-if="isTransferFunctionArchive()" id="syncArchiveTransferPhaseDifferencePlot" class="sync-archive-square-plot mt-3"></div>
                         <div v-if="isTransferFunctionArchive()" id="syncArchiveTransferPathNormalizedPlot" class="sync-archive-square-plot mt-3"></div>
                         <div v-if="isTransferFunctionArchive()" id="syncArchiveStrainSensitivityPlot" class="sync-archive-square-plot mt-3"></div>
+                        <div v-if="isTransferFunctionArchive()" id="syncArchiveCMRRPlot" class="sync-archive-square-plot mt-3"></div>
                     </div>
                 </section>
                 <section v-if="archivePhaseReferenceEditorVisible()" class="card mb-4 border-0 shadow-sm">
@@ -3031,7 +3032,7 @@
                     </div>
                     <div class="labplot-summary mb-3">
                         <template v-if="isTransferFunctionArchive()">
-                            Transfer Function uses {{ isTransferBurstTimeScanArchive() ? 'P0' : 'TTI carrier frequency' }} as the x-axis. Mean and standard-deviation worksheets contain separate phase curves; Interferometer Phase exports S² and an unnormalized ΔΦ² worksheet, each with the fixed Allan noise floor.
+                            Transfer Function uses {{ isTransferBurstTimeScanArchive() ? 'P0' : 'TTI carrier frequency' }} as the x-axis. Mean and standard-deviation worksheets contain separate phase curves; Interferometer Phase exports S² and an unnormalized ΔΦ² worksheet, each with the fixed Allan noise floor. When Interferometer Phase and SYNC differential worksheets are selected, Strain Sensitivity is included with propagated SEM error bars and the current noise settings. CMRR follows on a linear dB axis (more negative means better suppression), with paired statistical error bars.
                         </template>
                         <template v-else-if="isPhaseNoiseArchive()">
                             Exports a Standard Deviation worksheet and an Allan Deviation worksheet with one stacked plot per selected order ({{ phaseNoiseAllanOrders.map(order => `n=${order}`).join(', ') }}). The current T/T² x-axis selection is preserved.
@@ -3133,6 +3134,7 @@
     <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
     <script src="https://cdn.plot.ly/plotly-2.12.1.min.js"></script>
     <script src="/strain-sensitivity.js"></script>
+    <script src="/cmrr.js"></script>
     <script src="/plot-publication.js"></script>
 
     <script src="/archive-server-ui.js"></script>
@@ -3480,6 +3482,7 @@
                             this.resizePlot('syncArchiveTransferPhaseDifferencePlot');
                             this.resizePlot('syncArchiveTransferPathNormalizedPlot');
                             this.resizePlot('syncArchiveStrainSensitivityPlot');
+                            this.resizePlot('syncArchiveCMRRPlot');
                         }
                     }
                     this.resizePlot('archivePhaseReferencePlot');
@@ -9349,6 +9352,17 @@
                 syncArchiveStrainSensitivityRows() {
                     return StrainSensitivity.rows(this.syncArchiveTransferDifferentialRows(), this.syncArchivePairs(), this.analysis);
                 },
+                syncArchiveCMRRScales() {
+                    const scales = {...(this.syncTransferNormalization?.slave_scales || {})};
+                    const preview = this.syncTransferNormalizationOptimization?.result;
+                    if (preview?.slave_node_id && Number(preview.scale_after) > 0 && Number.isFinite(Number(preview.scale_after))) {
+                        scales[String(preview.slave_node_id)] = Number(preview.scale_after);
+                    }
+                    return scales;
+                },
+                syncArchiveCMRRRows(rows = null) {
+                    return CMRR.rows(rows || this.syncArchiveTransferDifferentialRows(), this.syncArchivePairs(), this.syncArchiveCMRRScales());
+                },
                 transferAmplitudePayload() {
                     const state = this.transferAmplitude;
                     const shot = value => value === '' || value === null ? null : Number(value);
@@ -9406,7 +9420,7 @@
                     return Object.values(this.archivePhaseReferenceContexts || {}).some(context => context?.has_override === true);
                 },
                 async downloadSyncTransferFunctionDifferentialCSV() {
-                    const rows = this.syncArchiveStrainSensitivityRows();
+                    const rows = this.syncArchiveCMRRRows(this.syncArchiveStrainSensitivityRows());
                     if (!rows.length) return;
                     const fields = ['slave_node_id', 'frequency_hz'];
                     ['0deg', '90deg'].forEach(phase => {
@@ -9423,7 +9437,8 @@
                     });
                     fields.push('differential_path_s2', 'differential_path_s2_sem', 'differential_path_noise_s2',
                         'strain_baseline_m', 'strain_response_rad', 'strain_phase_asd_rad_sqrt_hz', 'strain_asd_sqrt_hz', 'strain_asd_sem_sqrt_hz', 'strain_status', ...Object.keys(StrainSensitivity.defaults));
-                    const words = { s: 'S', s2: 'S2', sem: 'SEM', std: 'Std', hz: 'Hz', rad: 'Rad', id: 'ID', '0deg': '0deg', '90deg': '90deg' };
+                    fields.push('cmrr_master_s2', 'cmrr_slave_s2', 'cmrr_reference_s2', 'cmrr_ratio', 'cmrr_db', 'cmrr_sem_db', 'cmrr_status');
+                    const words = { cmrr: 'CMRR', db: 'dB', s: 'S', s2: 'S2', sem: 'SEM', std: 'Std', hz: 'Hz', rad: 'Rad', id: 'ID', '0deg': '0deg', '90deg': '90deg' };
                     const headers = fields.map(field => field.split('_').map(word => words[word] || word.charAt(0).toUpperCase() + word.slice(1)).join('_'));
                     const csv = '\uFEFF' + [headers, ...rows.map(row => fields.map(field => row[field] ?? ''))]
                         .map(row => row.map(value => this.csvCell(value)).join(',')).join('\n');
@@ -9558,11 +9573,18 @@
                     element.on('plotly_click', event => this.openTransferTof(event?.points?.[0]));
                 },
                 renderSyncArchiveStrainSensitivityPlot() {
+                    this.renderSyncArchiveCMRRPlot();
                     const element = document.getElementById('syncArchiveStrainSensitivityPlot');
                     if (!element || typeof Plotly === 'undefined') return;
                     const rows = this.syncArchiveStrainSensitivityRows();
                     const figure = StrainSensitivity.figure(rows, this.analysis, this.transferFunctionYAxisScale, this.getArchiveXAxisLabel());
                     Plotly.react(element, figure.data, figure.layout, { responsive: true, displaylogo: false });
+                },
+                renderSyncArchiveCMRRPlot() {
+                    const element = document.getElementById('syncArchiveCMRRPlot');
+                    if (!element || typeof Plotly === 'undefined') return;
+                    const figure = CMRR.figure(this.syncArchiveCMRRRows(), this.getArchiveXAxisLabel());
+                    Plotly.react(element, figure.data, figure.layout, {responsive: true, displaylogo: false});
                 },
                 renderSyncArchivePlot() {
                     if (this.isBraggRabiArchive()) {
@@ -10291,6 +10313,8 @@
                                 ? this.phaseNoiseSummary
                                 : null,
                             transfer_function_differential_summary: this.isTransferFunctionArchive() && this.syncManifest ? this.syncArchiveTransferDifferentialRows() : null,
+                            strain_sensitivity_settings: this.isTransferFunctionArchive() ? StrainSensitivity.settings(this.analysis) : null,
+                            cmrr_slave_normalization_scales: this.isTransferFunctionArchive() && this.syncManifest ? this.syncArchiveCMRRScales() : null,
                             phase_noise_x_axis: this.phaseNoiseXAxis
                         }, { responseType: 'blob' });
                         const fallbackName = `miga_${this.sanitizeFilenamePart(this.selectedRun || this.loadedRunId || 'archive')}.lml`;

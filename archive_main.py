@@ -111,6 +111,11 @@ async def setup_script():
     return FileResponse(STATIC_DIR / 'archive-setup.js', media_type='application/javascript')
 
 
+@app.get('/cmrr.js')
+async def cmrr_script():
+    return FileResponse(STATIC_DIR / 'cmrr.js', media_type='application/javascript')
+
+
 @app.get('/strain-sensitivity.js')
 async def strain_sensitivity_script():
     return FileResponse(STATIC_DIR / 'strain-sensitivity.js', media_type='application/javascript')

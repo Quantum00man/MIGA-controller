@@ -1371,18 +1371,74 @@ These inputs are separate from the per-node TF calibration noise-floor setting.
 Changing the number of shots used to calibrate the response does not automatically
 reduce the detector noise ASD.
 
-The error bars propagate the existing SEM of $Q$ with noise, wavelength and geometry
+For normalized paired quadrature samples $x_{\psi,q}$, let $\bar x_\psi$
+be their mean and $u_\psi=s_\psi/\sqrt{N_\psi}$ its SEM. The existing path-response
+uncertainty includes the second-order Gaussian terms:
+\begin{equation}
+ Q=\bar x_0^2+\bar x_{90}^2,\qquad
+ u_Q^2=4\bar x_0^2u_0^2+2u_0^4+4\bar x_{90}^2u_{90}^2+2u_{90}^4.
+\end{equation}
+The strain error bars propagate this SEM of $Q$ with noise, wavelength and geometry
 held fixed. Logarithmic plots retain absolute data-space errors; a lower error bound
 crossing zero is clipped to a positive plotting limit and explicitly labelled.
 Near response zeros this first-order approximation is unreliable; exact zero responses
 and missing or inconsistent paired baselines are omitted rather than plotted as finite
 sensitivities. The paired distances are taken from the recorded shots. Both plots and
 CSV export use the current noise inputs; reanalysis snapshots retain those parameters.
+LabPlot export includes a separate \ui{SYNC Strain Sensitivity} worksheet per Slave
+when Interferometer Phase and SYNC differential worksheets are selected. The embedded
+spreadsheet retains the strain ASD and separate upper/lower SEM columns. Project
+comments record the noise model, wavelength, sampling cycle and readout Nyquist frequency;
+current Archive noise inputs take precedence over archived values.
+
 
 This calibration assumes the ideal long-wavelength, optimally oriented GW propagation
 model. The ordinary shot-readout Nyquist frequency $1/(2T_c)$ is stated on the plot;
 points above it are model-equivalent sensitivities rather than a demonstrated broadband
 GW measurement.
+
+\subsection{Normalized common-mode rejection ratio}
+Immediately below Strain Sensitivity, \ui{Common-Mode Rejection Ratio (CMRR)} uses
+the negative-is-better convention
+\begin{equation}
+ D=|H_M-H_S|^2,\qquad
+ P=\frac{|H_M|^2+|H_S|^2}{2},\qquad
+ C_{\mathrm{dB}}=10\log_{10}\!\left(\frac{D}{P}\right).
+\end{equation}
+Here $D$ is \code{differential_s2}. Each $H_j$ retains the signed $0^\circ$ and $90^\circ$ normalized mean responses.
+The reference is the mean of the two single-node squared magnitudes, computed
+from the same valid paired shots as the differential response. It is not the square
+of the average magnitude. This measures normalized response matching; no distance
+weighting, strain-noise input or noise-floor subtraction is applied. More negative
+values indicate stronger suppression. The CMRR Y axis always stays linear in dB,
+including after selecting \ui{Log Y}; the other response and strain plots retain
+their selected scale.
+
+Let $m_\psi,s_\psi$ denote the normalized Master and Slave quadrature means and
+$\Sigma_\psi$ their $2\times2$ sample covariance matrix divided by the valid pair
+count $N_\psi$. First-order statistical error bars retain within-shot covariance:
+\begin{align}
+ g_{M,\psi}&=\frac{10}{\ln 10}\left[\frac{2(m_\psi-s_\psi)}{D}-\frac{m_\psi}{P}\right],\\
+ g_{S,\psi}&=\frac{10}{\ln 10}\left[-\frac{2(m_\psi-s_\psi)}{D}-\frac{s_\psi}{P}\right],\\
+ u_C^2&=\sum_{\psi\in\{0,90\}}\boldsymbol g_\psi^{\mathsf T}
+ \Sigma_\psi\boldsymbol g_\psi.
+\end{align}
+The two quadrature acquisitions are treated as independent. At least two valid
+pairs per quadrature are required for error bars; single-pair data can still provide
+a finite central value. Existing Slave normalization ratios, including the current
+preview, apply consistently to both numerator and reference. If an archived
+numerator does not match reconstruction from the paired samples, its central ratio
+is retained and its uncertainty is marked unavailable rather than estimated from
+inconsistent inputs. Near a zero residual, linearized errors are only approximate.
+
+A zero numerator with a positive reference represents $-\infty$ dB. Such points,
+zero references and missing quadratures are excluded from the finite plot and flagged
+in CSV. CSV includes each node's squared response, the mean reference, residual ratio,
+CMRR in dB, its SEM and status. LabPlot adds one \ui{SYNC CMRR} worksheet per Slave
+after \ui{SYNC Strain Sensitivity}, with native upper/lower SEM columns and a linear
+dB axis. Select Interferometer Phase and \ui{Include SYNC differential worksheets}
+when exporting. Both Controller and Archive Server use the same definitions; legacy
+runs are reconstructed from stored paired shots without changing acquisition files.
 
 \section{Archive replication}
 Each node first writes a normal local archive. A ZIP bundle excludes temporary files and

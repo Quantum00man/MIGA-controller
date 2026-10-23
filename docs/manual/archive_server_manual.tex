@@ -386,6 +386,29 @@ version before comparing or exporting results. A run directory in a revision sto
 must not be assumed to be the default Timeline selection: the implementation's
 normal raw-run namespace remains distinct from revision and analysis stores.
 
+\section{Strain sensitivity and normalized CMRR export}
+For SYNC Transfer Function runs, the differential view shows Strain Sensitivity
+below the path-normalized response, followed by CMRR. Archive reanalysis supports
+white single-shot differential phase noise or a supplied fixed phase ASD. Missing
+legacy inputs default to 74 mrad, 2.6 s sampling cycle and 780 nm wavelength.
+Strain error bars propagate the path-response SEM with these inputs fixed.
+
+CMRR uses $10\log_{10}[D/P]$, where $D$ is the squared difference of the two
+normalized complex responses and $P$ is the mean of their squared magnitudes.
+More negative dB values mean better rejection. This plot always has a linear dB
+Y axis, even when \ui{Log Y} is selected for the other plots. Its statistical
+error bars retain the covariance of the two channels within matched shots; no
+noise-floor subtraction or distance weighting is applied.
+
+SYNC differential CSV includes strain ASD, CMRR, their SEMs and calculation inputs
+or status fields. For LabPlot, select Interferometer Phase and
+\ui{Include SYNC differential worksheets}; the project contains
+\ui{SYNC Strain Sensitivity} and \ui{SYNC CMRR} worksheets with native error
+columns. Current Archive noise settings override archived defaults for strain;
+current Slave normalization ratios also apply to CMRR. Project comments record
+the conventions and strain-noise inputs. Exports and reanalysis leave raw backups
+unchanged. See the Controller manual for the full formulas and sampling limits.
+
 \chapter{Updating, reloading and unattended operation}
 \section{Server update panel}
 \begin{procedure}{Select and apply an update}

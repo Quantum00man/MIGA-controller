@@ -1145,6 +1145,8 @@ class ArchiveLabPlotExportRequest(BaseModel):
     phase_noise_summary: Optional[List[Dict[str, Any]]] = Field(None)
     phase_noise_x_axis: str = Field("t2")
     transfer_function_differential_summary: Optional[List[Dict[str, Any]]] = Field(None)
+    strain_sensitivity_settings: Optional[StrainSensitivitySettings] = Field(None)
+    cmrr_slave_normalization_scales: Optional[Dict[str, float]] = Field(None)
 
 
 class ArchiveMidFringeScheduleRequest(BaseModel):

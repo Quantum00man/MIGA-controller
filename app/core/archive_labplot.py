@@ -8,6 +8,9 @@ from copy import deepcopy
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from app.analysis.transfer_function import add_transfer_function_uncertainties, build_differential_transfer_function_summary
+from app.analysis.strain_sensitivity import strain_sensitivity_rows
+from app.analysis.cmrr import cmrr_rows
+from app.models.schemas import StrainSensitivitySettings
 from app.core.labplot_export import Curve, Plot, Worksheet, build_project
 
 
@@ -460,15 +463,20 @@ def _phase_noise_worksheets(
     return worksheets
 
 
-def _transfer_differential_worksheets(rows):
+def _transfer_differential_worksheets(rows, pairs=(), strain_settings=None, x_label="TTI carrier frequency (Hz)", cmrr_scales=None):
     worksheets = []
     for slave_id in sorted({str(row.get('slave_node_id', 'slave')) for row in rows}):
         selected = sorted([add_transfer_function_uncertainties(deepcopy(row)) for row in rows if str(row.get('slave_node_id', 'slave')) == slave_id], key=lambda row: row['frequency_hz'])
+        if strain_settings is not None:
+            selected = strain_sensitivity_rows(selected, pairs, strain_settings)
+        selected = cmrr_rows(selected, pairs, cmrr_scales)
         definitions = [
             ('SYNC Transfer S2', 'S2 (dimensionless)', [('differential_s2', 'Quadrature sum', 'differential_s2_sem'), ('delta_s_0deg_s2', '0 deg', 'delta_s_0deg_s2_sem'), ('delta_s_90deg_s2', '90 deg', 'delta_s_90deg_s2_sem')]),
             ('SYNC Transfer Magnitude', 'Response magnitude', [('differential_magnitude', 'Magnitude', 'differential_magnitude_sem')]),
             ('SYNC Phase Difference', 'Phase difference (rad)', [('phase_difference_magnitude_rad', 'Magnitude', 'phase_difference_magnitude_sem_rad'), ('phase_difference_0deg_mean_rad', '0 deg', 'phase_difference_0deg_sem_rad'), ('phase_difference_90deg_mean_rad', '90 deg', 'phase_difference_90deg_sem_rad')]),
             ('SYNC Path S2', 'Path normalized S2', [('differential_path_s2', 'Quadrature sum', 'differential_path_s2_sem')]),
+            ('SYNC Strain Sensitivity', 'Strain ASD (Hz^-1/2)', [('strain_asd_sqrt_hz', 'Strain ASD', 'strain_asd_sem_sqrt_hz')]),
+            ('SYNC CMRR', 'CMRR (dB; more negative = better)', [('cmrr_db', 'CMRR', 'cmrr_sem_db')]),
             ('SYNC Standard Deviation', 'Sample standard deviation', [(f'delta_s_{phase}_std', f'Normalized {phase}', None) for phase in ('0deg', '90deg')]),
             ('SYNC Phase Std', 'Phase standard deviation (rad)', [(f'phase_difference_{phase}_std_rad', phase, None) for phase in ('0deg', '90deg')]),
             ('SYNC Path Std', 'Path normalized standard deviation', [(f'phase_path_normalized_{phase}_std', phase, None) for phase in ('0deg', '90deg')]),
@@ -476,7 +484,7 @@ def _transfer_differential_worksheets(rows):
         for title, ylabel, fields in definitions:
             curves = [curve for index, (field, label, error) in enumerate(fields) if (curve := _transfer_curve(selected, field, label, COLORS[index % len(COLORS)], error_field=error))]
             if curves:
-                worksheets.append(Worksheet(f'{title} - {slave_id}', [Plot(title, 'TTI carrier frequency (Hz)', ylabel, curves)]))
+                worksheets.append(Worksheet(f'{title} - {slave_id}', [Plot(title, x_label, ylabel, curves)]))
     return worksheets
 
 
@@ -712,6 +720,8 @@ def build_archive_project(
     phase_noise_summary: Optional[Sequence[Dict[str, Any]]] = None,
     phase_noise_x_axis: str = "t2",
     transfer_function_differential_summary: Optional[Sequence[Dict[str, Any]]] = None,
+    strain_sensitivity_settings: Optional[Dict[str, Any]] = None,
+    cmrr_slave_normalization_scales: Optional[Dict[str, float]] = None,
 ) -> bytes:
     loaded_root = loader.load_run(
         year, month, day, run_id, current_phase_calibration=current_phase_calibration
@@ -728,11 +738,18 @@ def build_archive_project(
         burst_time_scan = str(config_data.get("mode") or "").strip().lower() == "transfer_burst_time_scan"
         x_label = "P0" if burst_time_scan else "TTI carrier frequency (Hz)"
         worksheets = _transfer_function_worksheets(selected, source, summary, x_label=x_label)
+        # Explicit current UI inputs win over archived parameters; legacy runs use defaults.
+        strain_parameters = StrainSensitivitySettings(**{
+            **(config_data.get('_system_settings_snapshot') or {}),
+            **(config_data.get('_analysis_snapshot') or {}),
+            **config_data,
+            **(strain_sensitivity_settings or {}),
+        }).model_dump()
         if include_differential and 'phase' in selected:
             manifest = loaded_root.get('sync_manifest') or {}
             differential = transfer_function_differential_summary
             if differential is None:
-                scales = (loaded_root.get('sync_transfer_normalization') or {}).get('slave_scales') or {}
+                scales = cmrr_slave_normalization_scales if cmrr_slave_normalization_scales is not None else (loaded_root.get('sync_transfer_normalization') or {}).get('slave_scales') or {}
                 has_override = any(context.get('has_override') for context in
                                    (loaded_root.get('archive_phase_reference_contexts') or {}).values())
                 saved = manifest.get('transfer_function_differential_summary') or []
@@ -742,7 +759,10 @@ def build_archive_project(
                     differential = saved
                 else:
                     differential = build_differential_transfer_function_summary(manifest.get('pairs') or [], scales)
-            worksheets.extend(_transfer_differential_worksheets(differential))
+            worksheets.extend(_transfer_differential_worksheets(
+                differential, manifest.get("pairs") or [], strain_parameters, x_label,
+                cmrr_slave_normalization_scales if cmrr_slave_normalization_scales is not None else (loaded_root.get("sync_transfer_normalization") or {}).get("slave_scales") or {},
+            ))
         power_worksheet = _power_meter_worksheet(loaded_root.get("data") or [])
         if power_worksheet:
             worksheets.append(power_worksheet)
@@ -761,6 +781,12 @@ def build_archive_project(
             f"x={x_label}{'; ' + normalization_comment if normalization_comment else ''}; "
             "SEM statistical error bars (independent shots/quadratures; fixed calibration); "
             "squared means include second-order Gaussian uncertainty; STD curves retained; "
+            "CMRR=10log10(differential_s2/mean(single-node S2)), negative is better; "
+            "linear dB axis; paired covariance delta-method SEM; no noise-floor subtraction; "
+            "ideal long-wavelength strain calibration, fixed noise/geometry; "
+            + "; ".join(f"{key}={value}" for key, value in strain_parameters.items())
+            + "; ordinary readout Nyquist=" + str(1 / (2 * strain_parameters['transfer_strain_cycle_time_s']))
+            + " Hz; higher-frequency strain values are model equivalents; "
             "generated for LabPlot 2.12.1"
         )
         return build_project(project_name, worksheets, comment=comment)
