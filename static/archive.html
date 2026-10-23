@@ -1406,6 +1406,24 @@
                                 </div>
                             </div>
                             <div class="col-12 form-text">Recalculate uses φ = 4πLΔν₇₈₀/c and updates the phase-resolved and quadrature S² curves.</div>
+<div class="col-12"><label class="form-label fw-bold">Strain sensitivity — differential phase noise</label></div>
+                        <div class="col-md-6"><label class="form-label">Noise model</label>
+                            <select class="form-select" v-model="analysis.transfer_strain_noise_model">
+                                <option value="white_phase">White phase noise (single shot σ, Tc)</option>
+                                <option value="fixed_asd">Fixed phase noise ASD</option>
+                            </select></div>
+                        <div class="col-md-6" v-if="analysis.transfer_strain_noise_model === 'white_phase'">
+                            <label class="form-label">Differential single-shot σ (mrad)</label>
+                            <input type="number" min="0" step="any" class="form-control" v-model.number="analysis.transfer_strain_sigma_mrad"></div>
+                        <div class="col-md-6"><label class="form-label">Sampling cycle Tc (s)</label>
+                            <input type="number" min="0.000001" step="any" class="form-control" v-model.number="analysis.transfer_strain_cycle_time_s"></div>
+                        <div class="col-md-6" v-if="analysis.transfer_strain_noise_model === 'fixed_asd'">
+                            <label class="form-label">Differential phase ASD (rad/√Hz)</label>
+                            <input type="number" min="0" step="any" class="form-control" v-model.number="analysis.transfer_strain_phase_asd_rad_sqrt_hz"></div>
+                        <div class="col-md-6"><label class="form-label">Optical wavelength (nm)</label>
+                            <input type="number" min="0.000001" step="any" class="form-control" v-model.number="analysis.transfer_strain_wavelength_nm"></div>
+                        <div class="col-12 form-text">White phase ASD = σ√(2Tc). σ describes the differential single-shot output, independent of the TF mean SEM. Missing legacy parameters default to 74 mrad, 2.6 s and 780 nm.</div>
+                            <div class="col-12"><button class="btn btn-sm btn-outline-primary" @click="renderSyncArchiveStrainSensitivityPlot()">Update strain sensitivity plot</button><span class="form-text ms-2">Noise parameters apply to the current paired differential response and are included in saved reanalysis settings.</span></div>
                         </div>
 
                         <div class="row g-2 mb-3 border-top pt-2 mt-2" v-if="isTransferFunctionArchive()">
@@ -2383,6 +2401,7 @@
                         </details>
                         <div v-if="isTransferFunctionArchive()" id="syncArchiveTransferPhaseDifferencePlot" class="sync-archive-square-plot mt-3"></div>
                         <div v-if="isTransferFunctionArchive()" id="syncArchiveTransferPathNormalizedPlot" class="sync-archive-square-plot mt-3"></div>
+                        <div v-if="isTransferFunctionArchive()" id="syncArchiveStrainSensitivityPlot" class="sync-archive-square-plot mt-3"></div>
                     </div>
                 </section>
                 <section v-if="archivePhaseReferenceEditorVisible()" class="card mb-4 border-0 shadow-sm">
@@ -3113,6 +3132,7 @@
     <script src="https://cdn.jsdelivr.net/npm/vue@3.2.31/dist/vue.global.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
     <script src="https://cdn.plot.ly/plotly-2.12.1.min.js"></script>
+    <script src="/strain-sensitivity.js"></script>
     <script src="/plot-publication.js"></script>
 
     <script src="/archive-server-ui.js"></script>
@@ -3229,6 +3249,7 @@
                     defaultFitModels: [], defaultScanFitModels: [],
                     collapsedPanels: { reanalysis: true, scanFitting: true },
                     analysis: {
+                        ...StrainSensitivity.defaults,
                         alpha: 0.0151, beta: 0.0188, R: 1.1, K: 7000,
                         gain_up: -1, gain_dw: -1,
                         z_up: 0.275, z_dw: 0.255,
@@ -3458,6 +3479,7 @@
                         if (this.isTransferFunctionArchive()) {
                             this.resizePlot('syncArchiveTransferPhaseDifferencePlot');
                             this.resizePlot('syncArchiveTransferPathNormalizedPlot');
+                            this.resizePlot('syncArchiveStrainSensitivityPlot');
                         }
                     }
                     this.resizePlot('archivePhaseReferencePlot');
@@ -3887,6 +3909,7 @@
                     normalized.atom_area_method = normalized.atom_area_method === 'edge_line' ? 'edge_line' : 'legacy';
                     const baselinePoints = Number.parseInt(normalized.atom_area_baseline_points ?? 2, 10);
                     normalized.atom_area_baseline_points = Number.isFinite(baselinePoints) && baselinePoints > 0 ? baselinePoints : 2;
+                    Object.assign(normalized, StrainSensitivity.settings(normalized));
                     const modulationMhz = Number(normalized.transfer_frequency_modulation_mhz ?? 1);
                     normalized.transfer_frequency_modulation_mhz = Number.isFinite(modulationMhz) && modulationMhz > 0 ? modulationMhz : 1;
                     const distanceM = Number(normalized.transfer_atom_mirror_distance_m ?? 2.23);
@@ -6720,7 +6743,9 @@
                             this.plotMode = "series";
                         }
                         this.currentScanDimensions = this.resolveScanDimensions(res.data.scan_dimensions, this.loadedConfig);
+                        const strainParameters = Object.fromEntries(Object.entries(StrainSensitivity.defaults).map(([key, fallback]) => [key, this.loadedConfig[key] ?? snap[key] ?? fallback]));
                         const transferNormalization = {
+                            ...strainParameters,
                             transfer_frequency_modulation_mhz: this.loadedConfig.transfer_frequency_modulation_mhz
                                 ?? snap.transfer_frequency_modulation_mhz ?? 1,
                             transfer_atom_mirror_distance_m: this.loadedConfig.transfer_atom_mirror_distance_m
@@ -6854,6 +6879,7 @@
                         this.isLoading = false;
                         await this.$nextTick();
                         await this.applyDisplayedPoints(res.data.data, this.recalculatedStats, this.recalculatedPreviewMap, false);
+                        if (this.isTransferFunctionArchive()) this.renderSyncArchiveStrainSensitivityPlot();
                         if (this.plotMode === 'allan') {
                             await this.refreshAllanIfNeeded(false);
                             await this.refreshAnalysisView();
@@ -9320,6 +9346,9 @@
                         };
                     }).map(row => this.withTransferUncertainties(row));
                 },
+                syncArchiveStrainSensitivityRows() {
+                    return StrainSensitivity.rows(this.syncArchiveTransferDifferentialRows(), this.syncArchivePairs(), this.analysis);
+                },
                 transferAmplitudePayload() {
                     const state = this.transferAmplitude;
                     const shot = value => value === '' || value === null ? null : Number(value);
@@ -9377,7 +9406,7 @@
                     return Object.values(this.archivePhaseReferenceContexts || {}).some(context => context?.has_override === true);
                 },
                 async downloadSyncTransferFunctionDifferentialCSV() {
-                    const rows = this.syncArchiveTransferDifferentialRows();
+                    const rows = this.syncArchiveStrainSensitivityRows();
                     if (!rows.length) return;
                     const fields = ['slave_node_id', 'frequency_hz'];
                     ['0deg', '90deg'].forEach(phase => {
@@ -9392,7 +9421,8 @@
                     ['0deg', '90deg'].forEach(phase => {
                         ['count', 'mean', 'std', 'sem', 's2', 's2_sem', 'noise_s2'].forEach(stat => fields.push(`phase_path_normalized_${phase}_${stat}`));
                     });
-                    fields.push('differential_path_s2', 'differential_path_s2_sem', 'differential_path_noise_s2');
+                    fields.push('differential_path_s2', 'differential_path_s2_sem', 'differential_path_noise_s2',
+                        'strain_baseline_m', 'strain_response_rad', 'strain_phase_asd_rad_sqrt_hz', 'strain_asd_sqrt_hz', 'strain_asd_sem_sqrt_hz', 'strain_status', ...Object.keys(StrainSensitivity.defaults));
                     const words = { s: 'S', s2: 'S2', sem: 'SEM', std: 'Std', hz: 'Hz', rad: 'Rad', id: 'ID', '0deg': '0deg', '90deg': '90deg' };
                     const headers = fields.map(field => field.split('_').map(word => words[word] || word.charAt(0).toUpperCase() + word.slice(1)).join('_'));
                     const csv = '\uFEFF' + [headers, ...rows.map(row => fields.map(field => row[field] ?? ''))]
@@ -9498,6 +9528,7 @@
                     element.on('plotly_click', event => this.openTransferTof(event?.points?.[0]));
                 },
                 renderSyncArchiveTransferPathNormalizedPlot() {
+                    this.renderSyncArchiveStrainSensitivityPlot();
                     const element = document.getElementById('syncArchiveTransferPathNormalizedPlot');
                     if (!element || typeof Plotly === 'undefined') return;
                     const rows = this.syncArchiveTransferDifferentialRows();
@@ -9525,6 +9556,13 @@
                     }, { responsive: true, displaylogo: false });
                     if (element.removeAllListeners) element.removeAllListeners('plotly_click');
                     element.on('plotly_click', event => this.openTransferTof(event?.points?.[0]));
+                },
+                renderSyncArchiveStrainSensitivityPlot() {
+                    const element = document.getElementById('syncArchiveStrainSensitivityPlot');
+                    if (!element || typeof Plotly === 'undefined') return;
+                    const rows = this.syncArchiveStrainSensitivityRows();
+                    const figure = StrainSensitivity.figure(rows, this.analysis, this.transferFunctionYAxisScale, this.getArchiveXAxisLabel());
+                    Plotly.react(element, figure.data, figure.layout, { responsive: true, displaylogo: false });
                 },
                 renderSyncArchivePlot() {
                     if (this.isBraggRabiArchive()) {

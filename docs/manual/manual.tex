@@ -1353,6 +1353,37 @@ For independent per-node Allan phase-noise deviations and valid paired counts $N
  {N_\psi(f)[2\delta k(L_{\mathrm{Master}}-L_{\mathrm{Slave}})]^2}.
 \end{equation}
 
+\subsection{Strain-equivalent sensitivity from the path response}
+After the Differential Path plot, the controller and archive server show
+\ui{Strain Sensitivity Function}. With $Q=R_{\Delta L}$,
+$k_0=2\pi/\lambda$ and $\Delta L=L_{\mathrm{Master}}-L_{\mathrm{Slave}}$,
+\begin{equation}
+ |R_h|=k_0|\Delta L|\sqrt{Q},\qquad
+ A_h=\frac{A_{\Delta\Phi}}{k_0|\Delta L|\sqrt{Q}},\qquad
+ \sigma_{A_h}=\frac{A_h}{2Q}\sigma_Q.
+\end{equation}
+The numerator is the differential detector phase-noise ASD. Settings and Archive
+reanalysis support either independent white single-shot differential phase noise,
+$A_{\Delta\Phi}=\sigma_{\Delta\Phi}\sqrt{2T_c}$, or an explicitly supplied fixed
+phase ASD in rad/$\sqrt{\mathrm{Hz}}$. Legacy runs default to
+$\sigma_{\Delta\Phi}=74$ mrad, $T_c=2.6$ s and $\lambda=780$ nm.
+These inputs are separate from the per-node TF calibration noise-floor setting.
+Changing the number of shots used to calibrate the response does not automatically
+reduce the detector noise ASD.
+
+The error bars propagate the existing SEM of $Q$ with noise, wavelength and geometry
+held fixed. Logarithmic plots retain absolute data-space errors; a lower error bound
+crossing zero is clipped to a positive plotting limit and explicitly labelled.
+Near response zeros this first-order approximation is unreliable; exact zero responses
+and missing or inconsistent paired baselines are omitted rather than plotted as finite
+sensitivities. The paired distances are taken from the recorded shots. Both plots and
+CSV export use the current noise inputs; reanalysis snapshots retain those parameters.
+
+This calibration assumes the ideal long-wavelength, optimally oriented GW propagation
+model. The ordinary shot-readout Nyquist frequency $1/(2T_c)$ is stated on the plot;
+points above it are model-equivalent sensitivities rather than a demonstrated broadband
+GW measurement.
+
 \section{Archive replication}
 Each node first writes a normal local archive. A ZIP bundle excludes temporary files and
 nested sync copies. SHA-256 checksums protect transfer integrity. Extraction rejects path

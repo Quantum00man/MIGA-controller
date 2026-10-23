@@ -515,6 +515,11 @@ class DataManager:
                     "transfer_frequency_modulation_mhz",
                     "transfer_atom_mirror_distance_m",
                     "transfer_phase_noise_sigma_mrad",
+                    "transfer_strain_noise_model",
+                    "transfer_strain_sigma_mrad",
+                    "transfer_strain_cycle_time_s",
+                    "transfer_strain_phase_asd_rad_sqrt_hz",
+                    "transfer_strain_wavelength_nm",
                 ):
                     if key in new_settings:
                         data[key] = new_settings[key]

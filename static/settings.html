@@ -803,6 +803,23 @@
                             </div>
                             <div class="form-text">Per-quadrature fixed noise. With both phases selected, the ΔΦ² noise floor is 2σ².</div>
                         </div>
+                        <div class="col-12"><label class="form-label fw-bold">Strain sensitivity — differential phase noise</label></div>
+                        <div class="col-md-6"><label class="form-label">Noise model</label>
+                            <select class="form-select" v-model="s.transfer_strain_noise_model">
+                                <option value="white_phase">White phase noise (single shot σ, Tc)</option>
+                                <option value="fixed_asd">Fixed phase noise ASD</option>
+                            </select></div>
+                        <div class="col-md-6" v-if="s.transfer_strain_noise_model === 'white_phase'">
+                            <label class="form-label">Differential single-shot σ (mrad)</label>
+                            <input type="number" min="0" step="any" class="form-control" v-model.number="s.transfer_strain_sigma_mrad"></div>
+                        <div class="col-md-6"><label class="form-label">Sampling cycle Tc (s)</label>
+                            <input type="number" min="0.000001" step="any" class="form-control" v-model.number="s.transfer_strain_cycle_time_s"></div>
+                        <div class="col-md-6" v-if="s.transfer_strain_noise_model === 'fixed_asd'">
+                            <label class="form-label">Differential phase ASD (rad/√Hz)</label>
+                            <input type="number" min="0" step="any" class="form-control" v-model.number="s.transfer_strain_phase_asd_rad_sqrt_hz"></div>
+                        <div class="col-md-6"><label class="form-label">Optical wavelength (nm)</label>
+                            <input type="number" min="0.000001" step="any" class="form-control" v-model.number="s.transfer_strain_wavelength_nm"></div>
+                        <div class="col-12 form-text">White phase ASD = σ√(2Tc). σ describes the differential single-shot output, independent of the TF mean SEM. Missing legacy parameters default to 74 mrad, 2.6 s and 780 nm.</div>
                         <div class="col-12">
                             <div v-if="transferS2NoiseFloor" class="border rounded bg-light px-3 py-2">
                                 <div class="small fw-bold mb-1">Normalized Transfer Function S² noise floor</div>
@@ -1890,6 +1907,7 @@
     <script src="https://cdn.jsdelivr.net/npm/vue@3.2.31/dist/vue.global.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
     <script src="https://cdn.plot.ly/plotly-2.12.1.min.js"></script>
+    <script src="/strain-sensitivity.js"></script>
     <script>
         const { createApp } = Vue;
         createApp({
@@ -3484,6 +3502,7 @@
                     normalized.tti_model = ['TG5012A', 'TGF3162', 'DG4162'].includes(String(normalized.tti_model || '').toUpperCase())
                         ? String(normalized.tti_model).toUpperCase() : 'TG5012A';
                     normalized.tti_channel = Number(normalized.tti_channel) === 2 ? 2 : 1;
+                    Object.assign(normalized, StrainSensitivity.settings(normalized));
                     const transferFrequencyModulationMhz = Number(normalized.transfer_frequency_modulation_mhz ?? 1);
                     normalized.transfer_frequency_modulation_mhz = Number.isFinite(transferFrequencyModulationMhz) && transferFrequencyModulationMhz > 0
                         ? transferFrequencyModulationMhz : 1;

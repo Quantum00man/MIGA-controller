@@ -103,7 +103,7 @@ def test_browser_rebuild_and_csv_exports_include_sem_and_std():
     source = Path('static/archive.html').read_text()
     methods = source[source.index('                withTransferUncertainties(input) {'):source.index('                renderSyncArchiveTransferFunctionPlot(element) {')]
     export = source[source.index('                async exportTransferFunctionCSV() {'):source.index('                async exportLockInCSV() {')]
-    script = 'const app = {' + methods + export + '''
+    script = "const StrainSensitivity = require('./static/strain-sensitivity.js'); const app = {" + methods + export + '''
         syncManifest: null, syncArchiveSlaveId: 'slave',
         syncTransferNormalizationOptimization: {}, syncTransferNormalization: {},
         syncArchivePairs() { return PAIRS; },

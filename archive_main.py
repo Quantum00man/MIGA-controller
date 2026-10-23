@@ -111,6 +111,11 @@ async def setup_script():
     return FileResponse(STATIC_DIR / 'archive-setup.js', media_type='application/javascript')
 
 
+@app.get('/strain-sensitivity.js')
+async def strain_sensitivity_script():
+    return FileResponse(STATIC_DIR / 'strain-sensitivity.js', media_type='application/javascript')
+
+
 @app.get('/plot-publication.js')
 async def publication_plot_script():
     return FileResponse(STATIC_DIR / 'plot-publication.js', media_type='application/javascript')

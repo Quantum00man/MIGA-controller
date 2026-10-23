@@ -1,7 +1,7 @@
 import math
 
 from pydantic import BaseModel, Field, validator
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
 
 
 class FitParameterConfig(BaseModel):
@@ -19,7 +19,15 @@ class FitModelDefinition(BaseModel):
     area_mode: str = Field("window_integral")
 
 
-class ScanConfig(BaseModel):
+class StrainSensitivitySettings(BaseModel):
+    transfer_strain_noise_model: Literal["white_phase", "fixed_asd"] = "white_phase"
+    transfer_strain_sigma_mrad: float = Field(74.0, ge=0, allow_inf_nan=False)
+    transfer_strain_cycle_time_s: float = Field(2.6, gt=0, allow_inf_nan=False)
+    transfer_strain_phase_asd_rad_sqrt_hz: float = Field(0.16874596291467242, ge=0, allow_inf_nan=False)
+    transfer_strain_wavelength_nm: float = Field(780.0, gt=0, allow_inf_nan=False)
+
+
+class ScanConfig(StrainSensitivitySettings):
     """Full-Feature Scan Configuration."""
     scan_dimensions: int = Field(1)
     dim1_type: str = Field("range")
@@ -536,7 +544,7 @@ class AnalysisSettings(BaseModel):
     atom_area_baseline_points: int = Field(2)
 
 
-class ArchiveAnalysisSettings(AnalysisSettings):
+class ArchiveAnalysisSettings(AnalysisSettings, StrainSensitivitySettings):
     fit_model_key: str = Field("gaussian")
     fit_models: List[FitModelDefinition] = Field(default_factory=list)
     transfer_frequency_modulation_mhz: float = Field(1.0, gt=0)
@@ -558,7 +566,7 @@ class SyncSlaveSettings(BaseModel):
     enabled: bool = Field(True)
 
 
-class SystemSettings(BaseModel):
+class SystemSettings(StrainSensitivitySettings):
     """Comprehensive System Settings."""
     hardware_platform: str = Field("redpitaya")
     rp_ip_red: str

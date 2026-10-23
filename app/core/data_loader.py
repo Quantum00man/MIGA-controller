@@ -3479,6 +3479,11 @@ class DataLoader:
                 "intf_gamma": 0.25,
                 "fit_model_key": "gaussian",
                 "fit_models": fitting.get_default_fit_models(),
+                "transfer_strain_noise_model": "white_phase",
+                "transfer_strain_sigma_mrad": 74.0,
+                "transfer_strain_cycle_time_s": 2.6,
+                "transfer_strain_phase_asd_rad_sqrt_hz": 0.16874596291467242,
+                "transfer_strain_wavelength_nm": 780.0,
             }
         )
 

@@ -636,6 +636,11 @@ class ExperimentManager:
             "transfer_frequency_modulation_mhz": 1.0,
             "transfer_atom_mirror_distance_m": 2.23,
             "transfer_phase_noise_sigma_mrad": 100.0,
+            "transfer_strain_noise_model": "white_phase",
+            "transfer_strain_sigma_mrad": 74.0,
+            "transfer_strain_cycle_time_s": 2.6,
+            "transfer_strain_phase_asd_rad_sqrt_hz": 0.16874596291467242,
+            "transfer_strain_wavelength_nm": 780.0,
             "rigol_host": "",
             "rigol_port": 5555,
             "rigol_timeout_s": 3.0,
@@ -1551,6 +1556,11 @@ class ExperimentManager:
         scan_config["transfer_frequency_modulation_mhz"] = frequency_modulation_mhz
         scan_config["transfer_atom_mirror_distance_m"] = atom_mirror_distance_m
         scan_config["transfer_phase_noise_sigma_mrad"] = phase_noise_sigma_mrad
+        scan_config["transfer_strain_noise_model"] = self.settings.get("transfer_strain_noise_model", 'white_phase')
+        scan_config["transfer_strain_sigma_mrad"] = self.settings.get("transfer_strain_sigma_mrad", 74.0)
+        scan_config["transfer_strain_cycle_time_s"] = self.settings.get("transfer_strain_cycle_time_s", 2.6)
+        scan_config["transfer_strain_phase_asd_rad_sqrt_hz"] = self.settings.get("transfer_strain_phase_asd_rad_sqrt_hz", 0.16874596291467242)
+        scan_config["transfer_strain_wavelength_nm"] = self.settings.get("transfer_strain_wavelength_nm", 780.0)
         scan_config["transfer_phase_degrees"] = phase_degrees
         scan_config["transfer_phase_scan_mode"] = phase_scan_mode
         scan_config["transfer_frequency_order"] = frequency_order

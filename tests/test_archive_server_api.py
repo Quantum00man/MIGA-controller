@@ -66,6 +66,7 @@ class ArchiveServerApiTests(unittest.TestCase):
                 self.assertEqual((base / 'config.json').read_bytes(),original_config)
                 self.assertIn(b'LaunchUI',request('/setup')[1])
                 self.assertIn(b'displayStep',request('/archive-setup.js')[1])
+                self.assertIn(b'StrainSensitivity', request('/strain-sensitivity.js')[1])
                 dashboard = request('/archive-server/dashboard')[1]
                 self.assertTrue(dashboard['storage']['ok'])
                 self.assertFalse(dashboard['devices'][0]['connection_stale'])
