@@ -2512,6 +2512,8 @@
                                 <span v-if="syncManifest" class="badge bg-primary">Data node: {{ syncArchiveNodeLabel(loadedSyncNode || 'master') }}</span>
                                 <span v-if="syncManifest && syncArchiveNodeSource !== (loadedSyncNode || 'master')" class="badge bg-warning text-dark">Calibration host: {{ syncArchiveNodeLabel(syncArchiveNodeSource) }}</span>
                                 <div class="btn-group btn-group-sm">
+                                    <button v-if="isPhaseNoiseArchive()" class="btn btn-outline-primary fw-bold" title="Recalculate all available nodes using the current analysis settings" @click="exportPhaseNoiseAll('csv')" :disabled="!loadedRunId || phaseNoiseExportBusy">All data CSV</button>
+                                    <button v-if="isPhaseNoiseArchive()" class="btn btn-outline-dark fw-bold" title="Recalculate all available nodes using the current analysis settings" @click="exportPhaseNoiseAll('labplot')" :disabled="!loadedRunId || phaseNoiseExportBusy">All data LabPlot</button>
                                     <button class="btn btn-outline-primary fw-bold" @click="exportCSV"
                                         :disabled="!loadedRunId"><i class="bi bi-file-earmark-spreadsheet-fill"></i>
                                         CSV</button>
@@ -3233,7 +3235,7 @@
                     transferFunctionSummary: [], savedTransferFunctionSummary: [], recalculatedTransferFunctionSummary: [],
                     phaseNoiseSummary: [], savedPhaseNoiseSummary: [], recalculatedPhaseNoiseSummary: [], phaseNoiseXAxis: 't2',
                     phaseNoiseView: 'overview', phaseNoiseSelectedT2: null,
-                    phaseNoiseSeries: [],
+                    phaseNoiseSeries: [], phaseNoiseExportBusy: false,
                     phaseNoiseXAxisScale: 'linear', phaseNoiseYAxisScale: 'linear',
                     phaseNoiseStatistic: 'std', phaseNoiseAllanOrders: [1], phaseNoiseAllanOrderDraft: 2,
                     savedAllanCache: {}, recalculatedAllanCache: {}, currentAllanData: null,
@@ -10409,6 +10411,20 @@
                     }
                 },
 
+                async exportPhaseNoiseAll(format) {
+                    if (!this.loadedRunRef || this.phaseNoiseExportBusy) return;
+                    this.phaseNoiseExportBusy = true;
+                    this.errorMsg = '';
+                    try {
+                        const response = await axios.post(`/archive/phase-noise/export-all/${format}`, this.buildArchivePayload(), { responseType: 'blob' });
+                        if (response.headers?.['x-export-warnings']) this.errorMsg = `Export incomplete: ${decodeURIComponent(response.headers['x-export-warnings'])}`;
+                        const extension = format === 'csv' ? '.zip' : '.lml';
+                        const name = this.getFilenameFromDisposition(response.headers?.['content-disposition']) || `phase_noise_all${extension}`;
+                        await this.downloadBlobContent(response.data, name, { description: format === 'csv' ? 'CSV files (ZIP)' : 'LabPlot project', mimeType: format === 'csv' ? 'application/zip' : 'application/x-labplot', extension });
+                    } catch (error) {
+                        this.errorMsg = error.response?.data instanceof Blob ? await this.getBlobErrorDetail(error.response.data, 'Export failed') : (error.message || 'Export failed');
+                    } finally { this.phaseNoiseExportBusy = false; }
+                },
                 async exportPhaseNoiseCSV() {
                     const header = [
                         'science_shot', 'sync_shot_index', 'T_index', 'T_count', 'T2_us2', 'T_ms',

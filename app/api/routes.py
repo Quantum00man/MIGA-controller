@@ -29,6 +29,7 @@ from app.core.data_loader import DataLoader
 from app.core.archive_collection_store import ArchiveCollectionStore
 from app.core.archive_audit import ArchiveAuditService
 from app.core.archive_labplot import build_archive_project
+from app.core.phase_noise_export import collect as collect_phase_export, csv_zip as phase_csv_zip, labplot as phase_labplot
 from app.core.data_manager import DataManager
 from app.core.bragg_export import build_bragg_zip_export, build_single_bragg_export, read_sequence_template
 from app.core.link_export import build_link_zip_export, build_single_link_export, render_link_mot
@@ -2302,6 +2303,23 @@ async def recalculate_archived_run(req: ReAnalysisRequest):
         raise HTTPException(400, str(exc))
     except Exception as exc:
         raise HTTPException(500, str(exc))
+
+
+@router.post('/archive/phase-noise/export-all/{format}')
+async def export_phase_noise_all(format: str, req: ReAnalysisRequest):
+    if format not in {'csv', 'labplot'}:
+        raise HTTPException(400, 'Unsupported export format')
+    try:
+        ref = (req.year, req.month, req.day, req.run_id)
+        rows, warnings = await run_in_threadpool(collect_phase_export, data_loader, ref, req.new_settings.dict(), manager.get_active_bragg_phase_calibration())
+        content = await run_in_threadpool(phase_csv_zip if format == 'csv' else phase_labplot, rows, warnings, ref)
+        ext = 'zip' if format == 'csv' else 'lml'
+        safe_run = ''.join(c if c.isalnum() or c in '-_' else '_' for c in req.run_id)
+        return Response(content, media_type='application/zip' if format == 'csv' else 'application/x-labplot', headers={'Content-Disposition': f'attachment; filename="phase_noise_all_{safe_run}.{ext}"', 'X-Export-Warnings': quote('; '.join(warnings), safe='')})
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
 
 
 @router.post("/archive/intf-alpha/reanalyze")

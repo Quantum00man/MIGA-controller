@@ -3750,6 +3750,7 @@ class DataLoader:
         max_points: Optional[int] = MAX_DISPLAY_POINTS,
         node_id: Optional[str] = None,
         phase_noise_allan_orders: Optional[List[int]] = None,
+        tolerate_missing_waveforms: bool = False,
     ) -> Dict[str, Any]:
         root_run_dir = self._get_run_dir(year, month, day, run_id)
         run_dir = self._resolve_archive_node_dir(root_run_dir, node_id)
@@ -3774,8 +3775,15 @@ class DataLoader:
         points = self._science_points(self._read_results_csv(run_dir, max_points=None))
 
         recalculated_points: List[Dict[str, Any]] = []
+        missing_waveform_steps: List[int] = []
         for point in points:
-            waveform = self._load_waveform_arrays(run_dir, int(point["step"]))
+            try:
+                waveform = self._load_waveform_arrays(run_dir, int(point["step"]))
+            except FileNotFoundError:
+                if not tolerate_missing_waveforms:
+                    raise
+                missing_waveform_steps.append(int(point['step']))
+                continue
             result = self._recalculate_point(point, waveform, settings, original_settings)
             if result is not None:
                 if str(config_data.get("mode") or "").strip().lower() == "phase_noise":
@@ -3847,6 +3855,7 @@ class DataLoader:
                 scan_dimensions=scan_dimensions,
             ),
             "total_points": len(self._transfer_response_points(recalculated_points)) if is_transfer_function else len(recalculated_points),
+            "missing_waveform_steps": missing_waveform_steps,
             "interferometer_phase_calibration": settings.get("_interferometer_phase_calibration"),
             "interferometer_phase_calibration_provenance": (
                 "archive_reference_override"

@@ -20,6 +20,7 @@ from app.models.schemas import *
 from app.analysis import fitting, interferometer_phase, phase_calibration_optimization, phase_noise
 from app.analysis.transfer_function import optimize_slave_normalization_scale
 from app.core.archive_labplot import build_archive_project
+from app.core.phase_noise_export import collect as collect_phase_export, csv_zip as phase_csv_zip, labplot as phase_labplot
 from app.core.mid_fringe_storage import load_prepared_queue
 from app.archive.ui_context import scoped, DeviceRoute, versions
 router = APIRouter(route_class=DeviceRoute)
@@ -28,6 +29,23 @@ manager = scoped('settings')
 archive_collection_store = scoped('collections')
 archive_audit_service = scoped('audit')
 sync_manager = scoped('offline_sync')
+
+
+@router.post('/archive/phase-noise/export-all/{format}')
+async def export_phase_noise_all(format: str, req: ReAnalysisRequest):
+    if format not in {'csv', 'labplot'}:
+        raise HTTPException(400, 'Unsupported export format')
+    try:
+        ref = (req.year, req.month, req.day, req.run_id)
+        rows, warnings = await run_in_threadpool(collect_phase_export, data_loader, ref, req.new_settings.dict(), manager.get_active_bragg_phase_calibration())
+        content = await run_in_threadpool(phase_csv_zip if format == 'csv' else phase_labplot, rows, warnings, ref)
+        ext = 'zip' if format == 'csv' else 'lml'
+        safe_run = ''.join(c if c.isalnum() or c in '-_' else '_' for c in req.run_id)
+        return Response(content, media_type='application/zip' if format == 'csv' else 'application/x-labplot', headers={'Content-Disposition': f'attachment; filename="phase_noise_all_{safe_run}.{ext}"', 'X-Export-Warnings': quote('; '.join(warnings), safe='')})
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
 archive_allan_lock = asyncio.Lock()
 
 async def _synchronize_archive_phase_metadata(year, month, day, run_id, request):
