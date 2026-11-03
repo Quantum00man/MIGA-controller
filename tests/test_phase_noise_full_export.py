@@ -49,11 +49,9 @@ def test_full_export_keeps_rejected_shots_and_warns_for_missing_nodes():
         assert rows[2]['shot_type'] == 'calibration'
         assert any('missing' in warning for warning in warnings)
         with zipfile.ZipFile(io.BytesIO(csv_zip(rows, warnings, ref))) as archive:
-            assert set(archive.namelist()) == {'shots.csv', 'statistics.csv', 'README.txt'}
+            assert set(archive.namelist()) == {'shots.csv', 'README.txt'}
             shots = list(csv.DictReader(io.StringIO(archive.read('shots.csv').decode('utf-8-sig'))))
             assert len(shots) == 6 and shots[0]['atom_number_up'] == '20'
-            stats = list(csv.DictReader(io.StringIO(archive.read('statistics.csv').decode('utf-8-sig'))))
-            atom = next(row for row in stats if row['node_id'] == 'master' and row['metric'] == 'atom_number_up')
-            assert atom['valid_count'] == '1' and atom['sample_std'] == ''
         project = ElementTree.fromstring(lzma.decompress(labplot(rows, warnings, ref)))
         assert any('Atom number UP' in item.attrib.get('name', '') for item in project.iter('worksheet'))
+        assert all('statistics' not in item.attrib.get('name', '').lower() for item in project.iter('worksheet'))

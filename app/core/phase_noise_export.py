@@ -2,7 +2,6 @@
 import csv
 import io
 import math
-import statistics
 import zipfile
 from collections import defaultdict
 
@@ -98,22 +97,6 @@ def collect(loader, reference, settings, calibration):
     return rows, warnings
 
 
-def summaries(rows):
-    groups = defaultdict(list)
-    for row in rows:
-        if row['reanalysis_status'] == 'ok':
-            groups[(row['node_id'], row['node_name'], row.get('phase_noise_t2_us2'))].append(row)
-    output = []
-    for (node, name, t2), group in groups.items():
-        for field in FIELDS:
-            values = [_number(row.get(field)) for row in group
-                      if field != 'interferometer_phase' or row.get('interferometer_phase_valid') is True]
-            values = [v for v in values if v is not None]
-            output.append([node, name, t2, field, len(values), statistics.mean(values) if values else None,
-                           statistics.stdev(values) if len(values) > 1 else None])
-    return output
-
-
 def csv_data(header, rows):
     stream = io.StringIO(newline='')
     writer = csv.writer(stream)
@@ -126,9 +109,8 @@ def csv_zip(rows, warnings, reference):
     output = io.BytesIO()
     with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as archive:
         archive.writestr('shots.csv', csv_data(META + FIELDS, [[row.get(k) for k in META + FIELDS] for row in rows]))
-        archive.writestr('statistics.csv', csv_data(['node_id', 'node_name', 'T2_us2', 'metric', 'valid_count', 'mean', 'sample_std'], summaries(rows)))
         lines = ['Phase Noise recalculated export: ' + '/'.join(reference),
-                 'Science shot statistics exclude rejected and calibration shots. Phase statistics exclude invalid phase values. Empty values are unavailable; sample standard deviation requires at least two values.',
+                 'Empty values are unavailable.',
                  'Calibration and rejected shots retain identifiers only; analysis values are not substituted from saved results.',
                  'Fit fields have no suffix; _nofit denotes NoFit; tail means are raw. T2 is in us^2, timestamp is Unix seconds, phase is rad, power is W.',
                  'sync_shot_index is included only where recorded identity can be established.', 'Units:']
@@ -140,7 +122,6 @@ def csv_zip(rows, warnings, reference):
 
 def labplot(rows, warnings, reference):
     worksheets = []
-    summary_rows = summaries(rows)
     colors = [(0,114,178), (213,94,0), (0,158,115), (204,121,167), (230,159,0)]
     descriptors = dict(METRICS)
     descriptors.update({k + '_nofit': (v[0] + ' NoFit', v[1]) for k, v in METRICS.items()})
@@ -159,15 +140,6 @@ def labplot(rows, warnings, reference):
             curves.append(Curve(f'{node} T2={t2}', [p[0] for p in points], [p[1] for p in points], colors[index % len(colors)]))
         if curves:
             worksheets.append(Worksheet(label, [Plot(label, 'Science shot within T', f'{label} ({unit})' if unit else label, curves)]))
-        mean_curves = []
-        for index, item in enumerate(summary_rows):
-            node, name, t2, metric, count, mean, std = item
-            if metric == field and _number(t2) is not None and mean is not None:
-                mean_curves.append(Curve(f'{name} [{node}] mean', [float(t2)], [mean], colors[index % len(colors)],
-                                         line=False, y_error_plus=[std] if std is not None else None,
-                                         y_error_minus=[std] if std is not None else None))
-        if mean_curves:
-            worksheets.append(Worksheet(label + ' statistics', [Plot(label + ' mean and sample standard deviation', 'T2 (us2)', f'{label} ({unit})' if unit else label, mean_curves)]))
     if not worksheets:
         raise ValueError('No valid recalculated values to plot')
     return build_project('MIGA Phase Noise ' + reference[-1], worksheets,
