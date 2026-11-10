@@ -678,7 +678,7 @@ class DataLoader:
                     "phase_noise_repeat", "phase_noise_total_repeats",
                     "phase_noise_t_index", "phase_noise_t_count",
                     "phase_noise_science_shot", "interferometer_phase",
-                    "interferometer_phase_valid", "intf_p1", "intf_p1_nofit",
+                    "interferometer_phase_valid", "intf_p1", "intf_p1_nofit", "intf_p2", "intf_p2_nofit",
                     "intf_alpha_applied", "power_meter_power_w",
                     "power_meter_valid", "power_meter_invalid_reason",
                 )

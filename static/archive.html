@@ -2485,6 +2485,27 @@
                         </div>
                     </div>
                 </section>
+                <section v-if="loadedRunId && (isPhaseNoiseArchive() || ['standard', '', 'scan'].includes(String(loadedConfig?.mode || '').toLowerCase()))" class="card mb-4 border-0 shadow-sm">
+                    <div class="card-header bg-white fw-bold">Bayesian Fringe Reconstruction</div>
+                    <div class="card-body">
+                        <p class="small text-muted">Independent Gaussian output noise and uniformly distributed random phase are assumed. Inspect the selected shots before analysis.</p>
+                        <div class="row g-2 align-items-end">
+                            <div v-if="syncManifest" class="col-sm-3"><label class="form-label small">Node</label><select class="form-select form-select-sm" v-model="bayes.node"><option value="master">Master</option><option v-for="id in syncArchiveSlaveOptions()" :key="id" :value="id">{{ syncArchiveNodeLabel(id) }}</option></select></div>
+                            <div class="col-sm-2"><label class="form-label small">Channel</label><select class="form-select form-select-sm" v-model.number="bayes.channel"><option :value="1">INTF P1</option><option :value="2">INTF P2</option></select></div>
+                            <div class="col-sm-2"><label class="form-label small">Source</label><select class="form-select form-select-sm" v-model="bayes.source"><option value="fit">Fit</option><option value="nofit">NoFit</option></select></div>
+                            <div v-if="isPhaseNoiseArchive()" class="col-sm-3"><label class="form-label small">T selection</label><select class="form-select form-select-sm" v-model.number="phaseNoiseSelectedT2" @change="bayes.stale=true"><option v-for="row in phaseNoiseSummary" :key="row.t2_us2" :value="Number(row.t2_us2)">T={{ Number(row.t_ms).toPrecision(6) }} ms</option></select></div>
+                            <div class="col-sm-2"><label class="form-label small">First shot</label><input class="form-control form-control-sm" type="number" v-model.number="bayes.shotMin" placeholder="All"></div>
+                            <div class="col-sm-2"><label class="form-label small">Last shot</label><input class="form-control form-control-sm" type="number" v-model.number="bayes.shotMax" placeholder="All"></div>
+                        </div>
+                        <details class="mt-3"><summary class="small fw-bold">Parameter grid settings</summary><p class="small text-muted mt-2">Leave all bounds empty for automatic bounds. Units are percentage points. Set both endpoints for every parameter when using manual bounds.</p>
+                            <div class="row g-2"><div v-for="key in ['A','B','sigma']" :key="key" class="col-sm-3"><label class="form-label small">{{ key }} min, max</label><div class="input-group input-group-sm"><input type="number" step="any" class="form-control" v-model.number="bayes.bounds[key][0]"><input type="number" step="any" class="form-control" v-model.number="bayes.bounds[key][1]"></div></div><div class="col-sm-2"><label class="form-label small">Grid points</label><input type="number" min="9" max="51" class="form-control form-control-sm" v-model.number="bayes.grid"></div><div class="col-sm-2"><label class="form-label small">Phase points</label><input type="number" min="32" max="256" class="form-control form-control-sm" v-model.number="bayes.phasePoints"></div></div>
+                        </details>
+                        <div class="d-flex flex-wrap gap-2 mt-3"><button class="btn btn-outline-primary btn-sm" :disabled="bayes.busy" @click="bayesLoadShots">Show P_interferometer shots</button><button class="btn btn-primary btn-sm" :disabled="bayes.busy" @click="bayesAnalyze">Run analysis</button><button class="btn btn-outline-dark btn-sm" :disabled="bayes.busy || !bayes.result || bayes.stale" @click="bayesExport">Download report ZIP</button><span v-if="bayes.busy" class="small text-muted">Computing, please wait…</span></div>
+                        <div v-if="bayes.error" class="alert alert-danger small mt-3">{{ bayes.error }}</div>
+                        <div id="bayesShotPlot" v-show="bayes.shots.length" style="height:300px" class="mt-2"></div>
+                        <div v-if="bayes.result && !bayes.stale" class="mt-3"><div class="small text-muted">{{ bayes.result.count }} included · {{ bayes.result.excluded }} excluded · posterior mean ± SD, percentage scale</div><div class="row g-2 mt-1"><div v-for="(label,key) in {A:'Amplitude A',contrast_2A:'Contrast 2A',B:'Offset B',sigma:'Noise σ'}" :key="key" class="col-sm-3"><strong>{{ label }}</strong><div>{{ bayes.result.parameters[key].mean.toPrecision(5) }} ± {{ bayes.result.parameters[key].sd.toPrecision(3) }}</div></div></div><div v-for="warning in bayes.result.warnings" :key="warning" class="small text-warning mt-1">{{ warning }}</div><div id="bayesDistributionPlot" style="height:320px" class="mt-3"></div><div id="bayesPosteriorPlot" style="height:320px" class="mt-3"></div></div>
+                    </div>
+                </section>
                 <div class="card mb-4 border-0 shadow-sm" :class="{'maximized': maximizedView === 'analysis'}">
                     <div class="analysis-header card-header bg-white">
                         <div class="analysis-header-top">
@@ -3168,6 +3189,7 @@
                     transferTof: {open: false, frequency: null, node: '', phase: 'all', rows: [], error: '', request: 0}, waveformRequestId: 0,
                     currentWaveforms: [],
                     selectedAllanWindow: null,
+                    bayes: {node:'master', channel:1, source:'fit', shotMin:null, shotMax:null, bounds:{A:['',''],B:['',''],sigma:['','']}, grid:25, phasePoints:96, shots:[], result:null, snapshot:null, busy:false, error:'', stale:true},
                     loadedPoints: [], currentCalculatedPoints: [], originalSettings: {}, loadedConfig: {}, currentScanDimensions: 1,
                     intfAlphaCalibrations: [],
                     transferBaselineCalibrations: [],
@@ -3352,6 +3374,17 @@
                 }
             },
             watch: {
+                phaseNoiseSelectedT2() { this.bayes.stale=true; this.bayes.shots=[]; },
+                'bayes.node'() { this.bayes.stale=true; this.bayes.shots=[]; },
+                'bayes.channel'() { this.bayes.stale=true; this.bayes.shots=[]; },
+                'bayes.source'() { this.bayes.stale=true; this.bayes.shots=[]; },
+                'bayes.shotMin'() { this.bayes.stale=true; this.bayes.shots=[]; },
+                'bayes.shotMax'() { this.bayes.stale=true; this.bayes.shots=[]; },
+                'bayes.grid'() { this.bayes.stale=true; this.bayes.shots=[]; },
+                'bayes.phasePoints'() { this.bayes.stale=true; this.bayes.shots=[]; },
+                'bayes.bounds': {deep:true, handler() { this.bayes.stale=true; this.bayes.shots=[]; }},
+                loadedRunId() { this.bayes.stale=true; this.bayes.shots=[]; },
+                loadedRunRef: {deep:true, handler() { this.bayes.stale=true; this.bayes.shots=[]; }},
                 archiveSourceMode() {
                     this.$nextTick(() => {
                         this.updateCollectionWorkspaceHeight();
@@ -11432,6 +11465,35 @@
                     }
                     await this.$nextTick();
                     this.resizeAnalysisPlots();
+                },
+                bayesPayload() {
+                    const b=this.bayes, entries=Object.values(b.bounds).flat(), any=entries.some(v => v !== '' && v !== null);
+                    if (any && entries.some(v => v === '' || v === null || !Number.isFinite(Number(v)))) throw new Error('Enter all six bounds or leave all bounds empty.');
+                    if (this.isPhaseNoiseArchive() && (this.phaseNoiseSelectedT2 === null || this.phaseNoiseSelectedT2 === '' || !Number.isFinite(Number(this.phaseNoiseSelectedT2)))) throw new Error('Select a T value.');
+                    return {...this.loadedRunRef, node_id:this.syncManifest ? b.node : null, channel:b.channel, source:b.source,
+                        t2:this.isPhaseNoiseArchive() ? Number(this.phaseNoiseSelectedT2) : null,
+                        shot_min:b.shotMin === '' ? null : b.shotMin, shot_max:b.shotMax === '' ? null : b.shotMax,
+                        bounds:any ? Object.fromEntries(Object.entries(b.bounds).map(([k,v]) => [k,v.map(Number)])) : null,
+                        grid:b.grid, phase_points:b.phasePoints};
+                },
+                async bayesLoadShots() {
+                    this.bayes.busy=true; this.bayes.error=''; this.bayes.result=null; this.bayes.stale=true;
+                    try { const res=await axios.post('/archive/bayesian-fringe/shots',this.bayesPayload()); this.bayes.shots=res.data.records || []; await this.$nextTick(); this.bayesPlotShots(); }
+                    catch(e){this.bayes.error=e.response?.data?.detail || e.message;} finally {this.bayes.busy=false;}
+                },
+                bayesPlotShots() {
+                    const rows=this.bayes.shots.filter(r=>r.included && r.probability_percent !== null);
+                    Plotly.react('bayesShotPlot',[{x:rows.map(r=>r.step),y:rows.map(r=>r.probability_percent),mode:'lines+markers',type:'scatter',marker:{size:4}}],{title:'Selected interferometer probability',xaxis:{title:'Shot index'},yaxis:{title:'Probability (%)'},margin:{t:45,b:55,l:65,r:20}},{responsive:true});
+                },
+                async bayesAnalyze() {
+                    this.bayes.busy=true; this.bayes.error=''; this.bayes.result=null; this.bayes.stale=true;
+                    try { const payload=this.bayesPayload(); const res=await axios.post('/archive/bayesian-fringe',payload); this.bayes.result=res.data; this.bayes.snapshot={...payload,input_stamp:res.data.input_stamp}; this.bayes.shots=res.data.records; this.bayes.stale=false; await this.$nextTick(); this.bayesPlotShots(); const r=res.data; Plotly.react('bayesDistributionPlot',[{x:r.records.filter(v=>v.included).map(v=>v.probability_percent),type:'histogram',histnorm:'probability density',name:'Shots',opacity:.65},{x:r.model_x,y:r.model_density,type:'scatter',mode:'lines',name:'Model at posterior means'}],{title:'Probability distribution and model',xaxis:{title:'Probability (%)'},yaxis:{title:'Probability density'},margin:{t:45,b:55,l:60,r:20}},{responsive:true}); Plotly.react('bayesPosteriorPlot',['A','B','sigma'].map((k,i)=>({x:r.axes[k],y:r.marginals[k],type:'scatter',mode:'lines',name:k,xaxis:i?'x'+(i+1):'x',yaxis:i?'y'+(i+1):'y'})),{grid:{rows:1,columns:3,pattern:'independent'},margin:{t:20,b:45,l:45,r:20},showlegend:true},{responsive:true}); }
+                    catch(e){this.bayes.error=e.response?.data?.detail || e.message;} finally {this.bayes.busy=false;}
+                },
+                async bayesExport() {
+                    this.bayes.busy=true; this.bayes.error='';
+                    try { if(JSON.stringify({...this.bayesPayload(),input_stamp:this.bayes.snapshot.input_stamp}) !== JSON.stringify(this.bayes.snapshot)) throw new Error('Selection changed; rerun the analysis before export.'); const res=await axios.post('/archive/bayesian-fringe/report',this.bayes.snapshot,{responseType:'blob'}); const url=URL.createObjectURL(res.data); const a=document.createElement('a'); a.href=url; a.download='bayesian_fringe_report.zip'; a.click(); setTimeout(()=>URL.revokeObjectURL(url),1000); }
+                    catch(e){this.bayes.error=e.response?.data?.detail || e.message || 'Export failed';} finally {this.bayes.busy=false;}
                 },
                 phaseNoiseDetailRows() {
                     const selected = Number(this.phaseNoiseSelectedT2);

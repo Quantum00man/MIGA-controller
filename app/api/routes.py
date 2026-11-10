@@ -3096,3 +3096,6 @@ router.include_router(build_analysis_router(lambda: data_loader, ControllerArchi
 
 from app.api.transfer_amplitude_routes import build_transfer_amplitude_router
 router.include_router(build_transfer_amplitude_router(lambda: data_loader, ControllerArchiveRoute, _synchronize_archive_phase_metadata))
+
+from app.api.bayesian_fringe_routes import build_bayesian_fringe_router
+router.include_router(build_bayesian_fringe_router(lambda: data_loader, ControllerArchiveRoute))
