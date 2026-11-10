@@ -3,7 +3,7 @@ import json
 import zipfile
 import numpy as np
 import pytest
-from app.analysis.bayesian_fringe import infer, select_shots, package
+from app.analysis.bayesian_fringe import compute, infer, select_shots, package
 from app.api.bayesian_fringe_routes import FringeRequest
 
 class Loader:
@@ -23,6 +23,26 @@ def test_selects_exact_t_and_source_and_keeps_exclusion():
     assert records[3]["exclusion_reason"] and identity["resolved_node"]=="slave"
     assert all(r["t2_us2"]==100 for r in records)
 
+def test_link_shots_respect_range_channel_source_and_node():
+    points = [{"step": i, "parameter": i / 10, "intf_p2_nofit": float(i)} for i in range(30)]
+    loader = Loader(points)
+    loader._load_config_data = lambda node: {"mode": "link"}
+    req = FringeRequest(year="2026", month="01", day="01", run_id="run01", node_id="slave",
+                        channel=2, source="nofit", shot_min=3, shot_max=25)
+    records, identity, mode = select_shots(loader, req)
+    assert mode == "link" and identity["resolved_node"] == "slave"
+    assert [r["step"] for r in records] == list(range(3, 26))
+    assert records[0]["probability_percent"] == 3.0
+    assert records[0]["scan_parameter_p0"] == .3
+    assert all(r["t2_us2"] is None for r in records)
+    req.grid = 9
+    req.phase_points = 32
+    result = compute(loader, req)
+    assert any("different P0" in warning for warning in result["warnings"])
+    with zipfile.ZipFile(io.BytesIO(package(req, result))) as archive:
+        assert json.loads(archive.read("configuration.json"))["scan_mode"] == "link"
+        assert "scan_parameter_p0" in archive.read("shots.csv").decode("utf-8")
+
 def test_simulated_parameters_and_report():
     rng=np.random.default_rng(1234)
     values=45+22*np.cos(rng.uniform(0,np.pi,300))+rng.normal(0,.5,300)
@@ -38,6 +58,7 @@ def test_simulated_parameters_and_report():
         assert z.read("report.pdf").startswith(b"%PDF")
         config=json.loads(z.read("configuration.json"))
         assert config["resolved_bounds"]==result["bounds"]
+        assert config["scan_mode"] == "phase_noise"
         import hashlib
         assert config["shots_csv_sha256"]==hashlib.sha256(z.read("shots.csv")).hexdigest()
 

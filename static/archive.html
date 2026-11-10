@@ -2485,10 +2485,11 @@
                         </div>
                     </div>
                 </section>
-                <section v-if="loadedRunId && (isPhaseNoiseArchive() || ['standard', '', 'scan'].includes(String(loadedConfig?.mode || '').toLowerCase()))" class="card mb-4 border-0 shadow-sm">
+                <section v-if="loadedRunId && (isPhaseNoiseArchive() || ['standard', 'link', '', 'scan'].includes(String(loadedConfig?.mode || '').trim().toLowerCase()))" class="card mb-4 border-0 shadow-sm">
                     <div class="card-header bg-white fw-bold">Bayesian Fringe Reconstruction</div>
                     <div class="card-body">
                         <p class="small text-muted">Independent Gaussian output noise and uniformly distributed random phase are assumed. Inspect the selected shots before analysis.</p>
+                        <p v-if="String(loadedConfig?.mode || '').trim().toLowerCase() === 'link'" class="small text-warning">Link shots may span different P0 values and experimental conditions. Choose a shot range with a stable fringe and check phase coverage before interpreting the result.</p>
                         <div class="row g-2 align-items-end">
                             <div v-if="syncManifest" class="col-sm-3"><label class="form-label small">Node</label><select class="form-select form-select-sm" v-model="bayes.node"><option value="master">Master</option><option v-for="id in syncArchiveSlaveOptions()" :key="id" :value="id">{{ syncArchiveNodeLabel(id) }}</option></select></div>
                             <div class="col-sm-2"><label class="form-label small">Channel</label><select class="form-select form-select-sm" v-model.number="bayes.channel"><option :value="1">INTF P1</option><option :value="2">INTF P2</option></select></div>

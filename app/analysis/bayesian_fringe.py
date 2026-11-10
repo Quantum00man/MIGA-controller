@@ -21,9 +21,9 @@ def select_shots(loader, req, require_minimum=True):
     root = loader.get_run_dir(req.year, req.month, req.day, req.run_id)
     node, identity = loader._resolve_archive_node_identity(root, req.node_id or None)
     config = loader._load_config_data(node)
-    mode = str(config.get("mode") or "").lower()
-    if mode not in ("standard", "phase_noise", "phase_noise_analyze", "", "scan"):
-        raise ValueError("Only Standard and Phase Noise Analyze archives are supported")
+    mode = str(config.get("mode") or "").strip().lower()
+    if mode not in ("standard", "link", "phase_noise", "phase_noise_analyze", "", "scan"):
+        raise ValueError("Only Standard, Link and Phase Noise Analyze archives are supported")
     phase = mode in ("phase_noise", "phase_noise_analyze")
     if phase and req.t2 is None:
         raise ValueError("Select a T value for Phase Noise Analyze")
@@ -33,9 +33,9 @@ def select_shots(loader, req, require_minimum=True):
     for point in points:
         step = point.get("step")
         t2 = point.get("phase_noise_t2_us2")
-        if t2 is None:
+        if phase and t2 is None:
             t2 = point.get("interferometer_phase_reference_t2_us2")
-        if t2 is None:
+        if phase and t2 is None:
             t2 = point.get("parameter")
         if phase and (t2 is None or not math.isclose(float(t2), req.t2, rel_tol=1e-9, abs_tol=1e-9)):
             continue
@@ -52,6 +52,7 @@ def select_shots(loader, req, require_minimum=True):
         elif value is None or not math.isfinite(float(value)):
             reason = "missing or non-finite probability"
         records.append({"step": step, "timestamp": point.get("timestamp"), "t2_us2": t2,
+                        "scan_parameter_p0": point.get("parameter"),
                         "probability_percent": float(value) if value is not None and math.isfinite(float(value)) else None,
                         "included": not bool(reason), "exclusion_reason": reason})
     if require_minimum and sum(r["included"] for r in records) < 20:
@@ -112,6 +113,8 @@ def compute(loader, req):
     records, identity, mode = select_shots(loader, req)
     values = [r["probability_percent"] for r in records if r["included"]]
     result = infer(values, req.bounds, req.grid, req.phase_points)
+    if mode == "link":
+        result["warnings"].insert(0, "Link shots can span different P0 values and experimental conditions. Check that the selected shots share a stable fringe and cover phase uniformly before interpreting the fit.")
     par = result["parameters"]
     a, b, noise = (par[k]["mean"] for k in ("A", "B", "sigma"))
     nodes, weights = np.polynomial.legendre.leggauss(req.phase_points)
@@ -128,7 +131,7 @@ def package(req, result):
     from matplotlib.backends.backend_pdf import PdfPages
     from scipy.special import logsumexp as lse
     config = req.model_dump() if hasattr(req, "model_dump") else req.dict()
-    config.update(algorithm_version=VERSION, resolved_bounds=result["bounds"], resolved_node=result["node"],
+    config.update(algorithm_version=VERSION, scan_mode=result["mode"], resolved_bounds=result["bounds"], resolved_node=result["node"],
                   probability_unit="percent; widths in percentage points", prior="uniform on finite parameter grid",
                   phase_model="uniform on [0, pi]", noise_model="independent Gaussian")
     shots = io.StringIO(newline="")
