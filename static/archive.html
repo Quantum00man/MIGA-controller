@@ -2503,7 +2503,7 @@
                         <div class="d-flex flex-wrap gap-2 mt-3"><button class="btn btn-outline-primary btn-sm" :disabled="bayes.busy" @click="bayesLoadShots">Show P_interferometer shots</button><button class="btn btn-primary btn-sm" :disabled="bayes.busy" @click="bayesAnalyze">Run analysis</button><button class="btn btn-outline-dark btn-sm" :disabled="bayes.busy || !bayes.result || bayes.stale" @click="bayesExport">Download report ZIP</button><span v-if="bayes.busy" class="small text-muted">Computing, please wait…</span></div>
                         <div v-if="bayes.error" class="alert alert-danger small mt-3">{{ bayes.error }}</div>
                         <div id="bayesShotPlot" v-show="bayes.shots.length" style="height:300px" class="mt-2"></div>
-                        <div v-if="bayes.result && !bayes.stale" class="mt-3"><div class="small text-muted">{{ bayes.result.count }} included · {{ bayes.result.excluded }} excluded · posterior mean ± SD, percentage scale</div><div class="row g-2 mt-1"><div v-for="(label,key) in {A:'Amplitude A',contrast_2A:'Contrast 2A',B:'Offset B',sigma:'Noise σ'}" :key="key" class="col-sm-3"><strong>{{ label }}</strong><div>{{ bayes.result.parameters[key].mean.toPrecision(5) }} ± {{ bayes.result.parameters[key].sd.toPrecision(3) }}</div></div></div><div v-for="warning in bayes.result.warnings" :key="warning" class="small text-warning mt-1">{{ warning }}</div><div id="bayesDistributionPlot" style="height:320px" class="mt-3"></div><div id="bayesPosteriorPlot" style="height:320px" class="mt-3"></div></div>
+                        <div v-if="bayes.result && !bayes.stale" class="mt-3"><div class="small text-muted">{{ bayes.result.count }} included · {{ bayes.result.excluded }} excluded · posterior mean ± SD, percentage scale</div><div class="row g-2 mt-1"><div v-for="(label,key) in {A:'Amplitude A',contrast_2A:'Contrast 2A',B:'Offset B',sigma:'Noise σ'}" :key="key" class="col-sm-3"><strong>{{ label }}</strong><div>{{ bayes.result.parameters[key].mean.toPrecision(5) }} ± {{ bayes.result.parameters[key].sd.toPrecision(3) }}</div></div></div><div v-for="warning in bayes.result.warnings" :key="warning" class="small text-warning mt-1">{{ warning }}</div><div id="bayesDistributionPlot" style="height:320px" class="mt-3"></div><div class="row g-2 mt-3"><div class="col-lg-4"><div id="bayesPosteriorA" style="height:270px"></div></div><div class="col-lg-4"><div id="bayesPosteriorB" style="height:270px"></div></div><div class="col-lg-4"><div id="bayesPosteriorSigma" style="height:270px"></div></div></div></div>
                     </div>
                 </section>
                 <div class="card mb-4 border-0 shadow-sm" :class="{'maximized': maximizedView === 'analysis'}">
@@ -11478,17 +11478,41 @@
                 },
                 async bayesLoadShots() {
                     this.bayes.busy=true; this.bayes.error=''; this.bayes.result=null; this.bayes.stale=true;
-                    try { const res=await axios.post('/archive/bayesian-fringe/shots',this.bayesPayload()); this.bayes.shots=res.data.records || []; await this.$nextTick(); this.bayesPlotShots(); }
+                    try { const res=await axios.post('/archive/bayesian-fringe/shots',this.bayesPayload()); this.bayes.shots=res.data.records || []; await this.$nextTick(); await this.bayesPlotShots(); }
                     catch(e){this.bayes.error=e.response?.data?.detail || e.message;} finally {this.bayes.busy=false;}
                 },
-                bayesPlotShots() {
-                    const rows=this.bayes.shots.filter(r=>r.included && r.probability_percent !== null);
-                    Plotly.react('bayesShotPlot',[{x:rows.map(r=>r.step),y:rows.map(r=>r.probability_percent),mode:'lines+markers',type:'scatter',marker:{size:4}}],{title:'Selected interferometer probability',xaxis:{title:'Shot index'},yaxis:{title:'Probability (%)'},margin:{t:45,b:55,l:65,r:20}},{responsive:true});
+                async bayesPlotShots() {
+                    const rows = this.bayes.shots.filter(r => r.included && r.probability_percent !== null);
+                    await Plotly.react('bayesShotPlot', [{x: rows.map(r => r.step), y: rows.map(r => r.probability_percent), mode: 'lines+markers', type: 'scatter', marker: {size: 4}}],
+                        {title: 'Selected interferometer probability', xaxis: {title: 'Shot index'}, yaxis: {title: 'Probability (%)'}, margin: {t: 45, b: 55, l: 65, r: 20}}, {responsive: true});
                 },
                 async bayesAnalyze() {
-                    this.bayes.busy=true; this.bayes.error=''; this.bayes.result=null; this.bayes.stale=true;
-                    try { const payload=this.bayesPayload(); const res=await axios.post('/archive/bayesian-fringe',payload); this.bayes.result=res.data; this.bayes.snapshot={...payload,input_stamp:res.data.input_stamp}; this.bayes.shots=res.data.records; this.bayes.stale=false; await this.$nextTick(); this.bayesPlotShots(); const r=res.data; Plotly.react('bayesDistributionPlot',[{x:r.records.filter(v=>v.included).map(v=>v.probability_percent),type:'histogram',histnorm:'probability density',name:'Shots',opacity:.65},{x:r.model_x,y:r.model_density,type:'scatter',mode:'lines',name:'Model at posterior means'}],{title:'Probability distribution and model',xaxis:{title:'Probability (%)'},yaxis:{title:'Probability density'},margin:{t:45,b:55,l:60,r:20}},{responsive:true}); Plotly.react('bayesPosteriorPlot',['A','B','sigma'].map((k,i)=>({x:r.axes[k],y:r.marginals[k],type:'scatter',mode:'lines',name:k,xaxis:i?'x'+(i+1):'x',yaxis:i?'y'+(i+1):'y'})),{grid:{rows:1,columns:3,pattern:'independent'},margin:{t:20,b:45,l:45,r:20},showlegend:true},{responsive:true}); }
-                    catch(e){this.bayes.error=e.response?.data?.detail || e.message;} finally {this.bayes.busy=false;}
+                    this.bayes.busy = true; this.bayes.error = ''; this.bayes.result = null; this.bayes.stale = true;
+                    try {
+                        const payload = this.bayesPayload();
+                        const res = await axios.post('/archive/bayesian-fringe', payload);
+                        const result = res.data;
+                        this.bayes.result = result;
+                        this.bayes.snapshot = {...payload, input_stamp: result.input_stamp};
+                        this.bayes.shots = result.records;
+                        this.bayes.stale = false;
+                        await this.$nextTick();
+                        try {
+                            await this.bayesPlotShots();
+                            await Plotly.react('bayesDistributionPlot', [
+                                {x: result.records.filter(row => row.included).map(row => row.probability_percent), type: 'histogram', histnorm: 'probability density', name: 'Shots', opacity: .65},
+                                {x: result.model_x, y: result.model_density, type: 'scatter', mode: 'lines', name: 'Model at posterior means'}
+                            ], {title: 'Probability distribution and model', xaxis: {title: 'Probability (%)'}, yaxis: {title: 'Probability density'}, margin: {t: 45, b: 55, l: 60, r: 20}}, {responsive: true});
+                            for (const [key, id, label] of [['A', 'bayesPosteriorA', 'Amplitude A'], ['B', 'bayesPosteriorB', 'Offset B'], ['sigma', 'bayesPosteriorSigma', 'Noise σ']]) {
+                                await Plotly.react(id, [{x: result.axes[key], y: result.marginals[key], type: 'scatter', mode: 'lines', name: label}],
+                                    {title: label, xaxis: {title: 'Percentage points'}, yaxis: {title: 'Probability mass'}, margin: {t: 45, b: 55, l: 55, r: 15}, showlegend: false}, {responsive: true});
+                            }
+                        } catch (error) {
+                            this.bayes.error = 'Analysis completed, but a plot could not be displayed: ' + (error.message || 'Unknown plot error') + '. The report can still be downloaded.';
+                        }
+                    } catch (error) {
+                        this.bayes.error = error.response?.data?.detail || error.message || 'Analysis failed';
+                    } finally { this.bayes.busy = false; }
                 },
                 async bayesExport() {
                     this.bayes.busy=true; this.bayes.error='';
