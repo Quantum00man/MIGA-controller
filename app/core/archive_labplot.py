@@ -46,16 +46,19 @@ def _finite(value: Any) -> Optional[float]:
     return number if math.isfinite(number) else None
 
 
-def _series(rows: Iterable[Dict[str, Any]], field: str) -> Tuple[List[float], List[float]]:
+def _series(rows: Iterable[Dict[str, Any]], field: str) -> Tuple[List[float], List[float], Optional[List[float]]]:
     x_values: List[float] = []
     y_values: List[float] = []
+    errors: List[Optional[float]] = []
     for row in rows:
         x = _finite(row.get("x"))
         y = _finite(row.get(field))
         if x is not None and y is not None:
             x_values.append(x)
             y_values.append(y)
-    return x_values, y_values
+            errors.append(_finite(row.get(f"{field}_std")))
+    error_values = [value if value is not None else float("nan") for value in errors] if any(value is not None for value in errors) else None
+    return x_values, y_values, error_values
 
 
 def _node_label(manifest: Optional[Dict[str, Any]], node_id: str) -> str:
@@ -121,18 +124,20 @@ def _metric_worksheet(
     if metric_key == "phase":
         curves: List[Curve] = []
         for index, node in enumerate(node_payloads):
-            x, y = _series(node["stats"], "phase_up")
+            x, y, errors = _series(node["stats"], "phase_up")
             if x:
-                curves.append(Curve(f"{node['label']} phase", x, y, COLORS[index % len(COLORS)]))
+                curves.append(Curve(f"{node['label']} phase", x, y, COLORS[index % len(COLORS)],
+                                    y_error_plus=errors, y_error_minus=errors))
         return Worksheet(metric["label"], [Plot(metric["label"], x_label, metric["label"], curves)]) if curves else None
 
     plots: List[Plot] = []
     for channel, channel_label in (("up", "UP"), ("dw", "DOWN")):
         curves = []
         for index, node in enumerate(node_payloads):
-            x, y = _series(node["stats"], f"{prefix}_{channel}")
+            x, y, errors = _series(node["stats"], f"{prefix}_{channel}")
             if x:
-                curves.append(Curve(f"{node['label']} {channel_label} {source.upper()}", x, y, COLORS[index % len(COLORS)]))
+                curves.append(Curve(f"{node['label']} {channel_label} {source.upper()}", x, y, COLORS[index % len(COLORS)],
+                                    y_error_plus=errors, y_error_minus=errors))
             if metric_key == "intf" and include_fits:
                 fit_curve = _calibration_curve(node.get("calibration"), channel, node["label"])
                 if fit_curve:

@@ -145,6 +145,39 @@ class LabPlotExportTests(unittest.TestCase):
     def parse(self, payload):
         return ET.fromstring(lzma.decompress(payload))
 
+    def test_standard_metric_error_bars_follow_filtered_points_and_source(self):
+        class ErrorLoader(FakeLoader):
+            def load_run(self, *args, **kwargs):
+                payload = super().load_run(*args, **kwargs)
+                rows = payload['stats']
+                for index, row in enumerate(rows):
+                    row.update(atoms_up_std=[0.1, 0.2, None][index],
+                               nf_atoms_up_std=[1.1, 1.2, None][index],
+                               atoms_dw_std=0.3, nf_atoms_dw_std=1.3,
+                               phase_up_std=0.01 * (index + 1))
+                rows[1]['atoms_up'] = None
+                rows[1]['nf_atoms_up'] = None
+                return payload
+
+        for source, expected in [('fit', 0.1), ('nofit', 1.1)]:
+            root = self.parse(build_archive_project(
+                ErrorLoader(sync=True), '2026', '08', '31', 'run01', ['atoms', 'phase'], source=source,
+                include_differential=False,
+            ))
+            columns = {column.get('name'): column for column in root.iter('column')}
+            curves = list(root.iter('xyCurve'))
+            measured = next(curve for curve in curves if curve.get('name') == f'MIGA22 UP {source.upper()}')
+            error = measured.find('errorBars')
+            self.assertEqual(error.get('yErrorType'), '2')
+            name = error.get('yErrorPlusColumn').split('/')[-1]
+            column = columns[name]
+            values = struct.unpack('=2d', base64.b64decode(column.find('output_filter').tail.strip()))
+            self.assertAlmostEqual(values[0], expected)
+            self.assertTrue(math.isnan(values[1]))
+            for name in ('MIGA21 DOWN ' + source.upper(), 'MIGA22 phase', 'MIGA21 phase'):
+                curve = next(curve for curve in curves if curve.get('name') == name)
+                self.assertEqual(curve.find('errorBars').get('yErrorType'), '2')
+
     def test_minimal_project_embeds_double_columns(self):
         payload = build_project("Test", [Worksheet("Metric", [
             Plot("UP", "P0", "Value", [Curve("Data", [1, 2], [3, 4])])
